@@ -13,7 +13,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Custom Field Types** - TEXT, HIDDEN, URL, BOOLEAN, DATE, and MONTH_YEAR
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** - Store and generate 2FA codes (otpauth:// URI support)
-- **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score
+- **Security Audit (Watchtower)** - Breached (HIBP), weak, reused, old, and HTTP-URL detection with security score; continuous dark-web monitoring with email alerts
 - **Import / Export** - Bitwarden, 1Password, Chrome CSV import; CSV/JSON export profiles: compatible and passwd-sso (full-fidelity)
 - **Password-Protected Export** - AES-256-GCM encrypted exports with PBKDF2 (600k)
 - **Attachments** - Encrypted file attachments (personal and team E2E)
@@ -35,11 +35,13 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Vault Reset** - Last-resort full vault deletion with explicit confirmation ("DELETE MY VAULT")
 - **Account Lockout** - Progressive lockout (5→15min, 10→1h, 15→24h) with audit logging
 - **Rate Limiting** - Redis-backed vault unlock rate limiting
-- **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting
+- **CSP & Security Headers** - Content Security Policy with nonce, CSP violation reporting, OWASP recommended headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy, Permissions-Policy)
 - **SCIM 2.0 Provisioning** - Tenant-scoped user/group sync (RFC 7644) with Bearer token auth
 - **Multi-Tenant Isolation** - PostgreSQL FORCE ROW LEVEL SECURITY on 33 tables with IdP claim-based tenant resolution
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
-- **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, context menu, keyboard shortcuts, new-login detect & save
+- **Tenant Admin** - Member management with search, SCIM token management, admin vault reset, and tenant-level settings
+- **CLI Tool** - Node.js CLI (`passwd-sso`) with 8 commands: login, unlock, status, list, get, generate, totp, export; OS keychain integration and XDG-compliant config
+- **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, CC/address autofill, context menu, keyboard shortcuts, new-login detect & save
 
 ## Tech Stack
 
@@ -299,6 +301,9 @@ extension/
 ├── src/content/              # Form detection and in-page fill logic
 ├── src/popup/                # Extension popup UI
 └── manifest.config.ts        # MV3 manifest definition
+cli/
+├── src/commands/             # CLI commands (login, unlock, list, get, generate, totp, export, status)
+└── src/lib/                  # Keychain, config, API client helpers
 ```
 
 ## Security Model
@@ -320,7 +325,8 @@ extension/
 - **Rate limiting** - Redis-backed rate limiting on sensitive endpoints (including vault unlock)
 - **CSRF defense** - JSON body + SameSite cookie + CSP + Origin header validation on destructive endpoints
 - **CSP** - Content Security Policy with nonce-based script control and violation reporting
-- **Multi-tenant isolation** - PostgreSQL FORCE RLS on 28 tables with CI guard scripts to prevent accidental RLS bypass
+- **Tenant admin vault reset** - Tenant owner/admin can reset a member's vault with audit logging
+- **Multi-tenant isolation** - PostgreSQL FORCE RLS on 33 tables with CI guard scripts to prevent accidental RLS bypass
 - **SCIM 2.0** - Tenant-scoped Bearer tokens, Users/Groups endpoints (RFC 7644)
 
 ## Deployment Guides

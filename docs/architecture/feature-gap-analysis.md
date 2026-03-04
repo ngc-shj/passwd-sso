@@ -85,7 +85,9 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 
 ### Other
 
-- Browser extension (Chrome MV3, form detection, manual/auto fill, TOTP autofill)
+- Browser extension (Chrome MV3, form detection, manual/auto fill, TOTP autofill, CC/address autofill)
+- CLI tool (login, unlock, list, get, generate, totp, export; OS keychain, XDG compliance)
+- Continuous dark-web monitoring (auto-monitor with email + in-app alerts)
 - i18n (ja/en, 1,300+ keys)
 - Audit logs (62 actions, personal + team)
 - Import/export (CSV, JSON, password-protected encrypted export)
@@ -212,7 +214,7 @@ Secure notes now support Markdown authoring with Edit/Preview tabs, rendered/sou
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ~~X-1~~ | ~~TOTP autofill~~ | Yes | Yes | - | - | Yes | Yes | Yes | — | — |
-| X-2 | Credit-card / address autofill | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Medium |
+| ~~X-2~~ | ~~Credit-card / address autofill~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
 | ~~X-3~~ | ~~Context menu (right click)~~ | Yes | Yes | Yes | - | - | - | - | — | — |
 | ~~X-4~~ | ~~Extension keyboard shortcuts~~ | Yes | Yes | - | - | - | - | - | — | — |
 | ~~X-5~~ | ~~New-login detect & save prompt~~ | Yes | Yes | Yes | Yes | Yes | Yes | Yes | — | — |
@@ -222,6 +224,10 @@ Secure notes now support Markdown authoring with Edit/Preview tabs, rendered/sou
 
 Implemented TOTP generation (SHA1/SHA256/SHA512) and auto-fill into 2FA fields in extension.
 Runs automatically after login autofill; password autofill is not blocked when TOTP generation fails.
+
+#### ~~X-2 Credit-card / address autofill~~ — Implemented (2026-03-04)
+
+Credit-card and identity form detection via `autocomplete` attributes, regex patterns, and Japanese labels. Autofill execution with `<select>` element support, visibility checks, and month/year format handling. Context menu sections for Logins / Credit Cards / Identities. Popup MatchList with entry-type badges and Fill buttons.
 
 #### ~~X-3 Context menu~~ — Implemented (2026-02-28)
 
@@ -242,7 +248,7 @@ Form submit capture (capture phase) + click-based detection for SPAs. Registrati
 | # | Feature | 1P | BW | LP | DL | KP | PP | NP | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | P-1 | Mobile apps (iOS/Android) | Yes | Yes | Yes | Yes | 3rd party | Yes | Yes | High | Very High |
-| P-2 | CLI tool (vault operations) | Yes | Yes | - | - | Yes | Planned | - | Medium | Medium |
+| ~~P-2~~ | ~~CLI tool (vault operations)~~ | Yes | Yes | - | - | Yes | Planned | - | — | — |
 | P-3 | Offline access | Yes | Yes | Partial | Partial | Yes | Yes | Yes | Medium | High |
 | P-4 | Desktop app | Yes | Yes | - | - | Yes | Yes | Yes | Low | High |
 | P-5 | Biometric unlock (Touch ID/Face ID) | Yes | Yes | Yes | Yes | - | Yes | Yes | Medium | Depends on P-1 |
@@ -253,11 +259,9 @@ Form submit capture (capture phase) + click-based detection for SPAs. Registrati
 - Competitors: all provide iOS/Android native apps
 - Proposal: React Native or Capacitor/Ionic reusing existing React components; integrate iOS/Android credential-provider APIs; replace Web Crypto via `react-native-quick-crypto`
 
-#### P-2 CLI tool
+#### ~~P-2 CLI tool~~ — Implemented (2026-03-04)
 
-- Current: no CLI; only web UI / extension
-- Competitors: 1Password `op`, Bitwarden CLI, KeePassXC `keepassxc-cli`
-- Proposal: Node-based CLI package (`commander` + existing crypto libraries), useful for CI/CD secret injection and scripting
+Node.js CLI package (`cli/`) with `commander`. Crypto adapter ported from Web Crypto API (PBKDF2/HKDF/AES-256-GCM). OS keychain integration (keytar) with file fallback. XDG Base Directory compliance. Commands: `login`, `unlock`, `list`, `get`, `generate`, `totp`, `export`. Interactive REPL mode after vault unlock. Bearer token auth with auto-refresh. Clipboard with 30s auto-clear. Settings card in Web UI for CLI token management.
 
 ---
 
@@ -312,7 +316,7 @@ Added a notification bell with unread count, paginated notification list, mark-a
 | B-2 | Directory sync (AD/Azure AD/LDAP) | Yes | Yes | Yes | Yes | - | - | - | Medium | High |
 | ~~B-3~~ | ~~SIEM integration (events API)~~ | Yes | Yes | Yes | Yes | - | - | - | — | — |
 | ~~B-4~~ | ~~Security policies (enforce 2FA/password requirements)~~ | Yes | Yes | Yes | Yes | - | Yes | Yes | — | — |
-| B-5 | Admin password reset | Yes | Yes | Yes | - | - | - | Yes | Low | Medium |
+| ~~B-5~~ | ~~Admin password reset~~ | Yes | Yes | Yes | - | - | - | Yes | — | — |
 
 #### ~~B-1 SCIM provisioning~~ — Implemented (2026-02-27)
 
@@ -325,6 +329,10 @@ Audit logs can now be downloaded via REST in JSONL / CSV for both personal and t
 #### ~~B-4 Security policies~~ — Implemented (2026-03-02)
 
 Added team security policy management covering export / sharing controls, reprompt requirements, and password-policy guidance. Export and sharing restrictions are server-enforced; password composition checks remain advisory because vault contents are client-side encrypted.
+
+#### ~~B-5 Admin password reset~~ — Implemented (2026-03-04)
+
+Tenant-level admin-initiated vault reset with RBAC (`OWNER`/`ADMIN` only, strict role hierarchy). Token-based reset flow: initiate → email notification → user executes or admin revokes. TOCTOU-safe execution via conditional atomic update. Dual rate limiting (admin 3/day, target 1/day), max 3 pending resets. Revoke API with notification + email. Tenant members management UI with reset history dialog. Migrated from team-scoped to tenant-scoped with RLS policy.
 
 ---
 
@@ -343,9 +351,13 @@ Added team security policy management covering export / sharing controls, reprom
 | # | Feature | Provided by | Impact | Implementation Effort |
 | --- | --- | --- | --- | --- |
 | U-1 | Email alias generation | Proton Pass (unlimited), NordPass (200) | Medium | High |
-| U-2 | Continuous dark-web monitoring | Dashlane, LastPass | Medium | Medium |
+| ~~U-2~~ | ~~Continuous dark-web monitoring~~ | Dashlane, LastPass | — | — |
 | U-3 | Travel Mode | 1Password | Low | Medium |
 | ~~U-4~~ | ~~Secure note templates~~ | LastPass (15+) | — | — |
+
+#### ~~U-2 Continuous dark-web monitoring~~ — Implemented (2026-03-04)
+
+Auto-monitor logic with 24-hour interval and vault-unlock gating. Background breach checking via Watchtower hook extension. `POST /api/watchtower/alert` with rate limiting and in-app + email notifications (en/ja). User-facing toggle component in Watchtower page.
 
 ---
 
@@ -386,7 +398,7 @@ Added team security policy management covering export / sharing controls, reprom
 | --- | --- | --- |
 | ~~V-1~~ | Folders / hierarchy | ✅ 2026-02-18 |
 | ~~V-2~~ | Entry history | ✅ 2026-02-18 |
-| ~~X-1~~ | TOTP autofill (extension) | ✅ 2026-01 |
+| ~~X-1~~ | TOTP autofill (extension) | ✅ 2026-02-18 |
 | ~~C-1~~ | Send (temporary sharing) | ✅ 2026-02-19 |
 | ~~X-5~~ | ~~New-login detect & save~~ | ✅ 2026-02-28 |
 | ~~N-1~~ | ~~Email notification foundation~~ | ✅ 2026-02-23 |
@@ -406,7 +418,10 @@ Added team security policy management covering export / sharing controls, reprom
 | ~~C-2~~ | ~~Granular sharing permissions~~ | ✅ 2026-03-02 |
 | ~~B-3~~ | ~~SIEM integration~~ | ✅ 2026-03-02 |
 | ~~B-4~~ | ~~Security policies~~ | ✅ 2026-03-02 |
-| P-2 | CLI tool | Developer-focused differentiation |
+| ~~P-2~~ | ~~CLI tool~~ | ✅ 2026-03-04 |
+| ~~X-2~~ | ~~CC/address autofill~~ | ✅ 2026-03-04 |
+| ~~U-2~~ | ~~Dark-web monitoring~~ | ✅ 2026-03-04 |
+| ~~B-5~~ | ~~Admin password reset~~ | ✅ 2026-03-04 |
 | ~~V-6~~ | ~~Nested tags~~ | ✅ 2026-03-02 |
 | ~~U-4~~ | ~~Secure note templates~~ | ✅ 2026-03-02 |
 | ~~N-2~~ | ~~In-app notification center~~ | ✅ 2026-03-02 |
@@ -487,12 +502,16 @@ Completed: 2026-03-02
 
 ```
 Goal: Multi-platform expansion
+Started: 2026-03-04
 ```
 
-1. **P-2** CLI tool
-2. **E-1** SSH key management
-3. **P-1** Mobile apps (iOS / Android)
-4. **P-3** Offline access
+1. ~~**P-2** CLI tool~~ ✅
+2. ~~**X-2** CC/address autofill~~ ✅
+3. ~~**U-2** Dark-web monitoring~~ ✅
+4. ~~**B-5** Admin password reset~~ ✅
+5. **E-1** SSH key management
+6. **P-1** Mobile apps (iOS / Android)
+7. **P-3** Offline access
 
 ---
 
@@ -509,7 +528,7 @@ Feature-category coverage:
 | KeePassXC | 7/11 | Fully local, SSH Agent, Auto-Type |
 | Proton Pass | 8/11 | Email aliases, Swiss jurisdiction, ecosystem |
 | NordPass | 7/11 | XChaCha20, email masking, offline mode |
-| **passwd-sso** | **10/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS, 7 entry types |
+| **passwd-sso** | **11/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS, 7 entry types, CLI |
 
 **passwd-sso differentiators:**
 
@@ -528,8 +547,8 @@ Feature-category coverage:
 **Largest gaps:**
 
 - No mobile / desktop apps
-- Follow-on enterprise work remains in directory sync (B-2) and admin password reset (B-5)
-- Extension gaps: card/address autofill (X-2), TOTP QR capture (X-6)
+- Follow-on enterprise work remains in directory sync (B-2)
+- Extension gap: TOTP QR capture (X-6)
 
 **Improvements since previous report (2026-02-20):**
 
@@ -541,6 +560,7 @@ Feature-category coverage:
 - Group B completed: session management, email notification infrastructure, emergency-access notifications
 - Group C completed: Bank Account + Software License entry types, BOOLEAN/DATE/MONTH_YEAR custom fields, requireReprompt/expiresAt on all 7 entry types
 - Batch D completed: notification center, login alerts, nested tags, secure note templates/Markdown, share permissions, team policies, audit download + webhooks
+- Batch E completed: CC/address autofill, dark-web monitoring, admin vault reset (tenant-level), CLI tool
 
 ---
 
@@ -592,4 +612,43 @@ Also extended `requireReprompt` and `expiresAt` from LOGIN-only to all 7 entry t
 
 ---
 
-*Competitor information in this report reflects the state as of February 2026. Feature availability varies by product plan and deployment model.*
+## 7. Batch E — ✅ Completed (2026-03-04)
+
+Platform expansion and remaining P2 items.
+
+### Group A: Credit-card / Address Autofill — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~X-2~~ | ~~CC/address autofill~~ | Medium | ✅ Form detection (autocomplete/regex/Japanese), select support, context menu sections |
+
+### Group B: Continuous Dark-web Monitoring — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~U-2~~ | ~~Dark-web monitoring~~ | Medium | ✅ Auto-monitor (24h interval), vault-unlock gating, email + in-app alerts |
+
+### Group C: Admin Vault Reset (Tenant-level) — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~B-5~~ | ~~Admin password reset~~ | Medium | ✅ Tenant-scoped RBAC, token-based flow, revoke, TOCTOU-safe, member management UI |
+
+### Group D: CLI Tool — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~P-2~~ | ~~CLI tool~~ | Medium | ✅ Node.js/commander, E2E crypto, OS keychain, XDG, 7 commands + REPL |
+
+Also in this batch:
+
+- Settings UI improvements: scrollable member lists, member search, webhook management card
+- Security headers: Referrer-Policy, X-Content-Type-Options, X-Frame-Options, HSTS, Permissions-Policy
+- Shared `isHttps` helper for AUTH_URL scheme detection
+- Audit log filter UI: Collapsible + Checkbox event groups (matching webhook event picker)
+
+**All four groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~ -> ~~D~~
+
+---
+
+*Competitor information in this report reflects the state as of March 2026. Feature availability varies by product plan and deployment model.*
