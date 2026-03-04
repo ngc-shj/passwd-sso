@@ -2,8 +2,8 @@
  * Tenant authorization helpers (RBAC).
  *
  * Permissions are derived from tenant role:
- *   OWNER  — full control (manage members, vault reset, create teams)
- *   ADMIN  — full control (manage members, vault reset, create teams)
+ *   OWNER  — full control (manage members, vault reset, create teams, SCIM)
+ *   ADMIN  — full control (manage members, vault reset, create teams, SCIM)
  *   MEMBER — no admin permissions
  */
 
@@ -27,11 +27,13 @@ const ROLE_PERMISSIONS: Record<TenantRole, Set<TenantPermission>> = {
     TENANT_PERMISSION.MEMBER_MANAGE,
     TENANT_PERMISSION.MEMBER_VAULT_RESET,
     TENANT_PERMISSION.TEAM_CREATE,
+    TENANT_PERMISSION.SCIM_MANAGE,
   ]),
   ADMIN: new Set([
     TENANT_PERMISSION.MEMBER_MANAGE,
     TENANT_PERMISSION.MEMBER_VAULT_RESET,
     TENANT_PERMISSION.TEAM_CREATE,
+    TENANT_PERMISSION.SCIM_MANAGE,
   ]),
   MEMBER: new Set(),
 };

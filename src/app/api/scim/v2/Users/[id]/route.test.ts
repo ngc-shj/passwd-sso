@@ -45,7 +45,7 @@ import { GET, PUT, PATCH, DELETE } from "./route";
 
 const SCIM_TOKEN_DATA = {
   ok: true as const,
-  data: { tokenId: "t1", teamId: "team-1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
+  data: { tokenId: "t1", tenantId: "tenant-1", createdById: "u1", auditUserId: "u1" },
 };
 
 function makeParams(id: string) {
@@ -225,6 +225,53 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
     expect(res!.status).toBe(409);
     const body = await res!.json();
     expect(body.detail).toContain("externalId");
+  });
+
+  it("sets externalId mapping when provided on PUT", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockTenantMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
+    mockScimExternalMapping.create.mockResolvedValue({});
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "u@example.com",
+          active: true,
+          externalId: "ext-new",
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockScimExternalMapping.deleteMany).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", internalId: "user-1", resourceType: "User" },
+    });
+    expect(mockScimExternalMapping.create).toHaveBeenCalledWith({
+      data: { tenantId: "tenant-1", externalId: "ext-new", resourceType: "User", internalId: "user-1" },
+    });
   });
 
   it("returns 400 for invalid JSON on PUT", async () => {

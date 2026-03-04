@@ -9,7 +9,6 @@ export const TEAM_PERMISSION = {
   PASSWORD_UPDATE: "password:update",
   PASSWORD_DELETE: "password:delete",
   TAG_MANAGE: "tag:manage",
-  SCIM_MANAGE: "scim:manage",
 } as const;
 
 export type TeamPermissionValue =

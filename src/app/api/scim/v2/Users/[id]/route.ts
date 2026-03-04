@@ -97,7 +97,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -174,7 +174,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
               },
             });
             await tx.scimExternalMapping.create({
-              data: { teamId: scopedTeamId, tenantId, externalId, resourceType: "User", internalId: userId },
+              data: { tenantId, externalId, resourceType: "User", internalId: userId },
             });
           }
         } else {
@@ -206,10 +206,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { resource, userId, auditAction } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId: auditUserId,
-    teamId: scopedTeamId,
+    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: { active, externalId, name: name?.formatted },
@@ -225,7 +225,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -308,10 +308,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { resource, userId, auditAction } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId: auditUserId,
-    teamId: scopedTeamId,
+    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: { active: patchResult.active, name: patchResult.name },
@@ -327,7 +327,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -387,10 +387,10 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   const { userId, member } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
     userId: auditUserId,
-    teamId: scopedTeamId,
+    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: { email: member.user?.email ?? null },
