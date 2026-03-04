@@ -41,7 +41,7 @@ export function hexDecode(hex: string): Uint8Array {
 }
 
 function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength);
+  return (arr.buffer as ArrayBuffer).slice(arr.byteOffset, arr.byteOffset + arr.byteLength);
 }
 
 function textEncode(text: string): ArrayBuffer {

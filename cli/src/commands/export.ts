@@ -3,15 +3,19 @@
  */
 
 import { apiRequest } from "../lib/api-client.js";
-import { getEncryptionKey } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
+import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import * as output from "../lib/output.js";
 
 interface PasswordEntry {
   id: string;
-  encryptedBlob: string;
-  blobIv: string;
-  blobAuthTag: string;
+  encryptedBlob: {
+    ciphertext: string;
+    iv: string;
+    authTag: string;
+  };
+  aadVersion: number;
   entryType: string;
   createdAt: string;
   updatedAt: string;
@@ -25,10 +29,6 @@ interface EntryBlob {
   notes?: string;
   totp?: string;
   [key: string]: unknown;
-}
-
-function buildAad(entryId: string): Uint8Array {
-  return new TextEncoder().encode(`blob:${entryId}`);
 }
 
 function escapeCSV(value: string): string {
@@ -54,7 +54,7 @@ export async function exportCommand(options: {
     return;
   }
 
-  const res = await apiRequest<PasswordEntry[]>("/api/passwords");
+  const res = await apiRequest<PasswordEntry[]>("/api/passwords?include=blob");
   if (!res.ok) {
     output.error(`Failed to fetch entries: ${res.status}`);
     return;
@@ -66,18 +66,18 @@ export async function exportCommand(options: {
     return;
   }
 
+  const userId = getUserId();
   const decrypted: EntryBlob[] = [];
 
   for (const entry of entries) {
     try {
+      const aad = entry.aadVersion >= 1 && userId
+        ? buildPersonalEntryAAD(userId, entry.id)
+        : undefined;
       const plaintext = await decryptData(
-        {
-          ciphertext: entry.encryptedBlob,
-          iv: entry.blobIv,
-          authTag: entry.blobAuthTag,
-        },
+        entry.encryptedBlob,
         key,
-        buildAad(entry.id),
+        aad,
       );
       decrypted.push(JSON.parse(plaintext));
     } catch {

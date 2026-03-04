@@ -3,15 +3,19 @@
  */
 
 import { apiRequest } from "../lib/api-client.js";
-import { getEncryptionKey } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
+import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import * as output from "../lib/output.js";
 
 interface PasswordEntry {
   id: string;
-  encryptedOverview: string;
-  overviewIv: string;
-  overviewAuthTag: string;
+  encryptedOverview: {
+    ciphertext: string;
+    iv: string;
+    authTag: string;
+  };
+  aadVersion: number;
   entryType: string;
   createdAt: string;
   updatedAt: string;
@@ -23,16 +27,14 @@ interface Overview {
   urlHost?: string;
 }
 
-function buildAad(entryId: string): Uint8Array {
-  return new TextEncoder().encode(`overview:${entryId}`);
-}
-
 export async function listCommand(options: { json?: boolean }): Promise<void> {
   const key = getEncryptionKey();
   if (!key) {
     output.error("Vault is locked. Run `unlock` first.");
     return;
   }
+
+  const userId = getUserId();
 
   const res = await apiRequest<PasswordEntry[]>("/api/passwords");
   if (!res.ok) {
@@ -50,14 +52,13 @@ export async function listCommand(options: { json?: boolean }): Promise<void> {
 
   for (const entry of entries) {
     try {
+      const aad = entry.aadVersion >= 1 && userId
+        ? buildPersonalEntryAAD(userId, entry.id)
+        : undefined;
       const plaintext = await decryptData(
-        {
-          ciphertext: entry.encryptedOverview,
-          iv: entry.overviewIv,
-          authTag: entry.overviewAuthTag,
-        },
+        entry.encryptedOverview,
         key,
-        buildAad(entry.id),
+        aad,
       );
       const overview: Overview = JSON.parse(plaintext);
       decrypted.push({
@@ -84,7 +85,7 @@ export async function listCommand(options: { json?: boolean }): Promise<void> {
     output.table(
       ["ID", "Type", "Title", "Username", "URL"],
       decrypted.map((d) => [
-        d.id.slice(0, 8) + "…",
+        d.id,
         d.type,
         d.title,
         d.username,

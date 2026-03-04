@@ -3,28 +3,30 @@
  */
 
 import { apiRequest } from "../lib/api-client.js";
-import { getEncryptionKey } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
+import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import { generateTOTPCode } from "../lib/totp.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import * as output from "../lib/output.js";
 
 interface PasswordEntryDetail {
   id: string;
-  encryptedBlob: string;
-  blobIv: string;
-  blobAuthTag: string;
+  encryptedBlob: {
+    ciphertext: string;
+    iv: string;
+    authTag: string;
+  };
+  aadVersion: number;
 }
 
 interface EntryBlob {
-  totp?: string;
-  totpAlgorithm?: string;
-  totpDigits?: number;
-  totpPeriod?: number;
-}
-
-function buildAad(entryId: string): Uint8Array {
-  return new TextEncoder().encode(`blob:${entryId}`);
+  totp?: {
+    secret: string;
+    algorithm?: string;
+    digits?: number;
+    period?: number;
+  };
 }
 
 export async function totpCommand(
@@ -37,6 +39,8 @@ export async function totpCommand(
     return;
   }
 
+  const userId = getUserId();
+
   const res = await apiRequest<PasswordEntryDetail>(`/api/passwords/${id}`);
   if (!res.ok) {
     output.error(`Entry not found: ${res.status}`);
@@ -44,30 +48,29 @@ export async function totpCommand(
   }
 
   try {
+    const aad = res.data.aadVersion >= 1 && userId
+      ? buildPersonalEntryAAD(userId, res.data.id)
+      : undefined;
     const plaintext = await decryptData(
-      {
-        ciphertext: res.data.encryptedBlob,
-        iv: res.data.blobIv,
-        authTag: res.data.blobAuthTag,
-      },
+      res.data.encryptedBlob,
       key,
-      buildAad(res.data.id),
+      aad,
     );
     const blob: EntryBlob = JSON.parse(plaintext);
 
-    if (!blob.totp) {
+    if (!blob.totp?.secret) {
       output.error("No TOTP configured for this entry.");
       return;
     }
 
     const code = generateTOTPCode({
-      secret: blob.totp,
-      algorithm: blob.totpAlgorithm,
-      digits: blob.totpDigits,
-      period: blob.totpPeriod,
+      secret: blob.totp.secret,
+      algorithm: blob.totp.algorithm,
+      digits: blob.totp.digits,
+      period: blob.totp.period,
     });
 
-    const period = blob.totpPeriod ?? 30;
+    const period = blob.totp.period ?? 30;
     const remaining = period - (Math.floor(Date.now() / 1000) % period);
 
     if (options.copy) {

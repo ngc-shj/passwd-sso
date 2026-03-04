@@ -3,16 +3,20 @@
  */
 
 import { apiRequest } from "../lib/api-client.js";
-import { getEncryptionKey } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { decryptData } from "../lib/crypto.js";
+import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import { copyToClipboard } from "../lib/clipboard.js";
 import * as output from "../lib/output.js";
 
 interface PasswordEntryDetail {
   id: string;
-  encryptedBlob: string;
-  blobIv: string;
-  blobAuthTag: string;
+  encryptedBlob: {
+    ciphertext: string;
+    iv: string;
+    authTag: string;
+  };
+  aadVersion: number;
   entryType: string;
 }
 
@@ -22,15 +26,13 @@ interface EntryBlob {
   password?: string;
   url?: string;
   notes?: string;
-  totp?: string;
-  totpAlgorithm?: string;
-  totpDigits?: number;
-  totpPeriod?: number;
+  totp?: {
+    secret: string;
+    algorithm?: string;
+    digits?: number;
+    period?: number;
+  };
   [key: string]: unknown;
-}
-
-function buildAad(entryId: string): Uint8Array {
-  return new TextEncoder().encode(`blob:${entryId}`);
 }
 
 export async function getCommand(
@@ -43,6 +45,8 @@ export async function getCommand(
     return;
   }
 
+  const userId = getUserId();
+
   const res = await apiRequest<PasswordEntryDetail>(`/api/passwords/${id}`);
   if (!res.ok) {
     output.error(`Entry not found: ${res.status}`);
@@ -52,14 +56,13 @@ export async function getCommand(
   const entry = res.data;
 
   try {
+    const aad = entry.aadVersion >= 1 && userId
+      ? buildPersonalEntryAAD(userId, entry.id)
+      : undefined;
     const plaintext = await decryptData(
-      {
-        ciphertext: entry.encryptedBlob,
-        iv: entry.blobIv,
-        authTag: entry.blobAuthTag,
-      },
+      entry.encryptedBlob,
       key,
-      buildAad(entry.id),
+      aad,
     );
     const blob: EntryBlob = JSON.parse(plaintext);
 
