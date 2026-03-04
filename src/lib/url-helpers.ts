@@ -1,6 +1,13 @@
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 /**
+ * Whether the app is served over HTTPS.
+ * Determined by the AUTH_URL scheme — not NODE_ENV, which can be
+ * "production" even on http://localhost via `npm start`.
+ */
+export const isHttps = (process.env.AUTH_URL ?? "http://localhost:3000").startsWith("https://");
+
+/**
  * Prepend basePath to a path (for fetch, window.location.href, etc.).
  * Client-side only — do NOT use inside server-side route handlers.
  */

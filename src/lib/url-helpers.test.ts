@@ -228,3 +228,34 @@ describe("serverAppUrl", () => {
     expect(serverAppUrl("/reset")).toBe("https://app.example.com/reset");
   });
 });
+
+// ─── isHttps ──────────────────────────────────────────────────
+
+describe("isHttps", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("returns true when AUTH_URL starts with https://", async () => {
+    vi.stubEnv("AUTH_URL", "https://app.example.com");
+    const { isHttps } = await import("@/lib/url-helpers");
+    expect(isHttps).toBe(true);
+  });
+
+  it("returns false when AUTH_URL starts with http://", async () => {
+    vi.stubEnv("AUTH_URL", "http://localhost:3000");
+    const { isHttps } = await import("@/lib/url-helpers");
+    expect(isHttps).toBe(false);
+  });
+
+  it("defaults to false when AUTH_URL is not set", async () => {
+    delete process.env.AUTH_URL;
+    const { isHttps } = await import("@/lib/url-helpers");
+    expect(isHttps).toBe(false);
+  });
+});

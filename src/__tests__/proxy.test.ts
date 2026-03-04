@@ -292,13 +292,12 @@ describe("proxy — applySecurityHeaders basePath", () => {
     expect(response.headers.get("X-Frame-Options")).toBe("DENY");
   });
 
-  it("sets Strict-Transport-Security header", () => {
+  it("omits Strict-Transport-Security when AUTH_URL is HTTP", () => {
     const response = new NextResponse();
     _applySecurityHeaders(response, dummyOptions);
 
-    expect(response.headers.get("Strict-Transport-Security")).toBe(
-      "max-age=63072000; includeSubDomains; preload",
-    );
+    // AUTH_URL is not set (defaults to http://localhost:3000) → no HSTS
+    expect(response.headers.get("Strict-Transport-Security")).toBeNull();
   });
 
   it("sets Permissions-Policy header", () => {
