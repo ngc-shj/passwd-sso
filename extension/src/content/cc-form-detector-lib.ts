@@ -34,7 +34,7 @@ function getHintString(el: HTMLElement): string {
   if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement) {
     if (el.name) parts.push(el.name);
     if (el.id) parts.push(el.id);
-    if (el.placeholder && el instanceof HTMLInputElement) parts.push(el.placeholder);
+    if (el instanceof HTMLInputElement && el.placeholder) parts.push(el.placeholder);
   }
   if (el.getAttribute("aria-label")) parts.push(el.getAttribute("aria-label")!);
   // Walk up to find associated label
