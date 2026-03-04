@@ -5,9 +5,24 @@
  * Automatically refreshes expired tokens.
  */
 
-import { loadToken, saveToken, loadConfig } from "./config.js";
+import { loadToken, saveToken, loadConfig, saveConfig } from "./config.js";
 
 let cachedToken: string | null = null;
+let cachedExpiresAt: number | null = null;
+
+export function setInsecure(enabled: boolean): void {
+  if (enabled) {
+    // Suppress the NODE_TLS warning before setting the env var
+    const origEmit = process.emit.bind(process);
+    process.emit = function (event: string, ...args: unknown[]) {
+      if (event === "warning" && (args[0] as { name?: string })?.name === "Warning") {
+        return false;
+      }
+      return origEmit(event, ...args);
+    } as typeof process.emit;
+    process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+  }
+}
 
 export async function getToken(): Promise<string | null> {
   if (cachedToken) return cachedToken;
@@ -15,8 +30,11 @@ export async function getToken(): Promise<string | null> {
   return cachedToken;
 }
 
-export function setTokenCache(token: string): void {
+export function setTokenCache(token: string, expiresAt?: string): void {
   cachedToken = token;
+  if (expiresAt) {
+    cachedExpiresAt = new Date(expiresAt).getTime();
+  }
 }
 
 export function clearTokenCache(): void {
@@ -37,6 +55,21 @@ export interface ApiResponse<T = unknown> {
   data: T;
 }
 
+/** Refresh buffer: refresh 2 minutes before expiry */
+const REFRESH_BUFFER_MS = 2 * 60 * 1000;
+
+function isTokenExpiringSoon(): boolean {
+  if (!cachedExpiresAt) {
+    // Load from config if not cached
+    const config = loadConfig();
+    if (config.tokenExpiresAt) {
+      cachedExpiresAt = new Date(config.tokenExpiresAt).getTime();
+    }
+  }
+  if (!cachedExpiresAt) return false;
+  return Date.now() >= cachedExpiresAt - REFRESH_BUFFER_MS;
+}
+
 async function refreshToken(): Promise<boolean> {
   const token = await getToken();
   if (!token) return false;
@@ -52,11 +85,17 @@ async function refreshToken(): Promise<boolean> {
     });
     if (!res.ok) return false;
 
-    const data = (await res.json()) as { token: string };
+    const data = (await res.json()) as { token: string; expiresAt: string };
     if (!data.token) return false;
 
     await saveToken(data.token);
-    setTokenCache(data.token);
+    setTokenCache(data.token, data.expiresAt);
+
+    // Persist expiresAt in config
+    const config = loadConfig();
+    config.tokenExpiresAt = data.expiresAt;
+    saveConfig(config);
+
     return true;
   } catch {
     return false;
@@ -71,9 +110,17 @@ export async function apiRequest<T = unknown>(
     headers?: Record<string, string>;
   } = {},
 ): Promise<ApiResponse<T>> {
-  const token = await getToken();
+  let token = await getToken();
   if (!token) {
     throw new Error("Not logged in. Run `passwd-sso login` first.");
+  }
+
+  // Proactively refresh if token is expiring soon
+  if (isTokenExpiringSoon()) {
+    const refreshed = await refreshToken();
+    if (refreshed) {
+      token = await getToken();
+    }
   }
 
   const baseUrl = getBaseUrl();
@@ -109,4 +156,27 @@ export async function apiRequest<T = unknown>(
 
   const data = (await res.json().catch(() => ({}))) as T;
   return { ok: res.ok, status: res.status, data };
+}
+
+// ─── Background Token Refresh Timer ─────────────────────────
+
+/** Interval: refresh every 10 minutes (well within 15-min TTL) */
+const BG_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+
+let bgRefreshTimer: ReturnType<typeof setInterval> | null = null;
+
+export function startBackgroundRefresh(): void {
+  stopBackgroundRefresh();
+  bgRefreshTimer = setInterval(() => {
+    void refreshToken();
+  }, BG_REFRESH_INTERVAL_MS);
+  // Don't keep the process alive just for the timer
+  bgRefreshTimer.unref();
+}
+
+export function stopBackgroundRefresh(): void {
+  if (bgRefreshTimer) {
+    clearInterval(bgRefreshTimer);
+    bgRefreshTimer = null;
+  }
 }

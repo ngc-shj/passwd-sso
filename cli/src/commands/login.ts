@@ -43,9 +43,11 @@ export async function loginCommand(): Promise<void> {
     return;
   }
 
+  // Approximate token expiry (15 min from now)
+  config.tokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
   saveConfig(config);
   const storage = await saveToken(token);
-  setTokenCache(token);
+  setTokenCache(token, config.tokenExpiresAt);
 
   if (storage === "file") {
     output.warn("Token saved to file (plaintext). Consider installing keytar for OS keychain storage.");

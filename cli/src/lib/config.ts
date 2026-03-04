@@ -19,6 +19,7 @@ const KEYCHAIN_ACCOUNT = "bearer-token";
 export interface CliConfig {
   serverUrl: string;
   locale: string;
+  tokenExpiresAt?: string; // ISO 8601
 }
 
 const DEFAULT_CONFIG: CliConfig = {
@@ -52,7 +53,9 @@ export function saveConfig(config: CliConfig): void {
 async function tryKeytar(): Promise<typeof import("keytar") | null> {
   if (process.env.PSSO_NO_KEYCHAIN === "1") return null;
   try {
-    return await import("keytar");
+    const mod = await import("keytar");
+    // Dynamic import may wrap the CJS module in { default: ... }
+    return (mod.default ?? mod) as typeof import("keytar");
   } catch {
     return null;
   }

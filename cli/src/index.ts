@@ -19,6 +19,7 @@ import { totpCommand } from "./commands/totp.js";
 import { exportCommand } from "./commands/export.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
+import { setInsecure, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
 import * as output from "./lib/output.js";
 
 const program = new Command();
@@ -26,7 +27,13 @@ const program = new Command();
 program
   .name("passwd-sso")
   .description("Password manager CLI")
-  .version("0.1.0");
+  .version("0.1.0")
+  .option("-k, --insecure", "Allow self-signed TLS certificates")
+  .hook("preAction", () => {
+    if (program.opts().insecure) {
+      setInsecure(true);
+    }
+  });
 
 program
   .command("login")
@@ -70,6 +77,9 @@ program.parse();
 
 async function interactiveMode(): Promise<void> {
   output.info("Vault unlocked. Type a command or `help` for options. `lock` to exit.");
+
+  // Keep token alive during REPL session
+  startBackgroundRefresh();
 
   const rl = createInterface({
     input: process.stdin,
@@ -147,6 +157,7 @@ async function interactiveMode(): Promise<void> {
         case "lock":
         case "exit":
         case "quit":
+          stopBackgroundRefresh();
           lockVault();
           clearPendingClipboard();
           output.success("Vault locked.");
