@@ -194,12 +194,52 @@ describe("POST /api/tenant/scim-tokens", () => {
     );
   });
 
-  it("returns 400 for invalid expiresInDays", async () => {
+  it("returns 400 for invalid expiresInDays (below minimum)", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
         body: { expiresInDays: 0 },
       }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("returns 400 for expiresInDays exceeding maximum", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { expiresInDays: 3651 },
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("creates a non-expiring token when expiresInDays is null", async () => {
+    mockPrismaScimToken.create.mockResolvedValue({
+      id: "tok-never",
+      description: "permanent",
+      expiresAt: null,
+      createdAt: new Date("2025-01-01"),
+    });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { description: "permanent", expiresInDays: null },
+      }),
+    );
+    expect(res.status).toBe(201);
+    expect(mockPrismaScimToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ expiresAt: null }) }),
+    );
+  });
+
+  it("rethrows unexpected errors from POST", async () => {
+    mockRequireTenantPermission.mockRejectedValue(new Error("boom"));
+
+    await expect(
+      POST(
+        createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+          body: { description: "test" },
+        }),
+      ),
+    ).rejects.toThrow("boom");
   });
 });

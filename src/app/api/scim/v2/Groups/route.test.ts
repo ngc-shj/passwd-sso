@@ -290,6 +290,37 @@ describe("POST /api/scim/v2/Groups", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when slug is empty in displayName", async () => {
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: ":ADMIN",
+          externalId: "grp-new",
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("displayName");
+  });
+
+  it("returns 400 when role in displayName is not a valid SCIM group role", async () => {
+    mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
+    const res = await POST(
+      makeReq({
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+          displayName: "core:OWNER",
+          externalId: "grp-new",
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.detail).toContain("displayName");
+  });
+
   it("reuses an existing mapping for the same team and role", async () => {
     mockTeam.findFirst.mockResolvedValue({ id: "team-1", slug: "core" });
     mockScimGroupMapping.findUnique.mockResolvedValue({

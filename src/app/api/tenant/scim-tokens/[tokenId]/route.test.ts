@@ -84,6 +84,17 @@ describe("DELETE /api/tenant/scim-tokens/[tokenId]", () => {
     expect(res.status).toBe(403);
   });
 
+  it("rethrows unexpected errors", async () => {
+    mockRequireTenantPermission.mockRejectedValue(new Error("boom"));
+
+    await expect(
+      DELETE(
+        createRequest("DELETE", "http://localhost/api/tenant/scim-tokens/tok-1"),
+        makeParams("tok-1"),
+      ),
+    ).rejects.toThrow("boom");
+  });
+
   it("returns 404 when token not found", async () => {
     mockPrismaScimToken.findUnique.mockResolvedValue(null);
 
