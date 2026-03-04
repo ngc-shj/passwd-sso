@@ -18,6 +18,16 @@ const nextConfig: NextConfig = {
     const isProd = process.env.NODE_ENV === "production";
     return [
       {
+        // Vault-reset page: suppress Referrer to prevent token leakage
+        source: "/:locale/dashboard/vault-reset",
+        headers: [
+          {
+            key: "Referrer-Policy",
+            value: "no-referrer",
+          },
+        ],
+      },
+      {
         source: "/(.*)",
         headers: [
           {

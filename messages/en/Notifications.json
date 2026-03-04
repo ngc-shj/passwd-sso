@@ -17,5 +17,6 @@
   "type_TEAM_INVITE": "Team invite",
   "type_ENTRY_EXPIRING": "Expiring entry",
   "type_WATCHTOWER_ALERT": "Watchtower alert",
-  "type_POLICY_UPDATE": "Policy update"
+  "type_POLICY_UPDATE": "Policy update",
+  "type_ADMIN_VAULT_RESET": "Admin vault reset"
 }

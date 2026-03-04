@@ -6,5 +6,8 @@
   "confirmationText": "DELETE MY VAULT",
   "resetButton": "Reset Vault",
   "resetting": "Resetting...",
-  "success": "Vault has been reset. Redirecting to setup..."
+  "success": "Vault has been reset. Redirecting to setup...",
+  "adminResetTitle": "Admin-initiated Vault Reset",
+  "adminResetWarning": "Your team admin has requested a vault reset. This will permanently delete all your passwords, attachments, and shared links. This action cannot be undone.",
+  "adminResetNoToken": "No reset token found. Please use the link from your email."
 }

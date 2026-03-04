@@ -47,5 +47,8 @@
   "expiring": "Expiring Passwords",
   "expiringDesc": "Entries that have expired or will expire within {days} days",
   "expiredDays": "Expired {days} days ago",
-  "expiresOn": "Expires on {date}"
+  "expiresOn": "Expires on {date}",
+  "autoMonitorLabel": "Auto-monitor",
+  "autoMonitorDescription": "Automatically check for new data breaches every 24 hours when the vault is unlocked.",
+  "lastAutoCheck": "Last auto-check: {time}"
 }

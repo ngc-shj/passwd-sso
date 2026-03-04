@@ -37,6 +37,8 @@ export const API_ERROR = {
   INVALID_RECOVERY_KEY: "INVALID_RECOVERY_KEY",
   RECOVERY_KEY_NOT_SET: "RECOVERY_KEY_NOT_SET",
   VAULT_RESET_CONFIRMATION_MISMATCH: "VAULT_RESET_CONFIRMATION_MISMATCH",
+  VAULT_RESET_TOKEN_EXPIRED: "VAULT_RESET_TOKEN_EXPIRED",
+  VAULT_RESET_TOKEN_USED: "VAULT_RESET_TOKEN_USED",
   INVALID_ORIGIN: "INVALID_ORIGIN",
 
   // ── Tags ──────────────────────────────────────────────────
@@ -240,6 +242,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_RECOVERY_KEY: "invalidRecoveryKey",
   RECOVERY_KEY_NOT_SET: "recoveryKeyNotSet",
   VAULT_RESET_CONFIRMATION_MISMATCH: "vaultResetConfirmationMismatch",
+  VAULT_RESET_TOKEN_EXPIRED: "vaultResetTokenExpired",
+  VAULT_RESET_TOKEN_USED: "vaultResetTokenUsed",
   INVALID_ORIGIN: "invalidOrigin",
   SCIM_TOKEN_INVALID: "scimTokenInvalid",
   SCIM_TOKEN_EXPIRED: "scimTokenExpired",

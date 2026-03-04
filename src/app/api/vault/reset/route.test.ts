@@ -4,7 +4,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction, mockRateLimiter, mockLogAudit, mockWithUserTenantRls,
+  mockPrismaTransaction, mockRateLimiter, mockLogAudit,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { update: vi.fn() },
@@ -19,7 +19,6 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -47,8 +46,9 @@ vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+// executeVaultReset uses withBypassRls (not withUserTenantRls)
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -129,9 +129,6 @@ describe("POST /api/vault/reset", () => {
     }));
     expect(res.status).toBe(200);
 
-    // Transaction includes TeamMemberKey deleteMany and TeamMember updateMany
-    const txArray = mockPrismaTransaction.mock.calls[0][0];
-
     // Verify TeamMemberKey.deleteMany was included
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
@@ -144,6 +141,7 @@ describe("POST /api/vault/reset", () => {
     });
 
     // Transaction should have 9 operations (original 7 + 2 new)
+    const txArray = mockPrismaTransaction.mock.calls[0][0];
     expect(txArray).toHaveLength(9);
   });
 });

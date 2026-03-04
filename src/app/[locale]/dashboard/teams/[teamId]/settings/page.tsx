@@ -34,6 +34,7 @@ import {
   AvatarImage,
 } from "@/components/ui/avatar";
 import { CopyButton } from "@/components/passwords/copy-button";
+import { AdminVaultResetButton } from "@/components/team/admin-vault-reset-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe } from "lucide-react";
@@ -456,6 +457,13 @@ export default function TeamSettingsPage({
                               <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
                             </SelectContent>
                           </Select>
+                          {isOwner || (isAdmin && m.role !== TEAM_ROLE.ADMIN) ? (
+                            <AdminVaultResetButton
+                              teamId={teamId}
+                              memberId={m.id}
+                              memberName={m.name ?? m.email ?? ""}
+                            />
+                          ) : null}
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
                               <Button variant="ghost" size="icon" className="h-8 w-8">

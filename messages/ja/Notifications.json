@@ -17,5 +17,6 @@
   "type_TEAM_INVITE": "チーム招待",
   "type_ENTRY_EXPIRING": "期限切れエントリ",
   "type_WATCHTOWER_ALERT": "ウォッチタワー警告",
-  "type_POLICY_UPDATE": "ポリシー更新"
+  "type_POLICY_UPDATE": "ポリシー更新",
+  "type_ADMIN_VAULT_RESET": "管理者による保管庫リセット"
 }
