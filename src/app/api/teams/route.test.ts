@@ -239,6 +239,8 @@ describe("POST /api/teams (E2E-only)", () => {
     expect(mockRequireTenantPermission).not.toHaveBeenCalled();
   });
 
+  // Both "no membership" and "MEMBER role" result in the same TenantAuthError(FORBIDDEN,403)
+  // from requireTenantPermission — the route handler cannot distinguish the two cases.
   it("returns 403 when user has no tenant membership", async () => {
     mockRequireTenantPermission.mockRejectedValue(new MockTenantAuthError("FORBIDDEN", 403));
     const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {

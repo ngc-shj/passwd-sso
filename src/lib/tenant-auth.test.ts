@@ -298,6 +298,23 @@ describe("requireTenantPermission", () => {
     });
   });
 
+  it("returns membership when OWNER has TEAM_CREATE permission", async () => {
+    const membership = {
+      id: "member-owner",
+      userId: "user-owner",
+      tenantId: "tenant-1",
+      role: "OWNER" as const,
+      deactivatedAt: null,
+    };
+    mockFindFirst.mockResolvedValue(membership);
+
+    const result = await requireTenantPermission(
+      "user-owner",
+      TENANT_PERMISSION.TEAM_CREATE,
+    );
+    expect(result).toEqual(membership);
+  });
+
   it("returns membership when ADMIN has TEAM_CREATE permission", async () => {
     const membership = {
       id: "member-4",
