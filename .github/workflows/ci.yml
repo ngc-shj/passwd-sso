@@ -19,6 +19,7 @@ jobs:
     outputs:
       app: ${{ steps.filter.outputs.app }}
       extension: ${{ steps.filter.outputs.extension }}
+      cli: ${{ steps.filter.outputs.cli }}
       e2e: ${{ steps.filter.outputs.e2e }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
@@ -43,6 +44,8 @@ jobs:
               - "scripts/**"
             extension:
               - "extension/**"
+            cli:
+              - "cli/**"
             e2e:
               - "e2e/**"
             ci:
@@ -127,6 +130,29 @@ jobs:
           node-version-file: ".nvmrc"
           cache: "npm"
           cache-dependency-path: "extension/package-lock.json"
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  # ─── CLI Tool: Test → Build ──────────────────────────────
+  cli-ci:
+    name: "CLI: Test → Build"
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true'
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "cli/package-lock.json"
 
       - run: npm ci
       - run: npm test
@@ -247,6 +273,29 @@ jobs:
       - run: npm ci
       - run: npm audit --omit=dev
 
+  # ─── Security Audit: CLI ──────────────────────────────────
+  audit-cli:
+    name: "Audit: CLI dependencies"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    needs: changes
+    if: needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true'
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+          cache-dependency-path: "cli/package-lock.json"
+
+      - run: npm ci
+      - run: npm audit --omit=dev
+
   # ─── License Audit ─────────────────────────────────────────
   license-audit:
     name: "Audit: Dependency licenses"
@@ -256,6 +305,7 @@ jobs:
     if: |
       needs.changes.outputs.app == 'true' ||
       needs.changes.outputs.extension == 'true' ||
+      needs.changes.outputs.cli == 'true' ||
       needs.changes.outputs.ci == 'true'
     steps:
       - uses: actions/checkout@v4
@@ -268,3 +318,4 @@ jobs:
       # Lockfile-based check (no install required)
       - run: npm run licenses:check:strict
       - run: npm run licenses:check:ext:strict
+      - run: npm run licenses:check:cli:strict

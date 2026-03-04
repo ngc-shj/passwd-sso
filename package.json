@@ -22,6 +22,8 @@
     "licenses:check:strict": "node scripts/check-licenses.mjs --name app --lockfile package-lock.json --strict",
     "licenses:check:ext": "node scripts/check-licenses.mjs --name extension --lockfile extension/package-lock.json",
     "licenses:check:ext:strict": "node scripts/check-licenses.mjs --name extension --lockfile extension/package-lock.json --strict",
+    "licenses:check:cli": "node scripts/check-licenses.mjs --name cli --lockfile cli/package-lock.json",
+    "licenses:check:cli:strict": "node scripts/check-licenses.mjs --name cli --lockfile cli/package-lock.json --strict",
     "test:load:seed": "node load-test/setup/seed-load-test-users.mjs",
     "test:load:cleanup": "node load-test/setup/seed-load-test-users.mjs --cleanup",
     "test:load:smoke": "node load-test/setup/seed-load-test-users.mjs --smoke",
