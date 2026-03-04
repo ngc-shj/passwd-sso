@@ -15,7 +15,7 @@ export const runtime = "nodejs";
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
 const adminResetSchema = z.object({
-  token: z.string().min(1),
+  token: z.string().length(64).regex(/^[0-9a-f]{64}$/),
   confirmation: z.string(),
 });
 
@@ -95,24 +95,40 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Execute vault reset
-  const { deletedEntries, deletedAttachments } =
-    await executeVaultReset(session.user.id);
-
-  // Mark token as executed
-  await withBypassRls(prisma, async () =>
-    prisma.adminVaultReset.update({
-      where: { id: resetRecord.id },
+  // TOCTOU prevention: atomically mark the token as executed BEFORE deleting
+  // vault data. This ensures a concurrent revoke cannot succeed after data
+  // deletion has already started.
+  const atomicResult = await withBypassRls(prisma, async () =>
+    prisma.adminVaultReset.updateMany({
+      where: {
+        id: resetRecord.id,
+        executedAt: null,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
       data: { executedAt: new Date() },
     }),
   );
 
-  // Audit log
+  if (atomicResult.count === 0) {
+    return NextResponse.json(
+      { error: API_ERROR.VAULT_RESET_TOKEN_USED },
+      { status: 410 },
+    );
+  }
+
+  // Token secured — now execute the irreversible vault reset
+  const { deletedEntries, deletedAttachments } =
+    await executeVaultReset(session.user.id);
+
+  // Audit log — use TENANT scope for tenant-level resets (teamId is null)
+  const auditScope = resetRecord.teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.TENANT;
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: auditScope,
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
     userId: session.user.id,
-    teamId: resetRecord.teamId,
+    tenantId: resetRecord.tenantId,
+    teamId: resetRecord.teamId ?? undefined,
     targetType: "User",
     targetId: session.user.id,
     metadata: {

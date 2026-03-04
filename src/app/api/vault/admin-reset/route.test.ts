@@ -3,13 +3,13 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
   mockAuth, mockLogAudit, mockExecuteVaultReset,
-  mockAdminVaultResetFindUnique, mockAdminVaultResetUpdate,
+  mockAdminVaultResetFindUnique, mockAdminVaultResetUpdateMany,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockLogAudit: vi.fn(),
   mockExecuteVaultReset: vi.fn(),
   mockAdminVaultResetFindUnique: vi.fn(),
-  mockAdminVaultResetUpdate: vi.fn(),
+  mockAdminVaultResetUpdateMany: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -17,7 +17,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     adminVaultReset: {
       findUnique: mockAdminVaultResetFindUnique,
-      update: mockAdminVaultResetUpdate,
+      updateMany: mockAdminVaultResetUpdateMany,
     },
   },
 }));
@@ -45,9 +45,9 @@ import { POST } from "./route";
 const URL = "http://localhost/api/vault/admin-reset";
 const TOKEN = "a".repeat(64);
 
-// SHA-256 hash of the token is computed in the route, mock returns based on hash
 const RESET_RECORD = {
   id: "reset-1",
+  tenantId: "tenant-1",
   teamId: "team-1",
   targetUserId: "user-1",
   initiatedById: "admin-1",
@@ -64,11 +64,22 @@ describe("POST /api/vault/admin-reset", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockAdminVaultResetFindUnique.mockResolvedValue(RESET_RECORD);
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 3, deletedAttachments: 1 });
-    mockAdminVaultResetUpdate.mockResolvedValue({});
+    mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
   });
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("returns 500 when APP_URL and AUTH_URL are both missing", async () => {
+    delete process.env.APP_URL;
+    delete process.env.AUTH_URL;
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+    }));
+    expect(res.status).toBe(500);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_ORIGIN");
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -150,7 +161,19 @@ describe("POST /api/vault/admin-reset", () => {
     expect(json.error).toBe("VAULT_RESET_TOKEN_USED");
   });
 
-  it("executes vault reset, marks token, and logs audit on success", async () => {
+  it("returns 410 when atomic update fails (TOCTOU: concurrent revoke) without executing vault reset", async () => {
+    mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 0 });
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+    }));
+    expect(res.status).toBe(410);
+    const json = await res.json();
+    expect(json.error).toBe("VAULT_RESET_TOKEN_USED");
+    // Vault reset must NOT execute when atomic mark fails
+    expect(mockExecuteVaultReset).not.toHaveBeenCalled();
+  });
+
+  it("marks token via updateMany BEFORE executing vault reset, and logs audit on success", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
     }));
@@ -161,19 +184,25 @@ describe("POST /api/vault/admin-reset", () => {
     // Vault reset executed
     expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
 
-    // Token marked as executed
-    expect(mockAdminVaultResetUpdate).toHaveBeenCalledWith(
+    // Token marked as executed via atomic updateMany
+    expect(mockAdminVaultResetUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "reset-1" },
+        where: expect.objectContaining({
+          id: "reset-1",
+          executedAt: null,
+          revokedAt: null,
+        }),
         data: expect.objectContaining({ executedAt: expect.any(Date) }),
       }),
     );
 
-    // Audit log
+    // Audit log with TEAM scope (teamId is not null)
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TEAM",
         action: "ADMIN_VAULT_RESET_EXECUTE",
         userId: "user-1",
+        tenantId: "tenant-1",
         teamId: "team-1",
         metadata: expect.objectContaining({
           deletedEntries: 3,
@@ -184,8 +213,26 @@ describe("POST /api/vault/admin-reset", () => {
     );
   });
 
+  it("uses TENANT scope when teamId is null", async () => {
+    mockAdminVaultResetFindUnique.mockResolvedValue({
+      ...RESET_RECORD,
+      teamId: null,
+    });
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+    }));
+    expect(res.status).toBe(200);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TENANT",
+        tenantId: "tenant-1",
+        teamId: undefined,
+      }),
+    );
+  });
+
   it("confirmation must be English regardless of locale", async () => {
-    // Japanese text should fail
     const res = await POST(createRequest("POST", URL, {
       body: { token: TOKEN, confirmation: "保管庫を削除する" },
     }));
