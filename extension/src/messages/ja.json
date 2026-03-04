@@ -30,7 +30,9 @@
     "enableAutofill": "このサイトで自動入力を有効にする",
     "autofillEnabled": "このサイトで自動入力が有効です",
     "httpWarning": "このページは HTTP です。安全でないページへの入力にはリスクがあります。",
-    "unlockSite": "現在のサイト: {host}"
+    "unlockSite": "現在のサイト: {host}",
+    "badgeCard": "カード",
+    "badgeIdentity": "個人情報"
   },
   "options": {
     "title": "設定",
@@ -55,7 +57,9 @@
     "vaultLocked": "保管庫がロックされています",
     "disconnected": "接続されていません",
     "noMatches": "一致するエントリがありません",
-    "openPopup": "passwd-sso を開く"
+    "openPopup": "passwd-sso を開く",
+    "creditCard": "クレジットカード",
+    "identity": "個人情報"
   },
   "saveBanner": {
     "saveLogin": "{host} のログインを保存しますか？",

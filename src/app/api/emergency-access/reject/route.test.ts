@@ -120,7 +120,7 @@ describe("POST /api/emergency-access/reject", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "owner@test.com",
-        subject: expect.stringContaining("辞退"),
+        subject: expect.stringContaining("declined"),
       })
     );
   });

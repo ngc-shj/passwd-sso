@@ -1,0 +1,32 @@
+{
+  "name": "passwd-sso-cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "passwd-sso": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "cli-table3": "^0.6.5",
+    "clipboardy": "^4.0.0",
+    "commander": "^13.1.0",
+    "inquirer": "^12.6.0",
+    "otpauth": "^9.4.0"
+  },
+  "optionalDependencies": {
+    "keytar": "^7.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.9.0-beta",
+    "vitest": "^4.0.18"
+  }
+}

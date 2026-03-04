@@ -1,0 +1,8 @@
+-- AlterTable
+ALTER TABLE "notifications" ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMP(3);
+
+-- AlterTable
+ALTER TABLE "team_webhooks" ALTER COLUMN "last_delivered_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "last_failed_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMP(3),
+ALTER COLUMN "updated_at" SET DATA TYPE TIMESTAMP(3);

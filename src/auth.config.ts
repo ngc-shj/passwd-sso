@@ -1,13 +1,11 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import { API_PATH } from "@/lib/constants";
+import { isHttps } from "@/lib/url-helpers";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
-// Auth.js resolves cookie name by URL scheme, not NODE_ENV.
-// npm start sets NODE_ENV=production even on localhost (HTTP),
-// so we mirror Auth.js's own logic: secure when AUTH_URL is HTTPS.
-const useSecureCookies = (process.env.AUTH_URL ?? "http://localhost:3000").startsWith("https://");
+const useSecureCookies = isHttps;
 
 export default {
   providers: [

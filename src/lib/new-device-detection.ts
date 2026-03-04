@@ -5,6 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { newDeviceLoginEmail } from "@/lib/email/templates/new-device-login";
 import { createNotification } from "@/lib/notification";
 import { NOTIFICATION_TYPE } from "@/lib/constants";
+import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { resolveUserLocale } from "@/lib/locale";
 
 interface DeviceMeta {
@@ -100,12 +101,8 @@ export async function checkNewDeviceAndNotify(
     createNotification({
       userId,
       type: NOTIFICATION_TYPE.NEW_DEVICE_LOGIN,
-      title: locale.startsWith("ja")
-        ? "新しいデバイスからのログイン"
-        : "New device login",
-      body: locale.startsWith("ja")
-        ? `${current.browserName} (${current.osName}) からログインしました`
-        : `Signed in from ${current.browserName} (${current.osName})`,
+      title: notificationTitle("NEW_DEVICE_LOGIN", locale),
+      body: notificationBody("NEW_DEVICE_LOGIN", locale, current.browserName, current.osName),
       metadata: {
         browserName: current.browserName,
         osName: current.osName,

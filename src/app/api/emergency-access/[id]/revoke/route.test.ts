@@ -86,7 +86,7 @@ describe("POST /api/emergency-access/[id]/revoke", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "grantee@test.com",
-        subject: expect.stringContaining("取り消"),
+        subject: expect.stringContaining("revoked"),
       })
     );
   });

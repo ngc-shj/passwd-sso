@@ -1,14 +1,13 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { withUserTenantRls } from "@/lib/tenant-context";
-import { z } from "zod";
+import { executeVaultReset } from "@/lib/vault-reset";
+import { z } from "zod/v4";
 
 export const runtime = "nodejs";
 
@@ -74,74 +73,8 @@ async function handlePOST(request: NextRequest) {
 
   const userId = session.user.id;
 
-  // Count data being deleted for audit metadata
-  const [entryCount, attachmentCount] = await withUserTenantRls(userId, async () =>
-    Promise.all([
-      prisma.passwordEntry.count({ where: { userId } }),
-      prisma.attachment.count({ where: { createdById: userId } }),
-    ]),
-  );
-
-  // Single transaction: delete all vault data
-  await withUserTenantRls(userId, async () =>
-    prisma.$transaction([
-      // Attachments (bytea stored directly in DB, no external storage)
-      // NOTE: If migrated to S3 in the future, add object deletion here
-      prisma.attachment.deleteMany({ where: { createdById: userId } }),
-      // Share links
-      prisma.passwordShare.deleteMany({ where: { createdById: userId } }),
-      // Password entries
-      prisma.passwordEntry.deleteMany({ where: { userId } }),
-      // Vault keys
-      prisma.vaultKey.deleteMany({ where: { userId } }),
-      // Tags (all entries deleted, tags are now orphaned)
-      prisma.tag.deleteMany({ where: { userId } }),
-      // Emergency access grants (revoke as owner)
-      prisma.emergencyAccessGrant.updateMany({
-        where: { ownerId: userId },
-        data: { status: "REVOKED", revokedAt: new Date() },
-      }),
-      // Team E2E: delete all TeamMemberKey records for this user
-      prisma.teamMemberKey.deleteMany({ where: { userId } }),
-      // Team E2E: reset keyDistributed on all TeamMember records for this user
-      prisma.teamMember.updateMany({
-        where: { userId },
-        data: { keyDistributed: false },
-      }),
-      // Null out vault + recovery + lockout + ECDH fields on User
-      prisma.user.update({
-        where: { id: userId },
-        data: {
-          vaultSetupAt: null,
-          accountSalt: null,
-          encryptedSecretKey: null,
-          secretKeyIv: null,
-          secretKeyAuthTag: null,
-          masterPasswordServerHash: null,
-          masterPasswordServerSalt: null,
-          keyVersion: 0,
-          passphraseVerifierHmac: null,
-          passphraseVerifierVersion: 1,
-          // Recovery key fields
-          recoveryEncryptedSecretKey: null,
-          recoverySecretKeyIv: null,
-          recoverySecretKeyAuthTag: null,
-          recoveryHkdfSalt: null,
-          recoveryVerifierHmac: null,
-          recoveryKeySetAt: null,
-          // Lockout fields
-          failedUnlockAttempts: 0,
-          lastFailedUnlockAt: null,
-          accountLockedUntil: null,
-          // ECDH key pair (team E2E)
-          ecdhPublicKey: null,
-          encryptedEcdhPrivateKey: null,
-          ecdhPrivateKeyIv: null,
-          ecdhPrivateKeyAuthTag: null,
-        },
-      }),
-    ]),
-  );
+  const { deletedEntries, deletedAttachments } =
+    await executeVaultReset(userId);
 
   const { ip, userAgent } = extractRequestMeta(request);
   logAudit({
@@ -149,8 +82,8 @@ async function handlePOST(request: NextRequest) {
     action: "VAULT_RESET_EXECUTED",
     userId,
     metadata: {
-      deletedEntries: entryCount,
-      deletedAttachments: attachmentCount,
+      deletedEntries,
+      deletedAttachments,
     },
     ip,
     userAgent,

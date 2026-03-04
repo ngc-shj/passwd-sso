@@ -96,7 +96,7 @@ export function MatchList({ tabUrl, onLock }: Props) {
     }
   };
 
-  const handleFill = async (entryId: string) => {
+  const handleFill = async (entryId: string, entryType: string) => {
     if (filling) return;
     setFilling(true);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -105,8 +105,13 @@ export function MatchList({ tabUrl, onLock }: Props) {
       setFilling(false);
       return;
     }
+
+    let msgType: "AUTOFILL" | "AUTOFILL_CREDIT_CARD" | "AUTOFILL_IDENTITY" = "AUTOFILL";
+    if (entryType === EXT_ENTRY_TYPE.CREDIT_CARD) msgType = "AUTOFILL_CREDIT_CARD";
+    else if (entryType === EXT_ENTRY_TYPE.IDENTITY) msgType = "AUTOFILL_IDENTITY";
+
     const res = await sendMessage({
-      type: "AUTOFILL",
+      type: msgType,
       entryId,
       tabId: tab.id,
     });
@@ -118,6 +123,21 @@ export function MatchList({ tabUrl, onLock }: Props) {
       setFilling(false);
     }
   };
+
+  const entryTypeBadge = (type: string) => {
+    if (type === EXT_ENTRY_TYPE.CREDIT_CARD) {
+      return <span className="text-[10px] font-medium text-blue-700 bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">{t("popup.badgeCard")}</span>;
+    }
+    if (type === EXT_ENTRY_TYPE.IDENTITY) {
+      return <span className="text-[10px] font-medium text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded">{t("popup.badgeIdentity")}</span>;
+    }
+    return null;
+  };
+
+  const isAutofillable = (type: string) =>
+    type === EXT_ENTRY_TYPE.LOGIN ||
+    type === EXT_ENTRY_TYPE.CREDIT_CARD ||
+    type === EXT_ENTRY_TYPE.IDENTITY;
 
   const sorted = sortByUrlMatch(entries, tabHost);
   const matched = tabHost
@@ -201,30 +221,37 @@ export function MatchList({ tabUrl, onLock }: Props) {
                   className="rounded-md border border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors px-3 py-2"
                 >
                   <div className="flex items-center justify-between gap-2 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate min-w-0">
-                      {e.title || "(Untitled)"}
+                    <div className="flex items-center gap-1.5 truncate min-w-0">
+                      <span className="text-sm font-medium text-gray-900 truncate">
+                        {e.title || "(Untitled)"}
+                      </span>
+                      {entryTypeBadge(e.entryType)}
                     </div>
-                    {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+                    {isAutofillable(e.entryType) && (
                       <div className="flex items-center gap-2 shrink-0">
                         <button
-                          onClick={() => handleFill(e.id)}
+                          onClick={() => handleFill(e.id, e.entryType)}
                           disabled={filling}
                           className="text-xs font-semibold text-white bg-gray-900 px-2.5 py-1.5 rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
-                        <button
-                          onClick={() => handleCopyTotp(e.id)}
-                          className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
-                        >
-                          {t("popup.copyTotp")}
-                        </button>
-                        <button
-                          onClick={() => handleCopy(e.id)}
-                          className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
-                        >
-                          {t("popup.copy")}
-                        </button>
+                        {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+                          <>
+                            <button
+                              onClick={() => handleCopyTotp(e.id)}
+                              className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                            >
+                              {t("popup.copyTotp")}
+                            </button>
+                            <button
+                              onClick={() => handleCopy(e.id)}
+                              className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                            >
+                              {t("popup.copy")}
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>
@@ -251,30 +278,37 @@ export function MatchList({ tabUrl, onLock }: Props) {
                   className="rounded-md border border-gray-200 px-3 py-2"
                 >
                   <div className="flex items-center justify-between gap-2 min-w-0">
-                    <div className="text-sm font-medium text-gray-900 truncate min-w-0">
-                      {e.title || "(Untitled)"}
+                    <div className="flex items-center gap-1.5 truncate min-w-0">
+                      <span className="text-sm font-medium text-gray-900 truncate">
+                        {e.title || "(Untitled)"}
+                      </span>
+                      {entryTypeBadge(e.entryType)}
                     </div>
-                    {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+                    {isAutofillable(e.entryType) && (
                       <div className="flex items-center gap-2 shrink-0">
                         <button
-                          onClick={() => handleFill(e.id)}
+                          onClick={() => handleFill(e.id, e.entryType)}
                           disabled={filling}
                           className="text-xs font-semibold text-white bg-gray-900 px-2.5 py-1.5 rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-60"
                         >
                           {t("popup.fill")}
                         </button>
-                        <button
-                          onClick={() => handleCopyTotp(e.id)}
-                          className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
-                        >
-                          {t("popup.copyTotp")}
-                        </button>
-                        <button
-                          onClick={() => handleCopy(e.id)}
-                          className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
-                        >
-                          {t("popup.copy")}
-                        </button>
+                        {e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+                          <>
+                            <button
+                              onClick={() => handleCopyTotp(e.id)}
+                              className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                            >
+                              {t("popup.copyTotp")}
+                            </button>
+                            <button
+                              onClick={() => handleCopy(e.id)}
+                              className="text-xs font-semibold text-gray-800 bg-gray-100 border border-gray-200 px-2.5 py-1.5 rounded-md hover:bg-gray-200 active:bg-gray-300 transition-colors"
+                            >
+                              {t("popup.copy")}
+                            </button>
+                          </>
+                        )}
                       </div>
                     )}
                   </div>

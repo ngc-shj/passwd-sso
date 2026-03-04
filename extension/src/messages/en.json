@@ -30,7 +30,9 @@
     "enableAutofill": "Enable autofill for this site",
     "autofillEnabled": "Autofill enabled for this site",
     "httpWarning": "This page uses HTTP. Filling credentials on insecure pages is risky.",
-    "unlockSite": "Current site: {host}"
+    "unlockSite": "Current site: {host}",
+    "badgeCard": "Card",
+    "badgeIdentity": "Identity"
   },
   "options": {
     "title": "Settings",
@@ -55,7 +57,9 @@
     "vaultLocked": "Vault is locked",
     "disconnected": "Not connected",
     "noMatches": "No matches",
-    "openPopup": "Open passwd-sso"
+    "openPopup": "Open passwd-sso",
+    "creditCard": "Credit Card",
+    "identity": "Identity"
   },
   "saveBanner": {
     "saveLogin": "Save login for {host}?",

@@ -101,7 +101,7 @@ describe("POST /api/emergency-access/[id]/request", () => {
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
         to: "owner@test.com",
-        subject: expect.stringContaining("リクエスト"),
+        subject: expect.stringContaining("requested"),
       })
     );
   });

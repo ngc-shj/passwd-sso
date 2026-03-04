@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
-  mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag,
+  mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction, mockRateLimiter, mockLogAudit, mockWithUserTenantRls,
+  mockPrismaTransaction, mockRateLimiter, mockLogAudit,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { update: vi.fn() },
@@ -13,13 +13,13 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare: { deleteMany: vi.fn() },
   mockPrismaVaultKey: { deleteMany: vi.fn() },
   mockPrismaTag: { deleteMany: vi.fn() },
+  mockPrismaFolder: { deleteMany: vi.fn() },
   mockPrismaEmergencyGrant: { updateMany: vi.fn() },
   mockPrismaTeamMemberKey: { deleteMany: vi.fn() },
   mockPrismaTeamMember: { updateMany: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -31,6 +31,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: mockPrismaPasswordShare,
     vaultKey: mockPrismaVaultKey,
     tag: mockPrismaTag,
+    folder: mockPrismaFolder,
     emergencyAccessGrant: mockPrismaEmergencyGrant,
     teamMemberKey: mockPrismaTeamMemberKey,
     teamMember: mockPrismaTeamMember,
@@ -47,8 +48,9 @@ vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+// executeVaultReset uses withBypassRls (not withUserTenantRls)
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -129,9 +131,6 @@ describe("POST /api/vault/reset", () => {
     }));
     expect(res.status).toBe(200);
 
-    // Transaction includes TeamMemberKey deleteMany and TeamMember updateMany
-    const txArray = mockPrismaTransaction.mock.calls[0][0];
-
     // Verify TeamMemberKey.deleteMany was included
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
@@ -143,7 +142,8 @@ describe("POST /api/vault/reset", () => {
       data: { keyDistributed: false },
     });
 
-    // Transaction should have 9 operations (original 7 + 2 new)
-    expect(txArray).toHaveLength(9);
+    // Transaction should have 10 operations (original 7 + 2 team E2E + 1 folder)
+    const txArray = mockPrismaTransaction.mock.calls[0][0];
+    expect(txArray).toHaveLength(10);
   });
 });

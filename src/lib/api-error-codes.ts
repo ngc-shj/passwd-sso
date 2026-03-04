@@ -24,6 +24,7 @@ export const API_ERROR = {
   VALIDATION_ERROR: "VALIDATION_ERROR",
   NOT_FOUND: "NOT_FOUND",
   FORBIDDEN: "FORBIDDEN",
+  CONFLICT: "CONFLICT",
 
   // ── Vault ─────────────────────────────────────────────────
   VAULT_ALREADY_SETUP: "VAULT_ALREADY_SETUP",
@@ -37,6 +38,8 @@ export const API_ERROR = {
   INVALID_RECOVERY_KEY: "INVALID_RECOVERY_KEY",
   RECOVERY_KEY_NOT_SET: "RECOVERY_KEY_NOT_SET",
   VAULT_RESET_CONFIRMATION_MISMATCH: "VAULT_RESET_CONFIRMATION_MISMATCH",
+  VAULT_RESET_TOKEN_EXPIRED: "VAULT_RESET_TOKEN_EXPIRED",
+  VAULT_RESET_TOKEN_USED: "VAULT_RESET_TOKEN_USED",
   INVALID_ORIGIN: "INVALID_ORIGIN",
 
   // ── Tags ──────────────────────────────────────────────────
@@ -161,6 +164,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   VALIDATION_ERROR: "validationError",
   NOT_FOUND: "notFound",
   FORBIDDEN: "forbidden",
+  CONFLICT: "conflict",
   VAULT_ALREADY_SETUP: "vaultAlreadySetup",
   VAULT_NOT_SETUP: "vaultNotSetup",
   INVALID_PASSPHRASE: "invalidPassphrase",
@@ -240,6 +244,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_RECOVERY_KEY: "invalidRecoveryKey",
   RECOVERY_KEY_NOT_SET: "recoveryKeyNotSet",
   VAULT_RESET_CONFIRMATION_MISMATCH: "vaultResetConfirmationMismatch",
+  VAULT_RESET_TOKEN_EXPIRED: "vaultResetTokenExpired",
+  VAULT_RESET_TOKEN_USED: "vaultResetTokenUsed",
   INVALID_ORIGIN: "invalidOrigin",
   SCIM_TOKEN_INVALID: "scimTokenInvalid",
   SCIM_TOKEN_EXPIRED: "scimTokenExpired",

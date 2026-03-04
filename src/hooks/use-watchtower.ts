@@ -1,12 +1,19 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useVault } from "@/lib/vault-context";
 import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { getCooldownState } from "@/lib/watchtower/state";
+import {
+  shouldAutoCheck,
+  hasNewBreaches,
+  LS_LAST_BREACH_CHECK_AT,
+  LS_AUTO_MONITOR_ENABLED,
+  LS_LAST_KNOWN_BREACH_COUNT,
+} from "@/lib/watchtower/auto-monitor";
 import {
   analyzeStrength,
   checkHIBP,
@@ -466,6 +473,118 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     }
   }, [scope, encryptionKey, userId, loading, cooldownRemainingMs, teamVault]);
 
+  // ── Auto-monitor state ──
+
+  const [autoMonitorEnabled, setAutoMonitorEnabledState] = useState(() => {
+    try {
+      return window.localStorage.getItem(LS_AUTO_MONITOR_ENABLED) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const [lastBreachCheckAt, setLastBreachCheckAt] = useState<number | null>(() => {
+    try {
+      const stored = window.localStorage.getItem(LS_LAST_BREACH_CHECK_AT);
+      if (!stored) return null;
+      const parsed = Number(stored);
+      return Number.isFinite(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setAutoMonitorEnabled = useCallback((enabled: boolean) => {
+    setAutoMonitorEnabledState(enabled);
+    try {
+      window.localStorage.setItem(LS_AUTO_MONITOR_ENABLED, String(enabled));
+    } catch {
+      // localStorage unavailable
+    }
+  }, []);
+
+  // Keep analyze in a ref so the auto-check effect doesn't re-run
+  // when analyze is recreated (e.g. cooldown updates).
+  const analyzeRef = useRef(analyze);
+  useEffect(() => {
+    analyzeRef.current = analyze;
+  }, [analyze]);
+
+  // Auto-check on vault unlock (encryptionKey changes).
+  // Only runs for personal scope — team auto-monitor is not supported yet.
+  useEffect(() => {
+    if (scope.type !== "personal") return;
+    if (!encryptionKey) return;
+
+    const doAutoCheck = shouldAutoCheck({
+      lastCheckAt: lastBreachCheckAt,
+      now: Date.now(),
+      enabled: autoMonitorEnabled,
+      vaultUnlocked: true,
+    });
+
+    if (!doAutoCheck) return;
+
+    let isMounted = true;
+
+    // Run analyze via ref to avoid dependency on analyze itself
+    void (async () => {
+      await analyzeRef.current({ skipRateLimit: false });
+
+      if (!isMounted) return;
+
+      const checkTimestamp = Date.now();
+      setLastBreachCheckAt(checkTimestamp);
+      try {
+        window.localStorage.setItem(LS_LAST_BREACH_CHECK_AT, String(checkTimestamp));
+      } catch {
+        // localStorage unavailable
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+    // Only re-evaluate when encryptionKey changes (vault unlock/lock).
+    // autoMonitorEnabled and lastBreachCheckAt are read from their
+    // current values at the time of the effect, not as reactive deps,
+    // to prevent re-triggering on every state update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encryptionKey, scope.type]);
+
+  // After analysis completes, check for new breaches and send alert.
+  useEffect(() => {
+    if (!report || scope.type !== "personal") return;
+
+    const currentBreachCount = report.breached.length;
+    let lastKnown = 0;
+    try {
+      const stored = window.localStorage.getItem(LS_LAST_KNOWN_BREACH_COUNT);
+      if (stored) lastKnown = Number(stored) || 0;
+    } catch {
+      // localStorage unavailable
+    }
+
+    // Always update lastKnownBreachCount with current value
+    try {
+      window.localStorage.setItem(LS_LAST_KNOWN_BREACH_COUNT, String(currentBreachCount));
+    } catch {
+      // localStorage unavailable
+    }
+
+    if (hasNewBreaches(currentBreachCount, lastKnown)) {
+      const newBreachCount = currentBreachCount - lastKnown;
+      // Fire alert API — fire-and-forget
+      void fetchApi(API_PATH.WATCHTOWER_ALERT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newBreachCount }),
+      }).catch(() => {
+        // Alert send failure should not affect UI
+      });
+    }
+  }, [report, scope.type]);
+
   return {
     report,
     loading,
@@ -475,6 +594,9 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     cooldownRemainingMs,
     nextAllowedAt,
     unavailableReason,
+    autoMonitorEnabled,
+    setAutoMonitorEnabled,
+    lastBreachCheckAt,
   };
 }
 

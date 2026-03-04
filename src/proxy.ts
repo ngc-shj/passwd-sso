@@ -5,6 +5,7 @@ import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";
+import { isHttps } from "./lib/url-helpers";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -75,6 +76,7 @@ async function handleApiAuth(request: NextRequest) {
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
   const extensionTokenRoutes = [
     API_PATH.PASSWORDS,
+    API_PATH.VAULT_STATUS,
     API_PATH.VAULT_UNLOCK_DATA,
     API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
     API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
@@ -112,7 +114,8 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.SESSIONS) ||
     pathname.startsWith(API_PATH.NOTIFICATIONS) ||
     pathname.startsWith(API_PATH.USER_LOCALE) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/extension`)
+    pathname.startsWith(`${API_PATH.API_ROOT}/extension`) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/tenant`)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
@@ -194,6 +197,20 @@ function applySecurityHeaders(
   response.headers.set(
     "Reporting-Endpoints",
     `csp-endpoint="${cspReportUrl}"`
+  );
+
+  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  response.headers.set("X-Content-Type-Options", "nosniff");
+  response.headers.set("X-Frame-Options", "DENY");
+  if (isHttps) {
+    response.headers.set(
+      "Strict-Transport-Security",
+      "max-age=63072000; includeSubDomains; preload"
+    );
+  }
+  response.headers.set(
+    "Permissions-Policy",
+    "camera=(), microphone=(), geolocation=(), payment=()"
   );
 
   response.cookies.set("csp-nonce", nonce, {

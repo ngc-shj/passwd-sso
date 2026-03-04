@@ -1,26 +1,30 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { authOrToken } from "@/lib/auth-or-token";
 
 export const runtime = "nodejs";
 
 /**
  * GET /api/vault/status
  * Returns whether the user has set up their vault (passphrase + secret key).
+ * Supports both Auth.js session and extension token (Bearer).
  */
-async function handleGET(_request: NextRequest) {
-  void _request;
-  const session = await auth();
-  if (!session?.user?.id) {
+async function handleGET(request: NextRequest) {
+  const result = await authOrToken(request, EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA);
+  if (!result) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  if (result.type === "scope_insufficient") {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 403 });
+  }
 
-  const user = await withUserTenantRls(session.user.id, async () =>
+  const user = await withUserTenantRls(result.userId, async () =>
     prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: result.userId },
       select: {
         vaultSetupAt: true,
         accountSalt: true,

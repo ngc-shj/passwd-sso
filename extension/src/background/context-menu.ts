@@ -4,6 +4,8 @@ import { t } from "../lib/i18n";
 
 const PARENT_ID = "psso-parent";
 const ITEM_PREFIX = "psso-login-";
+const CC_ITEM_PREFIX = "psso-cc-";
+const ID_ITEM_PREFIX = "psso-id-";
 const OPEN_POPUP_ID = "psso-open-popup";
 const MAX_ITEMS = 5;
 
@@ -102,11 +104,19 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
 
   try {
     const entries = await deps.getCachedEntries();
-    const matches = entries.filter(
+    const loginMatches = entries.filter(
       (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && deps!.isHostMatch(e.urlHost, host),
     );
+    const ccEntries = entries.filter(
+      (e) => e.entryType === EXT_ENTRY_TYPE.CREDIT_CARD,
+    );
+    const idEntries = entries.filter(
+      (e) => e.entryType === EXT_ENTRY_TYPE.IDENTITY,
+    );
 
-    if (matches.length === 0) {
+    const hasAnyItems = loginMatches.length > 0 || ccEntries.length > 0 || idEntries.length > 0;
+
+    if (!hasAnyItems) {
       chrome.contextMenus.create({
         id: `${ITEM_PREFIX}none`,
         parentId: PARENT_ID,
@@ -115,17 +125,61 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
         enabled: false,
       });
     } else {
-      const displayed = matches.slice(0, MAX_ITEMS);
-      for (const entry of displayed) {
-        const label = entry.username
-          ? `${entry.title} (${entry.username})`
-          : entry.title;
-        chrome.contextMenus.create({
-          id: `${ITEM_PREFIX}${entry.id}`,
-          parentId: PARENT_ID,
-          title: label,
-          contexts: ["editable"],
-        });
+      // Logins section
+      if (loginMatches.length > 0) {
+        for (const entry of loginMatches.slice(0, MAX_ITEMS)) {
+          const label = entry.username
+            ? `${entry.title} (${entry.username})`
+            : entry.title;
+          chrome.contextMenus.create({
+            id: `${ITEM_PREFIX}${entry.id}`,
+            parentId: PARENT_ID,
+            title: label,
+            contexts: ["editable"],
+          });
+        }
+      }
+
+      // Credit Cards section
+      if (ccEntries.length > 0) {
+        if (loginMatches.length > 0) {
+          chrome.contextMenus.create({
+            id: `${CC_ITEM_PREFIX}sep`,
+            parentId: PARENT_ID,
+            type: "separator",
+            contexts: ["editable"],
+          });
+        }
+        for (const entry of ccEntries.slice(0, MAX_ITEMS)) {
+          const label = entry.title || t("contextMenu.creditCard");
+          chrome.contextMenus.create({
+            id: `${CC_ITEM_PREFIX}${entry.id}`,
+            parentId: PARENT_ID,
+            title: `💳 ${label}`,
+            contexts: ["editable"],
+          });
+        }
+      }
+
+      // Identity section
+      if (idEntries.length > 0) {
+        if (loginMatches.length > 0 || ccEntries.length > 0) {
+          chrome.contextMenus.create({
+            id: `${ID_ITEM_PREFIX}sep`,
+            parentId: PARENT_ID,
+            type: "separator",
+            contexts: ["editable"],
+          });
+        }
+        for (const entry of idEntries.slice(0, MAX_ITEMS)) {
+          const label = entry.title || t("contextMenu.identity");
+          chrome.contextMenus.create({
+            id: `${ID_ITEM_PREFIX}${entry.id}`,
+            parentId: PARENT_ID,
+            title: `👤 ${label}`,
+            contexts: ["editable"],
+          });
+        }
       }
     }
 
@@ -177,9 +231,20 @@ export function handleContextMenuClick(
     return;
   }
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
   if (menuId.startsWith(ITEM_PREFIX)) {
     const entryId = menuId.slice(ITEM_PREFIX.length);
-    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (entryId && UUID_RE.test(entryId)) {
+      deps.performAutofill(entryId, tab.id).catch(() => {});
+    }
+  } else if (menuId.startsWith(CC_ITEM_PREFIX)) {
+    const entryId = menuId.slice(CC_ITEM_PREFIX.length);
+    if (entryId && UUID_RE.test(entryId)) {
+      deps.performAutofill(entryId, tab.id).catch(() => {});
+    }
+  } else if (menuId.startsWith(ID_ITEM_PREFIX)) {
+    const entryId = menuId.slice(ID_ITEM_PREFIX.length);
     if (entryId && UUID_RE.test(entryId)) {
       deps.performAutofill(entryId, tab.id).catch(() => {});
     }
