@@ -65,6 +65,24 @@ describe("hasTenantPermission", () => {
     ).toBe(true);
   });
 
+  it("OWNER has TEAM_CREATE permission", () => {
+    expect(
+      hasTenantPermission("OWNER", TENANT_PERMISSION.TEAM_CREATE),
+    ).toBe(true);
+  });
+
+  it("ADMIN has TEAM_CREATE permission", () => {
+    expect(
+      hasTenantPermission("ADMIN", TENANT_PERMISSION.TEAM_CREATE),
+    ).toBe(true);
+  });
+
+  it("MEMBER has no TEAM_CREATE permission", () => {
+    expect(
+      hasTenantPermission("MEMBER", TENANT_PERMISSION.TEAM_CREATE),
+    ).toBe(false);
+  });
+
   it("MEMBER has no MEMBER_MANAGE permission", () => {
     expect(
       hasTenantPermission("MEMBER", TENANT_PERMISSION.MEMBER_MANAGE),

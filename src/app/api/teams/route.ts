@@ -7,6 +7,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 import { resolveUserTenantId, resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { getLogger } from "@/lib/logger";
 
 // GET /api/teams — List teams the user belongs to
@@ -71,6 +73,16 @@ export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+
+  // Only OWNER / ADMIN can create teams
+  try {
+    await requireTenantPermission(session.user.id, TENANT_PERMISSION.TEAM_CREATE);
+  } catch (e) {
+    if (e instanceof TenantAuthError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
   }
 
   let body: unknown;

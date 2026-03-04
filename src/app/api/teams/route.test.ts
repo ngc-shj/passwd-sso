@@ -2,8 +2,16 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantId, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantId, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
   const loggerInfo = vi.fn();
+  class _TenantAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "TenantAuthError";
+      this.status = status;
+    }
+  }
   return {
     mockAuth: vi.fn(),
     mockPrismaTeamMember: { findMany: vi.fn() },
@@ -14,6 +22,8 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, m
     mockResolveUserTenantIdFromClient: vi.fn(),
     mockGetLogger: vi.fn(() => ({ info: loggerInfo })),
     mockLoggerInfo: loggerInfo,
+    mockRequireTenantPermission: vi.fn(),
+    MockTenantAuthError: _TenantAuthError,
   };
 });
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -33,6 +43,13 @@ vi.mock("@/lib/tenant-rls", () => ({
 }));
 vi.mock("@/lib/logger", () => ({
   getLogger: mockGetLogger,
+}));
+vi.mock("@/lib/tenant-auth", () => ({
+  requireTenantPermission: mockRequireTenantPermission,
+  TenantAuthError: MockTenantAuthError,
+}));
+vi.mock("@/lib/constants/tenant-permission", () => ({
+  TENANT_PERMISSION: { TEAM_CREATE: "tenant:team:create" },
 }));
 
 import { GET, POST } from "./route";
@@ -179,6 +196,7 @@ describe("POST /api/teams (E2E-only)", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockRequireTenantPermission.mockResolvedValue({ id: "tm-1", tenantId: "tenant-1", role: "ADMIN" });
     mockWithUserTenantRls.mockImplementation(async (_userId: string, fn: () => unknown) => fn());
     mockResolveUserTenantId.mockResolvedValue("tenant-1");
   });
@@ -202,6 +220,16 @@ describe("POST /api/teams (E2E-only)", () => {
       body: validE2EBody,
     }));
     expect(res.status).toBe(401);
+  });
+
+  it("returns 403 when tenant MEMBER tries to create a team", async () => {
+    mockRequireTenantPermission.mockRejectedValue(new MockTenantAuthError("FORBIDDEN", 403));
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/teams", {
+      body: validE2EBody,
+    }));
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("FORBIDDEN");
   });
 
   it("returns 400 when teamMemberKey is missing", async () => {
