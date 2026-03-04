@@ -6,9 +6,15 @@
  */
 
 let encryptionKey: CryptoKey | null = null;
+let vaultUserId: string | null = null;
 
-export function setEncryptionKey(key: CryptoKey): void {
+export function setEncryptionKey(key: CryptoKey, userId?: string): void {
   encryptionKey = key;
+  if (userId) vaultUserId = userId;
+}
+
+export function getUserId(): string | null {
+  return vaultUserId;
 }
 
 export function getEncryptionKey(): CryptoKey | null {
@@ -21,4 +27,5 @@ export function isUnlocked(): boolean {
 
 export function lockVault(): void {
   encryptionKey = null;
+  vaultUserId = null;
 }

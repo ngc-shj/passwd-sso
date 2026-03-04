@@ -4,7 +4,6 @@
  * Derives the encryption key and stores it in process memory.
  */
 
-import { createInterface } from "node:readline";
 import { apiRequest } from "../lib/api-client.js";
 import {
   hexDecode,
@@ -18,29 +17,28 @@ import * as output from "../lib/output.js";
 import type { EncryptedData } from "../lib/crypto.js";
 
 interface UnlockData {
+  userId: string;
   encryptedSecretKey: string;
   secretKeyIv: string;
   secretKeyAuthTag: string;
-  verificationArtifact: string;
-  verificationIv: string;
-  verificationAuthTag: string;
+  verificationArtifact: {
+    ciphertext: string;
+    iv: string;
+    authTag: string;
+  } | null;
   accountSalt: string;
 }
 
 async function readPassphrase(prompt: string): Promise<string> {
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
+  process.stdout.write(prompt);
 
-  // Disable echo
   if (process.stdin.isTTY) {
     process.stdin.setRawMode?.(true);
   }
+  process.stdin.resume();
 
   return new Promise((resolve) => {
     let passphrase = "";
-    process.stdout.write(prompt);
 
     const onData = (key: Buffer) => {
       const char = key.toString("utf-8");
@@ -49,8 +47,8 @@ async function readPassphrase(prompt: string): Promise<string> {
         if (process.stdin.isTTY) {
           process.stdin.setRawMode?.(false);
         }
+        process.stdin.pause();
         console.log(); // newline after hidden input
-        rl.close();
         if (char === "\u0003") {
           process.exit(130);
         }
@@ -106,19 +104,14 @@ export async function unlockCommand(): Promise<void> {
 
     // Verify with verification artifact
     if (data.verificationArtifact) {
-      const artifact: EncryptedData = {
-        ciphertext: data.verificationArtifact,
-        iv: data.verificationIv,
-        authTag: data.verificationAuthTag,
-      };
-      const valid = await verifyKey(encryptionKey, artifact);
+      const valid = await verifyKey(encryptionKey, data.verificationArtifact);
       if (!valid) {
         output.error("Incorrect passphrase.");
         return;
       }
     }
 
-    setEncryptionKey(encryptionKey);
+    setEncryptionKey(encryptionKey, data.userId);
     output.success("Vault unlocked.");
   } catch {
     output.error("Failed to unlock vault. Check your passphrase.");
