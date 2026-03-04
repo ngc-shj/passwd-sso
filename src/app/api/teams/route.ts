@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
-import { resolveUserTenantId, resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
+import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
@@ -76,14 +76,16 @@ export async function POST(req: NextRequest) {
   }
 
   // Only OWNER / ADMIN can create teams
+  let actor;
   try {
-    await requireTenantPermission(session.user.id, TENANT_PERMISSION.TEAM_CREATE);
+    actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.TEAM_CREATE);
   } catch (e) {
     if (e instanceof TenantAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
     }
     throw e;
   }
+  const tenantId = actor.tenantId;
 
   let body: unknown;
   try {
@@ -100,19 +102,6 @@ export async function POST(req: NextRequest) {
     );
   }
   const { id: clientId, name, slug, description, teamMemberKey } = parsed.data;
-
-  let tenantId: string;
-  try {
-    tenantId = await resolveUserTenantId(session.user.id) ?? "";
-  } catch (e) {
-    if (e instanceof Error && e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED") {
-      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
-    }
-    throw e;
-  }
-  if (!tenantId) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
-  }
 
   // Check slug uniqueness in tenant context
   let existing;
