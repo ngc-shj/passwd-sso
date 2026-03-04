@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId } = result.data;
+  const { tenantId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -157,13 +157,23 @@ export async function POST(req: NextRequest) {
   }
 
   return withTenantRls(prisma, tenantId, async () => {
-    const team = await prisma.team.findUnique({
-      where: { id: scopedTeamId },
-      select: { slug: true },
+    // Resolve team from displayName slug: "<teamSlug>:<ROLE>"
+    const separator = displayName.indexOf(":");
+    if (separator < 1) {
+      return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>'");
+    }
+    const slugPart = displayName.slice(0, separator).trim();
+    const team = await prisma.team.findFirst({
+      where: { slug: slugPart, tenantId },
+      select: { id: true, slug: true },
     });
-    const matchedRole = parseRoleFromDisplayName(displayName, team?.slug);
+    if (!team) {
+      return scimError(400, `Team with slug '${slugPart}' not found in this tenant`);
+    }
+
+    const matchedRole = parseRoleFromDisplayName(displayName, team.slug);
     if (!matchedRole) {
-      return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>' for the scoped team");
+      return scimError(400, "displayName must be in the format '<teamSlug>:<ROLE>'");
     }
 
     const existing = await prisma.scimGroupMapping.findUnique({
@@ -180,7 +190,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (existing && (existing.teamId !== scopedTeamId || existing.role !== matchedRole)) {
+    if (existing && (existing.teamId !== team.id || existing.role !== matchedRole)) {
       return scimError(409, "externalId is already mapped to a different group", "uniqueness");
     }
 
@@ -188,19 +198,19 @@ export async function POST(req: NextRequest) {
       await prisma.scimGroupMapping.create({
         data: {
           tenantId,
-          teamId: scopedTeamId,
+          teamId: team.id,
           externalGroupId: externalId,
           role: matchedRole,
         },
       });
     }
 
-    const members = await loadGroupMembers(scopedTeamId, matchedRole);
+    const members = await loadGroupMembers(team.id, matchedRole);
 
     return scimResponse(
       buildGroupResource(
         externalId,
-        toDisplayName(team?.slug, matchedRole),
+        toDisplayName(team.slug, matchedRole),
         members,
         getScimBaseUrl(),
       ),

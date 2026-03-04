@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -200,7 +200,6 @@ export async function POST(req: NextRequest) {
             });
             await tx.scimExternalMapping.create({
               data: {
-                teamId: scopedTeamId,
                 tenantId,
                 externalId,
                 resourceType: "User",
@@ -215,10 +214,10 @@ export async function POST(req: NextRequest) {
     );
 
     logAudit({
-      scope: AUDIT_SCOPE.TEAM,
+      scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
-      teamId: scopedTeamId,
+      tenantId,
       targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: created.user.id,
       metadata: { email: userName, externalId },

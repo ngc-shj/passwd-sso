@@ -130,7 +130,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -245,10 +245,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { resource, mapping, toAdd, toRemove } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
-    teamId: mapping.teamId ?? scopedTeamId,
+    teamId: mapping.teamId,
+    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: id,
     metadata: { role: mapping.role, added: toAdd.length, removed: toRemove.length },
@@ -264,7 +265,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { teamId: scopedTeamId, tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId } = result.data;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -365,10 +366,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { resource, mapping } = resultResponse;
 
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
-    teamId: mapping.teamId ?? scopedTeamId,
+    teamId: mapping.teamId,
+    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: id,
     metadata: {

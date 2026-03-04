@@ -208,20 +208,3 @@ describe("requireTeamPermission", () => {
   });
 });
 
-describe("SCIM_MANAGE permission", () => {
-  it("OWNER has SCIM_MANAGE permission", () => {
-    expect(hasTeamPermission(TEAM_ROLE.OWNER, TEAM_PERMISSION.SCIM_MANAGE)).toBe(true);
-  });
-
-  it("ADMIN has SCIM_MANAGE permission", () => {
-    expect(hasTeamPermission(TEAM_ROLE.ADMIN, TEAM_PERMISSION.SCIM_MANAGE)).toBe(true);
-  });
-
-  it("MEMBER does not have SCIM_MANAGE permission", () => {
-    expect(hasTeamPermission(TEAM_ROLE.MEMBER, TEAM_PERMISSION.SCIM_MANAGE)).toBe(false);
-  });
-
-  it("VIEWER does not have SCIM_MANAGE permission", () => {
-    expect(hasTeamPermission(TEAM_ROLE.VIEWER, TEAM_PERMISSION.SCIM_MANAGE)).toBe(false);
-  });
-});

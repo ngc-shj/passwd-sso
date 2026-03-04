@@ -42,13 +42,11 @@ function bearerRequest(token: string): NextRequest {
 function makeToken(overrides: Record<string, unknown> = {}) {
   return {
     id: "tok-1",
-    teamId: "team-1",
     tenantId: "tenant-1",
     createdById: "user-1",
     revokedAt: null,
     expiresAt: null,
     lastUsedAt: null,
-    team: { tenantId: "tenant-1" },
     ...overrides,
   };
 }
@@ -78,12 +76,12 @@ describe("validateScimToken", () => {
       ok: true,
       data: {
         tokenId: "tok-1",
-        teamId: "team-1",
         tenantId: "tenant-1",
         createdById: "user-1",
         auditUserId: "user-1",
       },
     });
+    expect(result.ok && result.data).not.toHaveProperty("teamId");
   });
 
   it("falls back to SCIM_SYSTEM_USER_ID when createdById is null", async () => {
@@ -170,7 +168,7 @@ describe("validateScimToken", () => {
 
     const result = await validateScimToken(bearerRequest("scim_valid"));
 
-    expect(result).toEqual({ ok: true, data: expect.objectContaining({ teamId: "team-1" }) });
+    expect(result).toEqual({ ok: true, data: expect.objectContaining({ tenantId: "tenant-1" }) });
   });
 
   // ─── lastUsedAt throttle ────────────────────────────────────
@@ -216,7 +214,7 @@ describe("validateScimToken", () => {
     // Should still return ok
     expect(result).toEqual({
       ok: true,
-      data: expect.objectContaining({ teamId: "team-1" }),
+      data: expect.objectContaining({ tenantId: "tenant-1" }),
     });
   });
 
@@ -231,35 +229,17 @@ describe("validateScimToken", () => {
       where: { tokenHash: "hashed:scim_abc123" },
       select: {
         id: true,
-        teamId: true,
         tenantId: true,
         createdById: true,
         revokedAt: true,
         expiresAt: true,
         lastUsedAt: true,
-        team: {
-          select: { tenantId: true },
-        },
       },
     });
   });
 
-  it("falls back to team.tenantId when token.tenantId is null", async () => {
-    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, team: { tenantId: "tenant-1" } }));
-
-    const result = await validateScimToken(bearerRequest("scim_abc123"));
-
-    expect(result).toEqual({
-      ok: true,
-      data: expect.objectContaining({
-        teamId: "team-1",
-        tenantId: "tenant-1",
-      }),
-    });
-  });
-
-  it("rejects token when tenant context is missing", async () => {
-    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null, team: { tenantId: null } }));
+  it("rejects token when tenantId is null", async () => {
+    mockFindUnique.mockResolvedValue(makeToken({ tenantId: null }));
 
     const result = await validateScimToken(bearerRequest("scim_abc123"));
 

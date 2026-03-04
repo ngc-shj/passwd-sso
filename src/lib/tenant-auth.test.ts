@@ -94,6 +94,24 @@ describe("hasTenantPermission", () => {
       hasTenantPermission("MEMBER", TENANT_PERMISSION.MEMBER_VAULT_RESET),
     ).toBe(false);
   });
+
+  it("OWNER has SCIM_MANAGE permission", () => {
+    expect(
+      hasTenantPermission("OWNER", TENANT_PERMISSION.SCIM_MANAGE),
+    ).toBe(true);
+  });
+
+  it("ADMIN has SCIM_MANAGE permission", () => {
+    expect(
+      hasTenantPermission("ADMIN", TENANT_PERMISSION.SCIM_MANAGE),
+    ).toBe(true);
+  });
+
+  it("MEMBER has no SCIM_MANAGE permission", () => {
+    expect(
+      hasTenantPermission("MEMBER", TENANT_PERMISSION.SCIM_MANAGE),
+    ).toBe(false);
+  });
 });
 
 // ─── isTenantRoleAbove ──────────────────────────────────────

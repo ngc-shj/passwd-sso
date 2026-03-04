@@ -48,6 +48,7 @@ export const API_PATH = {
   NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",
   TENANT_MEMBERS: "/api/tenant/members",
+  TENANT_SCIM_TOKENS: "/api/tenant/scim-tokens",
   TENANT_ROLE: "/api/tenant/role",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
@@ -117,12 +118,12 @@ export const apiPath = {
     `${API_PATH.TEAMS}/${teamId}/passwords/${entryId}/history/${historyId}/restore`,
   sessionById: (sessionId: string) => `${API_PATH.SESSIONS}/${sessionId}`,
   notificationById: (id: string) => `${API_PATH.NOTIFICATIONS}/${id}`,
-  teamScimTokens: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/scim-tokens`,
-  teamScimTokenById: (teamId: string, tokenId: string) =>
-    `${API_PATH.TEAMS}/${teamId}/scim-tokens/${tokenId}`,
   teamPasswordsBulkTrash: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-trash`,
   teamPasswordsBulkArchive: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-archive`,
   teamPasswordsBulkRestore: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-restore`,
+  tenantScimTokens: () => API_PATH.TENANT_SCIM_TOKENS,
+  tenantScimTokenById: (tokenId: string) =>
+    `${API_PATH.TENANT_SCIM_TOKENS}/${tokenId}`,
   tenantMemberResetVault: (userId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
   tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
