@@ -122,10 +122,10 @@ export function buildIdentitiesAnswer(
  * Build an SSH2_AGENT_SIGN_RESPONSE.
  */
 export function buildSignResponse(signature: Buffer): Buffer {
+  // SSH2_AGENT_SIGN_RESPONSE: byte(14) + string(signature_blob)
   const sigString = encodeString(signature);
-  const body = Buffer.alloc(1 + 4 + sigString.length);
+  const body = Buffer.alloc(1 + sigString.length);
   body[0] = SSH2_AGENT_SIGN_RESPONSE;
-  body.writeUInt32BE(sigString.length, 1);
-  sigString.copy(body, 5);
+  sigString.copy(body, 1);
   return frameMessage(body);
 }

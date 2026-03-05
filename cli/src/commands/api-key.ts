@@ -95,7 +95,7 @@ export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
 }
 
 export async function apiKeyRevokeCommand(id: string): Promise<void> {
-  const res = await apiRequest("/api/api-keys/" + id, { method: "DELETE" });
+  const res = await apiRequest(`/api/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) {
     const err = res.data as { error?: string };
     output.error(`Failed to revoke API key: ${err.error ?? `HTTP ${res.status}`}`);
