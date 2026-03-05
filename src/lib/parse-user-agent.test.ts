@@ -42,7 +42,7 @@ describe("parseDeviceFromUserAgent", () => {
     );
   });
 
-  it("returns Unknown OS (Browser) for empty string", () => {
+  it("returns null for empty string", () => {
     expect(parseDeviceFromUserAgent("")).toBeNull();
   });
 });

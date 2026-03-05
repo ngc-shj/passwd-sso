@@ -30,4 +30,10 @@ describe("getRpOrigin", () => {
     const { getRpOrigin } = await import("./webauthn-server");
     expect(getRpOrigin("localhost")).toBe("https://custom.example.com");
   });
+
+  it("falls back to https://${rpId} when AUTH_URL is invalid", async () => {
+    vi.stubEnv("AUTH_URL", "not-a-url");
+    const { getRpOrigin } = await import("./webauthn-server");
+    expect(getRpOrigin("example.com")).toBe("https://example.com");
+  });
 });
