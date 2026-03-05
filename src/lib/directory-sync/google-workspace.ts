@@ -41,6 +41,7 @@ export interface GoogleGroup {
 // ─── Constants ──────────────────────────────────────────────
 
 const MAX_PAGES = 1000;
+const FETCH_TIMEOUT_MS = 30_000;
 
 // ─── Validation ──────────────────────────────────────────────
 
@@ -117,6 +118,7 @@ export async function getGoogleAccessToken(
       grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
       assertion: jwt,
     }).toString(),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -171,6 +173,7 @@ export async function fetchGoogleUsers(
     const url = `https://admin.googleapis.com/admin/directory/v1/users?${params.toString()}`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -234,6 +237,7 @@ export async function fetchGoogleGroups(
     const url = `https://admin.googleapis.com/admin/directory/v1/groups?${params.toString()}`;
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {

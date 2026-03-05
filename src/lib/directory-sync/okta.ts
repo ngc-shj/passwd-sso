@@ -36,6 +36,7 @@ export interface OktaGroup {
 // ─── Constants ──────────────────────────────────────────────
 
 const MAX_PAGES = 1000;
+const FETCH_TIMEOUT_MS = 30_000;
 
 // ─── Validation ──────────────────────────────────────────────
 
@@ -109,6 +110,7 @@ export async function fetchOktaUsers(
         Authorization: `SSWS ${apiToken}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -181,6 +183,7 @@ export async function fetchOktaGroups(
         Authorization: `SSWS ${apiToken}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {

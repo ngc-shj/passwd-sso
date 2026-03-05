@@ -32,6 +32,7 @@ export interface AzureAdGroup {
 
 const MAX_PAGES = 1000;
 const GRAPH_ORIGIN = "https://graph.microsoft.com";
+const FETCH_TIMEOUT_MS = 30_000;
 
 // ─── Validation ──────────────────────────────────────────────
 
@@ -83,6 +84,7 @@ export async function getAzureAdToken(
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: body.toString(),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -131,6 +133,7 @@ export async function fetchAzureAdUsers(
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -199,6 +202,7 @@ export async function fetchAzureAdGroups(
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -240,7 +244,7 @@ async function fetchGroupMembers(
 ): Promise<string[]> {
   const memberIds: string[] = [];
   let url: string | undefined =
-    `https://graph.microsoft.com/v1.0/groups/${groupId}/members?$select=id`;
+    `https://graph.microsoft.com/v1.0/groups/${encodeURIComponent(groupId)}/members?$select=id`;
   let pages = 0;
 
   while (url) {
@@ -250,6 +254,7 @@ async function fetchGroupMembers(
 
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
