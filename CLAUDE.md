@@ -27,7 +27,7 @@ Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.y
 - Providers: Google OIDC + SAML 2.0 via BoxyHQ SAML Jackson (Docker container, NOT npm)
 - Jackson exposes an OIDC interface; Auth.js connects as a standard OIDC provider
 - Route protection: `proxy.ts` (root, entry point + CSP) → `src/proxy.ts` (Next.js 16 proxy pattern)
-- Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`
+- Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/api-keys/*`, `/api/v1/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
 
 ### E2E Encryption Architecture
@@ -62,6 +62,26 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/tags/[id]` | PUT, DELETE | Update/delete tag |
 | `/api/health/live` | GET | Liveness probe (always 200) |
 | `/api/health/ready` | GET | Readiness probe (DB + Redis, 503 if unhealthy) |
+| `/api/api-keys` | GET, POST | API key management |
+| `/api/api-keys/[id]` | DELETE | Delete API key |
+| `/api/v1/passwords` | GET, POST | REST API v1 password CRUD |
+| `/api/v1/passwords/[id]` | GET, PUT, DELETE | REST API v1 single entry |
+| `/api/v1/tags` | GET | REST API v1 tag list |
+| `/api/v1/vault/status` | GET | REST API v1 vault status |
+| `/api/v1/openapi.json` | GET | OpenAPI 3.1 spec |
+| `/api/travel-mode` | GET | Travel mode status |
+| `/api/travel-mode/enable` | POST | Enable travel mode |
+| `/api/travel-mode/disable` | POST | Disable travel mode |
+| `/api/directory-sync` | GET, POST | Directory sync config CRUD |
+| `/api/directory-sync/[id]` | GET, PUT, DELETE | Single sync config |
+| `/api/directory-sync/[id]/run` | POST | Trigger sync |
+| `/api/directory-sync/[id]/logs` | GET | Sync logs |
+| `/api/webauthn/register/options` | POST | WebAuthn registration options |
+| `/api/webauthn/register/verify` | POST | WebAuthn registration verify |
+| `/api/webauthn/authenticate/options` | POST | WebAuthn auth options |
+| `/api/webauthn/authenticate/verify` | POST | WebAuthn auth verify |
+| `/api/webauthn/credentials` | GET | List WebAuthn credentials |
+| `/api/webauthn/credentials/[id]` | DELETE | Delete WebAuthn credential |
 
 ### i18n
 
@@ -99,4 +119,4 @@ All password data is encrypted **client-side** before reaching the server. The s
 
 ### Docker Services
 
-Three containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson)
+Four containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7)
