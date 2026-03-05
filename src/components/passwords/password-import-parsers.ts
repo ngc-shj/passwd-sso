@@ -3,7 +3,7 @@ import type { CsvFormat, ParsedEntry } from "@/components/passwords/password-imp
 
 function extraDefaults(): Pick<
   ParsedEntry,
-  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory" | "requireReprompt" | "folderPath" | "isFavorite" | "expiresAt"
+  "tags" | "customFields" | "totp" | "generatorSettings" | "passwordHistory" | "requireReprompt" | "travelSafe" | "folderPath" | "isFavorite" | "expiresAt"
 > {
   return {
     tags: [],
@@ -12,6 +12,7 @@ function extraDefaults(): Pick<
     generatorSettings: null,
     passwordHistory: [],
     requireReprompt: false,
+    travelSafe: true,
     folderPath: "",
     isFavorite: false,
     expiresAt: null,
@@ -36,6 +37,7 @@ export function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEn
           : null,
       passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
       ...("requireReprompt" in parsed ? { requireReprompt: parsed.requireReprompt === true } : {}),
+      ...("travelSafe" in parsed ? { travelSafe: parsed.travelSafe !== false } : {}),
       ...("isFavorite" in parsed ? { isFavorite: parsed.isFavorite === true } : {}),
       ...("expiresAt" in parsed && typeof parsed.expiresAt === "string" ? { expiresAt: parsed.expiresAt } : {}),
       cardholderName: typeof parsed.cardholderName === "string" ? parsed.cardholderName : "",

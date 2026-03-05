@@ -1,6 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import type { ReactNode } from "react";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface TravelModeState {
   active: boolean;
@@ -9,7 +11,15 @@ interface TravelModeState {
   error: string | null;
 }
 
-export function useTravelMode() {
+interface TravelModeContextValue extends TravelModeState {
+  enable: () => Promise<boolean>;
+  disable: (verifierHash: string) => Promise<{ success: boolean; error?: string }>;
+  refresh: () => Promise<void>;
+}
+
+const TravelModeContext = createContext<TravelModeContextValue | null>(null);
+
+export function TravelModeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<TravelModeState>({
     active: false,
     activatedAt: null,
@@ -19,7 +29,7 @@ export function useTravelMode() {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const res = await fetch("/api/travel-mode");
+      const res = await fetchApi("/api/travel-mode");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setState({
@@ -43,7 +53,7 @@ export function useTravelMode() {
 
   const enable = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch("/api/travel-mode/enable", { method: "POST" });
+      const res = await fetchApi("/api/travel-mode/enable", { method: "POST" });
       if (!res.ok) return false;
       const data = await res.json();
       setState((prev) => ({
@@ -61,7 +71,7 @@ export function useTravelMode() {
   const disable = useCallback(
     async (verifierHash: string): Promise<{ success: boolean; error?: string }> => {
       try {
-        const res = await fetch("/api/travel-mode/disable", {
+        const res = await fetchApi("/api/travel-mode/disable", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ verifierHash }),
@@ -93,10 +103,24 @@ export function useTravelMode() {
     [],
   );
 
-  return {
+  const value: TravelModeContextValue = {
     ...state,
     enable,
     disable,
     refresh: fetchStatus,
   };
+
+  return (
+    <TravelModeContext value={value}>
+      {children}
+    </TravelModeContext>
+  );
+}
+
+export function useTravelMode(): TravelModeContextValue {
+  const ctx = useContext(TravelModeContext);
+  if (!ctx) {
+    throw new Error("useTravelMode must be used within TravelModeProvider");
+  }
+  return ctx;
 }

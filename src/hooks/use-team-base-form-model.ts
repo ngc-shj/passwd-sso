@@ -88,6 +88,9 @@ export function useTeamBaseFormModel({
   const [requireReprompt, setRequireReprompt] = useState(
     editData?.requireReprompt ?? teamPolicy?.requireRepromptForAll ?? false,
   );
+  const [travelSafe, setTravelSafe] = useState(
+    editData?.travelSafe ?? true,
+  );
   const [expiresAt, setExpiresAt] = useState<string | null>(
     editData?.expiresAt ?? null,
   );
@@ -167,6 +170,8 @@ export function useTeamBaseFormModel({
     setTeamFolderId,
     requireReprompt,
     setRequireReprompt,
+    travelSafe,
+    setTravelSafe,
     expiresAt,
     setExpiresAt,
 

@@ -29,6 +29,7 @@ interface BuildTeamLoginFormPresenterArgs {
   selectedTags: TeamTagData[];
   teamFolderId: string | null;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   generatorSettings: GeneratorSettings;
   setGeneratorSettings: (value: GeneratorSettings) => void;
@@ -64,6 +65,7 @@ export function buildTeamLoginFormPresenter({
   selectedTags,
   teamFolderId,
   requireReprompt,
+  travelSafe,
   expiresAt,
   generatorSettings,
   setGeneratorSettings,
@@ -93,6 +95,7 @@ export function buildTeamLoginFormPresenter({
     selectedTags,
     teamFolderId,
     requireReprompt,
+    travelSafe,
     expiresAt,
     generatorSettings,
     tGen,

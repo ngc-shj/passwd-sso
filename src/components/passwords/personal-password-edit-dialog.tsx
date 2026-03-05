@@ -97,6 +97,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
@@ -121,6 +122,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
@@ -144,6 +146,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
@@ -166,6 +169,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
@@ -191,6 +195,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
@@ -213,6 +218,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}
@@ -229,6 +235,7 @@ export function PasswordEditDialog({
               tags: editData.tags,
               folderId: editData.folderId ?? null,
               requireReprompt: editData.requireReprompt ?? false,
+              travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
             }}
             onSaved={handleSaved}

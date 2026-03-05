@@ -23,6 +23,7 @@ export function useEntryFormTranslations() {
   const tba = useTranslations("BankAccountForm");
   const tsl = useTranslations("SoftwareLicenseForm");
   const tsk = useTranslations("SshKeyForm");
+  const ttm = useTranslations("TravelMode");
 
   return {
     t,
@@ -35,5 +36,6 @@ export function useEntryFormTranslations() {
     tba,
     tsl,
     tsk,
+    ttm,
   } satisfies EntryFormTranslationsBundle;
 }

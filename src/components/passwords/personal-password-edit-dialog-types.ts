@@ -63,6 +63,7 @@ export interface PersonalPasswordEditData {
   passphrase?: string | null;
   sshComment?: string | null;
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   expiresAt?: string | null;
   folderId?: string | null;
 }

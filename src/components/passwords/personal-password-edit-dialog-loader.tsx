@@ -74,6 +74,7 @@ interface VaultEntryFull {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  travelSafe?: boolean;
 }
 
 export function PasswordEditDialogLoader({
@@ -178,6 +179,7 @@ export function PasswordEditDialogLoader({
           purchaseDate: entry.purchaseDate,
           expirationDate: entry.expirationDate,
           requireReprompt: raw.requireReprompt ?? false,
+          travelSafe: entry.travelSafe ?? true,
           expiresAt: raw.expiresAt ?? null,
           folderId: raw.folderId ?? null,
         });

@@ -28,6 +28,7 @@ interface BuildArgsOverrides {
   selectedTags?: TeamTagData[];
   teamFolderId?: string | null;
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   expiresAt?: string | null;
   generatorSettings?: GeneratorSettings;
 }
@@ -63,6 +64,7 @@ function buildArgsWithEdit(overrides: BuildArgsOverrides = {}) {
     selectedTags: overrides.selectedTags ?? (editData.tags ?? []),
     teamFolderId: overrides.teamFolderId ?? (editData.teamFolderId ?? null),
     requireReprompt: overrides.requireReprompt ?? (editData.requireReprompt ?? false),
+    travelSafe: overrides.travelSafe ?? (editData.travelSafe ?? true),
     expiresAt: overrides.expiresAt ?? (editData.expiresAt ?? null),
     generatorSettings: overrides.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
     tGen,
@@ -85,6 +87,7 @@ function buildArgsCreate(overrides: BuildArgsOverrides = {}) {
     selectedTags: overrides.selectedTags ?? [],
     teamFolderId: overrides.teamFolderId ?? null,
     requireReprompt: overrides.requireReprompt ?? false,
+    travelSafe: overrides.travelSafe ?? true,
     expiresAt: overrides.expiresAt ?? null,
     generatorSettings: overrides.generatorSettings ?? { ...DEFAULT_GENERATOR_SETTINGS },
     tGen,

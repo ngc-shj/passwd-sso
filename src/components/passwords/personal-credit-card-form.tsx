@@ -27,6 +27,7 @@ import {
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -49,6 +50,7 @@ interface CreditCardFormProps {
     tags: TagData[];
     folderId?: string | null;
     requireReprompt?: boolean;
+    travelSafe?: boolean;
     expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
@@ -70,6 +72,7 @@ export function CreditCardForm({
   const t = useTranslations("CreditCardForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
+  const ttm = useTranslations("TravelMode");
   const base = usePersonalBaseFormModel({
     mode,
     initialId: initialData?.id,
@@ -100,6 +103,7 @@ export function CreditCardForm({
   const [expiryYear, setExpiryYear] = useState(initialData?.expiryYear ?? "");
   const [cvv, setCvv] = useState(initialData?.cvv ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
+  const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
   const baselineSnapshot = useMemo(
     () =>
@@ -120,6 +124,7 @@ export function CreditCardForm({
           .sort(),
         folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
+        travelSafe: initialData?.travelSafe ?? true,
         expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData, defaultFolderId, defaultTags],
@@ -139,6 +144,7 @@ export function CreditCardForm({
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         folderId: base.folderId,
         requireReprompt: base.requireReprompt,
+        travelSafe,
         expiresAt: base.expiresAt,
       }),
     [
@@ -153,6 +159,7 @@ export function CreditCardForm({
       base.selectedTags,
       base.folderId,
       base.requireReprompt,
+      travelSafe,
       base.expiresAt,
     ],
   );
@@ -167,6 +174,7 @@ export function CreditCardForm({
   const {
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildPersonalFormSectionsProps({
@@ -176,6 +184,8 @@ export function CreditCardForm({
     sectionCardClass: dialogSectionClass,
     repromptTitle: tPw("requireReprompt"),
     repromptDescription: tPw("requireRepromptHelp"),
+    travelSafeTitle: ttm("travelSafe"),
+    travelSafeDescription: ttm("travelSafeDescription"),
     expirationTitle: tPw("expirationTitle"),
     expirationDescription: tPw("expirationDescription"),
     hasChanges,
@@ -192,6 +202,7 @@ export function CreditCardForm({
       totp: null,
       showTotpInput: false,
       requireReprompt: base.requireReprompt,
+      travelSafe,
       expiresAt: base.expiresAt,
     },
     setters: {
@@ -201,6 +212,7 @@ export function CreditCardForm({
       setTotp: () => {},
       setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
+      setTravelSafe,
       setExpiresAt: base.setExpiresAt,
     },
   });
@@ -341,6 +353,7 @@ export function CreditCardForm({
 
       <EntryTagsAndFolderSection {...tagsAndFolderProps} />
       <EntryRepromptSection {...repromptSectionProps} />
+      <EntryTravelSafeSection {...travelSafeSectionProps} />
       <EntryExpirationSection {...expirationSectionProps} />
       <EntryActionBar {...actionBarProps} submitDisabled={!cardNumberValid} />
     </form>

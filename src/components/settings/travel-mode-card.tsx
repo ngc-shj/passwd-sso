@@ -101,6 +101,7 @@ export function TravelModeCard() {
 
           <div className="flex items-center justify-between">
             <div className="text-sm">
+              <span className="text-muted-foreground">{t("status")}:</span>{" "}
               <span className="font-medium">
                 {active ? t("active") : t("inactive")}
               </span>
@@ -132,7 +133,7 @@ export function TravelModeCard() {
             <AlertDialogDescription>{t("enableConfirm")}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t("inactive")}</AlertDialogCancel>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction onClick={handleEnable} disabled={busy}>
               {t("enable")}
             </AlertDialogAction>
@@ -154,14 +155,13 @@ export function TravelModeCard() {
             <DialogDescription>{t("disableDescription")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div>
+            <div className="space-y-2">
               <Label htmlFor="travel-passphrase">{t("passphrasePlaceholder")}</Label>
               <Input
                 id="travel-passphrase"
                 type="password"
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
-                placeholder={t("passphrasePlaceholder")}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     void handleDisable();
@@ -177,7 +177,7 @@ export function TravelModeCard() {
                 variant="outline"
                 onClick={() => setShowDisableDialog(false)}
               >
-                Cancel
+                {t("cancel")}
               </Button>
               <Button onClick={handleDisable} disabled={busy}>
                 {t("disable")}

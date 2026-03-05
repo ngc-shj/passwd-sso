@@ -63,6 +63,7 @@ export interface BuildTeamEntryPayloadInput {
   fingerprint?: string;
   passphrase?: string;
   sshComment?: string;
+  travelSafe?: boolean;
 }
 
 /**
@@ -172,6 +173,7 @@ export function buildTeamEntryPayload(
     notes,
     tags,
     ...entryFields,
+    ...(input.travelSafe !== undefined && { travelSafe: input.travelSafe }),
   });
 
   // Overview: minimal summary for list rendering (per-type)
@@ -251,6 +253,10 @@ export function buildTeamEntryPayload(
       };
       break;
     }
+  }
+
+  if (input.travelSafe !== undefined) {
+    overviewData.travelSafe = input.travelSafe;
   }
 
   const overviewBlob = JSON.stringify(overviewData);

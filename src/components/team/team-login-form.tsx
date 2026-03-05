@@ -5,6 +5,7 @@ import { Label } from "@/components/ui/label";
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
@@ -29,6 +30,7 @@ export function TeamLoginForm({
     customFieldsTotpProps,
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
     handleFormSubmit,
@@ -71,6 +73,7 @@ export function TeamLoginForm({
           )}
 
           <EntryRepromptSection {...repromptSectionProps} />
+          <EntryTravelSafeSection {...travelSafeSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />
         </form>

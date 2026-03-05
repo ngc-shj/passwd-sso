@@ -10,3 +10,4 @@ export type PasskeyFormTranslator = ReturnType<typeof useTranslations<"PasskeyFo
 export type BankAccountFormTranslator = ReturnType<typeof useTranslations<"BankAccountForm">>;
 export type SoftwareLicenseFormTranslator = ReturnType<typeof useTranslations<"SoftwareLicenseForm">>;
 export type SshKeyFormTranslator = ReturnType<typeof useTranslations<"SshKeyForm">>;
+export type TravelModeTranslator = ReturnType<typeof useTranslations<"TravelMode">>;

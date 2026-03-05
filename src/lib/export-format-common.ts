@@ -63,6 +63,7 @@ export interface ExportEntry {
   generatorSettings: Record<string, unknown> | null;
   passwordHistory: EntryPasswordHistory[];
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   folderPath: string;
   isFavorite: boolean;
   expiresAt: string | null;
@@ -172,6 +173,7 @@ function basePasswdSsoMeta(
     ...(includeRequireRepromptInPasswdSso
       ? { requireReprompt: entry.requireReprompt }
       : {}),
+    ...(entry.travelSafe !== undefined ? { travelSafe: entry.travelSafe } : {}),
     isFavorite: entry.isFavorite,
     ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
   };
@@ -396,6 +398,7 @@ function passwdSsoCsvPayload(
     ...(options.includeRequireRepromptInPasswdSso
       ? { requireReprompt: entry.requireReprompt }
       : {}),
+    ...(entry.travelSafe !== undefined ? { travelSafe: entry.travelSafe } : {}),
     isFavorite: entry.isFavorite,
     ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
     cardholderName: entry.cardholderName,

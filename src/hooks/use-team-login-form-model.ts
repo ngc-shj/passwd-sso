@@ -56,6 +56,7 @@ export function useTeamLoginFormModel({
     selectedTags: base.selectedTags,
     teamFolderId: base.teamFolderId,
     requireReprompt: base.requireReprompt,
+    travelSafe: base.travelSafe,
     expiresAt: base.expiresAt,
     generatorSettings: loginState.generatorSettings,
     setGeneratorSettings: loginState.setGeneratorSettings,
@@ -77,6 +78,7 @@ export function useTeamLoginFormModel({
     tagsAndFolderProps,
     customFieldsTotpProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildTeamFormSectionsProps({
@@ -99,6 +101,8 @@ export function useTeamLoginFormModel({
     repromptPolicyForcedLabel: base.teamPolicy?.requireRepromptForAll
       ? base.t("requireRepromptPolicyForced")
       : undefined,
+    travelSafeTitle: base.translationBundle.ttm("travelSafe"),
+    travelSafeDescription: base.translationBundle.ttm("travelSafeDescription"),
     expirationTitle: base.t("expirationTitle"),
     expirationDescription: base.t("expirationDescription"),
     onCancel: () => base.handleOpenChange(false),
@@ -109,6 +113,7 @@ export function useTeamLoginFormModel({
       totp: loginState.totp,
       showTotpInput: loginState.showTotpInput,
       requireReprompt: base.requireReprompt,
+      travelSafe: base.travelSafe,
       expiresAt: base.expiresAt,
     },
     setters: {
@@ -118,6 +123,7 @@ export function useTeamLoginFormModel({
       setTotp: loginState.setTotp,
       setShowTotpInput: loginState.setShowTotpInput,
       setRequireReprompt: base.setRequireReprompt,
+      setTravelSafe: base.setTravelSafe,
       setExpiresAt: base.setExpiresAt,
     },
   });
@@ -144,6 +150,7 @@ export function useTeamLoginFormModel({
     customFieldsTotpProps,
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
     handleFormSubmit,

@@ -17,6 +17,7 @@ function createBundle(): EntryFormTranslationsBundle {
     tba: ((key: string) => `ba:${key}`) as EntryFormTranslationsBundle["tba"],
     tsl: ((key: string) => `sl:${key}`) as EntryFormTranslationsBundle["tsl"],
     tsk: ((key: string) => `sk:${key}`) as EntryFormTranslationsBundle["tsk"],
+    ttm: ((key: string) => `tm:${key}`) as EntryFormTranslationsBundle["ttm"],
   };
 }
 

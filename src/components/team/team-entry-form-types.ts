@@ -73,6 +73,7 @@ export interface TeamEntryFormEditData {
   sshComment?: string | null;
   teamFolderId?: string | null;
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   expiresAt?: string | null;
 }
 

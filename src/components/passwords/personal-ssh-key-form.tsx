@@ -17,6 +17,7 @@ import {
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -41,6 +42,7 @@ interface SshKeyFormProps {
     tags: TagData[];
     folderId?: string | null;
     requireReprompt?: boolean;
+    travelSafe?: boolean;
     expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
@@ -62,6 +64,7 @@ export function SshKeyForm({
   const t = useTranslations("SshKeyForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
+  const ttm = useTranslations("TravelMode");
   const base = usePersonalBaseFormModel({
     mode,
     initialId: initialData?.id,
@@ -87,6 +90,7 @@ export function SshKeyForm({
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [comment, setComment] = useState(initialData?.comment ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
+  const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
   // Auto-parse SSH key when private key changes
   const handlePrivateKeyChange = useCallback(async (pem: string) => {
@@ -130,6 +134,7 @@ export function SshKeyForm({
           .sort(),
         folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
+        travelSafe: initialData?.travelSafe ?? true,
         expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData, defaultFolderId, defaultTags],
@@ -147,6 +152,7 @@ export function SshKeyForm({
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         folderId: base.folderId,
         requireReprompt: base.requireReprompt,
+        travelSafe,
         expiresAt: base.expiresAt,
       }),
     [
@@ -159,6 +165,7 @@ export function SshKeyForm({
       base.selectedTags,
       base.folderId,
       base.requireReprompt,
+      travelSafe,
       base.expiresAt,
     ],
   );
@@ -173,6 +180,7 @@ export function SshKeyForm({
   const {
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildPersonalFormSectionsProps({
@@ -182,6 +190,8 @@ export function SshKeyForm({
     sectionCardClass: dialogSectionClass,
     repromptTitle: tPw("requireReprompt"),
     repromptDescription: tPw("requireRepromptHelp"),
+    travelSafeTitle: ttm("travelSafe"),
+    travelSafeDescription: ttm("travelSafeDescription"),
     expirationTitle: tPw("expirationTitle"),
     expirationDescription: tPw("expirationDescription"),
     hasChanges,
@@ -198,6 +208,7 @@ export function SshKeyForm({
       totp: null,
       showTotpInput: false,
       requireReprompt: base.requireReprompt,
+      travelSafe,
       expiresAt: base.expiresAt,
     },
     setters: {
@@ -207,6 +218,7 @@ export function SshKeyForm({
       setTotp: () => {},
       setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
+      setTravelSafe,
       setExpiresAt: base.setExpiresAt,
     },
   });
@@ -294,6 +306,7 @@ export function SshKeyForm({
 
       <EntryTagsAndFolderSection {...tagsAndFolderProps} />
       <EntryRepromptSection {...repromptSectionProps} />
+      <EntryTravelSafeSection {...travelSafeSectionProps} />
       <EntryExpirationSection {...expirationSectionProps} />
       <EntryActionBar {...actionBarProps} />
     </form>

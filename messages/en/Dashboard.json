@@ -63,5 +63,6 @@
   "select": "Select",
   "close": "Close",
   "selectAll": "Select All",
-  "externalTenant": "External tenant"
+  "externalTenant": "External tenant",
+  "travelMode": "Travel Mode"
 }

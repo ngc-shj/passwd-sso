@@ -17,6 +17,7 @@ import {
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -41,6 +42,7 @@ interface BankAccountFormProps {
     tags: TagData[];
     folderId?: string | null;
     requireReprompt?: boolean;
+    travelSafe?: boolean;
     expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
@@ -67,6 +69,7 @@ export function BankAccountForm({
   const t = useTranslations("BankAccountForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
+  const ttm = useTranslations("TravelMode");
   const base = usePersonalBaseFormModel({
     mode,
     initialId: initialData?.id,
@@ -98,6 +101,7 @@ export function BankAccountForm({
   const [iban, setIban] = useState(initialData?.iban ?? "");
   const [branchName, setBranchName] = useState(initialData?.branchName ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
+  const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
   const baselineSnapshot = useMemo(
     () =>
@@ -117,6 +121,7 @@ export function BankAccountForm({
           .sort(),
         folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
+        travelSafe: initialData?.travelSafe ?? true,
         expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData, defaultFolderId, defaultTags],
@@ -138,6 +143,7 @@ export function BankAccountForm({
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         folderId: base.folderId,
         requireReprompt: base.requireReprompt,
+        travelSafe,
         expiresAt: base.expiresAt,
       }),
     [
@@ -154,6 +160,7 @@ export function BankAccountForm({
       base.selectedTags,
       base.folderId,
       base.requireReprompt,
+      travelSafe,
       base.expiresAt,
     ],
   );
@@ -168,6 +175,7 @@ export function BankAccountForm({
   const {
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildPersonalFormSectionsProps({
@@ -177,6 +185,8 @@ export function BankAccountForm({
     sectionCardClass: dialogSectionClass,
     repromptTitle: tPw("requireReprompt"),
     repromptDescription: tPw("requireRepromptHelp"),
+    travelSafeTitle: ttm("travelSafe"),
+    travelSafeDescription: ttm("travelSafeDescription"),
     expirationTitle: tPw("expirationTitle"),
     expirationDescription: tPw("expirationDescription"),
     hasChanges,
@@ -193,6 +203,7 @@ export function BankAccountForm({
       totp: null,
       showTotpInput: false,
       requireReprompt: base.requireReprompt,
+      travelSafe,
       expiresAt: base.expiresAt,
     },
     setters: {
@@ -202,6 +213,7 @@ export function BankAccountForm({
       setTotp: () => {},
       setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
+      setTravelSafe,
       setExpiresAt: base.setExpiresAt,
     },
   });
@@ -303,6 +315,7 @@ export function BankAccountForm({
 
       <EntryTagsAndFolderSection {...tagsAndFolderProps} />
       <EntryRepromptSection {...repromptSectionProps} />
+      <EntryTravelSafeSection {...travelSafeSectionProps} />
       <EntryExpirationSection {...expirationSectionProps} />
       <EntryActionBar {...actionBarProps} />
     </form>

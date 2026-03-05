@@ -9,6 +9,7 @@ import type {
   SecureNoteFormTranslator,
   SoftwareLicenseFormTranslator,
   SshKeyFormTranslator,
+  TravelModeTranslator,
 } from "@/lib/translation-types";
 
 export interface PersonalLoginFormTranslations {
@@ -40,6 +41,7 @@ export interface EntryFormTranslationsBundle {
   tba: BankAccountFormTranslator;
   tsl: SoftwareLicenseFormTranslator;
   tsk: SshKeyFormTranslator;
+  ttm: TravelModeTranslator;
 }
 
 export function toPersonalLoginFormTranslations(

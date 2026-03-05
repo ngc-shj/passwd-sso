@@ -1,6 +1,6 @@
 {
   "title": "API キー",
-  "description": "REST API 経由でボールトにプログラムからアクセスするための API キーを管理します。",
+  "description": "REST API 経由で保管庫にプログラムからアクセスするための API キーを管理します。",
   "createKey": "API キーを作成",
   "name": "名前",
   "namePlaceholder": "例: CI/CD パイプライン",
@@ -30,6 +30,6 @@
   "scopePasswordsRead": "パスワード読み取り",
   "scopePasswordsWrite": "パスワード書き込み",
   "scopeTagsRead": "タグ読み取り",
-  "scopeVaultStatus": "ボールト状態",
+  "scopeVaultStatus": "保管庫状態",
   "cancel": "キャンセル"
 }

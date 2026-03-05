@@ -84,6 +84,7 @@ function makeEntry(): ParsedEntry {
     generatorSettings: null,
     passwordHistory: [],
     requireReprompt: false,
+    travelSafe: true,
     folderPath: "",
     isFavorite: false,
     expiresAt: null,

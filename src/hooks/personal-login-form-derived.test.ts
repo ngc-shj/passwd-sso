@@ -16,6 +16,7 @@ describe("buildPersonalLoginFormDerived", () => {
         url: "",
         notes: "",
         tags: [],
+        travelSafe: true,
       },
       values: buildValues({ title: "same" }),
       translations: buildTranslations((key: string) => key),
@@ -70,6 +71,25 @@ describe("buildPersonalLoginFormDerived", () => {
     expect(result.hasChanges).toBe(true);
   });
 
+  it("computes hasChanges=true when travelSafe differs", () => {
+    const result = buildPersonalLoginFormDerived({
+      initialData: {
+        id: "entry-1",
+        title: "same",
+        username: "user",
+        password: "pass",
+        url: "",
+        notes: "",
+        tags: [],
+        travelSafe: true,
+      },
+      values: buildValues({ title: "same", travelSafe: false }),
+      translations: buildTranslations((key: string) => key),
+    });
+
+    expect(result.hasChanges).toBe(true);
+  });
+
   it("hasChanges=false when values match defaultTags (no initialData)", () => {
     const tag = { id: "t1", name: "work", color: null };
     const result = buildPersonalLoginFormDerived({
@@ -85,6 +105,7 @@ function buildValues(overrides: Partial<{
   title: string;
   folderId: string | null;
   selectedTags: { id: string; name: string; color: string | null }[];
+  travelSafe: boolean;
 }> = {}) {
   return {
     title: overrides.title ?? "title",
@@ -97,7 +118,7 @@ function buildValues(overrides: Partial<{
     customFields: [],
     totp: null,
     requireReprompt: false,
-    travelSafe: true,
+    travelSafe: overrides.travelSafe ?? true,
     expiresAt: null,
     folderId: overrides.folderId ?? null,
   };

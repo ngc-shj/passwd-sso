@@ -5,22 +5,25 @@ import { Header } from "./header";
 import { Sidebar } from "./sidebar";
 import { RecoveryKeyBanner } from "@/components/vault/recovery-key-banner";
 import { ActiveVaultProvider } from "@/lib/active-vault-context";
+import { TravelModeProvider } from "@/hooks/use-travel-mode";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
     <ActiveVaultProvider>
-      <div className="fixed inset-0 flex flex-col overflow-hidden">
-        <Header onMenuToggle={() => setSidebarOpen(true)} />
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
-          <main className="min-h-0 flex-1 overflow-auto">
-            <RecoveryKeyBanner />
-            {children}
-          </main>
+      <TravelModeProvider>
+        <div className="fixed inset-0 flex flex-col overflow-hidden">
+          <Header onMenuToggle={() => setSidebarOpen(true)} />
+          <div className="flex min-h-0 flex-1 overflow-hidden">
+            <Sidebar open={sidebarOpen} onOpenChange={setSidebarOpen} />
+            <main className="min-h-0 flex-1 overflow-auto">
+              <RecoveryKeyBanner />
+              {children}
+            </main>
+          </div>
         </div>
-      </div>
+      </TravelModeProvider>
     </ActiveVaultProvider>
   );
 }

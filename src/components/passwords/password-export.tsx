@@ -134,6 +134,7 @@ function ExportPanelContent() {
             generatorSettings: parsed.generatorSettings ?? null,
             passwordHistory: Array.isArray(parsed.passwordHistory) ? parsed.passwordHistory : [],
             requireReprompt: raw.requireReprompt ?? false,
+            travelSafe: parsed.travelSafe,
             folderPath: raw.folderId ? (buildFolderPath(raw.folderId, folders) ?? "") : "",
             isFavorite: raw.isFavorite ?? false,
             expiresAt: raw.expiresAt ? String(raw.expiresAt) : null,

@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { Building2, Globe, KeyRound, Lock, Menu, RefreshCw, ShieldCheck } from "lucide-react";
+import { Building2, Globe, KeyRound, Lock, Menu, Plane, RefreshCw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -21,6 +21,7 @@ import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
 import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
 import { useActiveVault } from "@/lib/active-vault-context";
+import { useTravelMode } from "@/hooks/use-travel-mode";
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -32,6 +33,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
   const t = useTranslations("Vault");
   const tDash = useTranslations("Dashboard");
   const activeVault = useActiveVault();
+  const { active: travelModeActive } = useTravelMode();
   const [mounted, setMounted] = useState(false);
   const [changePassOpen, setChangePassOpen] = useState(false);
   const [recoveryKeyOpen, setRecoveryKeyOpen] = useState(false);
@@ -90,6 +92,13 @@ export function Header({ onMenuToggle }: HeaderProps) {
         </div>
 
         <div className="flex-1" />
+
+        {mounted && travelModeActive && (
+          <div className="flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+            <Plane className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">{tDash("travelMode")}</span>
+          </div>
+        )}
 
         {mounted && <LanguageSwitcher />}
         {mounted && <NotificationBell />}

@@ -155,6 +155,7 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
             generatorSettings: data.generatorSettings ?? null,
             passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
             requireReprompt: raw.requireReprompt ?? false,
+            travelSafe: data.travelSafe,
             folderPath: raw.teamFolderId ? (buildFolderPath(raw.teamFolderId, folders) ?? "") : "",
             isFavorite: raw.isFavorite ?? false,
             expiresAt: raw.expiresAt ? String(raw.expiresAt) : null,
