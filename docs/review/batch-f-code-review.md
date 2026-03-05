@@ -97,4 +97,31 @@ Post-fix review after 4 additional commits (0d6dad2, f9adb4c, a79fac7, 1798db9).
 | Low | 6 (3 sec + 1 sec-accepted + 2 test) |
 
 ## 対応状況
-(修正後に追記)
+
+### Round 1 修正 (commit b718c8d)
+
+- FUNC-Medium-1: `vault-lock-screen.tsx:195` — `"or"` → `{t("or")}`, Vault.json en/ja に "or" キー追加
+- SEC-Medium-1: `cli/src/commands/run.ts:133` — `PSSO_PASSPHRASE`/`PSSO_API_KEY` を destructuring で除去
+- SEC-Low-1: `webauthn/register/options/route.ts:80` — `prfSupported: prfSalt !== null`
+- SEC-Low-4: `cli/src/lib/ssh-agent-socket.ts:49` — `statSync` → `lstatSync` + `isDirectory()` チェック
+- TEST-High-1/2: `proxy.test.ts` — `/api/api-keys` Bearer bypass + `/api/v1/*` public API bypass テスト追加
+- TEST-Medium-1: `sidebar-section-security.test.tsx` — `isAdmin={true/false}` テスト追加
+- TEST-Medium-2: `parse-user-agent.test.ts` — 新規作成 (8 tests)
+- TEST-Medium-3: `webauthn-server.test.ts` — 新規作成 (4 tests)
+- TEST-Low-1: `api-path.test.ts` — 新規パス14定数 + パスビルダー4関数のアサーション追加
+
+### Round 2 修正 (commit ee1d0a2)
+
+- TEST-Low-2: `parse-user-agent.test.ts:45` — テスト名 "returns Unknown OS (Browser)" → "returns null for empty string"
+- TEST-Low-3: `webauthn-server.test.ts` — 不正 AUTH_URL フォールバック分岐テスト追加
+
+### ACCEPTED (修正不要)
+
+- SEC-Low-2: Extension tokens can manage API keys — 意図的設計 (proxy.ts extensionTokenRoutes)
+- SEC-Low-3: API_KEYS proxy prefix matching — ルートハンドラで auth 済み
+- TEST-Low-2 (F-TEST-1): CLI openssh-key-parser.ts テスト — 既存延期事項
+
+## Session 3 Final Status
+
+Session 3 Round 2: 機能 **指摘なし** / セキュリティ **指摘なし** / テスト Low 2件 → 即修正
+**Review approved: Session 3 — 2 rounds, final round 指摘なし from all 3 experts.**
