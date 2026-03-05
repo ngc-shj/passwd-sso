@@ -156,24 +156,36 @@ Snapshot comparison is used for change detection. Add the field to both baseline
 | # | File | Description |
 |---|------|-------------|
 | 32 | `src/components/passwords/entry-*-section.tsx` | New shared UI component |
-| 33 | `src/components/passwords/password-detail-inline.tsx` | Add field to detail view |
-| 34 | `src/components/passwords/entry-history-keys.ts` | History display keys (if applicable) |
+| 33 | `src/components/passwords/password-detail-inline.tsx` | Add field to detail view. Sensitive fields need `useState` + `handleReveal*` + `REVEAL_TIMEOUT` toggle |
+| 34 | `src/components/passwords/entry-history-keys.ts` | `DISPLAY_KEYS` (must use **blob field names**, not mapped property names), `SENSITIVE_KEYS` |
 
-### 11. Tests
+### 11. Shared Link Display
+
+If the field should be visible in shared links, update the following.
 
 | # | File | Description |
 |---|------|-------------|
-| 35 | `src/hooks/personal-login-form-derived.test.ts` | Snapshot tests |
-| 36 | `src/hooks/team-login-form-derived.test.ts` | Same as above |
-| 37 | `src/hooks/personal-form-sections-props.test.ts` | Props construction tests |
-| 38 | `src/hooks/team-form-sections-props.test.ts` | Same as above |
-| 39 | `src/hooks/team-login-form-presenter.test.ts` | Presenter tests |
-| 40 | `src/hooks/use-team-login-form-model.test.ts` | Model tests |
-| 41 | `src/hooks/entry-form-translations.test.ts` | Translation key tests |
-| 42 | `src/components/team/team-login-submit.test.ts` | Submit tests |
-| 43 | `src/components/passwords/personal-login-submit.test.ts` | Submit tests |
-| 44 | `src/components/passwords/password-import-*.test.ts` | Import tests |
-| 45 | `src/lib/personal-entry-payload.test.ts` | Payload tests |
+| 35 | `src/lib/validations.ts` | Add field to `shareDataSchema` (Zod strips undefined fields) |
+| 36 | `src/lib/constants/share-permission.ts` | Add to `SENSITIVE_FIELDS` (if sensitive) or `OVERVIEW_FIELDS` (if shown in overview mode) |
+| 37 | `src/components/share/share-entry-view.tsx` | Add field to each relevant `renderXxxFields()` function |
+| 38 | `src/components/share/share-dialog.tsx` | Add field to `FIELD_I18N_KEY` mapping (or `INTERNAL_FIELDS` if metadata) |
+| 39 | `messages/{en,ja}/Share.json` | Add i18n key for field label (used by share dialog field preview) |
+
+### 12. Tests
+
+| # | File | Description |
+|---|------|-------------|
+| 40 | `src/hooks/personal-login-form-derived.test.ts` | Snapshot tests |
+| 41 | `src/hooks/team-login-form-derived.test.ts` | Same as above |
+| 42 | `src/hooks/personal-form-sections-props.test.ts` | Props construction tests |
+| 43 | `src/hooks/team-form-sections-props.test.ts` | Same as above |
+| 44 | `src/hooks/team-login-form-presenter.test.ts` | Presenter tests |
+| 45 | `src/hooks/use-team-login-form-model.test.ts` | Model tests |
+| 46 | `src/hooks/entry-form-translations.test.ts` | Translation key tests |
+| 47 | `src/components/team/team-login-submit.test.ts` | Submit tests |
+| 48 | `src/components/passwords/personal-login-submit.test.ts` | Submit tests |
+| 46 | `src/components/passwords/password-import-*.test.ts` | Import tests |
+| 47 | `src/lib/personal-entry-payload.test.ts` | Payload tests |
 
 ### Backward Compatibility with Existing Data
 
@@ -219,6 +231,18 @@ Same as Section A items 2–5, but blob construction is not needed.
 | 8 | `src/components/passwords/password-export.tsx` | Extract from API response (`raw.fieldName`) |
 | 9 | `src/components/passwords/password-import-payload.ts` | Add field to API body |
 
+### 5. Shared Link Display
+
+If the field should be visible in shared links, update the following.
+
+| # | File | Description |
+|---|------|-------------|
+| 10 | `src/lib/validations.ts` | Add field to `shareDataSchema` (Zod strips undefined fields) |
+| 11 | `src/lib/constants/share-permission.ts` | Add to `SENSITIVE_FIELDS` (if sensitive) or `OVERVIEW_FIELDS` (if shown in overview mode) |
+| 12 | `src/components/share/share-entry-view.tsx` | Add field to each relevant `renderXxxFields()` function |
+| 13 | `src/components/share/share-dialog.tsx` | Add field to `FIELD_I18N_KEY` mapping (or `INTERNAL_FIELDS` if metadata) |
+| 14 | `messages/{en,ja}/Share.json` | Add i18n key for field label (used by share dialog field preview) |
+
 ---
 
 ## C. New Entry Type Addition Checklist
@@ -244,48 +268,69 @@ In addition to all items from Section A or B, the following are required.
 
 | # | File | Description |
 |---|------|-------------|
-| 6 | `src/components/passwords/password-dashboard.tsx` | Category filter + dropdown |
-| 7 | `src/components/layout/sidebar-sections.tsx` | Sidebar category addition |
-| 8 | `src/components/passwords/password-card.tsx` | Card display logic |
-| 9 | `src/components/passwords/password-detail-inline.tsx` | Detail view section |
+| 6 | `src/components/passwords/password-dashboard.tsx` | Category filter + dropdown + icon |
+| 7 | `src/app/[locale]/dashboard/teams/[teamId]/page.tsx` | Team vault: `activeCategoryLabel` + `ENTRY_TYPE_ICONS` + dropdown |
+| 8 | `src/components/layout/sidebar-sections.tsx` | Sidebar category addition |
+| 9 | `src/components/passwords/password-card.tsx` | Card display logic + primary copy button + dropdown menu |
+| 10 | `src/components/passwords/password-detail-inline.tsx` | Detail view section + sensitive fields need `useState` + `handleReveal*` + `REVEAL_TIMEOUT` toggle |
 
 ### 4. Dialog Integration
 
 | # | File | Description |
 |---|------|-------------|
-| 10 | `src/components/passwords/personal-password-new-dialog.tsx` | New entry dialog |
-| 11 | `src/components/passwords/personal-password-edit-dialog.tsx` | Edit entry dialog |
-| 12 | `src/components/team/team-new-dialog.tsx` | Team new entry dialog |
+| 11 | `src/components/passwords/personal-password-new-dialog.tsx` | New entry dialog |
+| 12 | `src/components/passwords/personal-password-edit-dialog.tsx` | Edit entry dialog |
+| 13 | `src/components/team/team-new-dialog.tsx` | Team new entry dialog |
+| 14 | `src/components/team/team-edit-dialog.tsx` | Team edit entry dialog |
 
 ### 5. Payload Construction
 
 | # | File | Description |
 |---|------|-------------|
-| 13 | `src/lib/team-entry-payload.ts` | Add new `case` to `switch` (fullBlob + overviewData) |
-| 14 | `src/components/team/team-entry-kind.ts` | Entry kind mapping |
+| 15 | `src/lib/team-entry-payload.ts` | Add new `case` to `switch` (fullBlob + overviewData) |
+| 16 | `src/components/team/team-entry-kind.ts` | Entry kind mapping |
 
 ### 6. Export / Import
 
 | # | File | Description |
 |---|------|-------------|
-| 15 | `src/lib/export-format-common.ts` | Add new type branch to JSON/CSV export |
-| 16 | `src/components/passwords/password-import-parsers.ts` | Import parser |
-| 17 | `src/components/passwords/password-import-payload.ts` | Blob builder |
+| 17 | `src/lib/export-format-common.ts` | Add new type branch to JSON/CSV export |
+| 18 | `src/components/passwords/password-export.tsx` | Extract type-specific fields from decrypted blob |
+| 19 | `src/components/team/team-export.tsx` | Same as above (team) |
+| 20 | `src/components/passwords/password-import-parsers.ts` | Import parser |
+| 21 | `src/components/passwords/password-import-payload.ts` | Blob builder |
 
-### 7. Translations / i18n
-
-| # | File | Description |
-|---|------|-------------|
-| 18 | `messages/en/Dashboard.json` | Category names (`catXxx`, `newXxx`) |
-| 19 | `messages/ja/Dashboard.json` | Same as above |
-| 20 | `messages/en/[TypeForm].json` | Form labels (new file) |
-| 21 | `messages/ja/[TypeForm].json` | Same as above |
-
-### 8. History Keys
+### 7. Shared Link Display
 
 | # | File | Description |
 |---|------|-------------|
-| 22 | `src/components/passwords/entry-history-keys.ts` | `DISPLAY_KEYS`, `SENSITIVE_KEYS` |
+| 22 | `src/lib/validations.ts` | Add type-specific fields to `shareDataSchema` (Zod strips undefined fields) |
+| 23 | `src/lib/constants/share-permission.ts` | `SENSITIVE_FIELDS` + `OVERVIEW_FIELDS` for new type |
+| 24 | `src/components/share/share-entry-view.tsx` | `ENTRY_TYPE_ICONS` + `renderXxxFields()` + `renderFields()` switch case |
+| 25 | `src/app/[locale]/dashboard/share-links/page.tsx` | `ENTRY_TYPE_ICONS` icon mapping |
+| 26 | `src/components/share/share-dialog.tsx` | Add all type fields to `FIELD_I18N_KEY` mapping (or `INTERNAL_FIELDS` if metadata) |
+| 27 | `messages/{en,ja}/Share.json` | Add i18n keys for all new field labels (used by share dialog field preview) |
+
+### 8. Translations / i18n
+
+| # | File | Description |
+|---|------|-------------|
+| 28 | `messages/en/Dashboard.json` | Category names (`catXxx`, `newXxx`) |
+| 29 | `messages/ja/Dashboard.json` | Same as above |
+| 30 | `messages/en/[TypeForm].json` | Form labels (new file) |
+| 31 | `messages/ja/[TypeForm].json` | Same as above |
+| 32 | `messages/en/PasswordDetail.json` | Detail view labels for type-specific fields |
+| 33 | `messages/ja/PasswordDetail.json` | Same as above |
+| 34 | `messages/en/PasswordCard.json` | Copy button labels for type-specific fields |
+| 35 | `messages/ja/PasswordCard.json` | Same as above |
+| 36 | `messages/en/Share.json` | Share view labels for type-specific fields |
+| 37 | `messages/ja/Share.json` | Same as above |
+
+### 9. History Keys
+
+| # | File | Description |
+|---|------|-------------|
+| 38 | `src/components/passwords/entry-history-keys.ts` | `DISPLAY_KEYS`, `SENSITIVE_KEYS` |
 
 ---
 
@@ -331,6 +376,36 @@ otherwise data is lost during round-trip.
 `travelSafe` is blob-only → must be added to all blob construction sites.
 Mixing up the pattern leads to either unnecessary additions or critical omissions.
 
+### 7. Missing Field in `shareDataSchema` (Zod Stripping)
+
+`shareDataSchema` in `src/lib/validations.ts` defines the allowed fields for personal share link data.
+Zod's `z.object()` **strips fields not declared in the schema** by default.
+If a new field is not added to this schema, it will be silently removed during server-side validation,
+causing the shared link to display without that field even when "Full access" is selected.
+
+### 8. Missing Show/Hide Toggle or autoHide Label for Sensitive Fields
+
+Sensitive fields in `password-detail-inline.tsx` require four elements:
+
+1. `useState` — e.g. `const [showField, setShowField] = useState(false);`
+2. `handleReveal*` callback — `requireVerification()` + `setTimeout(() => setShowField(false), REVEAL_TIMEOUT)`
+3. Eye icon button — `onClick={showField ? () => setShowField(false) : handleRevealField}`
+4. **autoHide label** — `{showField && <p className="text-xs text-muted-foreground">{t("autoHide")}</p>}`
+
+Without 1–3, sensitive values display as permanent `"••••••••"` with no way to reveal.
+Without 4, users have no indication that the revealed value will auto-hide after 30 seconds.
+
+The `share-entry-view.tsx` centralizes this in `renderSensitiveField()` — it also requires
+the `autoHide` label when `isShown` is true. Both `messages/en/Share.json` and `messages/ja/Share.json`
+must include the `"autoHide"` key.
+
+The same Show/Hide + autoHide pattern applies to `*-fields.tsx` display components if they have their own toggle.
+
+The `entry-history-section.tsx` `ViewContent` component also uses this pattern for `SENSITIVE_KEYS` fields.
+It reads fields directly from the decrypted blob, so `DISPLAY_KEYS` in `entry-history-keys.ts` must use
+**blob field names** (e.g. `comment`, `passphrase`), not mapped property names (e.g. `sshComment`).
+The i18n keys in `PasswordDetail.json` must also match the blob field names.
+
 ---
 
 ## Existing Field Pattern Classification
@@ -361,4 +436,5 @@ Mixing up the pattern leads to either unnecessary additions or critical omission
    - No field change → save button stays disabled
    - Export → field value is included in output
    - Import → field value is restored
+   - Share link → field is displayed correctly (full access / hide password / overview modes)
    - Existing entry (without field) → works correctly with default value

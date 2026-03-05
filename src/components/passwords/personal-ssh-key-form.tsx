@@ -91,11 +91,17 @@ export function SshKeyForm({
   const [comment, setComment] = useState(initialData?.comment ?? "");
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
+  const [privateKeyWarning, setPrivateKeyWarning] = useState("");
 
-  // Auto-parse SSH key when private key changes
+  // Auto-parse SSH key and show warning on failure
   const handlePrivateKeyChange = useCallback(async (pem: string) => {
     setPrivateKey(pem);
     if (!pem.trim()) {
+      setPublicKey("");
+      setKeyType("");
+      setKeySize(0);
+      setFingerprint("");
+      setPrivateKeyWarning("");
       return;
     }
     try {
@@ -106,15 +112,18 @@ export function SshKeyForm({
         setKeySize(parsed.keySize);
         setFingerprint(parsed.fingerprint);
         if (parsed.comment) setComment(parsed.comment);
+        setPrivateKeyWarning("");
+      } else {
+        setPrivateKeyWarning(t("privateKeyFormatWarning"));
       }
     } catch {
-      // Parse failed — user may still be pasting
+      setPrivateKeyWarning(t("privateKeyFormatWarning"));
     }
-  }, []);
+  }, [t]);
 
-  // Parse on initial load if we have a private key
+  // Parse on initial load
   useEffect(() => {
-    if (initialData?.privateKey && !initialData?.fingerprint) {
+    if (initialData?.privateKey) {
       void handlePrivateKeyChange(initialData.privateKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -294,6 +303,7 @@ export function SshKeyForm({
           onNotesChange={setNotes}
           notesPlaceholder={t("notesPlaceholder")}
           autoDetectedLabel={t("autoDetected")}
+          privateKeyWarning={privateKeyWarning}
           labels={{
             privateKey: t("privateKey"),
             publicKey: t("publicKey"),
@@ -302,6 +312,8 @@ export function SshKeyForm({
             fingerprint: t("fingerprint"),
             passphrase: t("passphrase"),
             comment: t("comment"),
+            show: t("show"),
+            hide: t("hide"),
           }}
         />
       </EntryPrimaryCard>

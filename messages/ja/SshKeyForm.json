@@ -22,5 +22,8 @@
   "failedToSave": "保存に失敗しました",
   "networkError": "ネットワークエラー",
   "parseError": "SSH鍵を解析できませんでした",
-  "autoDetected": "秘密鍵から自動検出"
+  "privateKeyFormatWarning": "この鍵を解析できませんでした。自動検出はOpenSSH形式（\"BEGIN OPENSSH PRIVATE KEY\"）のみ対応しています。このまま保存は可能です。",
+  "autoDetected": "秘密鍵から自動検出",
+  "show": "表示",
+  "hide": "非表示"
 }

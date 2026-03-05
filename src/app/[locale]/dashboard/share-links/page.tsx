@@ -34,6 +34,7 @@ import {
   MessageSquare,
   Paperclip,
   Send,
+  Terminal,
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
@@ -71,6 +72,7 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.PASSKEY]: <Fingerprint className="h-4 w-4" />,
   [ENTRY_TYPE.BANK_ACCOUNT]: <Landmark className="h-4 w-4" />,
   [ENTRY_TYPE.SOFTWARE_LICENSE]: <KeySquare className="h-4 w-4" />,
+  [ENTRY_TYPE.SSH_KEY]: <Terminal className="h-4 w-4" />,
 };
 
 export default function ShareLinksPage() {

@@ -338,6 +338,14 @@ const shareDataSchema = z.object({
   licensee: z.string().max(200).nullish(),
   purchaseDate: z.string().max(50).nullish(),
   expirationDate: z.string().max(50).nullish(),
+  // SSH_KEY
+  privateKey: z.string().max(10000).nullish(),
+  publicKey: z.string().max(5000).nullish(),
+  keyType: z.string().max(50).nullish(),
+  keySize: z.number().int().nullish(),
+  fingerprint: z.string().max(200).nullish(),
+  passphrase: z.string().max(500).nullish(),
+  comment: z.string().max(500).nullish(),
 });
 
 export const createShareLinkSchema = z.object({

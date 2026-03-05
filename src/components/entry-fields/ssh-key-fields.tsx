@@ -3,6 +3,7 @@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { AlertTriangle } from "lucide-react";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
 
 interface SshKeyFieldsProps {
@@ -37,8 +38,12 @@ interface SshKeyFieldsProps {
     fingerprint: string;
     passphrase: string;
     comment: string;
+    show?: string;
+    hide?: string;
   };
   autoDetectedLabel?: string;
+  privateKeyWarning?: string;
+  onPrivateKeyBlur?: () => void;
   idPrefix?: string;
 }
 
@@ -68,6 +73,8 @@ export function SshKeyFields({
   notesPlaceholder,
   labels,
   autoDetectedLabel,
+  privateKeyWarning,
+  onPrivateKeyBlur,
   idPrefix = "",
 }: SshKeyFieldsProps) {
   const privateKeyId = `${idPrefix}privateKey`;
@@ -93,15 +100,22 @@ export function SshKeyFields({
             onFocus={() => {
               if (!showPrivateKey && !privateKey) onTogglePrivateKey();
             }}
+            onBlur={onPrivateKeyBlur}
           />
           <button
             type="button"
             className="absolute right-2 top-2 text-xs text-muted-foreground hover:text-foreground"
             onClick={onTogglePrivateKey}
           >
-            {showPrivateKey ? "Hide" : "Show"}
+            {showPrivateKey ? (labels.hide ?? "Hide") : (labels.show ?? "Show")}
           </button>
         </div>
+        {privateKeyWarning && (
+          <div className="flex items-start gap-1.5 text-amber-600 dark:text-amber-500">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <p className="text-xs">{privateKeyWarning}</p>
+          </div>
+        )}
       </div>
 
       {(keyType || fingerprint) && (

@@ -75,6 +75,7 @@
   "newPasskey": "Passkey",
   "newBankAccount": "Bank Account",
   "newSoftwareLicense": "Software License",
+  "newSshKey": "SSH Key",
   "noPasswordsDesc": "Click \"New Password\" to add the first entry.",
   "createdBy": "Created by {name}",
   "updatedBy": "Updated by {name}",

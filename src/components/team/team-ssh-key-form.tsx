@@ -54,11 +54,19 @@ export function TeamSshKeyForm({
   const [passphrase, setPassphrase] = useState(editData?.passphrase ?? "");
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [sshComment, setSshComment] = useState(editData?.sshComment ?? "");
+  const [privateKeyWarning, setPrivateKeyWarning] = useState("");
 
-  // Auto-parse SSH key when private key changes
+  // Auto-parse SSH key and show warning on failure
   const handlePrivateKeyChange = useCallback(async (pem: string) => {
     setPrivateKey(pem);
-    if (!pem.trim()) return;
+    if (!pem.trim()) {
+      setPublicKey("");
+      setKeyType("");
+      setKeySize(0);
+      setFingerprint("");
+      setPrivateKeyWarning("");
+      return;
+    }
     try {
       const parsed = await parseSshPrivateKey(pem);
       if (parsed) {
@@ -67,15 +75,18 @@ export function TeamSshKeyForm({
         setKeySize(parsed.keySize);
         setFingerprint(parsed.fingerprint);
         if (parsed.comment) setSshComment(parsed.comment);
+        setPrivateKeyWarning("");
+      } else {
+        setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
       }
     } catch {
-      // Parse failed
+      setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
     }
-  }, []);
+  }, [tsk]);
 
-  // Parse on initial load if we have a private key but no fingerprint
+  // Parse on initial load
   useEffect(() => {
-    if (editData?.privateKey && !editData?.fingerprint) {
+    if (editData?.privateKey) {
       void handlePrivateKeyChange(editData.privateKey);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -259,6 +270,7 @@ export function TeamSshKeyForm({
             onNotesChange={base.setNotes}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
             autoDetectedLabel={tsk("autoDetected")}
+            privateKeyWarning={privateKeyWarning}
             labels={{
               privateKey: tsk("privateKey"),
               publicKey: tsk("publicKey"),
@@ -267,6 +279,8 @@ export function TeamSshKeyForm({
               fingerprint: tsk("fingerprint"),
               passphrase: tsk("passphrase"),
               comment: tsk("comment"),
+              show: tsk("show"),
+              hide: tsk("hide"),
             }}
           />
 

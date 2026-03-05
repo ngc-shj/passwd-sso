@@ -22,5 +22,8 @@
   "failedToSave": "Failed to save",
   "networkError": "Network error",
   "parseError": "Could not parse SSH key",
-  "autoDetected": "Auto-detected from private key"
+  "privateKeyFormatWarning": "Could not parse this key. Only OpenSSH format (\"BEGIN OPENSSH PRIVATE KEY\") is supported for auto-detection. You can still save this entry.",
+  "autoDetected": "Auto-detected from private key",
+  "show": "Show",
+  "hide": "Hide"
 }

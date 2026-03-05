@@ -127,6 +127,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const [showIban, setShowIban] = useState(false);
   const [showLicenseKey, setShowLicenseKey] = useState(false);
   const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [showSshPassphrase, setShowSshPassphrase] = useState(false);
 
   // Attachment state
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
@@ -234,6 +235,13 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
+  const handleRevealSshPassphrase = useCallback(() => {
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowSshPassphrase(true);
+      setTimeout(() => setShowSshPassphrase(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
+
   return (
     <div className="space-y-3 border-t pt-3 px-4 pb-3">
       {isSshKey ? (
@@ -302,13 +310,46 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   />
                 </div>
               </div>
+              {showPrivateKey && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
+            </div>
+          )}
+
+          {/* Passphrase */}
+          {data.sshPassphrase && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("passphrase")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-mono">
+                  {showSshPassphrase ? data.sshPassphrase : "••••••••"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={showSshPassphrase ? () => setShowSshPassphrase(false) : handleRevealSshPassphrase}
+                >
+                  {showSshPassphrase ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </Button>
+                <CopyButton
+                  getValue={createGuardedGetter(
+                    data.id,
+                    data.requireReprompt ?? false,
+                    () => data.sshPassphrase ?? "",
+                  )}
+                />
+              </div>
+              {showSshPassphrase && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
           {/* Comment */}
           {data.sshComment && (
             <div className="col-span-2 space-y-1">
-              <label className="text-sm text-muted-foreground">{t("sshComment")}</label>
+              <label className="text-sm text-muted-foreground">{t("comment")}</label>
               <div className="flex items-center gap-2">
                 <span className="text-sm">{data.sshComment}</span>
                 <CopyButton getValue={() => data.sshComment ?? ""} />
@@ -387,6 +428,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showAccountNumber && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -414,6 +458,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showRoutingNumber && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -452,6 +499,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showIban && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -510,6 +560,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showLicenseKey && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -625,6 +678,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showCredentialId && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -740,6 +796,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showIdNumber && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -797,6 +856,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showCardNumber && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 
@@ -853,6 +915,9 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                   )}
                 />
               </div>
+              {showCvv && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           )}
 

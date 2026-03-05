@@ -107,6 +107,9 @@ function ViewContent({ data }: { data: Record<string, unknown> }) {
                   <Eye className="h-3.5 w-3.5" />
                 )}
               </Button>
+              {revealedKeys.has(key) && (
+                <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+              )}
             </div>
           ) : (
             <p className="text-sm break-all whitespace-pre-wrap">{value}</p>

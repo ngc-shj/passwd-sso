@@ -23,7 +23,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -287,6 +287,7 @@ export default function TeamDashboardPage({
         [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
         [ENTRY_TYPE.BANK_ACCOUNT]: tDash("catBankAccount"),
         [ENTRY_TYPE.SOFTWARE_LICENSE]: tDash("catSoftwareLicense"),
+        [ENTRY_TYPE.SSH_KEY]: tDash("catSshKey"),
       } as Record<string, string>)[activeEntryType] ?? activeEntryType
     : null;
   const folderLabel = activeFolderId ? buildFolderPath(activeFolderId, teamFolders) : null;
@@ -309,6 +310,7 @@ export default function TeamDashboardPage({
     PASSKEY: <Fingerprint className="h-6 w-6" />,
     BANK_ACCOUNT: <Landmark className="h-6 w-6" />,
     SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
+    SSH_KEY: <Terminal className="h-6 w-6" />,
   };
 
   const headerIcon = isTeamTrash
@@ -689,6 +691,10 @@ export default function TeamDashboardPage({
                         <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setFormOpen(true); }}>
                           <KeySquare className="mr-2 h-4 w-4" />
                           {t("newSoftwareLicense")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setEditEntryId(null); setNewEntryType(ENTRY_TYPE.SSH_KEY); setFormOpen(true); }}>
+                          <Terminal className="mr-2 h-4 w-4" />
+                          {t("newSshKey")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

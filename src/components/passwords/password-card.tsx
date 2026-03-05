@@ -314,6 +314,15 @@ export function PasswordCard({
     return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
   };
 
+  const fetchSshField = async (field: "fingerprint" | "publicKey"): Promise<string> => {
+    if (getDetailProp) {
+      const detail = await getDetailProp();
+      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
+    }
+    const { entry } = await fetchDecryptedEntry();
+    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+  };
+
   const fetchCardField = async (field: "cardNumber" | "cvv"): Promise<string> => {
     if (getDetailProp) {
       const detail = await getDetailProp();
@@ -523,6 +532,30 @@ export function PasswordCard({
     }
   };
 
+  const handleCopyFingerprint = async () => {
+    try {
+      const fp = await fetchSshField("fingerprint");
+      if (!fp) return;
+      await navigator.clipboard.writeText(fp);
+      toast.success(tCopy("copied"));
+      scheduleClearClipboard(fp);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleCopyPublicKey = async () => {
+    try {
+      const pk = await fetchSshField("publicKey");
+      if (!pk) return;
+      await navigator.clipboard.writeText(pk);
+      toast.success(tCopy("copied"));
+      scheduleClearClipboard(pk);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   const handleCopyIdNumber = async () => {
     try {
       const num = await fetchIdentityField("idNumber");
@@ -700,12 +733,13 @@ export function PasswordCard({
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && <CopyButton getValue={fetchPassword} />}
+              {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey && <CopyButton getValue={fetchPassword} />}
               {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
               {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
               {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
               {isBankAccount && <CopyButton getValue={() => fetchBankField("accountNumber")} />}
               {isSoftwareLicense && <CopyButton getValue={() => fetchLicenseField("licenseKey")} />}
+              {isSshKey && <CopyButton getValue={() => fetchSshField("fingerprint")} />}
             </div>
             <div
               className="pointer-events-auto"
@@ -757,6 +791,17 @@ export function PasswordCard({
                   <DropdownMenuItem onSelect={handleCopyCvv}>
                     <Copy className="h-4 w-4" />
                     {t("copyCvv")}
+                  </DropdownMenuItem>
+                </>
+              ) : isSshKey ? (
+                <>
+                  <DropdownMenuItem onSelect={handleCopyFingerprint}>
+                    <Copy className="h-4 w-4" />
+                    {t("copyFingerprint")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleCopyPublicKey}>
+                    <Copy className="h-4 w-4" />
+                    {t("copyPublicKey")}
                   </DropdownMenuItem>
                 </>
               ) : isNote ? (
@@ -910,7 +955,7 @@ export function PasswordCard({
         passwordEntryId={isTeamMode ? undefined : id}
         teamPasswordEntryId={isTeamMode ? id : undefined}
         decryptedData={shareData}
-        entryType={isTeamMode ? entryType : undefined}
+        entryType={entryType}
         teamId={isTeamMode ? scopedTeamId : undefined}
       />
 
