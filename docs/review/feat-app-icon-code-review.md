@@ -1,6 +1,6 @@
 # Code Review: feat/app-icon
 Date: 2026-03-06
-Review rounds: Session 1 Round 1
+Review rounds: Session 1 Round 1-2
 
 ## Round 1 Findings
 
@@ -107,3 +107,35 @@ Review rounds: Session 1 Round 1
 
 - **Action**: 10 テストケース追加（スキップ対象 5 + 非スキップ対象 5）
 - **Created**: `src/__tests__/proxy-static-guard.test.ts`
+
+## Round 2 Findings
+
+### Functionality
+
+- FUNC-Low-1 (new): signin page.test.ts に古い KeyRound モック残存 → 修正
+- FUNC-Low-2 (new): manifest.ts に maskable icon 未設定 → ACCEPTED（低優先、現時点ではクリッピング問題のみ）
+
+### Security
+
+- No findings（Round 1 の全指摘が解消確認済み）
+
+### Testing
+
+- TEST-Low-1 (new): proxy-static-guard.test.ts の誤解を招くコメント → 修正
+- TEST-Low-2 (new): signin page.test.ts の古い KeyRound モック → FUNC-Low-1 と同一、修正済み
+
+### ACCEPTED (Round 2)
+
+- FUNC-Low-2: maskable icon — PWA ホーム画面アイコンの見た目のみ影響、低優先
+
+### Round 2 対応状況
+
+#### FUNC-Low-1 / TEST-Low-2: signin page.test.ts モック更新
+
+- **Action**: `KeyRound` モック削除、`AppIcon` モック追加
+- **Modified**: `src/app/[locale]/auth/signin/page.test.ts:44-48`
+
+#### TEST-Low-1: proxy-static-guard.test.ts コメント修正
+
+- **Action**: 誤解を招くコメントを修正（`.html` は whitelist 外なので proxy を通過）
+- **Modified**: `src/__tests__/proxy-static-guard.test.ts:63-66`

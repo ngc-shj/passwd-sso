@@ -60,12 +60,9 @@ describe("proxy — static file guard", () => {
     expect(res.headers.get("x-proxied")).toBe("1");
   });
 
-  it("does NOT skip /dashboard/settings.html (API-like path with extension)", () => {
-    // /dashboard/settings.html is NOT under /api/, so it WILL be skipped
-    // This is acceptable — .html files in public/ are legitimate static files
-    // The security concern was specifically about /api/ paths being bypassed
+  it("does NOT skip /dashboard/settings.html (non-whitelisted extension)", () => {
+    // .html is not in the static file whitelist, so it passes through to the proxy
     const res = proxy(req("/dashboard/settings.html"));
-    // .html is not in the whitelist, so it goes through the proxy
     expect(res.headers.get("x-proxied")).toBe("1");
   });
 });
