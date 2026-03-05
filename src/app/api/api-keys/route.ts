@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { auth } from "@/auth";
+import { authOrToken } from "@/lib/auth-or-token";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -16,14 +16,19 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authed = await authOrToken(req);
+  if (!authed || authed.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  // API keys cannot manage API keys (only session or extension token)
+  if (authed.type === "api_key") {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+  const userId = authed.userId;
 
-  const keys = await withUserTenantRls(session.user.id, async () =>
+  const keys = await withUserTenantRls(userId, async () =>
     prisma.apiKey.findMany({
-      where: { userId: session.user.id },
+      where: { userId },
       orderBy: { createdAt: "desc" },
       select: {
         id: true,
@@ -52,12 +57,17 @@ async function handleGET(req: NextRequest) {
   );
 }
 
-// POST /api/api-keys — Create a new API key (session-only)
+// POST /api/api-keys — Create a new API key (session or extension token, NOT API key)
 async function handlePOST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authed = await authOrToken(req);
+  if (!authed || authed.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  // API keys cannot create API keys
+  if (authed.type === "api_key") {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+  const userId = authed.userId;
 
   let body: unknown;
   try {
@@ -77,9 +87,9 @@ async function handlePOST(req: NextRequest) {
   const { name, scope: scopes, expiresAt } = parsed.data;
 
   // Check key limit
-  const existingCount = await withUserTenantRls(session.user.id, async () =>
+  const existingCount = await withUserTenantRls(userId, async () =>
     prisma.apiKey.count({
-      where: { userId: session.user.id, revokedAt: null },
+      where: { userId: userId, revokedAt: null },
     }),
   );
   if (existingCount >= MAX_API_KEYS_PER_USER) {
@@ -106,9 +116,9 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(plaintext);
   const prefix = plaintext.slice(0, 8); // "api_XXXX"
 
-  const actor = await withUserTenantRls(session.user.id, async () =>
+  const actor = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: userId },
       select: { tenantId: true },
     }),
   );
@@ -116,10 +126,10 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const key = await withUserTenantRls(session.user.id, async () =>
+  const key = await withUserTenantRls(userId, async () =>
     prisma.apiKey.create({
       data: {
-        userId: session.user.id,
+        userId: userId,
         tenantId: actor.tenantId,
         tokenHash,
         prefix,
@@ -133,7 +143,7 @@ async function handlePOST(req: NextRequest) {
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.API_KEY_CREATE,
-    userId: session.user.id,
+    userId: userId,
     targetType: AUDIT_TARGET_TYPE.API_KEY,
     targetId: key.id,
     metadata: { name, scopes },

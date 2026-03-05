@@ -48,6 +48,7 @@ export const API_PATH = {
   NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",
   TENANT_MEMBERS: "/api/tenant/members",
+  API_KEYS: "/api/api-keys",
   TENANT_SCIM_TOKENS: "/api/tenant/scim-tokens",
   TENANT_ROLE: "/api/tenant/role",
   HEALTH_LIVE: "/api/health/live",

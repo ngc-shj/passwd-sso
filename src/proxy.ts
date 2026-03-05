@@ -86,6 +86,7 @@ async function handleApiAuth(request: NextRequest) {
     API_PATH.VAULT_UNLOCK_DATA,
     API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
     API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
+    API_PATH.API_KEYS,  // API key management — validated by route handler via authOrToken
   ];
   const hasBearer = request.headers
     .get("authorization")
@@ -122,7 +123,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.USER_LOCALE) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/extension`) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/tenant`) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/api-keys`) ||
+    pathname.startsWith(API_PATH.API_KEYS) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/travel-mode`) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/directory-sync`) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/webauthn`)
