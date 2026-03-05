@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  if (!(await acceptLimiter.check(`rl:invite_accept:${session.user.id}`))) {
+  if (!(await acceptLimiter.check(`rl:invite_accept:${session.user.id}`)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }

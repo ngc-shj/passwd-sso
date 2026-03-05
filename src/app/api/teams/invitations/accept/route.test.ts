@@ -61,7 +61,7 @@ describe("POST /api/teams/invitations/accept", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id", email: "user@test.com" } });
     mockTransaction.mockResolvedValue([{}, {}]);
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {

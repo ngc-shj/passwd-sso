@@ -57,6 +57,11 @@ export const NAMESPACES = [
   "AuditDownload",
   "CliToken",
   "TenantAdmin",
+  "ApiKey",
+  "SshKeyForm",
+  "TravelMode",
+  "WebAuthn",
+  "DirectorySync",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

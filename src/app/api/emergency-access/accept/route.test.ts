@@ -34,7 +34,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => ({ check: () => Promise.resolve(true) }),
+  createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,

@@ -18,6 +18,8 @@ import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 import { fetchApi } from "@/lib/url-helpers";
+import { filterTravelSafe } from "@/lib/travel-mode";
+import { useTravelMode } from "@/hooks/use-travel-mode";
 
 interface DecryptedOverview {
   title: string;
@@ -34,7 +36,10 @@ interface DecryptedOverview {
   accountNumberLast4?: string | null;
   softwareName?: string | null;
   licensee?: string | null;
+  keyType?: string | null;
+  fingerprint?: string | null;
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   tags: EntryTagNameColor[];
 }
 
@@ -55,10 +60,13 @@ interface DisplayEntry {
   accountNumberLast4: string | null;
   softwareName: string | null;
   licensee: string | null;
+  keyType: string | null;
+  fingerprint: string | null;
   tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -100,6 +108,7 @@ export function PasswordList({
 }: PasswordListProps) {
   const t = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
+  const { active: travelModeActive } = useTravelMode();
   const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -156,7 +165,9 @@ export function PasswordList({
               (overview.bankName?.toLowerCase().includes(q) ?? false) ||
               (overview.accountNumberLast4?.includes(q) ?? false) ||
               (overview.softwareName?.toLowerCase().includes(q) ?? false) ||
-              (overview.licensee?.toLowerCase().includes(q) ?? false);
+              (overview.licensee?.toLowerCase().includes(q) ?? false) ||
+              (overview.keyType?.toLowerCase().includes(q) ?? false) ||
+              (overview.fingerprint?.toLowerCase().includes(q) ?? false);
             if (!matches) continue;
           }
 
@@ -177,10 +188,13 @@ export function PasswordList({
             accountNumberLast4: overview.accountNumberLast4 ?? null,
             softwareName: overview.softwareName ?? null,
             licensee: overview.licensee ?? null,
+            keyType: overview.keyType ?? null,
+            fingerprint: overview.fingerprint ?? null,
             tags: overview.tags ?? [],
             isFavorite: entry.isFavorite ?? false,
             isArchived: entry.isArchived ?? false,
             requireReprompt: entry.requireReprompt ?? overview.requireReprompt ?? false,
+            travelSafe: overview.travelSafe !== false,
             expiresAt: entry.expiresAt ?? null,
             createdAt: entry.createdAt,
             updatedAt: entry.updatedAt,
@@ -190,16 +204,19 @@ export function PasswordList({
         }
       }
 
-      // Client-side sorting
-      decrypted.sort((a, b) => compareEntriesWithFavorite(a, b, sortBy));
+      // Client-side travel mode filter
+      const filtered = filterTravelSafe(decrypted, travelModeActive);
 
-      setEntries(decrypted);
+      // Client-side sorting
+      filtered.sort((a, b) => compareEntriesWithFavorite(a, b, sortBy));
+
+      setEntries(filtered);
     } catch {
       // Network error
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, tagId, folderId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId]);
+  }, [searchQuery, tagId, folderId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId, travelModeActive]);
 
   useEffect(() => {
     fetchPasswords();
@@ -349,6 +366,8 @@ export function PasswordList({
                 accountNumberLast4={entry.accountNumberLast4}
                 softwareName={entry.softwareName}
                 licensee={entry.licensee}
+                keyType={entry.keyType}
+                fingerprint={entry.fingerprint}
                 tags={entry.tags}
                 isFavorite={entry.isFavorite}
                 isArchived={entry.isArchived}

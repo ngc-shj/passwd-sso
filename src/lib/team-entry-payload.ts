@@ -55,6 +55,15 @@ export interface BuildTeamEntryPayloadInput {
   licensee?: string;
   purchaseDate?: string;
   expirationDate?: string;
+
+  privateKey?: string;
+  publicKey?: string;
+  keyType?: string;
+  keySize?: number;
+  fingerprint?: string;
+  passphrase?: string;
+  sshComment?: string;
+  travelSafe?: boolean;
 }
 
 /**
@@ -127,6 +136,17 @@ export function buildTeamEntryPayload(
         expirationDate: input.expirationDate || null,
       };
       break;
+    case ENTRY_TYPE.SSH_KEY:
+      entryFields = {
+        privateKey: input.privateKey?.trim() || null,
+        publicKey: input.publicKey?.trim() || null,
+        keyType: input.keyType || null,
+        keySize: input.keySize || null,
+        fingerprint: input.fingerprint || null,
+        passphrase: input.passphrase || null,
+        comment: input.sshComment?.trim() || null,
+      };
+      break;
     case ENTRY_TYPE.SECURE_NOTE:
       entryFields = {
         content: input.content ?? "",
@@ -153,6 +173,7 @@ export function buildTeamEntryPayload(
     notes,
     tags,
     ...entryFields,
+    ...(input.travelSafe !== undefined && { travelSafe: input.travelSafe }),
   });
 
   // Overview: minimal summary for list rendering (per-type)
@@ -211,6 +232,16 @@ export function buildTeamEntryPayload(
         tags,
       };
       break;
+    case ENTRY_TYPE.SSH_KEY:
+      overviewData = {
+        title,
+        keyType: input.keyType || null,
+        fingerprint: input.fingerprint || null,
+        publicKey: input.publicKey?.trim() || null,
+        comment: input.sshComment?.trim() || null,
+        tags,
+      };
+      break;
     case ENTRY_TYPE.LOGIN:
     default: {
       const urlHost = input.url ? parseUrlHost(input.url) : null;
@@ -222,6 +253,10 @@ export function buildTeamEntryPayload(
       };
       break;
     }
+  }
+
+  if (input.travelSafe !== undefined) {
+    overviewData.travelSafe = input.travelSafe;
   }
 
   const overviewBlob = JSON.stringify(overviewData);

@@ -2,6 +2,7 @@
 
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import {
@@ -22,6 +23,7 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
   const {
     t,
     tc,
+    ttm,
     formState,
     folders,
     hasChanges,
@@ -45,6 +47,7 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
     tagsAndFolderProps,
     customFieldsTotpProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildPersonalFormSectionsProps({
@@ -54,6 +57,8 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
     sectionCardClass: dialogSectionClass,
     repromptTitle: t("requireReprompt"),
     repromptDescription: t("requireRepromptHelp"),
+    travelSafeTitle: ttm("travelSafe"),
+    travelSafeDescription: ttm("travelSafeDescription"),
     expirationTitle: t("expirationTitle"),
     expirationDescription: t("expirationDescription"),
     hasChanges,
@@ -86,6 +91,8 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
       <EntryCustomFieldsTotpSection {...customFieldsTotpProps} />
 
       <EntryRepromptSection {...repromptSectionProps} />
+
+      <EntryTravelSafeSection {...travelSafeSectionProps} />
 
       <EntryExpirationSection {...expirationSectionProps} />
 

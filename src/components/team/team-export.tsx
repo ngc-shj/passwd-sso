@@ -7,7 +7,7 @@ import { encryptExport } from "@/lib/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
-import { AlertTriangle, Building2 } from "lucide-react";
+import { AlertTriangle, Download } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
@@ -149,12 +149,20 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
             licensee: data.licensee ?? null,
             purchaseDate: data.purchaseDate ?? null,
             expirationDate: data.expirationDate ?? null,
+            privateKey: data.privateKey ?? null,
+            publicKey: data.publicKey ?? null,
+            keyType: data.keyType ?? null,
+            keySize: data.keySize ?? null,
+            fingerprint: data.fingerprint ?? null,
+            sshPassphrase: data.passphrase ?? null,
+            sshComment: data.comment ?? null,
             tags: Array.isArray(raw.tags) ? raw.tags : [],
             customFields: Array.isArray(data.customFields) ? data.customFields : [],
             totpConfig: data.totp ?? null,
             generatorSettings: data.generatorSettings ?? null,
             passwordHistory: Array.isArray(data.passwordHistory) ? data.passwordHistory : [],
             requireReprompt: raw.requireReprompt ?? false,
+            travelSafe: data.travelSafe,
             folderPath: raw.teamFolderId ? (buildFolderPath(raw.teamFolderId, folders) ?? "") : "",
             isFavorite: raw.isFavorite ?? false,
             expiresAt: raw.expiresAt ? String(raw.expiresAt) : null,
@@ -274,7 +282,7 @@ export function TeamExportPagePanel({ teamId }: TeamExportPagePanelProps) {
     <PagePane
       header={
         <PageTitleCard
-          icon={<Building2 className="h-5 w-5" />}
+          icon={<Download className="h-5 w-5" />}
           title={t("title")}
           description={t("description")}
         />

@@ -69,7 +69,7 @@ describe("POST /api/vault/recovery-key/recover", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaUser.findUnique.mockResolvedValue(userWithRecovery);
     mockPrismaUser.update.mockResolvedValue({});
   });
@@ -83,7 +83,7 @@ describe("POST /api/vault/recovery-key/recover", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(createRequest("POST", URL, {
       body: { step: "verify", verifierHash: "a".repeat(64) },
     }));

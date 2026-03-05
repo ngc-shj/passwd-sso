@@ -8,6 +8,7 @@ import { IdentityForm } from "./personal-identity-form";
 import { PasskeyForm } from "./personal-passkey-form";
 import { BankAccountForm } from "./personal-bank-account-form";
 import { SoftwareLicenseForm } from "./personal-software-license-form";
+import { SshKeyForm } from "./personal-ssh-key-form";
 import { PersonalEntryDialogShell } from "./personal-entry-dialog-shell";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -37,6 +38,7 @@ export function PasswordNewDialog({
   const tpk = useTranslations("PasskeyForm");
   const tba = useTranslations("BankAccountForm");
   const tsl = useTranslations("SoftwareLicenseForm");
+  const tsk = useTranslations("SshKeyForm");
 
   const handleSaved = () => {
     onOpenChange(false);
@@ -53,8 +55,11 @@ export function PasswordNewDialog({
   const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
   const isBankAccount = entryType === ENTRY_TYPE.BANK_ACCOUNT;
   const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
+  const isSshKey = entryType === ENTRY_TYPE.SSH_KEY;
 
-  const dialogTitle = isBankAccount
+  const dialogTitle = isSshKey
+    ? tsk("newSshKey")
+    : isBankAccount
     ? tba("newBankAccount")
     : isSoftwareLicense
     ? tsl("newLicense")
@@ -74,7 +79,16 @@ export function PasswordNewDialog({
       onOpenChange={onOpenChange}
       title={dialogTitle}
     >
-        {isBankAccount ? (
+        {isSshKey ? (
+          <SshKeyForm
+            mode="create"
+            variant="dialog"
+            onSaved={handleSaved}
+            onCancel={handleCancel}
+            defaultFolderId={defaultFolderId}
+            defaultTags={defaultTags}
+          />
+        ) : isBankAccount ? (
           <BankAccountForm
             mode="create"
             variant="dialog"

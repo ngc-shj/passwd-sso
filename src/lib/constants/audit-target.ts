@@ -12,6 +12,9 @@ export const AUDIT_TARGET_TYPE = {
   SCIM_EXTERNAL_MAPPING: "ScimExternalMapping",
   SESSION: "Session",
   TEAM: "Team",
+  API_KEY: "ApiKey",
+  WEBAUTHN_CREDENTIAL: "WebAuthnCredential",
+  DIRECTORY_SYNC_CONFIG: "DirectorySyncConfig",
 } as const;
 
 export type AuditTargetType =

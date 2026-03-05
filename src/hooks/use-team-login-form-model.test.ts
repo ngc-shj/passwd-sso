@@ -34,6 +34,7 @@ vi.mock("@/hooks/use-entry-form-translations", () => ({
     t: (key: string) => key,
     tc: (key: string) => key,
     tGen: (key: string) => key,
+    ttm: (key: string) => key,
   }),
   toTeamLoginFormTranslations: () => ({
     t: (key: string) => key,

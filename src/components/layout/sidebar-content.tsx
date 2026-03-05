@@ -2,7 +2,7 @@
 
 import { Separator } from "@/components/ui/separator";
 import { VaultSelector } from "@/components/layout/vault-selector";
-import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
+import { SecuritySection, SettingsNavSection, ToolsSection } from "@/components/layout/sidebar-section-security";
 import {
   VaultSection,
   CategoriesSection,
@@ -33,9 +33,11 @@ export interface SidebarContentProps {
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
   isTeamSettingsActive: boolean;
+  isTenantSettingsActive: boolean;
   isSettingsActive: boolean;
   isExportActive: boolean;
   isImportActive: boolean;
+  isAdmin: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -71,9 +73,11 @@ export function SidebarContent({
   isSelectedVaultArchive,
   isSelectedVaultTrash,
   isTeamSettingsActive,
+  isTenantSettingsActive,
   isSettingsActive,
   isExportActive,
   isImportActive,
+  isAdmin,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -204,14 +208,24 @@ export function SidebarContent({
 
       <Separator />
 
-      <UtilitiesSection
-        isOpen={isOpen("utilities")}
-        onOpenChange={toggleSection("utilities")}
+      <SettingsNavSection
+        isOpen={isOpen("settingsNav")}
+        onOpenChange={toggleSection("settingsNav")}
         t={t}
         tTeam={tTeam}
         selectedTeam={selectedTeam}
         isTeamSettingsActive={isTeamSettingsActive}
+        isTenantSettingsActive={isTenantSettingsActive}
         isSettingsActive={isSettingsActive}
+        isAdmin={isAdmin}
+        onNavigate={onNavigate}
+      />
+
+      <ToolsSection
+        isOpen={isOpen("tools")}
+        onOpenChange={toggleSection("tools")}
+        t={t}
+        selectedTeam={selectedTeam}
         isExportActive={isExportActive}
         isImportActive={isImportActive}
         onNavigate={onNavigate}

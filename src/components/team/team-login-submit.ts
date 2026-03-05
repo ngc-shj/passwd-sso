@@ -86,6 +86,7 @@ export interface SubmitTeamLoginArgs {
   licensee: string;
   purchaseDate: string;
   expirationDate: string;
+  travelSafe: boolean;
   requireReprompt: boolean;
   expiresAt: string | null;
   cardNumberValid: boolean;
@@ -158,6 +159,7 @@ export async function submitTeamLogin({
   licensee,
   purchaseDate,
   expirationDate,
+  travelSafe,
   requireReprompt,
   expiresAt,
   cardNumberValid,
@@ -241,6 +243,7 @@ export async function submitTeamLogin({
     licensee,
     purchaseDate,
     expirationDate,
+    travelSafe,
   });
 
   await executeTeamEntrySubmit({

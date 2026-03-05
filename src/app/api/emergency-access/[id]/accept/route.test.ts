@@ -57,7 +57,7 @@ describe("POST /api/emergency-access/[id]/accept", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "grantee-1", email: "grantee@example.com" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaGrant.findUnique.mockResolvedValue(pendingGrant);
     mockTransaction.mockResolvedValue([{}, {}]);
     mockPrismaUser.findUnique.mockResolvedValue({ email: "owner@test.com", name: "Owner Name" });
@@ -82,7 +82,7 @@ describe("POST /api/emergency-access/[id]/accept", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/accept", { body: validBody }),
       createParams({ id: "grant-1" })

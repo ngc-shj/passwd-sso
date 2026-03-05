@@ -26,6 +26,7 @@ export interface SubmitPersonalLoginFormArgs {
   customFields: EntryCustomField[];
   totp: EntryTotp | null;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   folderId: string | null;
   setSubmitting: (value: boolean) => void;
@@ -49,6 +50,7 @@ export async function submitPersonalLoginForm({
   customFields,
   totp,
   requireReprompt,
+  travelSafe,
   expiresAt,
   folderId,
   setSubmitting,
@@ -75,6 +77,7 @@ export async function submitPersonalLoginForm({
     customFields,
     totp,
     requireReprompt,
+    travelSafe,
     existingHistory,
   });
 

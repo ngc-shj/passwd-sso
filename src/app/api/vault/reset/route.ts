@@ -39,7 +39,7 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:vault_reset:${session.user.id}`;
-  if (!(await resetLimiter.check(rateKey))) {
+  if (!(await resetLimiter.check(rateKey)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

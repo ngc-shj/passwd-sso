@@ -76,5 +76,86 @@ describe("buildPersonalEntryPayload", () => {
     expect(overview.urlHost).toBe("example.com");
     expect(overview.requireReprompt).toBe(true);
   });
+
+  it("includes travelSafe in both blobs when provided", () => {
+    const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
+      title: "T",
+      username: "",
+      password: "",
+      url: "",
+      notes: "",
+      selectedTags: [],
+      generatorSettings: {
+        mode: "password",
+        length: 16,
+        uppercase: true,
+        lowercase: true,
+        numbers: true,
+        symbolGroups: {
+          hashEtc: false,
+          punctuation: false,
+          quotes: false,
+          slashDash: false,
+          mathCompare: false,
+          brackets: false,
+        },
+        excludeAmbiguous: false,
+        includeChars: "",
+        excludeChars: "",
+        passphrase: { wordCount: 4, separator: "-", capitalize: false, includeNumber: false },
+      },
+      customFields: [],
+      totp: null,
+      requireReprompt: false,
+      travelSafe: false,
+      existingHistory: [],
+    });
+
+    const full = JSON.parse(fullBlob) as Record<string, unknown>;
+    const overview = JSON.parse(overviewBlob) as Record<string, unknown>;
+
+    expect(full.travelSafe).toBe(false);
+    expect(overview.travelSafe).toBe(false);
+  });
+
+  it("omits travelSafe from blobs when not provided", () => {
+    const { fullBlob, overviewBlob } = buildPersonalEntryPayload({
+      title: "T",
+      username: "",
+      password: "",
+      url: "",
+      notes: "",
+      selectedTags: [],
+      generatorSettings: {
+        mode: "password",
+        length: 16,
+        uppercase: true,
+        lowercase: true,
+        numbers: true,
+        symbolGroups: {
+          hashEtc: false,
+          punctuation: false,
+          quotes: false,
+          slashDash: false,
+          mathCompare: false,
+          brackets: false,
+        },
+        excludeAmbiguous: false,
+        includeChars: "",
+        excludeChars: "",
+        passphrase: { wordCount: 4, separator: "-", capitalize: false, includeNumber: false },
+      },
+      customFields: [],
+      totp: null,
+      requireReprompt: false,
+      existingHistory: [],
+    });
+
+    const full = JSON.parse(fullBlob) as Record<string, unknown>;
+    const overview = JSON.parse(overviewBlob) as Record<string, unknown>;
+
+    expect("travelSafe" in full).toBe(false);
+    expect("travelSafe" in overview).toBe(false);
+  });
 });
 

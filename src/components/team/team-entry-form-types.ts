@@ -9,7 +9,8 @@ export type TeamEntryKind =
   | "identity"
   | "passkey"
   | "bankAccount"
-  | "softwareLicense";
+  | "softwareLicense"
+  | "sshKey";
 
 export interface TeamFolderItem {
   id: string;
@@ -63,8 +64,16 @@ export interface TeamEntryFormEditData {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  passphrase?: string | null;
+  sshComment?: string | null;
   teamFolderId?: string | null;
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   expiresAt?: string | null;
 }
 

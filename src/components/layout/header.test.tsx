@@ -56,6 +56,14 @@ vi.mock("@/components/notifications/notification-bell", () => ({
   NotificationBell: () => <div data-testid="notification-bell" />,
 }));
 
+vi.mock("@/hooks/use-travel-mode", () => ({
+  useTravelMode: () => ({ active: false, loading: false, enable: vi.fn(), disable: vi.fn() }),
+}));
+
+vi.mock("@/lib/active-vault-context", () => ({
+  useActiveVault: () => null,
+}));
+
 // Mock dropdown to render content directly (bypass Radix interaction)
 vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,

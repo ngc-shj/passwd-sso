@@ -88,6 +88,9 @@ export function useTeamBaseFormModel({
   const [requireReprompt, setRequireReprompt] = useState(
     editData?.requireReprompt ?? teamPolicy?.requireRepromptForAll ?? false,
   );
+  const [travelSafe, setTravelSafe] = useState(
+    editData?.travelSafe ?? true,
+  );
   const [expiresAt, setExpiresAt] = useState<string | null>(
     editData?.expiresAt ?? null,
   );
@@ -111,7 +114,10 @@ export function useTeamBaseFormModel({
     }
 
     const tagIds = extractTagIds(selectedTags);
-    const { fullBlob, overviewBlob } = buildTeamEntryPayload(payloadInput);
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
+      ...payloadInput,
+      travelSafe,
+    });
 
     await executeTeamEntrySubmit({
       teamId,
@@ -167,6 +173,8 @@ export function useTeamBaseFormModel({
     setTeamFolderId,
     requireReprompt,
     setRequireReprompt,
+    travelSafe,
+    setTravelSafe,
     expiresAt,
     setExpiresAt,
 

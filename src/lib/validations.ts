@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
 import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES, SHARE_PERMISSION_VALUES } from "@/lib/constants";
+import { API_KEY_SCOPES, MAX_API_KEY_EXPIRY_DAYS } from "@/lib/constants/api-key";
 
 const asciiPrintable = /^[\x20-\x7E]*$/;
 
@@ -337,6 +338,14 @@ const shareDataSchema = z.object({
   licensee: z.string().max(200).nullish(),
   purchaseDate: z.string().max(50).nullish(),
   expirationDate: z.string().max(50).nullish(),
+  // SSH_KEY
+  privateKey: z.string().max(10000).nullish(),
+  publicKey: z.string().max(5000).nullish(),
+  keyType: z.string().max(50).nullish(),
+  keySize: z.number().int().nullish(),
+  fingerprint: z.string().max(200).nullish(),
+  passphrase: z.string().max(500).nullish(),
+  comment: z.string().max(500).nullish(),
 });
 
 export const createShareLinkSchema = z.object({
@@ -411,6 +420,21 @@ export const revokeEmergencyGrantSchema = z.object({
   permanent: z.boolean().default(true),
 });
 
+// ─── API Key ──────────────────────────────────────────────
+
+export const apiKeyCreateSchema = z.object({
+  name: z.string().min(1).max(100),
+  scope: z.array(z.enum(API_KEY_SCOPES)).min(1),
+  expiresAt: z.coerce.date().refine(
+    (d) => {
+      const maxDate = new Date();
+      maxDate.setDate(maxDate.getDate() + MAX_API_KEY_EXPIRY_DAYS);
+      return d.getTime() > Date.now() && d.getTime() <= maxDate.getTime();
+    },
+    { message: `Expiry must be in the future and within ${MAX_API_KEY_EXPIRY_DAYS} days` },
+  ),
+});
+
 // ─── Type Exports ──────────────────────────────────────────
 
 export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
@@ -437,3 +461,4 @@ export type CreateEmergencyGrantInput = z.infer<typeof createEmergencyGrantSchem
 export type AcceptEmergencyGrantInput = z.infer<typeof acceptEmergencyGrantSchema>;
 export type ConfirmEmergencyGrantInput = z.infer<typeof confirmEmergencyGrantSchema>;
 export type RevokeEmergencyGrantInput = z.infer<typeof revokeEmergencyGrantSchema>;
+export type ApiKeyCreateInput = z.infer<typeof apiKeyCreateSchema>;

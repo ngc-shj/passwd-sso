@@ -60,6 +60,7 @@ function buildPresenterArgs(overrides: {
     selectedTags: overrides.selectedTags ?? [],
     teamFolderId: overrides.teamFolderId ?? null,
     requireReprompt: overrides.requireReprompt ?? false,
+    travelSafe: true,
     expiresAt: overrides.expiresAt ?? null,
     generatorSettings: { ...DEFAULT_GENERATOR_SETTINGS },
     setGeneratorSettings: vi.fn(),

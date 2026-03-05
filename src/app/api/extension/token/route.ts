@@ -33,7 +33,7 @@ export async function POST() {
     );
   }
 
-  if (!(await tokenLimiter.check(`rl:ext_token:${session.user.id}`))) {
+  if (!(await tokenLimiter.check(`rl:ext_token:${session.user.id}`)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

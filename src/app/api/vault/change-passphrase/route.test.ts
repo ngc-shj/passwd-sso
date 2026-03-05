@@ -52,7 +52,7 @@ describe("POST /api/vault/change-passphrase", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaUser.findUnique.mockResolvedValue(userWithVault);
     mockPrismaUser.update.mockResolvedValue({});
   });
@@ -64,7 +64,7 @@ describe("POST /api/vault/change-passphrase", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
     expect(res.status).toBe(429);
   });

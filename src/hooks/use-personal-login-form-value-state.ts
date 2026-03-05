@@ -16,6 +16,7 @@ export function usePersonalLoginFormValueState(initial: PersonalLoginFormInitial
   const [totp, setTotp] = useState<EntryTotp | null>(initial.totp);
   const [showTotpInput, setShowTotpInput] = useState(initial.showTotpInput);
   const [requireReprompt, setRequireReprompt] = useState(initial.requireReprompt);
+  const [travelSafe, setTravelSafe] = useState(initial.travelSafe);
   const [expiresAt, setExpiresAt] = useState<string | null>(initial.expiresAt);
   const [folderId, setFolderId] = useState<string | null>(initial.folderId);
 
@@ -32,6 +33,7 @@ export function usePersonalLoginFormValueState(initial: PersonalLoginFormInitial
       totp,
       showTotpInput,
       requireReprompt,
+      travelSafe,
       expiresAt,
       folderId,
     },
@@ -47,6 +49,7 @@ export function usePersonalLoginFormValueState(initial: PersonalLoginFormInitial
       setTotp,
       setShowTotpInput,
       setRequireReprompt,
+      setTravelSafe,
       setExpiresAt,
       setFolderId,
     },

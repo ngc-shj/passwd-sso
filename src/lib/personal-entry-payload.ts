@@ -23,6 +23,7 @@ interface BuildPersonalEntryPayloadInput {
   totp: EntryTotp | null;
   requireReprompt: boolean;
   existingHistory: EntryPasswordHistory[];
+  travelSafe?: boolean;
 }
 
 export function buildPasswordHistory(
@@ -56,6 +57,7 @@ export function buildPersonalEntryPayload(
     ...(input.existingHistory.length > 0 && { passwordHistory: input.existingHistory }),
     ...(validCustomFields.length > 0 && { customFields: validCustomFields }),
     ...(input.totp && { totp: input.totp }),
+    ...(input.travelSafe !== undefined && { travelSafe: input.travelSafe }),
   });
 
   const overviewBlob = JSON.stringify({
@@ -64,6 +66,7 @@ export function buildPersonalEntryPayload(
     urlHost,
     tags,
     requireReprompt: input.requireReprompt,
+    ...(input.travelSafe !== undefined && { travelSafe: input.travelSafe }),
   });
 
   return { fullBlob, overviewBlob };

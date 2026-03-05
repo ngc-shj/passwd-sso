@@ -17,6 +17,10 @@ import { getCommand } from "./commands/get.js";
 import { generateCommand } from "./commands/generate.js";
 import { totpCommand } from "./commands/totp.js";
 import { exportCommand } from "./commands/export.js";
+import { envCommand } from "./commands/env.js";
+import { runCommand } from "./commands/run.js";
+import { apiKeyListCommand, apiKeyCreateCommand, apiKeyRevokeCommand } from "./commands/api-key.js";
+import { agentCommand } from "./commands/agent.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
 import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
@@ -43,7 +47,8 @@ program
 program
   .command("status")
   .description("Show connection and vault status")
-  .action(statusCommand);
+  .option("--json", "Output as JSON")
+  .action((opts) => statusCommand({ json: opts.json }));
 
 program
   .command("unlock")
@@ -63,13 +68,66 @@ program
   .option("--no-digits", "Exclude digits")
   .option("--no-symbols", "Exclude symbols")
   .option("-c, --copy", "Copy to clipboard")
+  .option("--json", "Output as JSON")
   .action((opts) => generateCommand({
     length: parseInt(opts.length, 10),
     noUppercase: opts.uppercase === false,
     noDigits: opts.digits === false,
     noSymbols: opts.symbols === false,
     copy: opts.copy,
+    json: opts.json,
   }));
+
+program
+  .command("env")
+  .description("Output vault secrets as environment variables")
+  .option("-c, --config <path>", "Path to .passwd-sso-env.json")
+  .option("--format <format>", "Output format: shell, dotenv, json", "shell")
+  .action((opts) => envCommand({ config: opts.config, format: opts.format }));
+
+program
+  .command("run")
+  .description("Inject vault secrets into a command's environment")
+  .option("-c, --config <path>", "Path to .passwd-sso-env.json")
+  .argument("<command...>", "Command to execute")
+  .action((command: string[], opts) => runCommand({ config: opts.config, command }));
+
+const apiKeyCmd = program
+  .command("api-key")
+  .description("Manage API keys");
+
+apiKeyCmd
+  .command("list")
+  .description("List all API keys")
+  .option("--json", "Output as JSON")
+  .action((opts) => apiKeyListCommand({ json: opts.json }));
+
+apiKeyCmd
+  .command("create")
+  .description("Create a new API key")
+  .requiredOption("-n, --name <name>", "Key name")
+  .option("-s, --scopes <scopes>", "Comma-separated scopes", "passwords:read")
+  .option("-d, --days <days>", "Expiry in days", "90")
+  .option("--json", "Output as JSON")
+  .action((opts) => apiKeyCreateCommand({
+    name: opts.name,
+    scopes: opts.scopes.split(","),
+    days: parseInt(opts.days, 10),
+    json: opts.json,
+  }));
+
+apiKeyCmd
+  .command("revoke")
+  .description("Revoke an API key")
+  .argument("<id>", "API key ID")
+  .option("--json", "Output as JSON")
+  .action((id: string, opts) => apiKeyRevokeCommand(id, { json: opts.json }));
+
+program
+  .command("agent")
+  .description("Start SSH agent backed by vault SSH keys")
+  .option("--eval", "Output shell eval-compatible commands")
+  .action((opts) => agentCommand({ eval: opts.eval }));
 
 program.parse();
 
@@ -126,10 +184,11 @@ async function interactiveMode(): Promise<void> {
 
         case "totp":
           if (!args[1]) {
-            output.error("Usage: totp <id> [--copy]");
+            output.error("Usage: totp <id> [--copy] [--json]");
           } else {
             await totpCommand(args[1], {
               copy: args.includes("--copy") || args.includes("-c"),
+              json: args.includes("--json"),
             });
           }
           break;
@@ -148,6 +207,7 @@ async function interactiveMode(): Promise<void> {
           await generateCommand({
             length: isNaN(parsedLength) ? 20 : parsedLength,
             copy: args.includes("--copy") || args.includes("-c"),
+            json: args.includes("--json"),
           });
           break;
         }
@@ -164,8 +224,30 @@ async function interactiveMode(): Promise<void> {
           break;
         }
 
+        case "env": {
+          const envFmtIdx = args.indexOf("--format");
+          const envConfIdx = args.indexOf("-c");
+          const envConfIdx2 = args.indexOf("--config");
+          const envCIdx = envConfIdx !== -1 ? envConfIdx : envConfIdx2;
+          await envCommand({
+            config: envCIdx !== -1 ? args[envCIdx + 1] : undefined,
+            format: envFmtIdx !== -1 ? args[envFmtIdx + 1] : "shell",
+          });
+          break;
+        }
+
+        case "api-key": {
+          const sub = args[1];
+          if (sub === "list") {
+            await apiKeyListCommand({ json: args.includes("--json") });
+          } else {
+            output.error("Usage: api-key list [--json]");
+          }
+          break;
+        }
+
         case "status":
-          await statusCommand();
+          await statusCommand({ json: args.includes("--json") });
           break;
 
         case "lock":
@@ -186,10 +268,12 @@ Commands:
   list [--json]                    List all entries
   get <id> [--copy] [--json]       Show entry details
   get <id> --field password --copy Copy a specific field
-  totp <id> [--copy]               Generate TOTP code
-  generate [-l N] [--copy]         Generate password
+  totp <id> [--copy] [--json]      Generate TOTP code
+  generate [-l N] [--copy] [--json] Generate password
   export [--format json|csv] [-o file]  Export vault
-  status                           Show connection status
+  env [--format shell|dotenv|json] Output vault secrets as env vars
+  api-key list [--json]            List API keys
+  status [--json]                  Show connection status
   lock                             Lock vault and exit
           `.trim());
           break;

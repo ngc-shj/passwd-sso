@@ -24,6 +24,7 @@ export interface PersonalLoginFormValues {
   totp: EntryTotp | null;
   showTotpInput: boolean;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   folderId: string | null;
 }
@@ -39,6 +40,7 @@ export interface PersonalLoginFormEntryValues {
   customFields: EntryCustomField[];
   totp: EntryTotp | null;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   folderId: string | null;
 }
@@ -58,6 +60,7 @@ export interface PersonalLoginFormSetters {
   setTotp: (value: EntryTotp | null) => void;
   setShowTotpInput: (value: boolean) => void;
   setRequireReprompt: (value: boolean) => void;
+  setTravelSafe: (value: boolean) => void;
   setExpiresAt: (value: string | null) => void;
   setFolderId: (value: string | null) => void;
 }
@@ -101,6 +104,7 @@ export function selectPersonalEntryValues(
     customFields: values.customFields,
     totp: values.totp,
     requireReprompt: values.requireReprompt,
+    travelSafe: values.travelSafe,
     expiresAt: values.expiresAt,
     folderId: values.folderId,
   };

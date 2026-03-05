@@ -56,5 +56,6 @@
   "recoveryKeyClose": "閉じる",
   "recoveryKeyGenerating": "回復キーを生成中...",
   "recoveryKeyRegenerateWarning": "既に回復キーが設定されています。新しい鍵を生成すると、以前の鍵は無効になります。",
-  "vaultMustBeUnlocked": "保管庫のロックを解除してください。"
+  "vaultMustBeUnlocked": "保管庫のロックを解除してください。",
+  "or": "または"
 }

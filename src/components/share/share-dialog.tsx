@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import {
   Dialog,
@@ -109,6 +109,37 @@ async function encryptForShare(
 
 const EXPIRY_OPTIONS = ["1h", "1d", "7d", "30d"] as const;
 
+// Fields excluded from preview (metadata / internal-only)
+const INTERNAL_FIELDS = new Set([
+  "tags", "generatorSettings", "passwordHistory", "travelSafe", "totp",
+  "isMarkdown", "entryType", "createdAt", "updatedAt",
+  // overview-only derived fields (shouldn't appear in fullBlob, but defensive)
+  "snippet", "urlHost", "lastFour", "accountNumberLast4", "idNumberLast4", "requireReprompt",
+]);
+
+/** Map data field names → Share.json i18n keys */
+const FIELD_I18N_KEY: Record<string, string> = {
+  title: "fieldTitle",
+  username: "username", password: "password", url: "url", notes: "notes",
+  content: "content",
+  cardholderName: "cardholderName", cardNumber: "cardNumber", brand: "brand",
+  expiryMonth: "expiry", expiryYear: "expiry", cvv: "cvv",
+  fullName: "fullName", address: "address", phone: "phone", email: "email",
+  dateOfBirth: "dateOfBirth", nationality: "nationality", idNumber: "idNumber",
+  issueDate: "issueDate", expiryDate: "expiryDate",
+  relyingPartyId: "relyingPartyId", relyingPartyName: "relyingPartyName",
+  credentialId: "credentialId", creationDate: "creationDate", deviceInfo: "deviceInfo",
+  bankName: "bankName", accountType: "accountType", accountHolderName: "accountHolderName",
+  accountNumber: "accountNumber", routingNumber: "routingNumber",
+  swiftBic: "swiftBic", iban: "iban", branchName: "branchName",
+  softwareName: "softwareName", licenseKey: "licenseKey", version: "version",
+  licensee: "licensee", purchaseDate: "purchaseDate", expirationDate: "expirationDate",
+  privateKey: "privateKey", publicKey: "publicKey", keyType: "keyType",
+  keySize: "keySize", fingerprint: "fingerprint",
+  passphrase: "passphrase", comment: "comment",
+  customFields: "customFields",
+};
+
 export function ShareDialog({
   open,
   onOpenChange,
@@ -175,6 +206,42 @@ export function ShareDialog({
       })
       .catch(() => {});
   }, [open, teamId]);
+
+  const fieldPreview = useMemo(() => {
+    if (!decryptedData) return null;
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { totp, ...safeData } = decryptedData as Record<string, unknown>;
+    const allKeys = Object.keys(safeData).filter((k) => !INTERNAL_FIELDS.has(k));
+
+    const permissions =
+      permission === SHARE_PERMISSION.VIEW_ALL ? [] : [permission];
+    const filtered = applySharePermissions(safeData, permissions, entryType);
+    const filteredKeys = new Set(Object.keys(filtered).filter((k) => !INTERNAL_FIELDS.has(k)));
+
+    // Deduplicate expiryMonth/expiryYear → single "expiry"
+    const toLabelKey = (field: string): string | null => {
+      if (field === "expiryYear") return null; // merged into expiryMonth
+      return FIELD_I18N_KEY[field] ?? field;
+    };
+
+    const visible: string[] = [];
+    const hidden: string[] = [];
+    const seen = new Set<string>();
+
+    for (const key of allKeys) {
+      const label = toLabelKey(key);
+      if (!label || seen.has(label)) continue;
+      seen.add(label);
+      if (filteredKeys.has(key) || (key === "expiryMonth" && filteredKeys.has("expiryYear"))) {
+        visible.push(label);
+      } else {
+        hidden.push(label);
+      }
+    }
+
+    return { visible, hidden };
+  }, [decryptedData, permission, entryType]);
 
   const handleCreate = async () => {
     setCreating(true);
@@ -408,6 +475,31 @@ export function ShareDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {/* Field preview */}
+            {fieldPreview && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">{t("previewTitle")}</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {fieldPreview.visible.map((label) => (
+                    <span
+                      key={label}
+                      className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
+                    >
+                      {t(label)}
+                    </span>
+                  ))}
+                  {fieldPreview.hidden.map((label) => (
+                    <span
+                      key={label}
+                      className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800 line-through dark:bg-red-900/40 dark:text-red-300"
+                    >
+                      {t(label)} ({t("previewHidden")})
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <DialogFooter className="border-t pt-4">
               <Button onClick={handleCreate} disabled={creating}>

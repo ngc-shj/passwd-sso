@@ -25,7 +25,7 @@ const {
   mockUpdateMany: vi.fn(),
   mockUpdate: vi.fn(),
   mockTransaction: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
@@ -94,7 +94,7 @@ describe("POST /api/extension/token", () => {
 
   it("returns 429 when rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValueOnce(false);
+    mockCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST();
     const { status, json } = await parseResponse(res);
     expect(status).toBe(429);

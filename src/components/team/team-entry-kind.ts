@@ -10,6 +10,7 @@ export interface TeamEntryKindState {
   isPasskey: boolean;
   isBankAccount: boolean;
   isSoftwareLicense: boolean;
+  isSshKey: boolean;
   isLoginEntry: boolean;
 }
 
@@ -20,9 +21,12 @@ export function getTeamEntryKindState(entryType: EntryTypeValue): TeamEntryKindS
   const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
   const isBankAccount = entryType === ENTRY_TYPE.BANK_ACCOUNT;
   const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
-  const isLoginEntry = !isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense;
+  const isSshKey = entryType === ENTRY_TYPE.SSH_KEY;
+  const isLoginEntry = !isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey;
 
-  const entryKind: TeamEntryKind = isBankAccount
+  const entryKind: TeamEntryKind = isSshKey
+    ? "sshKey"
+    : isBankAccount
     ? "bankAccount"
     : isSoftwareLicense
       ? "softwareLicense"
@@ -44,6 +48,7 @@ export function getTeamEntryKindState(entryType: EntryTypeValue): TeamEntryKindS
     isPasskey,
     isBankAccount,
     isSoftwareLicense,
+    isSshKey,
     isLoginEntry,
   };
 }

@@ -57,7 +57,7 @@ describe("POST /api/vault/setup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockTransaction.mockResolvedValue([{}, {}]);
   });
 

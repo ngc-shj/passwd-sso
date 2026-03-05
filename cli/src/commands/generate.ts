@@ -17,6 +17,7 @@ export async function generateCommand(options: {
   noDigits?: boolean;
   noSymbols?: boolean;
   copy?: boolean;
+  json?: boolean;
 }): Promise<void> {
   const length = options.length ?? 20;
   if (length < 4 || length > 128) {
@@ -38,6 +39,11 @@ export async function generateCommand(options: {
     } while (val >= limit);
     return charset[val % charset.length];
   }).join("");
+
+  if (options.json) {
+    output.json({ password });
+    return;
+  }
 
   if (options.copy) {
     await copyToClipboard(password);

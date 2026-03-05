@@ -39,6 +39,7 @@ export const SENSITIVE_FIELDS: Readonly<Record<EntryTypeValue, ReadonlySet<strin
   // identifier (like a bank's routing code) and not sensitive on its own.
   BANK_ACCOUNT:     new Set(["accountNumber", "routingNumber", "iban", "customFields"]),
   SOFTWARE_LICENSE:  new Set(["licenseKey", "customFields"]),
+  SSH_KEY:           new Set(["privateKey", "passphrase", "customFields"]),
 };
 
 /** Fields to keep per entry type for OVERVIEW_ONLY. */
@@ -50,6 +51,7 @@ export const OVERVIEW_FIELDS: Readonly<Record<EntryTypeValue, ReadonlySet<string
   PASSKEY:          new Set(["title", "username", "relyingPartyName"]),
   BANK_ACCOUNT:     new Set(["title", "bankName", "accountType", "accountHolderName"]),
   SOFTWARE_LICENSE:  new Set(["title", "softwareName", "version", "licensee"]),
+  SSH_KEY:           new Set(["title", "keyType", "fingerprint", "comment"]),
 };
 
 // Fallback for unknown entry types (LOGIN-compatible, defensive copies)

@@ -5,7 +5,7 @@ import { createRequest, parseResponse } from "../../helpers/request-builder";
 const { mockAuth, mockCreate, mockCheck, mockLogAudit, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockCreate: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -50,7 +50,7 @@ const VALID_BODY = {
 describe("POST /api/sends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
   });
 
@@ -69,7 +69,7 @@ describe("POST /api/sends", () => {
 
   it("returns 429 when rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
 
     const req = createRequest("POST", "http://localhost/api/sends", {
       body: VALID_BODY,

@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Globe, Lock } from "lucide-react";
+import { Globe, Lock, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   Select,
@@ -51,7 +51,7 @@ export function VaultSelector({ value, teams, onValueChange }: VaultSelectorProp
                 {team.isCrossTenant ? (
                   <Globe className="h-4 w-4 mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
                 ) : (
-                  <Building2 className="h-4 w-4 mt-0.5 shrink-0" />
+                  <Users className="h-4 w-4 mt-0.5 shrink-0" />
                 )}
                 <span className="flex flex-col items-start">
                   <span>{team.name}</span>

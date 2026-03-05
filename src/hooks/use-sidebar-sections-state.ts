@@ -7,13 +7,15 @@ export type SidebarSection =
   | "categories"
   | "manage"
   | "security"
-  | "utilities";
+  | "settingsNav"
+  | "tools";
 
 const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
   categories: true,
   manage: true,
   security: false,
-  utilities: true,
+  settingsNav: true,
+  tools: true,
 };
 
 interface UseSidebarSectionsStateParams {
@@ -25,6 +27,9 @@ interface UseSidebarSectionsStateParams {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isAuditLog: boolean;
+  isSettingsActive: boolean;
+  isExportActive: boolean;
+  isImportActive: boolean;
 }
 
 export function useSidebarSectionsState({
@@ -36,6 +41,9 @@ export function useSidebarSectionsState({
   isShareLinks,
   isEmergencyAccess,
   isAuditLog,
+  isSettingsActive,
+  isExportActive,
+  isImportActive,
 }: UseSidebarSectionsStateParams) {
   const [collapsed, setCollapsed] = useLocalStorage<Record<SidebarSection, boolean>>(
     "sidebar-collapsed",
@@ -55,6 +63,8 @@ export function useSidebarSectionsState({
     if (selectedTypeFilter !== null) toOpen.push("categories");
     if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("manage");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
+    if (isSettingsActive) toOpen.push("settingsNav");
+    if (isExportActive || isImportActive) toOpen.push("tools");
 
     if (toOpen.length === 0) return;
 
@@ -72,6 +82,9 @@ export function useSidebarSectionsState({
     isShareLinks,
     isEmergencyAccess,
     isAuditLog,
+    isSettingsActive,
+    isExportActive,
+    isImportActive,
     setCollapsed,
   ]);
 

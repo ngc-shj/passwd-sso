@@ -106,6 +106,21 @@ const envSchema = z
     AZURE_STORAGE_SAS_TOKEN: nonEmpty.optional(),
     GCS_ATTACHMENTS_BUCKET: nonEmpty.optional(),
 
+    // --- WebAuthn ---
+    WEBAUTHN_RP_ID: z.string().optional().default(""),
+    WEBAUTHN_RP_NAME: z.string().optional(),
+    WEBAUTHN_RP_ORIGIN: nonEmpty.optional(),
+    WEBAUTHN_PRF_SECRET: hex64.optional(),
+
+    // --- Directory Sync ---
+    DIRECTORY_SYNC_MASTER_KEY: hex64.optional(),
+
+    // --- Public REST API ---
+    OPENAPI_PUBLIC: z
+      .enum(["true", "false"])
+      .default("true")
+      .transform((v) => v === "true"),
+
     // --- DB connection pool tuning (optional) ---
     DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
     DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce

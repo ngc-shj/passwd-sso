@@ -16,7 +16,7 @@ const {
     async (_userId: string, fn: () => unknown) => fn(),
   ),
   mockLogAudit: vi.fn(),
-  mockDownloadLimiterCheck: vi.fn().mockResolvedValue(true),
+  mockDownloadLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -95,7 +95,7 @@ describe("GET /api/audit-logs/download", () => {
       user: { id: "user-1" },
     });
     mockPrismaAuditLog.findMany.mockResolvedValue(MOCK_LOGS);
-    mockDownloadLimiterCheck.mockResolvedValue(true);
+    mockDownloadLimiterCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -106,7 +106,7 @@ describe("GET /api/audit-logs/download", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockDownloadLimiterCheck.mockResolvedValue(false);
+    mockDownloadLimiterCheck.mockResolvedValue({ allowed: false });
     const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
     const res = await GET(req);
     expect(res.status).toBe(429);

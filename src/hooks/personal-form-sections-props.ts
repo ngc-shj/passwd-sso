@@ -4,6 +4,7 @@ import type { ComponentProps } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
@@ -12,6 +13,7 @@ import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
 type EntryTagsAndFolderSectionProps = ComponentProps<typeof EntryTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
 type EntryRepromptSectionProps = ComponentProps<typeof EntryRepromptSection>;
+type EntryTravelSafeSectionProps = ComponentProps<typeof EntryTravelSafeSection>;
 type EntryExpirationSectionProps = ComponentProps<typeof EntryExpirationSection>;
 type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
 
@@ -22,6 +24,8 @@ interface UsePersonalFormSectionsPropsArgs {
   sectionCardClass: string;
   repromptTitle: string;
   repromptDescription: string;
+  travelSafeTitle: string;
+  travelSafeDescription: string;
   expirationTitle: string;
   expirationDescription: string;
   hasChanges: boolean;
@@ -33,7 +37,7 @@ interface UsePersonalFormSectionsPropsArgs {
   onCancel: () => void;
   values: Pick<
     PersonalLoginFormState["values"],
-    "selectedTags" | "folderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "expiresAt"
+    "selectedTags" | "folderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "travelSafe" | "expiresAt"
   >;
   setters: Pick<
     PersonalLoginFormState["setters"],
@@ -43,6 +47,7 @@ interface UsePersonalFormSectionsPropsArgs {
     | "setTotp"
     | "setShowTotpInput"
     | "setRequireReprompt"
+    | "setTravelSafe"
     | "setExpiresAt"
   >;
 }
@@ -51,6 +56,7 @@ interface PersonalFormSectionsPropsResult {
   tagsAndFolderProps: EntryTagsAndFolderSectionProps;
   customFieldsTotpProps: EntryCustomFieldsTotpSectionProps;
   repromptSectionProps: EntryRepromptSectionProps;
+  travelSafeSectionProps: EntryTravelSafeSectionProps;
   expirationSectionProps: EntryExpirationSectionProps;
   actionBarProps: EntryActionBarProps;
 }
@@ -62,6 +68,8 @@ export function buildPersonalFormSectionsProps({
   sectionCardClass,
   repromptTitle,
   repromptDescription,
+  travelSafeTitle,
+  travelSafeDescription,
   expirationTitle,
   expirationDescription,
   hasChanges,
@@ -99,6 +107,13 @@ export function buildPersonalFormSectionsProps({
       onCheckedChange: setters.setRequireReprompt,
       title: repromptTitle,
       description: repromptDescription,
+      sectionCardClass,
+    },
+    travelSafeSectionProps: {
+      checked: values.travelSafe,
+      onCheckedChange: setters.setTravelSafe,
+      title: travelSafeTitle,
+      description: travelSafeDescription,
       sectionCardClass,
     },
     expirationSectionProps: {

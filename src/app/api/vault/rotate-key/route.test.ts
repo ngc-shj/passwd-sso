@@ -27,7 +27,7 @@ vi.mock("@/lib/emergency-access-server", () => ({
   markGrantsStaleForOwner: mockMarkStale,
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => ({ check: () => Promise.resolve(true), clear: vi.fn() }),
+  createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }), clear: vi.fn() }),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },

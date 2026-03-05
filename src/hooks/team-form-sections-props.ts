@@ -4,6 +4,7 @@ import type { ComponentProps, Dispatch, SetStateAction } from "react";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
 import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
@@ -15,6 +16,7 @@ type TeamTagsAndFolderSectionProps = ComponentProps<typeof TeamTagsAndFolderSect
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
 type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
 type EntryRepromptSectionProps = ComponentProps<typeof EntryRepromptSection>;
+type EntryTravelSafeSectionProps = ComponentProps<typeof EntryTravelSafeSection>;
 type EntryExpirationSectionProps = ComponentProps<typeof EntryExpirationSection>;
 
 interface UseTeamFormSectionsPropsArgs {
@@ -35,6 +37,8 @@ interface UseTeamFormSectionsPropsArgs {
   repromptDescription: string;
   repromptPolicyForced?: boolean;
   repromptPolicyForcedLabel?: string;
+  travelSafeTitle: string;
+  travelSafeDescription: string;
   expirationTitle: string;
   expirationDescription: string;
   onCancel: () => void;
@@ -45,6 +49,7 @@ interface UseTeamFormSectionsPropsArgs {
     totp: EntryTotp | null;
     showTotpInput: boolean;
     requireReprompt: boolean;
+    travelSafe: boolean;
     expiresAt: string | null;
   };
   setters: {
@@ -54,6 +59,7 @@ interface UseTeamFormSectionsPropsArgs {
     setTotp: Dispatch<SetStateAction<EntryTotp | null>>;
     setShowTotpInput: Dispatch<SetStateAction<boolean>>;
     setRequireReprompt: Dispatch<SetStateAction<boolean>>;
+    setTravelSafe: Dispatch<SetStateAction<boolean>>;
     setExpiresAt: Dispatch<SetStateAction<string | null>>;
   };
 }
@@ -62,6 +68,7 @@ interface TeamFormSectionsPropsResult {
   tagsAndFolderProps: TeamTagsAndFolderSectionProps;
   customFieldsTotpProps: EntryCustomFieldsTotpSectionProps | null;
   repromptSectionProps: EntryRepromptSectionProps;
+  travelSafeSectionProps: EntryTravelSafeSectionProps;
   expirationSectionProps: EntryExpirationSectionProps;
   actionBarProps: EntryActionBarProps;
 }
@@ -84,6 +91,8 @@ export function buildTeamFormSectionsProps({
   repromptDescription,
   repromptPolicyForced,
   repromptPolicyForcedLabel,
+  travelSafeTitle,
+  travelSafeDescription,
   expirationTitle,
   expirationDescription,
   onCancel,
@@ -122,6 +131,13 @@ export function buildTeamFormSectionsProps({
       sectionCardClass,
       policyForced: repromptPolicyForced,
       policyForcedLabel: repromptPolicyForcedLabel,
+    },
+    travelSafeSectionProps: {
+      checked: values.travelSafe,
+      onCheckedChange: setters.setTravelSafe,
+      title: travelSafeTitle,
+      description: travelSafeDescription,
+      sectionCardClass,
     },
     expirationSectionProps: {
       value: values.expiresAt,

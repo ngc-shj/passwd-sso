@@ -8,6 +8,7 @@ export const ENTRY_TYPE = {
   PASSKEY: "PASSKEY",
   BANK_ACCOUNT: "BANK_ACCOUNT",
   SOFTWARE_LICENSE: "SOFTWARE_LICENSE",
+  SSH_KEY: "SSH_KEY",
 } as const satisfies Record<EntryType, EntryType>;
 
 /** Prisma EntryType に寄せる。独自型は作らない。 */
@@ -22,4 +23,5 @@ export const ENTRY_TYPE_VALUES = [
   ENTRY_TYPE.PASSKEY,
   ENTRY_TYPE.BANK_ACCOUNT,
   ENTRY_TYPE.SOFTWARE_LICENSE,
+  ENTRY_TYPE.SSH_KEY,
 ] as const;

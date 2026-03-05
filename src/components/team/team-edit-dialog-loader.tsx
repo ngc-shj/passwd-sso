@@ -117,8 +117,16 @@ export function TeamEditDialogLoader({
           licensee: blob.licensee as string | null | undefined,
           purchaseDate: blob.purchaseDate as string | null | undefined,
           expirationDate: blob.expirationDate as string | null | undefined,
+          privateKey: blob.privateKey as string | null | undefined,
+          publicKey: blob.publicKey as string | null | undefined,
+          keyType: blob.keyType as string | null | undefined,
+          keySize: blob.keySize as number | null | undefined,
+          fingerprint: blob.fingerprint as string | null | undefined,
+          passphrase: blob.passphrase as string | null | undefined,
+          sshComment: blob.comment as string | null | undefined,
           teamFolderId: (raw.teamFolderId as string) ?? null,
           requireReprompt: raw.requireReprompt ?? false,
+          travelSafe: (blob.travelSafe as boolean | undefined) ?? true,
           expiresAt: raw.expiresAt ?? null,
         });
         setError(null);

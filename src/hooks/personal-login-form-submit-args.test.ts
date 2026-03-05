@@ -25,6 +25,7 @@ describe("buildPersonalLoginSubmitArgs", () => {
         customFields: [],
         totp: null,
         requireReprompt: false,
+        travelSafe: true,
         expiresAt: null,
         folderId: null,
       },

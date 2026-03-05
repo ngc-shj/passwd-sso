@@ -304,7 +304,8 @@ export default function TeamSettingsPage({
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex flex-col items-start gap-2 min-w-0">
+          <div className="flex items-center gap-3">
+            <Users className="h-6 w-6" />
             <h1 className="truncate text-2xl font-bold">
               {t("teamSettings")}
             </h1>

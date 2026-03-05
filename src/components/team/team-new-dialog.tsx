@@ -14,6 +14,7 @@ import { TeamIdentityForm } from "@/components/team/team-identity-form";
 import { TeamPasskeyForm } from "@/components/team/team-passkey-form";
 import { TeamBankAccountForm } from "@/components/team/team-bank-account-form";
 import { TeamSoftwareLicenseForm } from "@/components/team/team-software-license-form";
+import { TeamSshKeyForm } from "@/components/team/team-ssh-key-form";
 import {
   toTeamLoginFormTranslations,
   useEntryFormTranslations,
@@ -74,6 +75,9 @@ export function TeamNewDialog({
       break;
     case ENTRY_TYPE.SOFTWARE_LICENSE:
       form = <TeamSoftwareLicenseForm {...shared} />;
+      break;
+    case ENTRY_TYPE.SSH_KEY:
+      form = <TeamSshKeyForm {...shared} />;
       break;
     case ENTRY_TYPE.LOGIN:
     default:

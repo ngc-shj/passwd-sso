@@ -131,7 +131,7 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
     mockPrismaTenantMemberFindFirst.mockResolvedValue(TARGET_MEMBER);
     mockPrismaAdminVaultResetCount.mockResolvedValue(0);
     mockPrismaAdminVaultResetCreate.mockResolvedValue({ id: "reset-1" });
-    mockRateLimiterCheck.mockResolvedValue(true);
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockResolveUserLocale.mockReturnValue("en");
     mockServerAppUrl.mockReturnValue("http://localhost");
     mockAdminVaultResetEmail.mockReturnValue({
@@ -215,8 +215,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
   it("returns 429 when admin rate limit is exceeded", async () => {
     // First call (admin limiter) returns false, second (target limiter) returns true
     mockRateLimiterCheck
-      .mockResolvedValueOnce(false)
-      .mockResolvedValueOnce(true);
+      .mockResolvedValueOnce({ allowed: false })
+      .mockResolvedValueOnce({ allowed: true });
     const res = await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
       createParams({ userId: TARGET_USER_ID }),
@@ -229,8 +229,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
   it("returns 429 when target rate limit is exceeded", async () => {
     // First call (admin limiter) returns true, second (target limiter) returns false
     mockRateLimiterCheck
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
+      .mockResolvedValueOnce({ allowed: true })
+      .mockResolvedValueOnce({ allowed: false });
     const res = await POST(
       createRequest("POST", `http://localhost/api/tenant/members/${TARGET_USER_ID}/reset-vault`),
       createParams({ userId: TARGET_USER_ID }),

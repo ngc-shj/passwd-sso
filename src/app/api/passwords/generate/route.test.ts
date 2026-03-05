@@ -3,7 +3,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const { mockAuth, mockCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/rate-limit", () => ({
@@ -27,7 +27,7 @@ describe("POST /api/passwords/generate", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockCheck.mockResolvedValueOnce(false);
+    mockCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords/generate", {
       body: { mode: "password", length: 16 },
     }));
