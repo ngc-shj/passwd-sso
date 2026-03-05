@@ -212,7 +212,7 @@ function derToSshEcdsa(derSig: Buffer): Buffer {
   let offset = 0;
   if (derSig[offset++] !== 0x30) throw new Error("Invalid DER sequence");
   // Skip length byte(s)
-  let seqLen = derSig[offset++];
+  const seqLen = derSig[offset++];
   if (seqLen & 0x80) {
     const lenBytes = seqLen & 0x7f;
     offset += lenBytes;
