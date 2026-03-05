@@ -13,6 +13,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
+    "generate:icons": "bash scripts/generate-icons.sh",
     "generate:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -94,7 +95,8 @@
   },
   "overrides": {
     "qs": "6.14.2",
-    "hono": "4.12.3",
+    "hono": "4.12.5",
+    "@hono/node-server": "1.19.11",
     "lodash": "4.17.23"
   }
 }

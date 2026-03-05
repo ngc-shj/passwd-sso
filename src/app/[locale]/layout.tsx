@@ -12,6 +12,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
 import { pickMessages } from "@/i18n/pick-messages";
 import { NS_GLOBAL } from "@/i18n/namespace-groups";
+import { BASE_PATH } from "@/lib/url-helpers";
 
 type Props = {
   children: React.ReactNode;
@@ -28,6 +29,14 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title: t("title"),
     description: t("description"),
+    icons: {
+      icon: [
+        { url: `${BASE_PATH}/favicon.ico`, sizes: "any" },
+        { url: `${BASE_PATH}/icon.png`, type: "image/png", sizes: "32x32" },
+        { url: `${BASE_PATH}/icon.svg`, type: "image/svg+xml" },
+      ],
+      apple: `${BASE_PATH}/apple-icon.png`,
+    },
   };
 }
 

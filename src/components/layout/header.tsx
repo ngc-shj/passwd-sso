@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { Building2, Globe, KeyRound, Lock, Menu, Plane, RefreshCw, ShieldCheck } from "lucide-react";
+import { Building2, Globe, Lock, Menu, Plane, RefreshCw, ShieldCheck } from "lucide-react";
+import { AppIcon } from "@/components/ui/app-icon";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -87,7 +88,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
         )}
 
         <div className="flex items-center gap-2 font-semibold">
-          <KeyRound className="h-5 w-5" />
+          <AppIcon className="h-5 w-5" />
           <span className="hidden sm:inline">{APP_NAME}</span>
         </div>
 
