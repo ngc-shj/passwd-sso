@@ -1,6 +1,6 @@
 # Feature Gap Analysis Report
 
-Last updated: 2026-03-02
+Last updated: 2026-03-06
 
 ## Purpose
 
@@ -35,10 +35,13 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - Passphrase verifier (HMAC-based)
 - Clipboard auto-clear (30 sec, Web UI)
 - Master-password reprompt (`requireReprompt`) for view/copy/edit
+- Passkey vault unlock (WebAuthn PRF-based passwordless unlock)
+- Travel Mode (hide sensitive entries at border crossings)
+- API key authentication (SHA-256 hashed, HMAC prefix, scoped access)
 
 ### Vault Management
 
-- 7 entry types (LOGIN, SECURE_NOTE, CREDIT_CARD, IDENTITY, PASSKEY, BANK_ACCOUNT, SOFTWARE_LICENSE)
+- 8 entry types (LOGIN, SECURE_NOTE, CREDIT_CARD, IDENTITY, PASSKEY, BANK_ACCOUNT, SOFTWARE_LICENSE, SSH_KEY)
 - Favorites / archive / trash (30-day auto purge)
 - Bulk operations (archive / trash / restore / permanent delete)
 - Tags (with color, user-scope unique constraint)
@@ -86,7 +89,12 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 ### Other
 
 - Browser extension (Chrome MV3, form detection, manual/auto fill, TOTP autofill, CC/address autofill)
-- CLI tool (login, unlock, list, get, generate, totp, export; OS keychain, XDG compliance)
+- CLI tool (login, unlock, list, get, generate, totp, export, env, run, agent, api-key, ssh-key; OS keychain, XDG compliance)
+- SSH Agent (CLI `passwd-sso agent` proxies SSH keys from vault)
+- CI/CD secrets injection (CLI `env` / `run` commands for secret injection)
+- REST API v1 (`/api/v1/*` with OpenAPI spec, scoped API key auth)
+- TOTP QR capture (camera-based QR code scanning for TOTP setup)
+- Directory sync (Azure AD, Google Workspace, Okta user provisioning)
 - Continuous dark-web monitoring (auto-monitor with email + in-app alerts)
 - i18n (ja/en, 1,300+ keys)
 - Audit logs (62 actions, personal + team)
@@ -433,17 +441,17 @@ Auto-monitor logic with 24-hour interval and vault-unlock gating. Background bre
 
 | ID | Feature | Rationale |
 | --- | --- | --- |
-| S-4 | Passkey vault unlock | Affects key-derivation design |
+| ~~S-4~~ | ~~Passkey vault unlock~~ | ✅ 2026-03-06 |
 | P-1 | Mobile app | Very high effort, likely dedicated team |
 | P-3 | Offline access | Service Worker + IndexedDB + complex sync design |
 | P-4 | Desktop app | Electron/Tauri, can be partially substituted by web |
-| E-1 | SSH keys + SSH Agent | New entry type + native process integration |
-| D-1 | SSH Agent integration | Depends on desktop/CLI direction |
-| D-2 | Secrets management | Depends on CLI + API maturity |
-| B-2 | Directory sync | SCIM foundation in place; can build on top |
+| ~~E-1~~ | ~~SSH keys + SSH Agent~~ | ✅ 2026-03-06 |
+| ~~D-1~~ | ~~SSH Agent integration~~ | ✅ 2026-03-06 |
+| ~~D-2~~ | ~~Secrets management~~ | ✅ 2026-03-06 |
+| ~~B-2~~ | ~~Directory sync~~ | ✅ 2026-03-06 |
 | V-5 | Multiple vaults | Significant key-management redesign |
 | U-1 | Email aliases | Requires mail infra integration |
-| U-3 | Travel Mode | Niche feature |
+| ~~U-3~~ | ~~Travel Mode~~ | ✅ 2026-03-06 |
 
 ---
 
@@ -498,20 +506,26 @@ Completed: 2026-03-02
 3. ~~**B-3** SIEM integration~~ ✅
 4. ~~**S-5** Session management~~ ✅
 
-### Phase 5: Platform expansion (P2 + P3)
+### Phase 5: Platform expansion (P2 + P3) — ✅ Completed
 
 ```
 Goal: Multi-platform expansion
-Started: 2026-03-04
+Completed: 2026-03-06
 ```
 
 1. ~~**P-2** CLI tool~~ ✅
 2. ~~**X-2** CC/address autofill~~ ✅
 3. ~~**U-2** Dark-web monitoring~~ ✅
 4. ~~**B-5** Admin password reset~~ ✅
-5. **E-1** SSH key management
-6. **P-1** Mobile apps (iOS / Android)
-7. **P-3** Offline access
+5. ~~**E-1** SSH key management~~ ✅
+6. ~~**D-1** SSH Agent integration~~ ✅
+7. ~~**D-2** Secrets management for CI/CD~~ ✅
+8. ~~**S-4** Passkey vault unlock~~ ✅
+9. ~~**B-2** Directory sync~~ ✅
+10. ~~**U-3** Travel Mode~~ ✅
+11. ~~**X-6** TOTP QR capture~~ ✅
+12. **P-1** Mobile apps (iOS / Android)
+13. **P-3** Offline access
 
 ---
 
@@ -528,7 +542,7 @@ Feature-category coverage:
 | KeePassXC | 7/11 | Fully local, SSH Agent, Auto-Type |
 | Proton Pass | 8/11 | Email aliases, Swiss jurisdiction, ecosystem |
 | NordPass | 7/11 | XChaCha20, email masking, offline mode |
-| **passwd-sso** | **11/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS, 7 entry types, CLI |
+| **passwd-sso** | **11/11** | E2E encryption, PQC-ready, self-hosted, SAML SSO, Send, SCIM, tenant RLS, 8 entry types, CLI, SSH Agent, REST API, Travel Mode, Directory Sync, Passkey unlock |
 
 **passwd-sso differentiators:**
 
@@ -547,8 +561,6 @@ Feature-category coverage:
 **Largest gaps:**
 
 - No mobile / desktop apps
-- Follow-on enterprise work remains in directory sync (B-2)
-- Extension gap: TOTP QR capture (X-6)
 
 **Improvements since previous report (2026-02-20):**
 
@@ -561,6 +573,7 @@ Feature-category coverage:
 - Group C completed: Bank Account + Software License entry types, BOOLEAN/DATE/MONTH_YEAR custom fields, requireReprompt/expiresAt on all 7 entry types
 - Batch D completed: notification center, login alerts, nested tags, secure note templates/Markdown, share permissions, team policies, audit download + webhooks
 - Batch E completed: CC/address autofill, dark-web monitoring, admin vault reset (tenant-level), CLI tool
+- Batch F completed: SSH key entry type, SSH Agent, CI/CD secrets, API keys, REST API v1, TOTP QR capture, Travel Mode, Directory Sync, Passkey vault unlock
 
 ---
 
@@ -646,6 +659,49 @@ Also in this batch:
 - Security headers: Referrer-Policy, X-Content-Type-Options, X-Frame-Options, HSTS, Permissions-Policy
 - Shared `isHttps` helper for AUTH_URL scheme detection
 - Audit log filter UI: Collapsible + Checkbox event groups (matching webhook event picker)
+
+**All four groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~ -> ~~D~~
+
+---
+
+## 8. Batch F — ✅ Completed (2026-03-06)
+
+Advanced features: SSH Agent, secrets management, enterprise provisioning, and passwordless unlock.
+
+### Group A: SSH Key Entry Type + SSH Agent — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~E-1~~ | ~~SSH key entry type~~ | Medium | ✅ Public/private key fields, field preview, key generation support |
+| ~~D-1~~ | ~~SSH Agent integration~~ | Medium | ✅ CLI `passwd-sso agent` proxies SSH keys from vault via Unix socket |
+
+### Group B: CI/CD Secrets + API Keys + REST API — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~D-2~~ | ~~Secrets management~~ | Medium | ✅ CLI `env` / `run` commands for CI/CD secret injection |
+| — | ~~API key management~~ | Medium | ✅ Scoped API keys with expiration (SHA-256 hashed, HMAC prefix) |
+| — | ~~REST API v1~~ | Medium | ✅ `/api/v1/*` with OpenAPI spec, passwords/tags/vault endpoints |
+
+### Group C: Travel Mode + TOTP QR Capture — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~U-3~~ | ~~Travel Mode~~ | Medium | ✅ `travelSafe` flag per entry, team/personal vault support |
+| ~~X-6~~ | ~~TOTP QR capture~~ | Low | ✅ Camera-based QR code scanning for TOTP secret setup |
+
+### Group D: Directory Sync + Passkey Vault Unlock — ✅ Completed
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~B-2~~ | ~~Directory sync~~ | High | ✅ Azure AD, Google Workspace, Okta; AES-256-GCM encrypted credentials |
+| ~~S-4~~ | ~~Passkey vault unlock~~ | Medium | ✅ WebAuthn PRF-based passwordless vault unlock |
+
+Also in this batch:
+
+- CLI commands expanded from 8 to 13 (added env, run, agent, api-key, ssh-key)
+- BLOCKED_KEYS shared module for env/run command security
+- Redis added as Docker service (session store + rate limiting)
 
 **All four groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~ -> ~~D~~
 
