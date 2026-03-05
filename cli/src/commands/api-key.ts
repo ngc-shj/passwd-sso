@@ -21,7 +21,7 @@ interface ApiKeyEntry {
   lastUsedAt: string | null;
 }
 
-export async function apiKeyListCommand(): Promise<void> {
+export async function apiKeyListCommand(options: { json?: boolean } = {}): Promise<void> {
   const res = await apiRequest<ApiKeyEntry[]>("/api/api-keys");
   if (!res.ok) {
     output.error(`Failed to list API keys: HTTP ${res.status}`);
@@ -30,7 +30,30 @@ export async function apiKeyListCommand(): Promise<void> {
 
   const keys = res.data;
   if (keys.length === 0) {
-    output.info("No API keys found.");
+    if (options.json) {
+      output.json([]);
+    } else {
+      output.info("No API keys found.");
+    }
+    return;
+  }
+
+  if (options.json) {
+    output.json(keys.map((key) => ({
+      id: key.id,
+      name: key.name,
+      prefix: key.prefix,
+      scopes: key.scopes,
+      status: key.revokedAt
+        ? "revoked"
+        : new Date(key.expiresAt) < new Date()
+          ? "expired"
+          : "active",
+      expiresAt: key.expiresAt,
+      createdAt: key.createdAt,
+      revokedAt: key.revokedAt,
+      lastUsedAt: key.lastUsedAt,
+    })));
     return;
   }
 
@@ -42,6 +65,7 @@ export async function apiKeyListCommand(): Promise<void> {
         ? "expired"
         : "active";
     rows.push([
+      key.id,
       key.name,
       key.prefix + "...",
       key.scopes.join(", "),
@@ -50,13 +74,14 @@ export async function apiKeyListCommand(): Promise<void> {
       key.lastUsedAt ? new Date(key.lastUsedAt).toLocaleDateString() : "never",
     ]);
   }
-  output.table(["Name", "Prefix", "Scopes", "Status", "Expires", "Last Used"], rows);
+  output.table(["ID", "Name", "Prefix", "Scopes", "Status", "Expires", "Last Used"], rows);
 }
 
 interface CreateOptions {
   name: string;
   scopes: string[];
   days: number;
+  json?: boolean;
 }
 
 export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
@@ -85,6 +110,18 @@ export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
     return;
   }
 
+  if (opts.json) {
+    output.json({
+      id: res.data.id,
+      token: res.data.token,
+      name: res.data.name,
+      prefix: res.data.prefix,
+      scopes: res.data.scopes,
+      expiresAt: res.data.expiresAt,
+    });
+    return;
+  }
+
   output.success("API key created:");
   console.log(`  Name:    ${res.data.name}`);
   console.log(`  Scopes:  ${res.data.scopes.join(", ")}`);
@@ -94,13 +131,21 @@ export async function apiKeyCreateCommand(opts: CreateOptions): Promise<void> {
   console.log(`  ${res.data.token}`);
 }
 
-export async function apiKeyRevokeCommand(id: string): Promise<void> {
+export async function apiKeyRevokeCommand(id: string, options: { json?: boolean } = {}): Promise<void> {
   const res = await apiRequest(`/api/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" });
   if (!res.ok) {
     const err = res.data as { error?: string };
-    output.error(`Failed to revoke API key: ${err.error ?? `HTTP ${res.status}`}`);
+    if (options.json) {
+      output.json({ success: false, error: err.error ?? `HTTP ${res.status}` });
+    } else {
+      output.error(`Failed to revoke API key: ${err.error ?? `HTTP ${res.status}`}`);
+    }
     return;
   }
 
-  output.success("API key revoked.");
+  if (options.json) {
+    output.json({ success: true, id });
+  } else {
+    output.success("API key revoked.");
+  }
 }

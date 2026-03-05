@@ -47,7 +47,8 @@ program
 program
   .command("status")
   .description("Show connection and vault status")
-  .action(statusCommand);
+  .option("--json", "Output as JSON")
+  .action((opts) => statusCommand({ json: opts.json }));
 
 program
   .command("unlock")
@@ -67,12 +68,14 @@ program
   .option("--no-digits", "Exclude digits")
   .option("--no-symbols", "Exclude symbols")
   .option("-c, --copy", "Copy to clipboard")
+  .option("--json", "Output as JSON")
   .action((opts) => generateCommand({
     length: parseInt(opts.length, 10),
     noUppercase: opts.uppercase === false,
     noDigits: opts.digits === false,
     noSymbols: opts.symbols === false,
     copy: opts.copy,
+    json: opts.json,
   }));
 
 program
@@ -96,7 +99,8 @@ const apiKeyCmd = program
 apiKeyCmd
   .command("list")
   .description("List all API keys")
-  .action(() => apiKeyListCommand());
+  .option("--json", "Output as JSON")
+  .action((opts) => apiKeyListCommand({ json: opts.json }));
 
 apiKeyCmd
   .command("create")
@@ -104,17 +108,20 @@ apiKeyCmd
   .requiredOption("-n, --name <name>", "Key name")
   .option("-s, --scopes <scopes>", "Comma-separated scopes", "passwords:read")
   .option("-d, --days <days>", "Expiry in days", "90")
+  .option("--json", "Output as JSON")
   .action((opts) => apiKeyCreateCommand({
     name: opts.name,
     scopes: opts.scopes.split(","),
     days: parseInt(opts.days, 10),
+    json: opts.json,
   }));
 
 apiKeyCmd
   .command("revoke")
   .description("Revoke an API key")
   .argument("<id>", "API key ID")
-  .action((id: string) => apiKeyRevokeCommand(id));
+  .option("--json", "Output as JSON")
+  .action((id: string, opts) => apiKeyRevokeCommand(id, { json: opts.json }));
 
 program
   .command("agent")
@@ -177,10 +184,11 @@ async function interactiveMode(): Promise<void> {
 
         case "totp":
           if (!args[1]) {
-            output.error("Usage: totp <id> [--copy]");
+            output.error("Usage: totp <id> [--copy] [--json]");
           } else {
             await totpCommand(args[1], {
               copy: args.includes("--copy") || args.includes("-c"),
+              json: args.includes("--json"),
             });
           }
           break;
@@ -199,6 +207,7 @@ async function interactiveMode(): Promise<void> {
           await generateCommand({
             length: isNaN(parsedLength) ? 20 : parsedLength,
             copy: args.includes("--copy") || args.includes("-c"),
+            json: args.includes("--json"),
           });
           break;
         }
@@ -230,15 +239,15 @@ async function interactiveMode(): Promise<void> {
         case "api-key": {
           const sub = args[1];
           if (sub === "list") {
-            await apiKeyListCommand();
+            await apiKeyListCommand({ json: args.includes("--json") });
           } else {
-            output.error("Usage: api-key list");
+            output.error("Usage: api-key list [--json]");
           }
           break;
         }
 
         case "status":
-          await statusCommand();
+          await statusCommand({ json: args.includes("--json") });
           break;
 
         case "lock":
@@ -259,12 +268,12 @@ Commands:
   list [--json]                    List all entries
   get <id> [--copy] [--json]       Show entry details
   get <id> --field password --copy Copy a specific field
-  totp <id> [--copy]               Generate TOTP code
-  generate [-l N] [--copy]         Generate password
+  totp <id> [--copy] [--json]      Generate TOTP code
+  generate [-l N] [--copy] [--json] Generate password
   export [--format json|csv] [-o file]  Export vault
   env [--format shell|dotenv|json] Output vault secrets as env vars
-  api-key list                     List API keys
-  status                           Show connection status
+  api-key list [--json]            List API keys
+  status [--json]                  Show connection status
   lock                             Lock vault and exit
           `.trim());
           break;

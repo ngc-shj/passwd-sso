@@ -9,7 +9,8 @@
  */
 
 import { loadSecretsConfig, getPasswordPath } from "../lib/secrets-config.js";
-import { getEncryptionKey, getUserId, isUnlocked } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
+import { autoUnlockIfNeeded } from "./unlock.js";
 import { getToken } from "../lib/api-client.js";
 import { loadConfig } from "../lib/config.js";
 import { decryptData } from "../lib/crypto.js";
@@ -22,7 +23,13 @@ interface EnvOptions {
 }
 
 export async function envCommand(opts: EnvOptions): Promise<void> {
-  const config = loadSecretsConfig(opts.config);
+  let config;
+  try {
+    config = loadSecretsConfig(opts.config);
+  } catch (err) {
+    output.error(err instanceof Error ? err.message : "Failed to load config.");
+    return;
+  }
   const useV1 = !!config.apiKey;
   const baseUrl = config.server.replace(/\/$/, "");
 
@@ -33,14 +40,16 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
   } else {
     const token = await getToken();
     if (!token) {
-      throw new Error("Not logged in. Run `passwd-sso login` first, or set apiKey in config.");
+      output.error("Not logged in. Run `passwd-sso login` first, or set apiKey in config.");
+      return;
     }
     authHeader = `Bearer ${token}`;
   }
 
-  // Check vault unlock
-  if (!isUnlocked()) {
-    throw new Error("Vault is not unlocked. Run `passwd-sso unlock` first, or set PSSO_PASSPHRASE.");
+  // Auto-unlock with PSSO_PASSPHRASE if needed
+  if (!await autoUnlockIfNeeded()) {
+    output.error("Vault is not unlocked. Run `passwd-sso unlock` first, or set PSSO_PASSPHRASE.");
+    return;
   }
 
   const encryptionKey = getEncryptionKey()!;

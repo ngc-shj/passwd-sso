@@ -5,9 +5,10 @@
  * Blocks certain dangerous env var names from being overwritten.
  */
 
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { loadSecretsConfig, getPasswordPath } from "../lib/secrets-config.js";
-import { getEncryptionKey, getUserId, isUnlocked } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
+import { autoUnlockIfNeeded } from "./unlock.js";
 import { getToken } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
@@ -43,10 +44,17 @@ interface RunOptions {
 
 export async function runCommand(opts: RunOptions): Promise<void> {
   if (opts.command.length === 0) {
-    throw new Error("No command specified. Usage: passwd-sso run -- <command>");
+    output.error("No command specified. Usage: passwd-sso run -- <command>");
+    process.exit(1);
   }
 
-  const config = loadSecretsConfig(opts.config);
+  let config;
+  try {
+    config = loadSecretsConfig(opts.config);
+  } catch (err) {
+    output.error(err instanceof Error ? err.message : "Failed to load config.");
+    process.exit(1);
+  }
   const useV1 = !!config.apiKey;
   const baseUrl = config.server.replace(/\/$/, "");
 
@@ -56,13 +64,15 @@ export async function runCommand(opts: RunOptions): Promise<void> {
   } else {
     const token = await getToken();
     if (!token) {
-      throw new Error("Not logged in. Run `passwd-sso login` first, or set apiKey in config.");
+      output.error("Not logged in. Run `passwd-sso login` first, or set apiKey in config.");
+      process.exit(1);
     }
     authHeader = `Bearer ${token}`;
   }
 
-  if (!isUnlocked()) {
-    throw new Error("Vault is not unlocked. Run `passwd-sso unlock` first, or set PSSO_PASSPHRASE.");
+  if (!await autoUnlockIfNeeded()) {
+    output.error("Vault is not unlocked. Run `passwd-sso unlock` first, or set PSSO_PASSPHRASE.");
+    process.exit(1);
   }
 
   const encryptionKey = getEncryptionKey()!;
@@ -120,17 +130,16 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
   // Execute command with injected env vars (shell-free)
   const [cmd, ...args] = opts.command;
-  const child = execFile(cmd, args, {
+  const child = spawn(cmd, args, {
     env: { ...process.env, ...secretEnv },
     stdio: "inherit",
-    maxBuffer: 10 * 1024 * 1024,
   });
 
-  child.on("exit", (code) => {
+  child.on("exit", (code: number | null) => {
     process.exit(code ?? 1);
   });
 
-  child.on("error", (err) => {
+  child.on("error", (err: Error) => {
     output.error(`Failed to execute: ${err.message}`);
     process.exit(1);
   });
