@@ -17,7 +17,8 @@ async function handleGET(req: NextRequest) {
   }
 
   const url = new URL(req.url);
-  const baseUrl = `${url.protocol}//${url.host}`;
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
+  const baseUrl = `${url.protocol}//${url.host}${basePath}`;
   const spec = buildOpenApiSpec(baseUrl);
 
   return NextResponse.json(spec, {
