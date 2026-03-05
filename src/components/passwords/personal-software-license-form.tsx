@@ -239,12 +239,14 @@ export function SoftwareLicenseForm({
         expirationDate: expirationDate || null,
         notes: notes || null,
         tags,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
         softwareName: softwareName || null,
         licensee: licensee || null,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
     });

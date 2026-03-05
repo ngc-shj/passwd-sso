@@ -114,7 +114,10 @@ export function useTeamBaseFormModel({
     }
 
     const tagIds = extractTagIds(selectedTags);
-    const { fullBlob, overviewBlob } = buildTeamEntryPayload(payloadInput);
+    const { fullBlob, overviewBlob } = buildTeamEntryPayload({
+      ...payloadInput,
+      travelSafe,
+    });
 
     await executeTeamEntrySubmit({
       teamId,

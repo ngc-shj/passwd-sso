@@ -239,12 +239,14 @@ export function BankAccountForm({
         branchName: branchName || null,
         notes: notes || null,
         tags,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
         bankName: bankName || null,
         accountNumberLast4,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.BANK_ACCOUNT,
     });

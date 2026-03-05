@@ -119,6 +119,7 @@ export function TeamEditDialogLoader({
           expirationDate: blob.expirationDate as string | null | undefined,
           teamFolderId: (raw.teamFolderId as string) ?? null,
           requireReprompt: raw.requireReprompt ?? false,
+          travelSafe: (blob.travelSafe as boolean | undefined) ?? true,
           expiresAt: raw.expiresAt ?? null,
         });
         setError(null);

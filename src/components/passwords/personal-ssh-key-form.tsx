@@ -240,6 +240,7 @@ export function SshKeyForm({
         comment: comment || null,
         notes: notes || null,
         tags,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
@@ -248,6 +249,7 @@ export function SshKeyForm({
         publicKey: publicKey || null,
         comment: comment || null,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.SSH_KEY,
     });

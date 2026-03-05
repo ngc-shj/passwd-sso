@@ -185,11 +185,13 @@ export function SecureNoteForm({
         content,
         tags,
         isMarkdown: true,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
         snippet,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.SECURE_NOTE,
     });

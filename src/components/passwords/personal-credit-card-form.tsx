@@ -258,6 +258,7 @@ export function CreditCardForm({
         cvv: cvv || null,
         notes: notes || null,
         tags,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
@@ -265,6 +266,7 @@ export function CreditCardForm({
         brand: normalizeCardBrand(brand) || null,
         lastFour,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.CREDIT_CARD,
     });

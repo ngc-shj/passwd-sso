@@ -220,12 +220,14 @@ export function PasskeyForm({
         deviceInfo: deviceInfo || null,
         notes: notes || null,
         tags,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
         relyingPartyId: relyingPartyId || null,
         username: username || null,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.PASSKEY,
     });

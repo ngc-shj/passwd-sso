@@ -251,12 +251,14 @@ export function IdentityForm({
         expiryDate: expiryDate || null,
         notes: notes || null,
         tags,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
         fullName: fullName || null,
         idNumberLast4,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.IDENTITY,
     });
