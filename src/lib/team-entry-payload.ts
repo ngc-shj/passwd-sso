@@ -55,6 +55,14 @@ export interface BuildTeamEntryPayloadInput {
   licensee?: string;
   purchaseDate?: string;
   expirationDate?: string;
+
+  privateKey?: string;
+  publicKey?: string;
+  keyType?: string;
+  keySize?: number;
+  fingerprint?: string;
+  passphrase?: string;
+  sshComment?: string;
 }
 
 /**
@@ -125,6 +133,17 @@ export function buildTeamEntryPayload(
         email: input.email?.trim() || null,
         purchaseDate: input.purchaseDate || null,
         expirationDate: input.expirationDate || null,
+      };
+      break;
+    case ENTRY_TYPE.SSH_KEY:
+      entryFields = {
+        privateKey: input.privateKey?.trim() || null,
+        publicKey: input.publicKey?.trim() || null,
+        keyType: input.keyType || null,
+        keySize: input.keySize || null,
+        fingerprint: input.fingerprint || null,
+        passphrase: input.passphrase || null,
+        comment: input.sshComment?.trim() || null,
       };
       break;
     case ENTRY_TYPE.SECURE_NOTE:
@@ -208,6 +227,16 @@ export function buildTeamEntryPayload(
         title,
         softwareName: input.softwareName?.trim() || null,
         licensee: input.licensee?.trim() || null,
+        tags,
+      };
+      break;
+    case ENTRY_TYPE.SSH_KEY:
+      overviewData = {
+        title,
+        keyType: input.keyType || null,
+        fingerprint: input.fingerprint || null,
+        publicKey: input.publicKey?.trim() || null,
+        comment: input.sshComment?.trim() || null,
         tags,
       };
       break;

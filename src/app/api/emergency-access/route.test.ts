@@ -9,7 +9,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, moc
     findMany: vi.fn(),
   },
   mockPrismaUser: { findUnique: vi.fn(), findFirst: vi.fn() },
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSendEmail: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
@@ -61,7 +61,7 @@ describe("POST /api/emergency-access", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockCheck.mockResolvedValueOnce(false);
+    mockCheck.mockResolvedValueOnce({ allowed: false });
     const res = await POST(createRequest("POST", "http://localhost/api/emergency-access", {
       body: { granteeEmail: "grantee@test.com", waitDays: 7 },
     }));

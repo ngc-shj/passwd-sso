@@ -80,5 +80,10 @@
   "scimFilterInvalid": "Invalid SCIM filter expression.",
   "scimUnsupportedOperation": "Unsupported SCIM operation.",
   "scimResourceExists": "Resource already exists.",
-  "scimTokenLimitExceeded": "Maximum number of SCIM tokens reached. Please revoke unused tokens first."
+  "scimTokenLimitExceeded": "Maximum number of SCIM tokens reached. Please revoke unused tokens first.",
+  "apiKeyLimitExceeded": "Maximum number of API keys reached. Please revoke unused keys first.",
+  "apiKeyNotFound": "API key not found.",
+  "apiKeyAlreadyRevoked": "API key has already been revoked.",
+  "apiKeyInvalid": "Invalid API key.",
+  "apiKeyScopeInsufficient": "API key does not have the required scope."
 }

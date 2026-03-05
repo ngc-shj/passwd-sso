@@ -21,7 +21,7 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  if (!(await generateLimiter.check(`rl:pw_generate:${session.user.id}`))) {
+  if (!(await generateLimiter.check(`rl:pw_generate:${session.user.id}`)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }

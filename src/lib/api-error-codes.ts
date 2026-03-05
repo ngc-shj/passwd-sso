@@ -148,6 +148,13 @@ export const API_ERROR = {
   SCIM_UNSUPPORTED_OPERATION: "SCIM_UNSUPPORTED_OPERATION",
   SCIM_RESOURCE_EXISTS: "SCIM_RESOURCE_EXISTS",
   SCIM_TOKEN_LIMIT_EXCEEDED: "SCIM_TOKEN_LIMIT_EXCEEDED",
+
+  // ── API Keys ───────────────────────────────────────────────
+  API_KEY_LIMIT_EXCEEDED: "API_KEY_LIMIT_EXCEEDED",
+  API_KEY_NOT_FOUND: "API_KEY_NOT_FOUND",
+  API_KEY_ALREADY_REVOKED: "API_KEY_ALREADY_REVOKED",
+  API_KEY_INVALID: "API_KEY_INVALID",
+  API_KEY_SCOPE_INSUFFICIENT: "API_KEY_SCOPE_INSUFFICIENT",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -256,6 +263,11 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   SCIM_UNSUPPORTED_OPERATION: "scimUnsupportedOperation",
   SCIM_RESOURCE_EXISTS: "scimResourceExists",
   SCIM_TOKEN_LIMIT_EXCEEDED: "scimTokenLimitExceeded",
+  API_KEY_LIMIT_EXCEEDED: "apiKeyLimitExceeded",
+  API_KEY_NOT_FOUND: "apiKeyNotFound",
+  API_KEY_ALREADY_REVOKED: "apiKeyAlreadyRevoked",
+  API_KEY_INVALID: "apiKeyInvalid",
+  API_KEY_SCOPE_INSUFFICIENT: "apiKeyScopeInsufficient",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

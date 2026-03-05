@@ -18,6 +18,7 @@ export interface PersonalLoginFormInitialValues {
   totp: EntryTotp | null;
   showTotpInput: boolean;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   folderId: string | null;
 }
@@ -38,6 +39,7 @@ export function buildPersonalLoginFormInitialValues(
     totp: initialData?.totp ?? null,
     showTotpInput: Boolean(initialData?.totp),
     requireReprompt: initialData?.requireReprompt ?? false,
+    travelSafe: initialData?.travelSafe ?? true,
     expiresAt: initialData?.expiresAt ?? null,
     folderId: initialData?.folderId ?? defaults?.defaultFolderId ?? null,
   };

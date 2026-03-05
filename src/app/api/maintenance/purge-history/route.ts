@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   }
 
   const rateKey = `rl:purge_history:${session.user.id}`;
-  if (!(await purgeLimiter.check(rateKey))) {
+  if (!(await purgeLimiter.check(rateKey)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

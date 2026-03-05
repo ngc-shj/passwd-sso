@@ -8,6 +8,7 @@ import { IdentityForm } from "./personal-identity-form";
 import { PasskeyForm } from "./personal-passkey-form";
 import { BankAccountForm } from "./personal-bank-account-form";
 import { SoftwareLicenseForm } from "./personal-software-license-form";
+import { SshKeyForm } from "./personal-ssh-key-form";
 import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
 import { PersonalEntryDialogShell } from "./personal-entry-dialog-shell";
 import type { PersonalPasswordEditData } from "./personal-password-edit-dialog-types";
@@ -37,6 +38,7 @@ export function PasswordEditDialog({
   const tpk = useTranslations("PasskeyForm");
   const tba = useTranslations("BankAccountForm");
   const tsl = useTranslations("SoftwareLicenseForm");
+  const tsk = useTranslations("SshKeyForm");
 
   const handleSaved = () => {
     onOpenChange(false);
@@ -53,8 +55,11 @@ export function PasswordEditDialog({
   const isPasskey = editData.entryType === ENTRY_TYPE.PASSKEY;
   const isBankAccount = editData.entryType === ENTRY_TYPE.BANK_ACCOUNT;
   const isSoftwareLicense = editData.entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
+  const isSshKey = editData.entryType === ENTRY_TYPE.SSH_KEY;
 
-  const dialogTitle = isBankAccount
+  const dialogTitle = isSshKey
+    ? tsk("editSshKey")
+    : isBankAccount
     ? tba("editBankAccount")
     : isSoftwareLicense
     ? tsl("editLicense")
@@ -74,7 +79,30 @@ export function PasswordEditDialog({
       onOpenChange={onOpenChange}
       title={dialogTitle}
     >
-        {isBankAccount ? (
+        {isSshKey ? (
+          <SshKeyForm
+            mode="edit"
+            variant="dialog"
+            initialData={{
+              id: editData.id,
+              title: editData.title,
+              privateKey: editData.privateKey ?? null,
+              publicKey: editData.publicKey ?? null,
+              keyType: editData.keyType ?? null,
+              keySize: editData.keySize ?? null,
+              fingerprint: editData.fingerprint ?? null,
+              passphrase: editData.passphrase ?? null,
+              comment: editData.sshComment ?? null,
+              notes: editData.notes,
+              tags: editData.tags,
+              folderId: editData.folderId ?? null,
+              requireReprompt: editData.requireReprompt ?? false,
+              expiresAt: editData.expiresAt ?? null,
+            }}
+            onSaved={handleSaved}
+            onCancel={handleCancel}
+          />
+        ) : isBankAccount ? (
           <BankAccountForm
             mode="edit"
             variant="dialog"

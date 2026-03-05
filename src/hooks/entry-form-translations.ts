@@ -8,6 +8,7 @@ import type {
   PasskeyFormTranslator,
   SecureNoteFormTranslator,
   SoftwareLicenseFormTranslator,
+  SshKeyFormTranslator,
 } from "@/lib/translation-types";
 
 export interface PersonalLoginFormTranslations {
@@ -25,6 +26,7 @@ export interface TeamLoginFormTranslations {
   tpk: PasskeyFormTranslator;
   tba: BankAccountFormTranslator;
   tsl: SoftwareLicenseFormTranslator;
+  tsk: SshKeyFormTranslator;
 }
 
 export interface EntryFormTranslationsBundle {
@@ -37,6 +39,7 @@ export interface EntryFormTranslationsBundle {
   tpk: PasskeyFormTranslator;
   tba: BankAccountFormTranslator;
   tsl: SoftwareLicenseFormTranslator;
+  tsk: SshKeyFormTranslator;
 }
 
 export function toPersonalLoginFormTranslations(
@@ -61,5 +64,6 @@ export function toTeamLoginFormTranslations(
     tpk: translations.tpk,
     tba: translations.tba,
     tsl: translations.tsl,
+    tsk: translations.tsk,
   };
 }

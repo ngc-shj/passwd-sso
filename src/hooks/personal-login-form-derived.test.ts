@@ -97,6 +97,7 @@ function buildValues(overrides: Partial<{
     customFields: [],
     totp: null,
     requireReprompt: false,
+    travelSafe: true,
     expiresAt: null,
     folderId: overrides.folderId ?? null,
   };
@@ -118,6 +119,7 @@ function buildEmptyValues(overrides: Partial<{
     customFields: [],
     totp: null,
     requireReprompt: false,
+    travelSafe: true,
     expiresAt: null,
     folderId: overrides.folderId ?? null,
   };

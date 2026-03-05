@@ -51,6 +51,13 @@ export interface ParsedEntry {
   licensee: string;
   purchaseDate: string;
   expirationDate: string;
+  privateKey: string;
+  publicKey: string;
+  keyType: string;
+  keySize: string;
+  fingerprint: string;
+  sshPassphrase: string;
+  sshComment: string;
   tags: EntryTagNameColor[];
   customFields: EntryCustomFieldPortable[];
   totp: EntryTotpPortable | null;

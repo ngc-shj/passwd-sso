@@ -45,7 +45,7 @@ async function handlePOST(request: Request) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  if (!(await setupLimiter.check(`rl:vault_setup:${session.user.id}`))) {
+  if (!(await setupLimiter.check(`rl:vault_setup:${session.user.id}`)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }

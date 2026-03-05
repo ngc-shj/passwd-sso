@@ -8,6 +8,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 const limiter = createRateLimiter({ windowMs: 60_000, max: 200 });
 
 /** Returns true if allowed, false if rate-limited. */
-export function checkScimRateLimit(scopeId: string): Promise<boolean> {
-  return limiter.check(`rl:scim:${scopeId}`);
+export async function checkScimRateLimit(scopeId: string): Promise<boolean> {
+  const { allowed } = await limiter.check(`rl:scim:${scopeId}`);
+  return allowed;
 }

@@ -1,0 +1,30 @@
+import { NextRequest, NextResponse } from "next/server";
+import { buildOpenApiSpec } from "@/lib/openapi-spec";
+import { authOrToken } from "@/lib/auth-or-token";
+import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/api-error-codes";
+
+const isPublic = process.env.OPENAPI_PUBLIC !== "false";
+
+// GET /api/v1/openapi.json — OpenAPI 3.1 specification
+async function handleGET(req: NextRequest) {
+  if (!isPublic) {
+    // Require any valid auth (session, extension token, or API key)
+    const result = await authOrToken(req);
+    if (!result) {
+      return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    }
+  }
+
+  const url = new URL(req.url);
+  const baseUrl = `${url.protocol}//${url.host}`;
+  const spec = buildOpenApiSpec(baseUrl);
+
+  return NextResponse.json(spec, {
+    headers: {
+      "Cache-Control": "public, max-age=3600",
+    },
+  });
+}
+
+export const GET = withRequestLog(handleGET);

@@ -67,7 +67,7 @@ describe("POST /api/vault/unlock", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: `user-${Date.now()}-${Math.random()}` } });
     mockPrismaVaultKey.findUnique.mockResolvedValue(null);
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockRateLimiter.clear.mockResolvedValue(undefined);
     mockCheckLockout.mockResolvedValue({ locked: false, lockedUntil: null });
     mockRecordFailure.mockResolvedValue({ locked: false, lockedUntil: null, attempts: 1 });
@@ -166,7 +166,7 @@ describe("POST /api/vault/unlock", () => {
   });
 
   it("returns 429 when rate limiter denies request", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
 
     const res = await POST(makeUnlockRequest());
     expect(res.status).toBe(429);
@@ -194,7 +194,7 @@ describe("POST /api/vault/unlock", () => {
   it("uses userId-only rate key (no IP)", async () => {
     const userId = "test-user-rate";
     mockAuth.mockResolvedValue({ user: { id: userId } });
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
 
     await POST(makeUnlockRequest());
     expect(mockRateLimiter.check).toHaveBeenCalledWith(`rl:vault_unlock:${userId}`);

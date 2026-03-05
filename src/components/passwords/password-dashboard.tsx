@@ -22,7 +22,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare, Landmark, KeySquare, FolderOpen, Tag } from "lucide-react";
+import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare, Landmark, KeySquare, FolderOpen, Tag, Terminal } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -76,6 +76,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     PASSKEY: t("catPasskey"),
     BANK_ACCOUNT: t("catBankAccount"),
     SOFTWARE_LICENSE: t("catSoftwareLicense"),
+    SSH_KEY: t("catSshKey"),
   };
 
   const folderLabel = folderId ? buildFolderPath(folderId, folders) : null;
@@ -100,6 +101,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     PASSKEY: <Fingerprint className="h-6 w-6" />,
     BANK_ACCOUNT: <Landmark className="h-6 w-6" />,
     SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
+    SSH_KEY: <Terminal className="h-6 w-6" />,
   };
 
   const headerIcon = isTrash
@@ -311,6 +313,10 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                         <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SOFTWARE_LICENSE); setNewDialogOpen(true); }}>
                           <KeySquare className="h-4 w-4 mr-2" />
                           {t("newSoftwareLicense")}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => { setNewEntryType(ENTRY_TYPE.SSH_KEY); setNewDialogOpen(true); }}>
+                          <Terminal className="h-4 w-4 mr-2" />
+                          {t("newSshKey")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

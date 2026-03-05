@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   }
   const sessionEmail = session.user.email;
 
-  if (!(await createLimiter.check(`rl:ea_create:${session.user.id}`))) {
+  if (!(await createLimiter.check(`rl:ea_create:${session.user.id}`)).allowed) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 

@@ -81,6 +81,13 @@ export interface InlineDetailData {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  sshPassphrase?: string | null;
+  sshComment?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,6 +126,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const [showRoutingNumber, setShowRoutingNumber] = useState(false);
   const [showIban, setShowIban] = useState(false);
   const [showLicenseKey, setShowLicenseKey] = useState(false);
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
 
   // Attachment state
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
@@ -182,6 +190,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const isPasskey = data.entryType === ENTRY_TYPE.PASSKEY;
   const isBankAccount = data.entryType === ENTRY_TYPE.BANK_ACCOUNT;
   const isSoftwareLicense = data.entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
+  const isSshKey = data.entryType === ENTRY_TYPE.SSH_KEY;
 
   const handleRevealCredentialId = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
@@ -218,9 +227,106 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
+  const handleRevealPrivateKey = useCallback(() => {
+    requireVerification(data.id, data.requireReprompt ?? false, () => {
+      setShowPrivateKey(true);
+      setTimeout(() => setShowPrivateKey(false), REVEAL_TIMEOUT);
+    });
+  }, [data.id, data.requireReprompt, requireVerification]);
+
   return (
     <div className="space-y-3 border-t pt-3 px-4 pb-3">
-      {isBankAccount ? (
+      {isSshKey ? (
+        <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+          {/* Key Type + Key Size */}
+          {data.keyType && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("keyType")}</label>
+              <p className="text-sm font-mono">{data.keyType}</p>
+            </div>
+          )}
+          {data.keySize && (
+            <div className="space-y-1">
+              <label className="text-sm text-muted-foreground">{t("keySize")}</label>
+              <p className="text-sm font-mono">{data.keySize}</p>
+            </div>
+          )}
+
+          {/* Fingerprint */}
+          {data.fingerprint && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("fingerprint")}</label>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm break-all">{data.fingerprint}</span>
+                <CopyButton getValue={() => data.fingerprint ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Public Key */}
+          {data.publicKey && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("publicKey")}</label>
+              <div className="flex items-start gap-2">
+                <pre className="rounded-lg border bg-muted/30 p-3 text-xs font-mono whitespace-pre-wrap break-all flex-1 overflow-hidden">
+                  {data.publicKey}
+                </pre>
+                <CopyButton getValue={() => data.publicKey ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Private Key */}
+          {data.privateKey && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("privateKey")}</label>
+              <div className="flex items-start gap-2">
+                <pre className="rounded-lg border bg-muted/30 p-3 text-xs font-mono whitespace-pre-wrap break-all flex-1 overflow-hidden">
+                  {showPrivateKey ? data.privateKey : "••••••••"}
+                </pre>
+                <div className="flex flex-col gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
+                    onClick={showPrivateKey ? () => setShowPrivateKey(false) : handleRevealPrivateKey}
+                  >
+                    {showPrivateKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                  <CopyButton
+                    getValue={createGuardedGetter(
+                      data.id,
+                      data.requireReprompt ?? false,
+                      () => data.privateKey ?? "",
+                    )}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Comment */}
+          {data.sshComment && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("sshComment")}</label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm">{data.sshComment}</span>
+                <CopyButton getValue={() => data.sshComment ?? ""} />
+              </div>
+            </div>
+          )}
+
+          {/* Notes */}
+          {data.notes && (
+            <div className="col-span-2 space-y-1">
+              <label className="text-sm text-muted-foreground">{t("notes")}</label>
+              <p className="rounded-lg border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
+                {data.notes}
+              </p>
+            </div>
+          )}
+        </div>
+      ) : isBankAccount ? (
         <div className="grid grid-cols-2 gap-x-4 gap-y-3">
           {/* Bank Name */}
           {data.bankName && (

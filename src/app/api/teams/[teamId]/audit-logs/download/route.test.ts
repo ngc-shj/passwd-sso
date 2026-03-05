@@ -26,7 +26,7 @@ const { mockAuth, mockPrismaAuditLog, mockRequireTeamPermission, TeamAuthError, 
     mockExtractRequestMeta: vi.fn(() => ({ ip: null, userAgent: null })),
     mockAssertPolicyAllowsExport: vi.fn(),
     PolicyViolationError: _PolicyViolationError,
-    mockCheckRateLimit: vi.fn().mockResolvedValue(true),
+    mockCheckRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
   };
 });
 
@@ -76,7 +76,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: "OWNER" });
     mockAssertPolicyAllowsExport.mockResolvedValue(undefined);
-    mockCheckRateLimit.mockResolvedValue(true);
+    mockCheckRateLimit.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -127,7 +127,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
   });
 
   it("returns 429 when rate limit exceeded", async () => {
-    mockCheckRateLimit.mockResolvedValue(false);
+    mockCheckRateLimit.mockResolvedValue({ allowed: false });
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
       createParams({ teamId: TEAM_ID }),

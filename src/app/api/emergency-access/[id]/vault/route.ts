@@ -19,7 +19,7 @@ export async function GET(
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  if (!(await vaultLimiter.check(`rl:ea_vault:${session.user.id}`))) {
+  if (!(await vaultLimiter.check(`rl:ea_vault:${session.user.id}`)).allowed) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 

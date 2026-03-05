@@ -67,6 +67,8 @@ interface TeamPasswordEntry {
   accountNumberLast4: string | null;
   softwareName: string | null;
   licensee: string | null;
+  keyType: string | null;
+  fingerprint: string | null;
   requireReprompt: boolean;
   expiresAt: string | null;
   isFavorite: boolean;
@@ -207,6 +209,8 @@ export default function TeamDashboardPage({
               accountNumberLast4: overview.accountNumberLast4 ?? null,
               softwareName: overview.softwareName ?? null,
               licensee: overview.licensee ?? null,
+              keyType: overview.keyType ?? null,
+              fingerprint: overview.fingerprint ?? null,
               requireReprompt: entry.requireReprompt ?? false,
               expiresAt: entry.expiresAt ?? null,
               isFavorite: entry.isFavorite,
@@ -235,6 +239,8 @@ export default function TeamDashboardPage({
               accountNumberLast4: null,
               softwareName: null,
               licensee: null,
+              keyType: null,
+              fingerprint: null,
               requireReprompt: (entry.requireReprompt as boolean) ?? false,
               expiresAt: (entry.expiresAt as string | null) ?? null,
               isFavorite: entry.isFavorite as boolean,
@@ -460,6 +466,13 @@ export default function TeamDashboardPage({
         licensee: blob.licensee as string | undefined,
         purchaseDate: blob.purchaseDate as string | undefined,
         expirationDate: blob.expirationDate as string | undefined,
+        privateKey: blob.privateKey as string | undefined,
+        publicKey: blob.publicKey as string | undefined,
+        keyType: blob.keyType as string | undefined,
+        keySize: blob.keySize as number | undefined,
+        fingerprint: blob.fingerprint as string | undefined,
+        sshPassphrase: blob.passphrase as string | undefined,
+        sshComment: blob.comment as string | undefined,
         createdAt: raw.createdAt,
         updatedAt: raw.updatedAt,
       };
@@ -506,7 +519,9 @@ export default function TeamDashboardPage({
       p.bankName?.toLowerCase().includes(q) ||
       p.accountNumberLast4?.includes(q) ||
       p.softwareName?.toLowerCase().includes(q) ||
-      p.licensee?.toLowerCase().includes(q)
+      p.licensee?.toLowerCase().includes(q) ||
+      p.keyType?.toLowerCase().includes(q) ||
+      p.fingerprint?.toLowerCase().includes(q)
     );
   });
   const sortedFiltered = [...filtered].sort((a, b) =>
@@ -786,6 +801,8 @@ export default function TeamDashboardPage({
                       accountNumberLast4={entry.accountNumberLast4}
                       softwareName={entry.softwareName}
                       licensee={entry.licensee}
+                      keyType={entry.keyType}
+                      fingerprint={entry.fingerprint}
                       requireReprompt={entry.requireReprompt}
                       expiresAt={entry.expiresAt}
                       tags={entry.tags}
@@ -836,6 +853,8 @@ export default function TeamDashboardPage({
                   accountNumberLast4={entry.accountNumberLast4}
                   softwareName={entry.softwareName}
                   licensee={entry.licensee}
+                  keyType={entry.keyType}
+                  fingerprint={entry.fingerprint}
                   requireReprompt={entry.requireReprompt}
                   expiresAt={entry.expiresAt}
                   tags={entry.tags}

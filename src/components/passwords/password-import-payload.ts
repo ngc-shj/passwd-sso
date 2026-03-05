@@ -133,6 +133,32 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
     };
   }
 
+  if (entry.entryType === ENTRY_TYPE.SSH_KEY) {
+    return {
+      fullBlob: JSON.stringify({
+        title: entry.title,
+        privateKey: entry.privateKey || null,
+        publicKey: entry.publicKey || null,
+        keyType: entry.keyType || null,
+        keySize: entry.keySize ? Number(entry.keySize) || null : null,
+        fingerprint: entry.fingerprint || null,
+        passphrase: entry.sshPassphrase || null,
+        comment: entry.sshComment || null,
+        notes: entry.notes || null,
+        tags: entry.tags,
+      }),
+      overviewBlob: JSON.stringify({
+        title: entry.title,
+        keyType: entry.keyType || null,
+        fingerprint: entry.fingerprint || null,
+        publicKey: entry.publicKey || null,
+        comment: entry.sshComment || null,
+        tags: entry.tags,
+        requireReprompt: entry.requireReprompt,
+      }),
+    };
+  }
+
   if (entry.entryType === ENTRY_TYPE.SECURE_NOTE) {
     return {
       fullBlob: JSON.stringify({

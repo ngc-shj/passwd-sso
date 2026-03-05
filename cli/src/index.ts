@@ -17,6 +17,10 @@ import { getCommand } from "./commands/get.js";
 import { generateCommand } from "./commands/generate.js";
 import { totpCommand } from "./commands/totp.js";
 import { exportCommand } from "./commands/export.js";
+import { envCommand } from "./commands/env.js";
+import { runCommand } from "./commands/run.js";
+import { apiKeyListCommand, apiKeyCreateCommand, apiKeyRevokeCommand } from "./commands/api-key.js";
+import { agentCommand } from "./commands/agent.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
 import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
@@ -70,6 +74,53 @@ program
     noSymbols: opts.symbols === false,
     copy: opts.copy,
   }));
+
+program
+  .command("env")
+  .description("Output vault secrets as environment variables")
+  .option("-c, --config <path>", "Path to .passwd-sso-env.json")
+  .option("--format <format>", "Output format: shell, dotenv, json", "shell")
+  .action((opts) => envCommand({ config: opts.config, format: opts.format }));
+
+program
+  .command("run")
+  .description("Inject vault secrets into a command's environment")
+  .option("-c, --config <path>", "Path to .passwd-sso-env.json")
+  .argument("<command...>", "Command to execute")
+  .action((command: string[], opts) => runCommand({ config: opts.config, command }));
+
+const apiKeyCmd = program
+  .command("api-key")
+  .description("Manage API keys");
+
+apiKeyCmd
+  .command("list")
+  .description("List all API keys")
+  .action(() => apiKeyListCommand());
+
+apiKeyCmd
+  .command("create")
+  .description("Create a new API key")
+  .requiredOption("-n, --name <name>", "Key name")
+  .option("-s, --scopes <scopes>", "Comma-separated scopes", "passwords:read")
+  .option("-d, --days <days>", "Expiry in days", "90")
+  .action((opts) => apiKeyCreateCommand({
+    name: opts.name,
+    scopes: opts.scopes.split(","),
+    days: parseInt(opts.days, 10),
+  }));
+
+apiKeyCmd
+  .command("revoke")
+  .description("Revoke an API key")
+  .argument("<id>", "API key ID")
+  .action((id: string) => apiKeyRevokeCommand(id));
+
+program
+  .command("agent")
+  .description("Start SSH agent backed by vault SSH keys")
+  .option("--eval", "Output shell eval-compatible commands")
+  .action((opts) => agentCommand({ eval: opts.eval }));
 
 program.parse();
 
@@ -164,6 +215,28 @@ async function interactiveMode(): Promise<void> {
           break;
         }
 
+        case "env": {
+          const envFmtIdx = args.indexOf("--format");
+          const envConfIdx = args.indexOf("-c");
+          const envConfIdx2 = args.indexOf("--config");
+          const envCIdx = envConfIdx !== -1 ? envConfIdx : envConfIdx2;
+          await envCommand({
+            config: envCIdx !== -1 ? args[envCIdx + 1] : undefined,
+            format: envFmtIdx !== -1 ? args[envFmtIdx + 1] : "shell",
+          });
+          break;
+        }
+
+        case "api-key": {
+          const sub = args[1];
+          if (sub === "list") {
+            await apiKeyListCommand();
+          } else {
+            output.error("Usage: api-key list");
+          }
+          break;
+        }
+
         case "status":
           await statusCommand();
           break;
@@ -189,6 +262,8 @@ Commands:
   totp <id> [--copy]               Generate TOTP code
   generate [-l N] [--copy]         Generate password
   export [--format json|csv] [-o file]  Export vault
+  env [--format shell|dotenv|json] Output vault secrets as env vars
+  api-key list                     List API keys
   status                           Show connection status
   lock                             Lock vault and exit
           `.trim());

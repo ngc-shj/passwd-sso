@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
 
   const { tokenId, userId, scopes } = result.data;
 
-  if (!(await refreshLimiter.check(`rl:ext_refresh:${userId}`))) {
+  if (!(await refreshLimiter.check(`rl:ext_refresh:${userId}`)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

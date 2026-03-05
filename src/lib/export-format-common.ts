@@ -50,6 +50,13 @@ export interface ExportEntry {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  sshPassphrase?: string | null;
+  sshComment?: string | null;
   tags: EntryTagNameColor[];
   customFields: EntryCustomFieldPortable[];
   totpConfig: EntryTotpPortable | null;
@@ -90,13 +97,14 @@ interface CsvTypeOptions {
 export function csvEntryType(
   entryType: EntryTypeValue,
   options: CsvTypeOptions
-): "passkey" | "identity" | "card" | "securenote" | "bankaccount" | "softwarelicense" | "login" {
+): "passkey" | "identity" | "card" | "securenote" | "bankaccount" | "softwarelicense" | "sshkey" | "login" {
   if (options.includePasskeyType && entryType === ENTRY_TYPE.PASSKEY) return "passkey";
   if (entryType === ENTRY_TYPE.IDENTITY) return "identity";
   if (entryType === ENTRY_TYPE.CREDIT_CARD) return "card";
   if (entryType === ENTRY_TYPE.SECURE_NOTE) return "securenote";
   if (entryType === ENTRY_TYPE.BANK_ACCOUNT) return "bankaccount";
   if (entryType === ENTRY_TYPE.SOFTWARE_LICENSE) return "softwarelicense";
+  if (entryType === ENTRY_TYPE.SSH_KEY) return "sshkey";
   return "login";
 }
 
@@ -307,6 +315,29 @@ export function formatExportJson(
           };
         }
 
+        if (e.entryType === ENTRY_TYPE.SSH_KEY) {
+          return {
+            ...folderFavorite,
+            type: "sshkey",
+            name: e.title,
+            sshKey: {
+              privateKey: e.password || null,
+              publicKey: e.publicKey,
+              keyType: e.keyType,
+              keySize: e.keySize,
+              fingerprint: e.fingerprint,
+              passphrase: e.sshPassphrase,
+              comment: e.sshComment,
+            },
+            notes: e.notes,
+            ...withReprompt(e, options.includeReprompt),
+            ...withPasswdSsoMeta(
+              profile,
+              basePasswdSsoMeta(e, options.includeRequireRepromptInPasswdSso)
+            ),
+          };
+        }
+
         if (e.entryType === ENTRY_TYPE.SECURE_NOTE) {
           return {
             ...folderFavorite,
@@ -405,6 +436,13 @@ function passwdSsoCsvPayload(
     licensee: entry.licensee,
     purchaseDate: entry.purchaseDate,
     expirationDate: entry.expirationDate,
+    privateKey: entry.privateKey,
+    publicKey: entry.publicKey,
+    keyType: entry.keyType,
+    keySize: entry.keySize,
+    fingerprint: entry.fingerprint,
+    sshPassphrase: entry.sshPassphrase,
+    sshComment: entry.sshComment,
   });
 }
 
@@ -421,10 +459,11 @@ export function formatExportCsv(
     const isPasskey = entry.entryType === ENTRY_TYPE.PASSKEY;
     const isBankAccount = entry.entryType === ENTRY_TYPE.BANK_ACCOUNT;
     const isSoftwareLicense = entry.entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
+    const isSshKey = entry.entryType === ENTRY_TYPE.SSH_KEY;
     const type = csvEntryType(entry.entryType, {
       includePasskeyType: options.includePasskeyType,
     });
-    const isLogin = !isNote && !isCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense;
+    const isLogin = !isNote && !isCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey;
     const passwdSso = passwdSsoCsvPayload(entry, {
       includeRequireRepromptInPasswdSso:
         options.includeRequireRepromptInPasswdSso,

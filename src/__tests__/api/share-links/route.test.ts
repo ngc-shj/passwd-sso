@@ -55,7 +55,7 @@ vi.mock("@/lib/team-policy", () => ({
 }));
 
 const { mockCheck } = vi.hoisted(() => ({
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
@@ -176,7 +176,7 @@ describe("POST /api/share-links", () => {
 
   it("returns 429 when rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValueOnce(false);
+    mockCheck.mockResolvedValueOnce({ allowed: false });
 
     const req = createRequest("POST", "http://localhost/api/share-links", {
       body: {

@@ -72,6 +72,13 @@ export function parsePasswdSsoPayload(raw: string | undefined): Partial<ParsedEn
       licensee: typeof parsed.licensee === "string" ? parsed.licensee : "",
       purchaseDate: typeof parsed.purchaseDate === "string" ? parsed.purchaseDate : "",
       expirationDate: typeof parsed.expirationDate === "string" ? parsed.expirationDate : "",
+      privateKey: typeof parsed.privateKey === "string" ? parsed.privateKey : "",
+      publicKey: typeof parsed.publicKey === "string" ? parsed.publicKey : "",
+      keyType: typeof parsed.keyType === "string" ? parsed.keyType : "",
+      keySize: typeof parsed.keySize === "string" ? parsed.keySize : parsed.keySize != null ? String(parsed.keySize) : "",
+      fingerprint: typeof parsed.fingerprint === "string" ? parsed.fingerprint : "",
+      sshPassphrase: typeof parsed.sshPassphrase === "string" ? parsed.sshPassphrase : "",
+      sshComment: typeof parsed.sshComment === "string" ? parsed.sshComment : "",
     };
   } catch {
     return {};
@@ -217,8 +224,13 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
       softwareName: "", licenseKey: "", version: "",
       licensee: "", purchaseDate: "", expirationDate: "",
     };
+    const sshKeyDefaults = {
+      privateKey: "", publicKey: "", keyType: "",
+      keySize: "", fingerprint: "", sshPassphrase: "", sshComment: "",
+    };
     const isBankAccount = rowType === "bankaccount";
     const isSoftwareLicense = rowType === "softwarelicense";
+    const isSshKey = rowType === "sshkey";
 
     switch (format) {
       case "bitwarden":
@@ -235,6 +247,7 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
         };
         break;
@@ -252,6 +265,7 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
         };
         break;
@@ -269,12 +283,13 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
         };
         break;
       default:
         entry = {
-          entryType: isBankAccount ? ENTRY_TYPE.BANK_ACCOUNT : isSoftwareLicense ? ENTRY_TYPE.SOFTWARE_LICENSE : isPasskey ? ENTRY_TYPE.PASSKEY : isIdentity ? ENTRY_TYPE.IDENTITY : isCard ? ENTRY_TYPE.CREDIT_CARD : isNote ? ENTRY_TYPE.SECURE_NOTE : ENTRY_TYPE.LOGIN,
+          entryType: isSshKey ? ENTRY_TYPE.SSH_KEY : isBankAccount ? ENTRY_TYPE.BANK_ACCOUNT : isSoftwareLicense ? ENTRY_TYPE.SOFTWARE_LICENSE : isPasskey ? ENTRY_TYPE.PASSKEY : isIdentity ? ENTRY_TYPE.IDENTITY : isCard ? ENTRY_TYPE.CREDIT_CARD : isNote ? ENTRY_TYPE.SECURE_NOTE : ENTRY_TYPE.LOGIN,
           title: row["name"] ?? row["title"] ?? fields[0] ?? "",
           username: row["username"] ?? row["login_username"] ?? fields[1] ?? "",
           password: row["password"] ?? row["login_password"] ?? fields[2] ?? "",
@@ -286,6 +301,7 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
         };
     }
@@ -360,6 +376,37 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
       const passkeyDefaults = { relyingPartyId: "", relyingPartyName: "", credentialId: "", creationDate: "", deviceInfo: "" };
       const bankAccountDefaults = { bankName: "", accountType: "", accountHolderName: "", accountNumber: "", routingNumber: "", swiftBic: "", iban: "", branchName: "" };
       const softwareLicenseDefaults = { softwareName: "", licenseKey: "", version: "", licensee: "", purchaseDate: "", expirationDate: "" };
+      const sshKeyDefaults = { privateKey: "", publicKey: "", keyType: "", keySize: "", fingerprint: "", sshPassphrase: "", sshComment: "" };
+
+      if (type === "sshkey") {
+        const sshKey = item.sshKey ?? {};
+        const entry: ParsedEntry = {
+          entryType: ENTRY_TYPE.SSH_KEY,
+          title: item.name ?? "",
+          username: "",
+          password: sshKey.privateKey ?? "",
+          content: "",
+          url: "",
+          notes: item.notes ?? "",
+          ...cardDefaults,
+          ...identityDefaults,
+          ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
+          ...extraDefaults(),
+          ...passwdSso,
+          privateKey: sshKey.privateKey ?? "",
+          publicKey: sshKey.publicKey ?? "",
+          keyType: sshKey.keyType ?? "",
+          keySize: sshKey.keySize != null ? String(sshKey.keySize) : "",
+          fingerprint: sshKey.fingerprint ?? "",
+          sshPassphrase: sshKey.passphrase ?? "",
+          sshComment: sshKey.comment ?? "",
+          ...metaOverrides,
+        };
+        if (entry.title) entries.push(entry);
+        continue;
+      }
 
       if (type === "passkey") {
         const passkey = item.passkey ?? {};
@@ -375,6 +422,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...identityDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
           ...passwdSso,
           relyingPartyId: passkey.relyingPartyId ?? "",
@@ -402,6 +450,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...identityDefaults,
           ...passkeyDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
           ...passwdSso,
           bankName: bank.bankName ?? "",
@@ -432,6 +481,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...identityDefaults,
           ...passkeyDefaults,
           ...bankAccountDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
           ...passwdSso,
           softwareName: license.softwareName ?? "",
@@ -461,6 +511,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
           ...passwdSso,
           fullName: identity.fullName
@@ -495,6 +546,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
           ...passwdSso,
           cardholderName: card.cardholderName ?? "",
@@ -523,6 +575,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
           ...passkeyDefaults,
           ...bankAccountDefaults,
           ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
           ...extraDefaults(),
           ...passwdSso,
           ...metaOverrides,
@@ -546,6 +599,7 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
         ...passkeyDefaults,
         ...bankAccountDefaults,
         ...softwareLicenseDefaults,
+        ...sshKeyDefaults,
         ...extraDefaults(),
         ...passwdSso,
         // login.totp (bare string) is a fallback; passwdSso.totp (full config) takes priority

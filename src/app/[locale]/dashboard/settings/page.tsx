@@ -9,6 +9,8 @@ import { SessionsCard } from "@/components/sessions/sessions-card";
 import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
 import { CliTokenCard } from "@/components/settings/cli-token-card";
 import { TenantMembersCard } from "@/components/settings/tenant-members-card";
+import { ApiKeyManager } from "@/components/settings/api-key-manager";
+import { TravelModeCard } from "@/components/settings/travel-mode-card";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
@@ -38,6 +40,8 @@ export default function SettingsPage() {
             <TabsContent value="personal" className="mt-0 space-y-4">
               <SessionsCard />
               <CliTokenCard />
+              <ApiKeyManager />
+              <TravelModeCard />
             </TabsContent>
             <TabsContent value="tenant" className="mt-0 space-y-4">
               <TenantMembersCard />
@@ -48,6 +52,8 @@ export default function SettingsPage() {
           <div className="space-y-4">
             <SessionsCard />
             <CliTokenCard />
+            <ApiKeyManager />
+            <TravelModeCard />
           </div>
         )}
       </div>

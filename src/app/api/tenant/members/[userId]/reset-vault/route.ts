@@ -96,12 +96,12 @@ export async function POST(
   }
 
   // Rate limits
-  const [adminAllowed, targetAllowed] = await Promise.all([
+  const [adminResult, targetResult] = await Promise.all([
     adminResetLimiter.check(`rl:admin-reset:admin:${session.user.id}`),
     targetResetLimiter.check(`rl:admin-reset:target:${targetUserId}`),
   ]);
 
-  if (!adminAllowed || !targetAllowed) {
+  if (!adminResult.allowed || !targetResult.allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

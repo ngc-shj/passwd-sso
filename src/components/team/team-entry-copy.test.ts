@@ -66,6 +66,15 @@ describe("buildTeamEntryCopy", () => {
       notesPlaceholder: "License notes placeholder",
       tagsTitle: "License tags",
     },
+    sshKey: {
+      edit: "Edit SSH key",
+      create: "Create SSH key",
+      titleLabel: "SSH key title",
+      titlePlaceholder: "SSH key title placeholder",
+      notesLabel: "SSH key notes",
+      notesPlaceholder: "SSH key notes placeholder",
+      tagsTitle: "SSH key tags",
+    },
   } as const;
 
   it("returns edit labels for edit mode", () => {

@@ -6,8 +6,10 @@ import { TOTP, Secret } from "otpauth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CopyButton } from "./copy-button";
-import { X, ShieldCheck } from "lucide-react";
+import { X, ShieldCheck, QrCode } from "lucide-react";
 import { TOTP_ALGORITHM } from "@/lib/constants";
+import { parseOtpauthUri } from "@/lib/qr-scanner-client";
+import { QRCaptureDialog } from "./qr-capture-dialog";
 import type { EntryTotp } from "@/lib/entry-form-types";
 
 export type TOTPEntry = EntryTotp;
@@ -26,30 +28,6 @@ interface TOTPFieldInputProps {
 }
 
 type TOTPFieldProps = TOTPFieldDisplayProps | TOTPFieldInputProps;
-
-function parseOtpauthUri(input: string): TOTPEntry | null {
-  try {
-    const url = new URL(input);
-    if (url.protocol !== "otpauth:") return null;
-    if (url.hostname !== "totp") return null;
-    const secret = url.searchParams.get("secret");
-    if (!secret) return null;
-    return {
-      secret,
-      algorithm:
-        (url.searchParams.get("algorithm")?.toUpperCase() as TOTPEntry["algorithm"]) ??
-        undefined,
-      digits: url.searchParams.has("digits")
-        ? parseInt(url.searchParams.get("digits")!, 10)
-        : undefined,
-      period: url.searchParams.has("period")
-        ? parseInt(url.searchParams.get("period")!, 10)
-        : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
 
 function createTOTP(entry: TOTPEntry): TOTP {
   return new TOTP({
@@ -127,6 +105,7 @@ export function TOTPField(props: TOTPFieldProps) {
   const [inputValue, setInputValue] = useState(
     props.mode === "input" ? (props.totp?.secret ?? "") : ""
   );
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
 
   // Sync input value when switching from display → input or when secret changes
   const secret = props.mode === "input" ? (props.totp?.secret ?? "") : "";
@@ -180,6 +159,16 @@ export function TOTPField(props: TOTPFieldProps) {
           className="font-mono text-sm"
           autoComplete="off"
         />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-primary"
+          onClick={() => setQrDialogOpen(true)}
+          title={t("qrScan")}
+        >
+          <QrCode className="h-3.5 w-3.5" />
+        </Button>
         {totp && (
           <Button
             type="button"
@@ -193,6 +182,15 @@ export function TOTPField(props: TOTPFieldProps) {
         )}
       </div>
       {totp && <TOTPCodeDisplay totp={totp} />}
+
+      <QRCaptureDialog
+        open={qrDialogOpen}
+        onOpenChange={setQrDialogOpen}
+        onTotpDetected={(detected) => {
+          onChange(detected);
+          setInputValue(detected.secret);
+        }}
+      />
     </div>
   );
 }

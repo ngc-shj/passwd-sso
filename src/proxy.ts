@@ -71,6 +71,12 @@ async function handleApiAuth(request: NextRequest) {
     return handlePreflight(request);
   }
 
+  // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
+  // Route handlers handle all auth via validateApiKeyOnly().
+  if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
+    return NextResponse.next();
+  }
+
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
@@ -115,7 +121,11 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.NOTIFICATIONS) ||
     pathname.startsWith(API_PATH.USER_LOCALE) ||
     pathname.startsWith(`${API_PATH.API_ROOT}/extension`) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/tenant`)
+    pathname.startsWith(`${API_PATH.API_ROOT}/tenant`) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/api-keys`) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/travel-mode`) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/directory-sync`) ||
+    pathname.startsWith(`${API_PATH.API_ROOT}/webauthn`)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {
