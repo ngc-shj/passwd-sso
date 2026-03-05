@@ -1,6 +1,6 @@
 # Code Review: batch-f
 Date: 2026-03-06T10:00:00+09:00
-Review rounds: Session 3 Round 1
+Review rounds: Session 4 Round 1
 Reviewers: 3 expert agents (functional, security, test)
 
 ## Review Sessions
@@ -11,117 +11,104 @@ Initial implementation review — all findings resolved.
 ### Session 2 (previous conversation): Rounds 1-4
 Full codebase re-review after Session 1 fixes were committed.
 
-### Session 3 (this conversation): Round 1
+### Session 3 (previous conversation): Rounds 1-2
 Post-fix review after 4 additional commits (0d6dad2, f9adb4c, a79fac7, 1798db9).
+
+### Session 4 (this conversation): Round 1
+Full codebase re-review — fresh session.
 
 ---
 
-## Session 3 Round 1 Findings
+## Session 4 Round 1 Findings
 
-### FUNC-Medium-1: Hardcoded English "or" divider in vault-lock-screen.tsx
-- **File**: `src/components/vault/vault-lock-screen.tsx:195`
-- **Problem**: `<span>or</span>` is not internationalized. Japanese users see English "or" on the vault lock screen.
-- **Impact**: i18n consistency broken on the most visible screen
-- **Recommendation**: Add `"or"` key to `Vault.json` (en/ja) and use `{t("or")}`
+### FUNC-High-2: Okta fetchOktaUsers filter URL not encoded
+- **File**: `src/lib/directory-sync/okta.ts:99`
+- **Problem**: `filter=status eq "ACTIVE"&limit=200` is concatenated directly into URL without `URLSearchParams`, so spaces and quotes are not percent-encoded. Not RFC-compliant.
+- **Recommendation**: Use `URLSearchParams` for proper encoding.
 
-### SEC-Medium-1: PSSO_PASSPHRASE leaks to child processes via `run` command
-- **File**: `cli/src/commands/run.ts:133-134`
-- **CWE**: CWE-214 (Invocation of Process Using Visible Sensitive Information)
-- **Problem**: `env: { ...process.env, ...secretEnv }` spreads entire parent environment including `PSSO_PASSPHRASE` and `PSSO_API_KEY` to the child process
-- **Impact**: Compromised child dependency could exfiltrate vault master passphrase
-- **Recommendation**: Strip `PSSO_PASSPHRASE` and `PSSO_API_KEY` from env before spawning
+### FUNC-Medium-1: `env` command outputs partial results on fetch failure
+- **File**: `cli/src/commands/env.ts:68-70`
+- **Problem**: On HTTP error, `continue` skips the failed entry and outputs the rest. CI/CD pipelines using `eval $(passwd-sso env)` get incomplete env vars.
+- **Recommendation**: `process.exit(1)` like `run` command does.
 
-### SEC-Low-1: `prfSupported: true` hardcoded regardless of PRF config
-- **File**: `src/app/api/webauthn/register/options/route.ts:80`
-- **Problem**: Always returns `prfSupported: true` even when `WEBAUTHN_PRF_SECRET` is not configured
-- **Recommendation**: Set `prfSupported: prfSalt !== null`
+### FUNC-Medium-2: `authenticate/options` doesn't catch `derivePrfSalt` exception
+- **File**: `src/app/api/webauthn/authenticate/options/route.ts:77`
+- **Problem**: Unlike `register/options` which wraps `derivePrfSalt` in try/catch, this handler calls it unprotected. If `WEBAUTHN_PRF_SECRET` is unset, 500 error.
+- **Recommendation**: Add try/catch like register/options.
 
-### SEC-Low-2: Extension tokens can manage API keys without scope check
-- **File**: `src/app/api/api-keys/route.ts:17-26`
-- **CWE**: CWE-863 (Incorrect Authorization)
-- **Problem**: `authOrToken(req)` allows extension tokens to create/revoke API keys without scope restriction
-- **Recommendation**: Restore session-only auth or add scope check
+### FUNC-Medium-3: `validateApiKey` no null guard on `expiresAt`
+- **File**: `src/lib/api-key.ts:100`
+- **Problem**: `key.expiresAt.getTime()` would throw if expiresAt were null (DB inconsistency).
+- **Recommendation**: Add `!key.expiresAt ||` guard.
 
-### SEC-Low-3: API_KEYS bearer bypass allows child path prefix matching in proxy
-- **File**: `src/proxy.ts:89`
-- **Problem**: Prefix matching on `/api/api-keys` allows bypass of any future child routes
-- **Recommendation**: Exact-match for API key routes
+### FUNC-Medium-4: `derToSshEcdsa` assigns dead variable `seqLen = 0`
+- **File**: `cli/src/lib/ssh-key-agent.ts:220`
+- **Problem**: `seqLen = 0` is unreachable code — variable is unused after assignment.
+- **Recommendation**: Remove the line.
 
-### SEC-Low-4: TOCTOU race in socket directory creation
-- **File**: `cli/src/lib/ssh-agent-socket.ts:49`
-- **CWE**: CWE-367
-- **Problem**: `statSync` follows symlinks; should use `lstatSync`
-- **Note**: Previously accepted as Low in Session 2 (uid check mitigates)
+### SEC-Low-1: `env` command missing BLOCKED_KEYS check
+- **File**: `cli/src/commands/env.ts:61`
+- **CWE**: CWE-426 (Untrusted Search Path)
+- **Problem**: `run` command blocks PATH/LD_PRELOAD etc. (19 entries) but `env` command has no such check.
+- **Recommendation**: Share BLOCKED_KEYS from `run.ts` and apply in `env.ts`.
 
-### TEST-High-1: proxy test missing `/api/api-keys` Bearer bypass tests
-- **File**: `src/__tests__/proxy.test.ts`
-- **Problem**: `API_PATH.API_KEYS` added to `extensionTokenRoutes` but no test coverage
-- **Recommendation**: Add Bearer bypass test for `/api/api-keys` and `/api/api-keys/[id]`
+### TEST-High-3: `auth-or-token.test.ts` missing API key path
+- **File**: `src/lib/auth-or-token.test.ts`
+- **Problem**: Tests cover session and extension token paths only. API key dispatch (L45-61) is untested.
+- **Recommendation**: Add tests for API key success, failure, and scope_insufficient.
 
-### TEST-High-2: proxy test missing `/api/v1/*` Public API bypass tests
-- **File**: `src/__tests__/proxy.test.ts`
-- **Problem**: `/api/v1/*` session check bypass has no test
-- **Recommendation**: Add test for `/api/v1/passwords` without session
+### TEST-High-4: `api-key.ts` pure functions have no tests
+- **File**: `src/lib/api-key.ts`
+- **Problem**: `parseApiKeyScopes()` and `hasApiKeyScope()` are pure functions without tests.
+- **Recommendation**: Create `src/lib/api-key.test.ts`.
 
-### TEST-Medium-1: `SettingsNavSection` test missing `isAdmin` coverage
-- **File**: `src/components/layout/sidebar-section-security.test.tsx`
-- **Problem**: `isAdmin` condition for tenant settings link not tested
-- **Recommendation**: Add tests for `isAdmin={true}` and `isAdmin={false}`
+### TEST-Medium-4: `travel-mode.ts` `filterTravelSafe()` has no tests
+- **File**: `src/lib/travel-mode.ts`
+- **Problem**: Core travel mode filtering logic untested.
+- **Recommendation**: Create `src/lib/travel-mode.test.ts`.
 
-### TEST-Medium-2: `parse-user-agent.ts` unit tests missing
-- **File**: `src/lib/parse-user-agent.ts` (28 lines, new file)
-- **Problem**: Pure function with no test coverage
-- **Recommendation**: Add tests for null, major browsers, unknown UA
+### TEST-Medium-5: `directory-sync/sanitize.ts` has no tests
+- **File**: `src/lib/directory-sync/sanitize.ts`
+- **Problem**: Security-critical function (credential masking) untested.
+- **Recommendation**: Create `src/lib/directory-sync/sanitize.test.ts`.
 
-### TEST-Medium-3: `webauthn-server.ts` `getRpOrigin()` tests missing
-- **File**: `src/lib/webauthn-server.ts:52-63`
-- **Problem**: 3-stage fallback logic untested
-- **Recommendation**: Add tests for each fallback path
+### TEST-Medium-6: `ssh-agent-protocol.ts` has no tests
+- **File**: `cli/src/lib/ssh-agent-protocol.ts`
+- **Problem**: Binary protocol pure functions (8 functions) untested.
+- **Recommendation**: Create `cli/src/__tests__/unit/ssh-agent-protocol.test.ts`.
 
-### TEST-Low-1: `api-path.test.ts` missing new path assertions
-- **File**: `src/lib/constants/api-path.test.ts`
-- **Problem**: New API_PATH entries and path builder functions not covered
-- **Recommendation**: Add assertions for all new paths
+### TEST-Medium-7: `secrets-config.ts` `getPasswordPath()` untested
+- **File**: `cli/src/lib/secrets-config.ts:58-65`
+- **Problem**: Path traversal prevention logic untested.
+- **Recommendation**: Create `cli/src/__tests__/unit/secrets-config.test.ts`.
 
-### TEST-Low-2: CLI `openssh-key-parser.ts` tests missing
-- **File**: `cli/src/lib/openssh-key-parser.ts` (348 lines)
-- **Note**: Already deferred as F-TEST-1
+### TEST-Low-3: `parse-user-agent.test.ts` missing ChromeOS/Opera
+- **File**: `src/lib/parse-user-agent.test.ts`
+- **Problem**: `detectOS()` CrOS branch and `detectBrowser()` Opera branch untested.
+- **Recommendation**: Add 2 test cases.
+
+### TEST-Low-4: `webauthn-server.test.ts` missing `derivePrfSalt()` tests
+- **File**: `src/lib/webauthn-server.test.ts`
+- **Problem**: Only `getRpOrigin()` tested. `derivePrfSalt()` determinism and error cases untested.
+- **Recommendation**: Add tests.
 
 ## Summary
 
 | Severity | Count |
 |----------|-------|
 | Critical | 0 |
-| High | 2 (test gaps) |
-| Medium | 4 (1 func + 1 sec + 2 test) |
-| Low | 6 (3 sec + 1 sec-accepted + 2 test) |
-
-## 対応状況
-
-### Round 1 修正 (commit b718c8d)
-
-- FUNC-Medium-1: `vault-lock-screen.tsx:195` — `"or"` → `{t("or")}`, Vault.json en/ja に "or" キー追加
-- SEC-Medium-1: `cli/src/commands/run.ts:133` — `PSSO_PASSPHRASE`/`PSSO_API_KEY` を destructuring で除去
-- SEC-Low-1: `webauthn/register/options/route.ts:80` — `prfSupported: prfSalt !== null`
-- SEC-Low-4: `cli/src/lib/ssh-agent-socket.ts:49` — `statSync` → `lstatSync` + `isDirectory()` チェック
-- TEST-High-1/2: `proxy.test.ts` — `/api/api-keys` Bearer bypass + `/api/v1/*` public API bypass テスト追加
-- TEST-Medium-1: `sidebar-section-security.test.tsx` — `isAdmin={true/false}` テスト追加
-- TEST-Medium-2: `parse-user-agent.test.ts` — 新規作成 (8 tests)
-- TEST-Medium-3: `webauthn-server.test.ts` — 新規作成 (4 tests)
-- TEST-Low-1: `api-path.test.ts` — 新規パス14定数 + パスビルダー4関数のアサーション追加
-
-### Round 2 修正 (commit ee1d0a2)
-
-- TEST-Low-2: `parse-user-agent.test.ts:45` — テスト名 "returns Unknown OS (Browser)" → "returns null for empty string"
-- TEST-Low-3: `webauthn-server.test.ts` — 不正 AUTH_URL フォールバック分岐テスト追加
+| High | 3 (1 func + 2 test) |
+| Medium | 8 (3 func + 1 sec + 4 test) |
+| Low | 3 (2 test + 1 sec) |
 
 ### ACCEPTED (修正不要)
 
-- SEC-Low-2: Extension tokens can manage API keys — 意図的設計 (proxy.ts extensionTokenRoutes)
-- SEC-Low-3: API_KEYS proxy prefix matching — ルートハンドラで auth 済み
-- TEST-Low-2 (F-TEST-1): CLI openssh-key-parser.ts テスト — 既存延期事項
+- FUNC-High-1: Permissions-Policy — 未宣言の機能はデフォルト `self` で許可。ブロックなし。
+- FUNC-Medium-5: v1 PUT history/update 別トランザクション — 内部 API (`/api/passwords/[id]`) と同一パターン。
+- FUNC-Low-1: ImageCapture Safari — catch ブロックでハンドル済み。
+- FUNC-Low-2: readString 関数名シャドウイング — ファイルスコープ内、実害なし。
+- FUNC-Low-3: travel-mode-card busy 状態 — React バッチ処理で問題なし。
 
-## Session 3 Final Status
+## 対応状況
 
-Session 3 Round 2: 機能 **指摘なし** / セキュリティ **指摘なし** / テスト Low 2件 → 即修正
-**Review approved: Session 3 — 2 rounds, final round 指摘なし from all 3 experts.**
+(修正後に追記)

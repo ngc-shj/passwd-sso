@@ -15,6 +15,7 @@ import { getToken } from "../lib/api-client.js";
 import { loadConfig } from "../lib/config.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
+import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
 import * as output from "../lib/output.js";
 
 interface EnvOptions {
@@ -59,6 +60,10 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
   const entries = Object.entries(config.secrets);
 
   for (const [envName, mapping] of entries) {
+    if (BLOCKED_KEYS.has(envName.toUpperCase())) {
+      output.error(`Blocked: cannot output '${envName}' (security restriction)`);
+      process.exit(1);
+    }
     const path = getPasswordPath(mapping.entry, useV1);
     const url = `${baseUrl}${path}`;
 
@@ -67,7 +72,7 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
     });
     if (!res.ok) {
       output.error(`Failed to fetch entry ${mapping.entry}: HTTP ${res.status}`);
-      continue;
+      process.exit(1);
     }
 
     const data = (await res.json()) as {

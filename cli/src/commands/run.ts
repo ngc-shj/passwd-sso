@@ -14,28 +14,7 @@ import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import * as output from "../lib/output.js";
 
-/** Env vars that must never be overwritten (case-insensitive) */
-const BLOCKED_KEYS = new Set([
-  "PATH",
-  "LD_PRELOAD",
-  "LD_LIBRARY_PATH",
-  "DYLD_INSERT_LIBRARIES",
-  "DYLD_FRAMEWORK_PATH",
-  "NODE_OPTIONS",
-  "NODE_PATH",
-  "PYTHONPATH",
-  "PYTHONSTARTUP",
-  "PYTHONUSERBASE",
-  "RUBYLIB",
-  "RUBYOPT",
-  "PERL5LIB",
-  "PERL5OPT",
-  "JAVA_TOOL_OPTIONS",
-  "_JAVA_OPTIONS",
-  "CLASSPATH",
-  "BASH_ENV",
-  "ENV",
-]);
+import { BLOCKED_KEYS } from "../lib/blocked-keys.js";
 
 interface RunOptions {
   config?: string;

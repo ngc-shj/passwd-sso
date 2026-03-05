@@ -54,7 +54,8 @@ export function sanitizeSyncError(error: unknown): string {
     message = error;
   } else {
     try {
-      message = JSON.stringify(error);
+      const json = JSON.stringify(error);
+      message = json ?? String(error);
     } catch {
       message = String(error);
     }

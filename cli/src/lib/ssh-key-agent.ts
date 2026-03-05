@@ -216,8 +216,6 @@ function derToSshEcdsa(derSig: Buffer): Buffer {
   if (seqLen & 0x80) {
     const lenBytes = seqLen & 0x7f;
     offset += lenBytes;
-    // We don't actually need seqLen
-    seqLen = 0;
   }
 
   // Read r INTEGER

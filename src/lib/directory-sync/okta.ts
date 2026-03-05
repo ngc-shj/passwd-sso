@@ -96,7 +96,11 @@ export async function fetchOktaUsers(
   validateOrgUrl(orgUrl);
 
   const users: OktaUser[] = [];
-  const initialUrl = `${orgUrl}api/v1/users?filter=status eq "ACTIVE"&limit=200`;
+  const params = new URLSearchParams({
+    filter: 'status eq "ACTIVE"',
+    limit: "200",
+  });
+  const initialUrl = `${orgUrl}api/v1/users?${params.toString()}`;
   let url: string | undefined = initialUrl;
   let pages = 0;
 

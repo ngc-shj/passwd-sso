@@ -45,4 +45,16 @@ describe("parseDeviceFromUserAgent", () => {
   it("returns null for empty string", () => {
     expect(parseDeviceFromUserAgent("")).toBeNull();
   });
+
+  it("detects ChromeOS + Chrome", () => {
+    const ua =
+      "Mozilla/5.0 (X11; CrOS x86_64 14541.0.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+    expect(parseDeviceFromUserAgent(ua)).toBe("ChromeOS (Chrome)");
+  });
+
+  it("detects Windows + Opera", () => {
+    const ua =
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0";
+    expect(parseDeviceFromUserAgent(ua)).toBe("Windows (Opera)");
+  });
 });

@@ -97,7 +97,7 @@ export async function validateApiKey(
   if (key.revokedAt) {
     return { ok: false, error: "API_KEY_REVOKED" };
   }
-  if (key.expiresAt.getTime() <= Date.now()) {
+  if (!key.expiresAt || key.expiresAt.getTime() <= Date.now()) {
     return { ok: false, error: "API_KEY_EXPIRED" };
   }
 
