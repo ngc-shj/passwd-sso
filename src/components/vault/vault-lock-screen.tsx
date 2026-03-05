@@ -1,10 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { API_PATH } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { isWebAuthnSupported } from "@/lib/webauthn-client";
+import { fetchApi } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +19,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
-import { Loader2, Lock, Eye, EyeOff } from "lucide-react";
+import { Fingerprint, Loader2, Lock, Eye, EyeOff } from "lucide-react";
 
 /** @internal Exported for testing */
 export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
@@ -33,12 +36,29 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
 
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
-  const { unlock } = useVault();
+  const tw = useTranslations("WebAuthn");
+  const { unlock, unlockWithPasskey } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [error, setError] = useState("");
+  const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
+
+  // Check if user has PRF-capable passkeys
+  useEffect(() => {
+    if (!isWebAuthnSupported()) return;
+
+    fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
+      .then(async (res) => {
+        if (res.ok) {
+          const creds: Array<{ prfSupported: boolean }> = await res.json();
+          setHasPrfPasskeys(creds.some((c) => c.prfSupported));
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -75,6 +95,37 @@ export function VaultLockScreen() {
       setLoading(false);
     }
   };
+
+  const handlePasskeyUnlock = useCallback(async () => {
+    setPasskeyLoading(true);
+    setError("");
+    try {
+      const success = await unlockWithPasskey();
+      if (!success) {
+        setError(tw("unlockError"));
+      }
+    } catch (err) {
+      if (err instanceof VaultUnlockError) {
+        switch (err.code) {
+          case API_ERROR.ACCOUNT_LOCKED:
+            setError(formatLockedUntil(err.lockedUntil, t));
+            break;
+          case API_ERROR.RATE_LIMIT_EXCEEDED:
+            setError(t("rateLimited"));
+            break;
+          case API_ERROR.SERVICE_UNAVAILABLE:
+            setError(tw("serviceUnavailable"));
+            break;
+          default:
+            setError(tw("unlockError"));
+        }
+      } else {
+        setError(tw("unlockError"));
+      }
+    } finally {
+      setPasskeyLoading(false);
+    }
+  }, [unlockWithPasskey, t, tw]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
@@ -127,11 +178,40 @@ export function VaultLockScreen() {
             <Button
               type="submit"
               className="w-full"
-              disabled={!passphrase || loading}
+              disabled={!passphrase || loading || passkeyLoading}
             >
               {loading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
               {t("unlock")}
             </Button>
+
+            {/* Passkey unlock button */}
+            {hasPrfPasskeys && (
+              <>
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-card px-2 text-muted-foreground">or</span>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={loading || passkeyLoading}
+                  onClick={handlePasskeyUnlock}
+                >
+                  {passkeyLoading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Fingerprint className="h-4 w-4 mr-2" />
+                  )}
+                  {passkeyLoading ? tw("unlocking") : tw("unlockWithPasskey")}
+                </Button>
+              </>
+            )}
 
             <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
               <Link href="/recovery" className="hover:underline">

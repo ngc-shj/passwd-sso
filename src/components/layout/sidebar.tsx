@@ -138,6 +138,9 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isShareLinks,
     isEmergencyAccess,
     isAuditLog,
+    isSettingsActive: isSettings || isTenantSettings || isTeamSettings || isTeamsManage,
+    isExportActive: isExport,
+    isImportActive: isImport,
   });
 
   const sidebarContentProps = useSidebarViewModel({

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
-import { Plus, Building2, CalendarClock, Globe } from "lucide-react";
+import { Plus, Users, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
@@ -60,7 +60,7 @@ export default function TeamsPage() {
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0 space-y-1">
               <div className="flex items-center gap-3">
-                <Building2 className="h-6 w-6" />
+                <Users className="h-6 w-6" />
                 <h1 className="text-2xl font-bold">{t("teams")}</h1>
               </div>
               <p className="text-sm text-muted-foreground">{t("manage")}</p>
@@ -85,7 +85,7 @@ export default function TeamsPage() {
           </div>
         ) : teams.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-            <Building2 className="mb-4 h-12 w-12 text-muted-foreground" />
+            <Users className="mb-4 h-12 w-12 text-muted-foreground" />
             <p className="text-muted-foreground">{t("noTeams")}</p>
             <p className="mt-1 text-sm text-muted-foreground">
               {t("noTeamsDesc")}

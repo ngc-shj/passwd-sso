@@ -109,6 +109,7 @@ const envSchema = z
     // --- WebAuthn ---
     WEBAUTHN_RP_ID: z.string().optional().default(""),
     WEBAUTHN_RP_NAME: z.string().optional(),
+    WEBAUTHN_RP_ORIGIN: nonEmpty.optional(),
     WEBAUTHN_PRF_SECRET: hex64.optional(),
 
     // --- Directory Sync ---

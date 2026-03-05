@@ -23,7 +23,8 @@
   "lastUsedNever": "未使用",
   "delete": "削除",
   "deleteConfirmTitle": "パスキーの削除",
-  "deleteConfirm": "このパスキーを削除しますか？サインインや保管庫のロック解除に使用できなくなります。",
+  "deleteConfirm": "このパスキーを削除しますか？サインインに使用できなくなります。",
+  "deleteConfirmPrf": "このパスキーを削除しますか？サインインや保管庫のロック解除に使用できなくなります。",
   "deleteSuccess": "パスキーを削除しました。",
   "deleteError": "パスキーの削除に失敗しました。",
   "cancel": "キャンセル",
@@ -35,5 +36,17 @@
   "unlocking": "ロック解除中...",
   "unlockSuccess": "パスキーで保管庫をロック解除しました。",
   "unlockError": "パスキーによるロック解除に失敗しました。",
-  "serviceUnavailable": "パスキーサービスは一時的に利用できません。"
+  "serviceUnavailable": "パスキーサービスは一時的に利用できません。",
+  "vaultMustBeUnlocked": "パスキーを登録するには保管庫のロック解除が必要です。",
+  "prfNotSupportedWarning": "ブラウザまたはデバイスがPRFに対応していません。このパスキーは保管庫のロック解除に使用できません。",
+  "lastPrfDeleteWarning": "保管庫のロック解除（PRF）に対応したパスキーが最後の1つです。削除するとパスキーによるロック解除ができなくなります。",
+  "alreadyRegistered": "この認証器はすでに登録されています。",
+  "requestPending": "パスキーのリクエストが処理中です。しばらく待つかページをリロードしてください。",
+  "webauthnNotSupported": "お使いのブラウザはパスキーに対応していません。",
+  "rename": "名前を変更",
+  "vaultUnlock": "保管庫のロック解除",
+  "vaultUnlockEnabled": "対応",
+  "vaultUnlockDisabled": "非対応",
+  "tryIt": "試してみる",
+  "tryItSuccess": "パスキーの動作を確認しました！"
 }

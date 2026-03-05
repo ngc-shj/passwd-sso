@@ -1,6 +1,7 @@
 export const API_PATH = {
   API_ROOT: "/api",
   AUTH_SESSION: "/api/auth/session",
+  EXTENSION: "/api/extension",
   EXTENSION_TOKEN: "/api/extension/token",
   EXTENSION_TOKEN_REFRESH: "/api/extension/token/refresh",
   PASSWORDS: "/api/passwords",
@@ -38,6 +39,7 @@ export const API_PATH = {
   EMERGENCY_ACCESS_ACCEPT: "/api/emergency-access/accept",
   EMERGENCY_ACCESS_REJECT: "/api/emergency-access/reject",
   EMERGENCY_PENDING_CONFIRMATIONS: "/api/emergency-access/pending-confirmations",
+  WATCHTOWER: "/api/watchtower",
   WATCHTOWER_START: "/api/watchtower/start",
   WATCHTOWER_HIBP: "/api/watchtower/hibp",
   WATCHTOWER_ALERT: "/api/watchtower/alert",
@@ -47,11 +49,19 @@ export const API_PATH = {
   NOTIFICATIONS: "/api/notifications",
   NOTIFICATIONS_COUNT: "/api/notifications/count",
   SCIM_V2: "/api/scim/v2",
+  TENANT: "/api/tenant",
   TENANT_MEMBERS: "/api/tenant/members",
   API_KEYS: "/api/api-keys",
   TENANT_SCIM_TOKENS: "/api/tenant/scim-tokens",
   DIRECTORY_SYNC: "/api/directory-sync",
   TENANT_ROLE: "/api/tenant/role",
+  TRAVEL_MODE: "/api/travel-mode",
+  WEBAUTHN: "/api/webauthn",
+  WEBAUTHN_REGISTER_OPTIONS: "/api/webauthn/register/options",
+  WEBAUTHN_REGISTER_VERIFY: "/api/webauthn/register/verify",
+  WEBAUTHN_AUTHENTICATE_OPTIONS: "/api/webauthn/authenticate/options",
+  WEBAUTHN_AUTHENTICATE_VERIFY: "/api/webauthn/authenticate/verify",
+  WEBAUTHN_CREDENTIALS: "/api/webauthn/credentials",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
 } as const;
@@ -139,4 +149,6 @@ export const apiPath = {
     `${API_PATH.DIRECTORY_SYNC}/${configId}/run`,
   directorySyncLogs: (configId: string) =>
     `${API_PATH.DIRECTORY_SYNC}/${configId}/logs`,
+  webauthnCredentialById: (credentialId: string) =>
+    `${API_PATH.WEBAUTHN_CREDENTIALS}/${credentialId}`,
 } as const;

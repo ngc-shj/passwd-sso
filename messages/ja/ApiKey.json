@@ -15,6 +15,8 @@
   "tokenReady": "API キー（一度だけ表示されます）:",
   "tokenOnce": "今すぐコピーしてください。再表示はできません。",
   "noKeys": "API キーはまだありません。",
+  "noActiveKeys": "有効な API キーはありません。",
+  "inactiveKeys": "失効済み / 期限切れのキー（{count}）",
   "active": "有効",
   "expired": "期限切れ",
   "revoked": "失効済み",

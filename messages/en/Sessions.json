@@ -1,6 +1,9 @@
 {
-  "settingsTitle": "Settings",
+  "settingsTitle": "Personal Settings",
   "settingsDescription": "Manage your personal settings.",
+  "tabAccount": "Account",
+  "tabSecurity": "Security",
+  "tabDeveloper": "Developer",
   "title": "Sessions",
   "description": "Manage your active sessions. You can revoke sessions you no longer need.",
   "current": "Current",

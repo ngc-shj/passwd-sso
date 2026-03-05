@@ -1137,6 +1137,8 @@ model WebAuthnCredential {
   prfSecretKeyIv        String?   @map("prf_secret_key_iv") @db.VarChar(24)
   prfSecretKeyAuthTag   String?   @map("prf_secret_key_auth_tag") @db.VarChar(32)
   prfSupported          Boolean   @default(false) @map("prf_supported")
+  registeredDevice      String?   @map("registered_device") @db.VarChar(100)
+  lastUsedDevice        String?   @map("last_used_device") @db.VarChar(100)
   createdAt             DateTime  @default(now()) @map("created_at")
   lastUsedAt            DateTime? @map("last_used_at")
 

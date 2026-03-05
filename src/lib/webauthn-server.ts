@@ -45,6 +45,23 @@ function getRpName(): string {
   return process.env.WEBAUTHN_RP_NAME ?? "passwd-sso";
 }
 
+/**
+ * Resolve the RP origin for verification.
+ * Priority: WEBAUTHN_RP_ORIGIN > AUTH_URL origin > https://${rpId}
+ */
+export function getRpOrigin(rpId: string): string {
+  if (process.env.WEBAUTHN_RP_ORIGIN) return process.env.WEBAUTHN_RP_ORIGIN;
+  if (process.env.AUTH_URL) {
+    try {
+      const url = new URL(process.env.AUTH_URL);
+      return url.origin;
+    } catch {
+      // fall through
+    }
+  }
+  return `https://${rpId}`;
+}
+
 function getPrfSecret(): Buffer {
   const hex = process.env.WEBAUTHN_PRF_SECRET;
   if (!hex || hex.length !== 64) {
@@ -82,7 +99,7 @@ export async function generateRegistrationOpts(
   const opts: GenerateRegistrationOptionsOpts = {
     rpName,
     rpID: rpId,
-    userID: userId,
+    userID: Buffer.from(userId, "utf-8").toString("base64url"),
     userName,
     attestationType: "none",
     excludeCredentials,

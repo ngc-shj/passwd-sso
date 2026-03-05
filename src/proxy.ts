@@ -112,7 +112,7 @@ async function handleApiAuth(request: NextRequest) {
   if (
     pathname.startsWith(API_PATH.PASSWORDS) ||
     pathname.startsWith(API_PATH.TAGS) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
+    pathname.startsWith(API_PATH.WATCHTOWER) ||
     pathname.startsWith(API_PATH.TEAMS) ||
     pathname.startsWith(API_PATH.AUDIT_LOGS) ||
     pathname.startsWith(API_PATH.SHARE_LINKS) ||
@@ -121,12 +121,12 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.SESSIONS) ||
     pathname.startsWith(API_PATH.NOTIFICATIONS) ||
     pathname.startsWith(API_PATH.USER_LOCALE) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/extension`) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/tenant`) ||
+    pathname.startsWith(API_PATH.EXTENSION) ||
+    pathname.startsWith(API_PATH.TENANT) ||
     pathname.startsWith(API_PATH.API_KEYS) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/travel-mode`) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/directory-sync`) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/webauthn`)
+    pathname.startsWith(API_PATH.TRAVEL_MODE) ||
+    pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
+    pathname.startsWith(API_PATH.WEBAUTHN)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {

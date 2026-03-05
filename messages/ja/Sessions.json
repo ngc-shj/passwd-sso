@@ -1,6 +1,9 @@
 {
-  "settingsTitle": "設定",
+  "settingsTitle": "個人の設定",
   "settingsDescription": "個人設定を管理できます。",
+  "tabAccount": "アカウント",
+  "tabSecurity": "セキュリティ",
+  "tabDeveloper": "開発者",
   "title": "セッション",
   "description": "アクティブなセッションを管理できます。不要なセッションを取り消すことができます。",
   "current": "現在",

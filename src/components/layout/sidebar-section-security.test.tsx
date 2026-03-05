@@ -24,7 +24,7 @@ vi.mock("@/components/layout/sidebar-shared", () => ({
   CollapsibleSectionHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-import { SecuritySection, UtilitiesSection } from "./sidebar-section-security";
+import { SecuritySection, SettingsNavSection, ToolsSection } from "./sidebar-section-security";
 
 describe("SecuritySection", () => {
   it("renders watchtower and emergency access links", () => {
@@ -80,10 +80,10 @@ describe("SecuritySection", () => {
   });
 });
 
-describe("UtilitiesSection", () => {
+describe("SettingsNavSection", () => {
   it("shows team settings link for admin", () => {
     render(
-      <UtilitiesSection
+      <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -101,7 +101,7 @@ describe("UtilitiesSection", () => {
 
   it("hides team settings link for member", () => {
     render(
-      <UtilitiesSection
+      <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -116,7 +116,7 @@ describe("UtilitiesSection", () => {
 
   it("shows settings and team settings links in personal context", () => {
     render(
-      <UtilitiesSection
+      <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -138,7 +138,7 @@ describe("UtilitiesSection", () => {
 
   it("hides settings link when team is selected", () => {
     render(
-      <UtilitiesSection
+      <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
@@ -150,14 +150,15 @@ describe("UtilitiesSection", () => {
 
     expect(screen.queryByRole("link", { name: "settings" })).toBeNull();
   });
+});
 
+describe("ToolsSection", () => {
   it("routes import/export to team pages when team is selected", () => {
     render(
-      <UtilitiesSection
+      <ToolsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tTeam={(k) => k}
         selectedTeam={{ id: "team-1", name: "Acme", role: "MEMBER" }}
         onNavigate={() => {}}
       />
@@ -170,6 +171,27 @@ describe("UtilitiesSection", () => {
     expect(screen.getByRole("link", { name: "import" })).toHaveAttribute(
       "href",
       "/dashboard/teams/team-1/import"
+    );
+  });
+
+  it("routes import/export to personal pages when no team is selected", () => {
+    render(
+      <ToolsSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        selectedTeam={null}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "export" })).toHaveAttribute(
+      "href",
+      "/dashboard/export"
+    );
+    expect(screen.getByRole("link", { name: "import" })).toHaveAttribute(
+      "href",
+      "/dashboard/import"
     );
   });
 });

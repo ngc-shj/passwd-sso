@@ -9,8 +9,10 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   verifyAuthentication,
+  getRpOrigin,
 } from "@/lib/webauthn-server";
 import type { AuthenticatorDevice } from "@simplewebauthn/types";
+import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 
 export const runtime = "nodejs";
 
@@ -116,8 +118,7 @@ async function handlePOST(req: NextRequest) {
     transports: storedCredential.transports as AuthenticatorDevice["transports"],
   };
 
-  // WEBAUTHN_RP_ORIGIN allows http://localhost for local development
-  const origin = process.env.WEBAUTHN_RP_ORIGIN ?? `https://${rpId}`;
+  const origin = getRpOrigin(rpId);
 
   let verification;
   try {
@@ -139,11 +140,13 @@ async function handlePOST(req: NextRequest) {
 
   // Update counter atomically with CAS check (prevents replay/clone attacks)
   const newCounter = BigInt(verification.authenticationInfo.newCounter);
+  const lastUsedDevice = parseDeviceFromUserAgent(req.headers.get("user-agent"));
   const updatedRows = await withUserTenantRls(userId, async () =>
     prisma.$executeRaw`
       UPDATE "webauthn_credentials"
       SET counter = ${newCounter},
-          "last_used_at" = ${new Date()}
+          "last_used_at" = ${new Date()},
+          "last_used_device" = ${lastUsedDevice}
       WHERE id = ${storedCredential.id}
         AND counter = ${storedCredential.counter}
     `,

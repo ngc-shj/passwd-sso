@@ -2,7 +2,7 @@
 
 import { Separator } from "@/components/ui/separator";
 import { VaultSelector } from "@/components/layout/vault-selector";
-import { SecuritySection, UtilitiesSection } from "@/components/layout/sidebar-section-security";
+import { SecuritySection, SettingsNavSection, ToolsSection } from "@/components/layout/sidebar-section-security";
 import {
   VaultSection,
   CategoriesSection,
@@ -208,18 +208,26 @@ export function SidebarContent({
 
       <Separator />
 
-      <UtilitiesSection
-        isOpen={isOpen("utilities")}
-        onOpenChange={toggleSection("utilities")}
+      <SettingsNavSection
+        isOpen={isOpen("settingsNav")}
+        onOpenChange={toggleSection("settingsNav")}
         t={t}
         tTeam={tTeam}
         selectedTeam={selectedTeam}
         isTeamSettingsActive={isTeamSettingsActive}
         isTenantSettingsActive={isTenantSettingsActive}
         isSettingsActive={isSettingsActive}
+        isAdmin={isAdmin}
+        onNavigate={onNavigate}
+      />
+
+      <ToolsSection
+        isOpen={isOpen("tools")}
+        onOpenChange={toggleSection("tools")}
+        t={t}
+        selectedTeam={selectedTeam}
         isExportActive={isExportActive}
         isImportActive={isImportActive}
-        isAdmin={isAdmin}
         onNavigate={onNavigate}
       />
     </nav>

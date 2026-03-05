@@ -7,7 +7,7 @@ import { encryptExport } from "@/lib/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
-import { AlertTriangle, Building2 } from "lucide-react";
+import { AlertTriangle, Download } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
@@ -282,7 +282,7 @@ export function TeamExportPagePanel({ teamId }: TeamExportPagePanelProps) {
     <PagePane
       header={
         <PageTitleCard
-          icon={<Building2 className="h-5 w-5" />}
+          icon={<Download className="h-5 w-5" />}
           title={t("title")}
           description={t("description")}
         />

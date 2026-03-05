@@ -10,10 +10,10 @@ import {
   Building2,
   Download,
   HeartPulse,
-  Monitor,
-  Settings,
   Shield,
   Upload,
+  UserRound,
+  Users,
 } from "lucide-react";
 
 interface SecurityTeam {
@@ -81,7 +81,7 @@ export function SecuritySection({
   );
 }
 
-interface UtilitiesSectionProps {
+interface SettingsNavSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
@@ -90,13 +90,11 @@ interface UtilitiesSectionProps {
   isTeamSettingsActive?: boolean;
   isTenantSettingsActive?: boolean;
   isSettingsActive?: boolean;
-  isExportActive?: boolean;
-  isImportActive?: boolean;
   isAdmin?: boolean;
   onNavigate: () => void;
 }
 
-export function UtilitiesSection({
+export function SettingsNavSection({
   isOpen,
   onOpenChange,
   t,
@@ -105,29 +103,21 @@ export function UtilitiesSection({
   isTeamSettingsActive,
   isTenantSettingsActive,
   isSettingsActive,
-  isExportActive,
-  isImportActive,
   isAdmin,
   onNavigate,
-}: UtilitiesSectionProps) {
+}: SettingsNavSectionProps) {
   const scopedTeam = selectedTeam ?? null;
-  const exportHref = scopedTeam
-    ? `/dashboard/teams/${scopedTeam.id}/export`
-    : "/dashboard/export";
-  const importHref = scopedTeam
-    ? `/dashboard/teams/${scopedTeam.id}/import`
-    : "/dashboard/import";
 
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader isOpen={isOpen}>{t("utilities")}</CollapsibleSectionHeader>
+      <CollapsibleSectionHeader isOpen={isOpen}>{t("settingsNav")}</CollapsibleSectionHeader>
       <CollapsibleContent>
         <div className="space-y-1">
           {scopedTeam &&
             (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
             <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
               <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
-                <Settings className="h-4 w-4" />
+                <Users className="h-4 w-4" />
                 {tTeam("teamSettings")}
               </Link>
             </Button>
@@ -135,7 +125,7 @@ export function UtilitiesSection({
             <>
               <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/settings" onClick={onNavigate}>
-                  <Monitor className="h-4 w-4" />
+                  <UserRound className="h-4 w-4" />
                   {t("settings")}
                 </Link>
               </Button>
@@ -149,12 +139,50 @@ export function UtilitiesSection({
               )}
               <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/teams" onClick={onNavigate}>
-                  <Settings className="h-4 w-4" />
+                  <Users className="h-4 w-4" />
                   {tTeam("teamSettings")}
                 </Link>
               </Button>
             </>
           )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface ToolsSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  selectedTeam?: SecurityTeam | null;
+  isExportActive?: boolean;
+  isImportActive?: boolean;
+  onNavigate: () => void;
+}
+
+export function ToolsSection({
+  isOpen,
+  onOpenChange,
+  t,
+  selectedTeam,
+  isExportActive,
+  isImportActive,
+  onNavigate,
+}: ToolsSectionProps) {
+  const scopedTeam = selectedTeam ?? null;
+  const exportHref = scopedTeam
+    ? `/dashboard/teams/${scopedTeam.id}/export`
+    : "/dashboard/export";
+  const importHref = scopedTeam
+    ? `/dashboard/teams/${scopedTeam.id}/import`
+    : "/dashboard/import";
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader isOpen={isOpen}>{t("tools")}</CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
           <Button variant={isExportActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
             <Link href={exportHref} onClick={onNavigate}>
               <Download className="h-4 w-4" />

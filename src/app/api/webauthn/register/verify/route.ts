@@ -12,7 +12,9 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import {
   verifyRegistration,
   uint8ArrayToBase64url,
+  getRpOrigin,
 } from "@/lib/webauthn-server";
+import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 
 export const runtime = "nodejs";
 
@@ -103,9 +105,7 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Use server-configured origin (never trust Origin header)
-  // WEBAUTHN_RP_ORIGIN allows http://localhost for local development
-  const origin = process.env.WEBAUTHN_RP_ORIGIN ?? `https://${rpId}`;
+  const origin = getRpOrigin(rpId);
 
   let verification;
   try {
@@ -138,6 +138,7 @@ async function handlePOST(req: NextRequest) {
   const transports: string[] = (response as any).response?.transports ?? [];
 
   const hasPrf = !!(prfEncryptedSecretKey && prfSecretKeyIv && prfSecretKeyAuthTag);
+  const registeredDevice = parseDeviceFromUserAgent(req.headers.get("user-agent"));
 
   const credential = await withUserTenantRls(userId, async () => {
     const user = await prisma.user.findUnique({
@@ -158,6 +159,7 @@ async function handlePOST(req: NextRequest) {
         backedUp,
         nickname: nickname ?? null,
         prfSupported: hasPrf,
+        registeredDevice,
         ...(hasPrf
           ? {
               prfEncryptedSecretKey,

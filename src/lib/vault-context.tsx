@@ -36,6 +36,10 @@ import {
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  startPasskeyAuthentication,
+  unwrapSecretKeyWithPrf,
+} from "./webauthn-client";
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {
@@ -78,6 +82,7 @@ interface VaultContextValue {
   userId: string | null;
   hasRecoveryKey: boolean;
   unlock: (passphrase: string) => Promise<boolean>;
+  unlockWithPasskey: () => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
@@ -563,6 +568,147 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
   }, [session?.user?.id]);
 
+  // ─── Unlock with Passkey (PRF) ───────────────────────────────
+
+  const unlockWithPasskey = useCallback(async (): Promise<boolean> => {
+    try {
+      // 1. Fetch vault data and WebAuthn options in parallel
+      const [dataRes, optionsRes] = await Promise.all([
+        fetchApi(API_PATH.VAULT_UNLOCK_DATA),
+        fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS, { method: "POST" }),
+      ]);
+
+      if (!dataRes.ok || !optionsRes.ok) return false;
+
+      const vaultData = await dataRes.json();
+      const { options, prfSalt } = await optionsRes.json();
+
+      if (!prfSalt || !vaultData.accountSalt) return false;
+
+      // 2. Perform WebAuthn authentication with PRF extension
+      const { responseJSON, prfOutput } = await startPasskeyAuthentication(
+        options,
+        prfSalt,
+      );
+
+      if (!prfOutput) {
+        // PRF not supported by this credential/browser
+        return false;
+      }
+
+      // 3. Verify with server — get PRF-encrypted secretKey
+      const verifyRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_VERIFY, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ response: responseJSON }),
+      });
+
+      if (!verifyRes.ok) return false;
+
+      const verifyData = await verifyRes.json();
+      if (!verifyData.verified || !verifyData.prf) {
+        prfOutput.fill(0);
+        return false;
+      }
+
+      // 4. Unwrap secretKey using PRF output
+      let secretKey: Uint8Array;
+      try {
+        secretKey = await unwrapSecretKeyWithPrf(
+          {
+            ciphertext: verifyData.prf.prfEncryptedSecretKey,
+            iv: verifyData.prf.prfSecretKeyIv,
+            authTag: verifyData.prf.prfSecretKeyAuthTag,
+          },
+          prfOutput,
+        );
+      } finally {
+        prfOutput.fill(0);
+      }
+
+      // 5. Derive encryption key and verify with artifact
+      const encKey = await deriveEncryptionKey(secretKey);
+      if (vaultData.verificationArtifact) {
+        const valid = await verifyKey(encKey, vaultData.verificationArtifact);
+        if (!valid) {
+          secretKey.fill(0);
+          return false;
+        }
+      }
+
+      // 6. Compute auth hash and verify with server
+      const authKey = await deriveAuthKey(secretKey);
+      const authHash = await computeAuthHash(authKey);
+
+      const unlockRes = await fetchApi(API_PATH.VAULT_UNLOCK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authHash }),
+      });
+
+      if (!unlockRes.ok) {
+        const body = await unlockRes.json().catch(() => ({}));
+        if (body.error) {
+          throw new VaultUnlockError(body.error, body.lockedUntil);
+        }
+        secretKey.fill(0);
+        return false;
+      }
+
+      // 7. Store refs (same as passphrase unlock)
+      const accountSalt = hexDecode(vaultData.accountSalt);
+      secretKeyRef.current = new Uint8Array(secretKey);
+      keyVersionRef.current = vaultData.keyVersion ?? 1;
+      accountSaltRef.current = accountSalt;
+      wrappedKeyRef.current = {
+        ciphertext: vaultData.encryptedSecretKey,
+        iv: vaultData.secretKeyIv,
+        authTag: vaultData.secretKeyAuthTag,
+      };
+
+      // 7b. Restore ECDH private key if available
+      if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
+        try {
+          const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
+          const ecdhPrivDecrypted = await decryptBinary(
+            {
+              ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
+              iv: vaultData.ecdhPrivateKeyIv,
+              authTag: vaultData.ecdhPrivateKeyAuthTag,
+            },
+            ecdhWrapKey,
+          );
+          ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
+          ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
+        } catch {
+          // ECDH restoration failure is non-fatal
+        }
+      }
+
+      secretKey.fill(0);
+
+      // 8. Auto-confirm pending emergency access grants
+      const userId = session?.user?.id;
+      if (userId && secretKeyRef.current) {
+        confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {});
+      }
+
+      // 9. Set unlocked
+      setEncryptionKey(encKey);
+      setVaultStatus(VAULT_STATUS.UNLOCKED);
+      lastActivityRef.current = Date.now();
+
+      return true;
+    } catch (err) {
+      if (err instanceof VaultUnlockError) throw err;
+      // User cancelled WebAuthn dialog — not an error
+      if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
+        return false;
+      }
+      return false;
+    }
+  }, [session?.user?.id]);
+
   // ─── Change Passphrase ────────────────────────────────────────
 
   const changePassphrase = useCallback(
@@ -658,6 +804,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         userId: session?.user?.id ?? null,
         hasRecoveryKey,
         unlock,
+        unlockWithPasskey,
         lock,
         setup,
         changePassphrase,

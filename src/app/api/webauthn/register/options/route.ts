@@ -6,7 +6,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { generateRegistrationOpts } from "@/lib/webauthn-server";
+import { generateRegistrationOpts, derivePrfSalt } from "@/lib/webauthn-server";
 
 export const runtime = "nodejs";
 
@@ -67,9 +67,18 @@ async function handlePOST(_req: NextRequest) {
     { EX: CHALLENGE_TTL_SECONDS },
   );
 
+  // Derive PRF salt so the client can use it during credential creation
+  let prfSalt: string | null = null;
+  try {
+    prfSalt = derivePrfSalt(userId);
+  } catch {
+    // PRF secret not configured — passkey will be registered without PRF
+  }
+
   return NextResponse.json({
     options,
     prfSupported: true,
+    prfSalt,
   });
 }
 
