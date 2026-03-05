@@ -1,124 +1,100 @@
 # Code Review: batch-f
-Date: 2026-03-05T15:05:00+09:00
-Review rounds: 4 (final: 指摘なし)
-Reviewers: 3 expert agents (functional, security, test) x 4 rounds
+Date: 2026-03-06T10:00:00+09:00
+Review rounds: Session 3 Round 1
+Reviewers: 3 expert agents (functional, security, test)
 
 ## Review Sessions
 
 ### Session 1 (previous conversation): Rounds 1-4
 Initial implementation review — all findings resolved.
 
-### Session 2 (this conversation): Rounds 1-4
+### Session 2 (previous conversation): Rounds 1-4
 Full codebase re-review after Session 1 fixes were committed.
 
----
-
-## Session 2 Round 1 Findings
-
-### FUNC-Critical-1: CLI decryptData argument order reversed — RESOLVED
-- Files: `cli/src/commands/env.ts:75-79`, `cli/src/commands/run.ts:91-95`
-- `decryptData(encrypted, key, aad)` but called as `(key, encrypted, aad)`
-- Fix: Swap to `(data.encryptedBlob, encryptionKey, additionalData)`
-
-### FUNC-Critical-2: agent.ts missing include=blob query param — RESOLVED
-- File: `cli/src/commands/agent.ts:73`
-- `/api/passwords?type=SSH_KEY` doesn't include encryptedBlob
-- Fix: Added `&include=blob`
-
-### FUNC-High-1: WebAuthn PRF all-or-nothing validation missing — RESOLVED
-- File: `src/app/api/webauthn/register/verify/route.ts:21-27`
-- 3 PRF fields each independently optional → partial data silently discarded
-- Fix: Added Zod `.refine()` enforcing 0 or 3 fields
-
-### FUNC-Medium-1: WebAuthn origin hardcoded `https://` breaks localhost dev — RESOLVED
-- Files: `register/verify/route.ts:100`, `authenticate/verify/route.ts:119`
-- Fix: `process.env.WEBAUTHN_RP_ORIGIN ?? \`https://${rpId}\``
-
-### FUNC-Medium-2: CLI entryId path traversal — RESOLVED
-- File: `cli/src/lib/secrets-config.ts:58-62`
-- Fix: `/[\/\\]/` validation + `encodeURIComponent()`
-
-### FUNC-Medium-3: clearKeys() zeroes copy not original — RESOLVED
-- File: `cli/src/lib/ssh-key-agent.ts:91-98`
-- Fix: Reference clearing + JS immutability documentation
-
-### SEC-Medium-1: requireUserVerification: false — RESOLVED
-- File: `src/lib/webauthn-server.ts:109,157`
-- CWE-287: UV-less auth on vault unlock
-- Fix: `requireUserVerification: true`
-
-### SEC-Medium-2: CLI run env var blocklist incomplete — RESOLVED
-- File: `cli/src/commands/run.ts:17-24`
-- CWE-426: Missing PYTHONPATH, RUBYLIB, etc.
-- Fix: Expanded to 19 blocked keys
-
-### SEC-Medium-3: Okta SSWS token not masked in sanitizer — RESOLVED
-- File: `src/lib/directory-sync/sanitize.ts:13-19`
-- CWE-209: Error messages may leak SSWS tokens
-- Fix: Added `SSWS` + `api_token=` patterns
-
-### TEST-Medium-1: proxy.test.ts missing /api/v1/* bypass tests — ACCEPTED
-- Deferred with F-TEST-1 (new test files follow-up)
-
-### Low items ACCEPTED
-- RSA key size off-by-one (display only)
-- Public API pagination (future)
-- Directory sync synchronous execution (future)
-- SSH key PEM zeroing JS constraint (documented)
-- lstatSync TOCTOU (uid check mitigates)
-- credentials schema validation (sanitize mitigates)
-- API key creation rate limit (MAX 10 + session auth mitigates)
-
-## Session 2 Round 2 Findings
-
-### R2-FUNC-High-1: buildSignResponse SSH signature double-wrapping — RESOLVED
-- File: `cli/src/lib/ssh-agent-protocol.ts:124-131`
-- `encodeString()` already wraps with uint32 length; extra `writeUInt32BE` produced `type + string(string(sig))`
-- Fix: `body = Buffer.alloc(1 + sigString.length); sigString.copy(body, 1)`
-
-### R2-FUNC-Medium-1: apiKeyRevokeCommand id not URL-encoded — RESOLVED
-- File: `cli/src/commands/api-key.ts:98`
-- Fix: `encodeURIComponent(id)`
-
-### R2-FUNC-Medium-2: dotenv shellEscape uses single quotes — ACCEPTED (Low)
-- Most dotenv parsers handle single quotes correctly
-
-### Security: 指摘なし
-### Test: 指摘なし
-
-## Session 2 Round 3 Findings
-
-### R3-FUNC-Medium-1: Azure AD groupId not URL-encoded — RESOLVED
-- File: `src/lib/directory-sync/azure-ad.ts:243`
-- Fix: `encodeURIComponent(groupId)`
-
-### R3-FUNC-Medium-2: Directory sync fetch calls have no timeout — RESOLVED
-- Files: `azure-ad.ts`, `google-workspace.ts`, `okta.ts` (8 fetch calls)
-- Fix: `AbortSignal.timeout(30_000)` added to all
-
-### R3-FUNC-Low-1: WebAuthn response as any — ACCEPTED
-- simplewebauthn type constraint
-
-### R3-SEC-Medium-1: CLI get.ts/totp.ts missing encodeURIComponent — ACCEPTED
-- Batch F scope external files
-
-### Test: 指摘なし
-
-## Session 2 Round 4 Findings
-
-All three reviewers: **指摘なし** (no findings)
+### Session 3 (this conversation): Round 1
+Post-fix review after 4 additional commits (0d6dad2, f9adb4c, a79fac7, 1798db9).
 
 ---
 
-## Deferred Items (not blocking)
+## Session 3 Round 1 Findings
 
-1. New test file creation (F-TEST-1) — follow-up batch
-2. proxy.test.ts /api/v1/* tests — follow-up with F-TEST-1
-3. CLI get.ts/totp.ts encodeURIComponent — follow-up (scope external)
-4. dotenv shellEscape — Low, most parsers handle correctly
+### FUNC-Medium-1: Hardcoded English "or" divider in vault-lock-screen.tsx
+- **File**: `src/components/vault/vault-lock-screen.tsx:195`
+- **Problem**: `<span>or</span>` is not internationalized. Japanese users see English "or" on the vault lock screen.
+- **Impact**: i18n consistency broken on the most visible screen
+- **Recommendation**: Add `"or"` key to `Vault.json` (en/ja) and use `{t("or")}`
 
-## Final Status
+### SEC-Medium-1: PSSO_PASSPHRASE leaks to child processes via `run` command
+- **File**: `cli/src/commands/run.ts:133-134`
+- **CWE**: CWE-214 (Invocation of Process Using Visible Sensitive Information)
+- **Problem**: `env: { ...process.env, ...secretEnv }` spreads entire parent environment including `PSSO_PASSPHRASE` and `PSSO_API_KEY` to the child process
+- **Impact**: Compromised child dependency could exfiltrate vault master passphrase
+- **Recommendation**: Strip `PSSO_PASSPHRASE` and `PSSO_API_KEY` from env before spawning
 
-All Critical, High, and Medium findings resolved across 2 review sessions (8 rounds total).
-Remaining items are Low/deferred with documented rationale.
-**Review approved: Session 2 — 4 rounds, final round 指摘なし from all 3 experts.**
+### SEC-Low-1: `prfSupported: true` hardcoded regardless of PRF config
+- **File**: `src/app/api/webauthn/register/options/route.ts:80`
+- **Problem**: Always returns `prfSupported: true` even when `WEBAUTHN_PRF_SECRET` is not configured
+- **Recommendation**: Set `prfSupported: prfSalt !== null`
+
+### SEC-Low-2: Extension tokens can manage API keys without scope check
+- **File**: `src/app/api/api-keys/route.ts:17-26`
+- **CWE**: CWE-863 (Incorrect Authorization)
+- **Problem**: `authOrToken(req)` allows extension tokens to create/revoke API keys without scope restriction
+- **Recommendation**: Restore session-only auth or add scope check
+
+### SEC-Low-3: API_KEYS bearer bypass allows child path prefix matching in proxy
+- **File**: `src/proxy.ts:89`
+- **Problem**: Prefix matching on `/api/api-keys` allows bypass of any future child routes
+- **Recommendation**: Exact-match for API key routes
+
+### SEC-Low-4: TOCTOU race in socket directory creation
+- **File**: `cli/src/lib/ssh-agent-socket.ts:49`
+- **CWE**: CWE-367
+- **Problem**: `statSync` follows symlinks; should use `lstatSync`
+- **Note**: Previously accepted as Low in Session 2 (uid check mitigates)
+
+### TEST-High-1: proxy test missing `/api/api-keys` Bearer bypass tests
+- **File**: `src/__tests__/proxy.test.ts`
+- **Problem**: `API_PATH.API_KEYS` added to `extensionTokenRoutes` but no test coverage
+- **Recommendation**: Add Bearer bypass test for `/api/api-keys` and `/api/api-keys/[id]`
+
+### TEST-High-2: proxy test missing `/api/v1/*` Public API bypass tests
+- **File**: `src/__tests__/proxy.test.ts`
+- **Problem**: `/api/v1/*` session check bypass has no test
+- **Recommendation**: Add test for `/api/v1/passwords` without session
+
+### TEST-Medium-1: `SettingsNavSection` test missing `isAdmin` coverage
+- **File**: `src/components/layout/sidebar-section-security.test.tsx`
+- **Problem**: `isAdmin` condition for tenant settings link not tested
+- **Recommendation**: Add tests for `isAdmin={true}` and `isAdmin={false}`
+
+### TEST-Medium-2: `parse-user-agent.ts` unit tests missing
+- **File**: `src/lib/parse-user-agent.ts` (28 lines, new file)
+- **Problem**: Pure function with no test coverage
+- **Recommendation**: Add tests for null, major browsers, unknown UA
+
+### TEST-Medium-3: `webauthn-server.ts` `getRpOrigin()` tests missing
+- **File**: `src/lib/webauthn-server.ts:52-63`
+- **Problem**: 3-stage fallback logic untested
+- **Recommendation**: Add tests for each fallback path
+
+### TEST-Low-1: `api-path.test.ts` missing new path assertions
+- **File**: `src/lib/constants/api-path.test.ts`
+- **Problem**: New API_PATH entries and path builder functions not covered
+- **Recommendation**: Add assertions for all new paths
+
+### TEST-Low-2: CLI `openssh-key-parser.ts` tests missing
+- **File**: `cli/src/lib/openssh-key-parser.ts` (348 lines)
+- **Note**: Already deferred as F-TEST-1
+
+## Summary
+
+| Severity | Count |
+|----------|-------|
+| Critical | 0 |
+| High | 2 (test gaps) |
+| Medium | 4 (1 func + 1 sec + 2 test) |
+| Low | 6 (3 sec + 1 sec-accepted + 2 test) |
+
+## 対応状況
+(修正後に追記)
