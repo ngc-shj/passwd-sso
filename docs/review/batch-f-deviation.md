@@ -63,3 +63,40 @@ Created: 2026-03-05T13:15:00+09:00
 - **Actual**: Removed duplicate from `totp-field.tsx`, now imports from `@/lib/qr-scanner-client`
 - **Reason**: Code review found the duplicate lacked algorithm validation fix
 - **Impact**: None — same behavior, single source of truth
+
+---
+
+## Session 2 Review-Driven Corrections
+
+The following corrections were identified during the Session 2 code review (4 rounds, 3 expert agents).
+These are implementation bugs caught by reviewers, not plan deviations.
+
+### DEV-11: decryptData argument order was reversed in CLI env.ts/run.ts
+
+- **Bug**: Called `decryptData(encryptionKey, data.encryptedBlob, aad)` — key and data swapped
+- **Fix**: Corrected to `decryptData(data.encryptedBlob, encryptionKey, aad)`
+- **Severity**: Critical — would cause runtime decrypt failure
+
+### DEV-12: agent.ts missing `include=blob` query parameter
+
+- **Bug**: `"/api/passwords?type=SSH_KEY"` omitted `&include=blob`
+- **Fix**: Added `&include=blob` to fetch encrypted private key data
+- **Severity**: Critical — SSH agent would receive entries without key material
+
+### DEV-13: SSH buildSignResponse double-wrapped signature
+
+- **Bug**: Extra `writeUInt32BE(sigString.length, 1)` produced `type + uint32 + string(sig)` instead of `type + string(sig)`
+- **Fix**: `body = Buffer.alloc(1 + sigString.length); sigString.copy(body, 1)`
+- **Severity**: High — SSH clients would fail to parse sign responses
+
+### DEV-14: CLI env var blocklist expanded from 6 to 19 entries
+
+- **Plan**: Specified PATH, LD_PRELOAD, LD_LIBRARY_PATH, DYLD_INSERT_LIBRARIES, NODE_OPTIONS, NODE_PATH
+- **Fix**: Added DYLD_FRAMEWORK_PATH, PYTHONPATH, PYTHONSTARTUP, PYTHONUSERBASE, RUBYLIB, RUBYOPT, PERL5LIB, PERL5OPT, JAVA_TOOL_OPTIONS, _JAVA_OPTIONS, CLASSPATH, BASH_ENV, ENV
+- **Reason**: Security reviewer identified CWE-426 risk from incomplete blocklist
+
+### DEV-15: Fetch timeout added to all directory sync provider calls
+
+- **Bug**: 8 fetch calls across azure-ad.ts, google-workspace.ts, okta.ts had no timeout
+- **Fix**: `AbortSignal.timeout(30_000)` added to all external fetch calls
+- **Reason**: Indefinite hang risk on IdP network issues
