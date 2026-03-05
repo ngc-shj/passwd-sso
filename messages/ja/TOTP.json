@@ -1,4 +1,16 @@
 {
   "authenticator": "認証コード (TOTP)",
-  "inputPlaceholder": "Base32 シークレットまたは otpauth:// URI"
+  "inputPlaceholder": "Base32 シークレットまたは otpauth:// URI",
+  "qrScan": "QR スキャン",
+  "qrScanTitle": "TOTP QR コードをスキャン",
+  "qrScanDescription": "QR コードが含まれた画面をキャプチャするか、画像をアップロードしてください。",
+  "qrCaptureScreen": "画面キャプチャ",
+  "qrUploadImage": "画像アップロード",
+  "qrScanning": "スキャン中...",
+  "qrScreenCaptureNote": "QR コードが表示されている画面またはタブのみを選択してください。他のコンテンツもキャプチャされる可能性があります。",
+  "qrNotFound": "画像から QR コードが見つかりませんでした。",
+  "qrNotTotp": "QR コードに有効な TOTP URI が含まれていません。",
+  "qrImageTooLarge": "画像が大きすぎます。最大サイズは 4096×4096 ピクセルです。",
+  "qrImageLoadFailed": "画像の読み込みに失敗しました。",
+  "qrCaptureFailed": "画面キャプチャに失敗しました。"
 }

@@ -7,7 +7,8 @@ const mockCollapsed = {
   categories: true,
   manage: true,
   security: true,
-  utilities: true,
+  settingsNav: true,
+  tools: true,
 };
 
 vi.mock("@/hooks/use-local-storage", () => ({
@@ -26,6 +27,9 @@ function baseParams() {
     isShareLinks: false,
     isEmergencyAccess: false,
     isAuditLog: false,
+    isSettingsActive: false,
+    isExportActive: false,
+    isImportActive: false,
   };
 }
 
@@ -36,7 +40,7 @@ describe("useSidebarSectionsState", () => {
 
   it("inverts collapsed state through isOpen", () => {
     const { result } = renderHook(() => useSidebarSectionsState(baseParams()));
-    expect(result.current.isOpen("utilities")).toBe(false);
+    expect(result.current.isOpen("settingsNav")).toBe(false);
   });
 
   it("toggles section state", () => {

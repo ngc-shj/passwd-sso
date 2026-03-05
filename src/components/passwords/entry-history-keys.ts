@@ -22,6 +22,8 @@ export const DISPLAY_KEYS = [
   "swiftBic", "iban", "branchName",
   // SOFTWARE_LICENSE
   "softwareName", "licenseKey", "version", "licensee", "purchaseDate", "expirationDate",
+  // SSH_KEY
+  "privateKey", "publicKey", "keyType", "keySize", "fingerprint", "passphrase", "comment",
 ] as const;
 
 /**
@@ -30,6 +32,7 @@ export const DISPLAY_KEYS = [
 export const SENSITIVE_KEYS = new Set([
   "password", "cvv", "cardNumber", "idNumber",
   "accountNumber", "routingNumber", "iban", "licenseKey", "credentialId",
+  "privateKey", "passphrase",
 ]);
 
 /**

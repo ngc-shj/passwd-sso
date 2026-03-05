@@ -7,9 +7,15 @@ interface RateLimiterOptions {
   max: number;
 }
 
+interface RateLimitResult {
+  allowed: boolean;
+  /** Milliseconds until the rate limit resets (present when rate-limited) */
+  retryAfterMs?: number;
+}
+
 interface RateLimiter {
-  /** Returns true if allowed, false if rate-limited */
-  check(key: string): Promise<boolean>;
+  /** Returns { allowed, retryAfterMs? } */
+  check(key: string): Promise<RateLimitResult>;
   /** Clear the counter for a key (e.g. on successful auth) */
   clear(key: string): Promise<void>;
 }
@@ -22,7 +28,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   const { windowMs, max } = options;
   const store = new Map<string, { resetAt: number; count: number }>();
 
-  async function checkRedis(key: string): Promise<boolean | null> {
+  async function checkRedis(key: string): Promise<RateLimitResult | null> {
     const redis = getRedis();
     if (!redis) return null;
     try {
@@ -30,7 +36,14 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       if (count === 1) {
         await redis.pExpire(key, windowMs);
       }
-      return count <= max;
+      if (count <= max) {
+        return { allowed: true };
+      }
+      const ttl = await redis.pTTL(key);
+      return {
+        allowed: false,
+        retryAfterMs: ttl > 0 ? ttl : windowMs,
+      };
     } catch {
       return null; // fallback to in-memory
     }
@@ -47,7 +60,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     }
   }
 
-  function checkMemory(key: string): boolean {
+  function checkMemory(key: string): RateLimitResult {
     const now = Date.now();
     const entry = store.get(key);
     if (!entry || entry.resetAt < now) {
@@ -60,15 +73,20 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         if (store.size >= MAX_MAP_SIZE) store.clear();
       }
       store.set(key, { resetAt: now + windowMs, count: 1 });
-      return true;
+      return { allowed: true };
     }
-    if (entry.count >= max) return false;
+    if (entry.count >= max) {
+      return {
+        allowed: false,
+        retryAfterMs: entry.resetAt - now,
+      };
+    }
     entry.count += 1;
-    return true;
+    return { allowed: true };
   }
 
   return {
-    async check(key: string): Promise<boolean> {
+    async check(key: string): Promise<RateLimitResult> {
       // Validate Redis config on first request (not at module load / build time)
       if (!redisConfigValidated) {
         validateRedisConfig();

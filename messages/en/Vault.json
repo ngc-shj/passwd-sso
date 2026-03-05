@@ -56,5 +56,6 @@
   "recoveryKeyClose": "Close",
   "recoveryKeyGenerating": "Generating Recovery Key...",
   "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key.",
-  "vaultMustBeUnlocked": "Vault must be unlocked."
+  "vaultMustBeUnlocked": "Vault must be unlocked.",
+  "or": "or"
 }

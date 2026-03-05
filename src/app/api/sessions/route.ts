@@ -73,7 +73,7 @@ async function handleDELETE(request: NextRequest) {
   }
 
   if (
-    !(await revokeAllLimiter.check(`rl:session_revoke_all:${session.user.id}`))
+    !(await revokeAllLimiter.check(`rl:session_revoke_all:${session.user.id}`)).allowed
   ) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },

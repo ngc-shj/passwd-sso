@@ -1,4 +1,16 @@
 {
   "authenticator": "Authenticator (TOTP)",
-  "inputPlaceholder": "Base32 secret or otpauth:// URI"
+  "inputPlaceholder": "Base32 secret or otpauth:// URI",
+  "qrScan": "Scan QR",
+  "qrScanTitle": "Scan TOTP QR Code",
+  "qrScanDescription": "Capture a screen or upload an image containing a TOTP QR code.",
+  "qrCaptureScreen": "Capture Screen",
+  "qrUploadImage": "Upload Image",
+  "qrScanning": "Scanning...",
+  "qrScreenCaptureNote": "Select only the screen or tab that shows the QR code. Other content may be captured.",
+  "qrNotFound": "No QR code found in the image.",
+  "qrNotTotp": "The QR code does not contain a valid TOTP URI.",
+  "qrImageTooLarge": "Image is too large. Maximum size is 4096×4096 pixels.",
+  "qrImageLoadFailed": "Failed to load the image.",
+  "qrCaptureFailed": "Screen capture failed."
 }

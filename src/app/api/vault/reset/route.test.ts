@@ -66,7 +66,7 @@ describe("POST /api/vault/reset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaPasswordEntry.count.mockResolvedValue(5);
     mockPrismaAttachment.count.mockResolvedValue(2);
     mockPrismaTransaction.mockResolvedValue([]);
@@ -81,7 +81,7 @@ describe("POST /api/vault/reset", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(createRequest("POST", URL, {
       body: { confirmation: "DELETE MY VAULT" },
     }));

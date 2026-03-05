@@ -74,6 +74,14 @@ interface VaultEntryFull {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  passphrase?: string | null;
+  comment?: string | null;
+  travelSafe?: boolean;
 }
 
 export function PasswordEditDialogLoader({
@@ -177,7 +185,15 @@ export function PasswordEditDialogLoader({
           licensee: entry.licensee,
           purchaseDate: entry.purchaseDate,
           expirationDate: entry.expirationDate,
+          privateKey: entry.privateKey,
+          publicKey: entry.publicKey,
+          keyType: entry.keyType,
+          keySize: entry.keySize,
+          fingerprint: entry.fingerprint,
+          passphrase: entry.passphrase,
+          sshComment: entry.comment,
           requireReprompt: raw.requireReprompt ?? false,
+          travelSafe: entry.travelSafe ?? true,
           expiresAt: raw.expiresAt ?? null,
           folderId: raw.folderId ?? null,
         });

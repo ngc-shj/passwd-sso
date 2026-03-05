@@ -62,7 +62,7 @@ describe("POST /api/watchtower/alert", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: userId } });
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
     mockWithUserTenantRls.mockImplementation((_id: string, fn: () => unknown) => fn());
   });
 
@@ -99,7 +99,7 @@ describe("POST /api/watchtower/alert", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
     const res = await POST(makeRequest({ newBreachCount: 3 }));
     expect(res.status).toBe(429);
   });

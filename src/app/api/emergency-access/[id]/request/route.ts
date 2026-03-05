@@ -23,7 +23,7 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  if (!(await requestLimiter.check(`rl:ea_request:${session.user.id}`))) {
+  if (!(await requestLimiter.check(`rl:ea_request:${session.user.id}`)).allowed) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 

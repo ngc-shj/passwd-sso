@@ -1,0 +1,23 @@
+{
+  "title": "Travel Mode",
+  "description": "When Travel Mode is active, only entries marked as travel-safe are visible. This helps protect sensitive data when crossing borders.",
+  "securityNote": "Note: Travel Mode filters entries on the client side. All encrypted data remains on the server. This provides a UI-level safeguard, not a cryptographic boundary.",
+  "status": "Status",
+  "active": "Active",
+  "inactive": "Inactive",
+  "enable": "Enable Travel Mode",
+  "disable": "Disable Travel Mode",
+  "enableConfirm": "Are you sure you want to enable Travel Mode? Only travel-safe entries will be visible.",
+  "disableTitle": "Disable Travel Mode",
+  "disableDescription": "Enter your passphrase to disable Travel Mode and restore access to all entries.",
+  "passphrasePlaceholder": "Passphrase",
+  "passphraseRequired": "Passphrase is required to disable Travel Mode.",
+  "passphraseIncorrect": "Incorrect passphrase. Please try again.",
+  "enabled": "Travel Mode enabled. Only travel-safe entries are visible.",
+  "disabled": "Travel Mode disabled. All entries are now visible.",
+  "enableFailed": "Failed to enable Travel Mode.",
+  "cancel": "Cancel",
+  "disableFailed": "Failed to disable Travel Mode.",
+  "travelSafe": "Travel Safe",
+  "travelSafeDescription": "Show this entry when Travel Mode is active"
+}

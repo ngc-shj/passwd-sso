@@ -38,6 +38,7 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "PasskeyForm",
   "BankAccountForm",
   "SoftwareLicenseForm",
+  "SshKeyForm",
   "Trash",
   "TOTP",
   "Attachments",
@@ -56,6 +57,10 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "AuditDownload",
   "CliToken",
   "TenantAdmin",
+  "ApiKey",
+  "TravelMode",
+  "WebAuthn",
+  "DirectorySync",
 ];
 
 /** Union of all dashboard namespaces (must be a superset of NS_GLOBAL). */

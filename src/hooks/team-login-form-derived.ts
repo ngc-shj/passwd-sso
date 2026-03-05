@@ -18,6 +18,7 @@ interface BuildTeamLoginFormDerivedArgs {
   selectedTags: TeamTagData[];
   teamFolderId: string | null;
   requireReprompt: boolean;
+  travelSafe: boolean;
   expiresAt: string | null;
   generatorSettings: GeneratorSettings;
   tGen: (key: "modePassphrase" | "modePassword") => string;
@@ -37,6 +38,7 @@ export function buildTeamLoginFormDerived({
   selectedTags,
   teamFolderId,
   requireReprompt,
+  travelSafe,
   expiresAt,
   generatorSettings,
   tGen,
@@ -52,6 +54,7 @@ export function buildTeamLoginFormDerived({
     selectedTagIds: (editData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
     teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
     requireReprompt: editData?.requireReprompt ?? false,
+    travelSafe: editData?.travelSafe ?? true,
     expiresAt: editData?.expiresAt ?? null,
   });
 
@@ -66,6 +69,7 @@ export function buildTeamLoginFormDerived({
     selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
     teamFolderId,
     requireReprompt,
+    travelSafe,
     expiresAt,
   });
 

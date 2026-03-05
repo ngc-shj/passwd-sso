@@ -12,6 +12,8 @@ describe("buildPersonalFormSectionsProps", () => {
       sectionCardClass: "flat",
       repromptTitle: "reprompt",
       repromptDescription: "desc",
+      travelSafeTitle: "travelSafe",
+      travelSafeDescription: "travelDesc",
       expirationTitle: "expiration",
       expirationDescription: "expDesc",
       hasChanges: true,
@@ -46,6 +48,7 @@ function createState(): Pick<PersonalLoginFormState, "values" | "setters"> {
       totp: null,
       showTotpInput: false,
       requireReprompt: false,
+      travelSafe: true,
       expiresAt: null,
     } as unknown as PersonalLoginFormState["values"],
     setters: {
@@ -55,6 +58,7 @@ function createState(): Pick<PersonalLoginFormState, "values" | "setters"> {
       setTotp: vi.fn(),
       setShowTotpInput: vi.fn(),
       setRequireReprompt: vi.fn(),
+      setTravelSafe: vi.fn(),
       setExpiresAt: vi.fn(),
     } as unknown as PersonalLoginFormState["setters"],
   };

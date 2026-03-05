@@ -55,7 +55,15 @@ export interface PersonalPasswordEditData {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  passphrase?: string | null;
+  sshComment?: string | null;
   requireReprompt?: boolean;
+  travelSafe?: boolean;
   expiresAt?: string | null;
   folderId?: string | null;
 }

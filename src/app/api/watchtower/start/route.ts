@@ -19,7 +19,7 @@ export async function POST() {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const allowed = await scanLimiter.check(`rl:watchtower:start:${session.user.id}`);
+  const { allowed } = await scanLimiter.check(`rl:watchtower:start:${session.user.id}`);
   if (!allowed) {
     return NextResponse.json(
       {

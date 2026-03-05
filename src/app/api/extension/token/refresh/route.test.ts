@@ -13,7 +13,7 @@ const {
   mockWithUserTenantRls,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSessionFindFirst: vi.fn(),
   mockExtTokenUpdateMany: vi.fn(),
   mockExtTokenCreate: vi.fn(),
@@ -137,7 +137,7 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("returns 429 when rate limited", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockCheck.mockResolvedValueOnce(false);
+    mockCheck.mockResolvedValueOnce({ allowed: false });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },

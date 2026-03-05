@@ -22,7 +22,7 @@ export default async function SharePage({ params }: Props) {
   const rateLimitIp = forwarded
     ? forwarded.split(",")[0].trim()
     : headersList.get("x-real-ip") ?? "unknown";
-  if (!(await sharePageLimiter.check(`rl:share_page:${rateLimitIp}`))) {
+  if (!(await sharePageLimiter.check(`rl:share_page:${rateLimitIp}`)).allowed) {
     return <ShareError reason="rateLimited" />;
   }
 

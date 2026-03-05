@@ -46,6 +46,9 @@ vi.mock("@/components/passwords/personal-bank-account-form", () => ({
 vi.mock("@/components/passwords/personal-software-license-form", () => ({
   SoftwareLicenseForm: () => <div data-testid="personal-software-license-form" />,
 }));
+vi.mock("@/components/passwords/personal-ssh-key-form", () => ({
+  SshKeyForm: () => <div data-testid="personal-ssh-key-form" />,
+}));
 vi.mock("@/components/passwords/attachment-section", () => ({
   AttachmentSection: () => <div data-testid="attachment-section" />,
 }));

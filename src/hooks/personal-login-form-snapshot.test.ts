@@ -28,6 +28,7 @@ describe("personal-login-form-derived snapshot helpers", () => {
         customFields: [],
         totp: null,
         requireReprompt: true,
+        travelSafe: true,
         expiresAt: "2026-06-01T23:59:59.999Z",
         folderId: "folder-1",
       }),

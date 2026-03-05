@@ -22,6 +22,8 @@ export function useEntryFormTranslations() {
   const tpk = useTranslations("PasskeyForm");
   const tba = useTranslations("BankAccountForm");
   const tsl = useTranslations("SoftwareLicenseForm");
+  const tsk = useTranslations("SshKeyForm");
+  const ttm = useTranslations("TravelMode");
 
   return {
     t,
@@ -33,5 +35,7 @@ export function useEntryFormTranslations() {
     tpk,
     tba,
     tsl,
+    tsk,
+    ttm,
   } satisfies EntryFormTranslationsBundle;
 }

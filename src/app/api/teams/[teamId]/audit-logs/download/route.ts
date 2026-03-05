@@ -71,7 +71,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
 
   const rateKey = `rl:audit_download:team:${teamId}:${session.user.id}`;
-  if (!(await downloadLimiter.check(rateKey))) {
+  if (!(await downloadLimiter.check(rateKey)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

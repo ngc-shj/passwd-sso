@@ -17,7 +17,7 @@ import { POST } from "./route";
 describe("POST /api/watchtower/start", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -39,7 +39,7 @@ describe("POST /api/watchtower/start", () => {
   it("returns 429 during cooldown", async () => {
     const userId = "cooldown-user";
     mockAuth.mockResolvedValue({ user: { id: userId } });
-    mockCheck.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    mockCheck.mockResolvedValueOnce({ allowed: true }).mockResolvedValueOnce({ allowed: false });
 
     const first = await POST();
     expect(first.status).toBe(200);

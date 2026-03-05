@@ -17,6 +17,7 @@ export interface PersonalLoginFormInitialData {
   requireReprompt?: boolean;
   expiresAt?: string | null;
   folderId?: string | null;
+  travelSafe?: boolean;
 }
 
 export interface PersonalLoginFormProps {

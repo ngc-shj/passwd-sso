@@ -28,9 +28,11 @@ interface UseSidebarViewModelParams {
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
   isTeamSettingsActive: boolean;
+  isTenantSettingsActive: boolean;
   isSettingsActive: boolean;
   isExportActive: boolean;
   isImportActive: boolean;
+  isAdmin: boolean;
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
@@ -66,9 +68,11 @@ export function useSidebarViewModel({
   isSelectedVaultArchive,
   isSelectedVaultTrash,
   isTeamSettingsActive,
+  isTenantSettingsActive,
   isSettingsActive,
   isExportActive,
   isImportActive,
+  isAdmin,
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
@@ -121,9 +125,11 @@ export function useSidebarViewModel({
     isSelectedVaultArchive,
     isSelectedVaultTrash,
     isTeamSettingsActive,
+    isTenantSettingsActive,
     isSettingsActive,
     isExportActive,
     isImportActive,
+    isAdmin,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,

@@ -31,12 +31,17 @@ const EXPECTED_FIELDS: Record<string, string[]> = {
     "title", "softwareName", "licenseKey", "version",
     "licensee", "email", "purchaseDate", "expirationDate", "notes",
   ],
+  SSH_KEY: [
+    "title", "privateKey", "publicKey", "keyType", "keySize",
+    "fingerprint", "passphrase", "comment", "notes",
+  ],
 };
 
 /** Fields that contain sensitive data and should be masked in history view. */
 const EXPECTED_SENSITIVE = [
   "password", "cvv", "cardNumber", "idNumber",
   "accountNumber", "routingNumber", "iban", "licenseKey", "credentialId",
+  "privateKey", "passphrase",
 ];
 
 describe("DISPLAY_KEYS coverage", () => {

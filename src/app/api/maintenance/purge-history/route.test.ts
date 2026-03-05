@@ -35,7 +35,7 @@ describe("POST /api/maintenance/purge-history", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -47,7 +47,7 @@ describe("POST /api/maintenance/purge-history", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
     );

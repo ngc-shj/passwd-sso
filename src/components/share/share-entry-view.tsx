@@ -18,6 +18,7 @@ import {
   Fingerprint,
   Landmark,
   KeySquare,
+  Terminal,
 } from "lucide-react";
 import { formatDateTime, formatDate } from "@/lib/format-datetime";
 
@@ -39,6 +40,7 @@ const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
   [ENTRY_TYPE.PASSKEY]: <Fingerprint className="h-5 w-5" />,
   [ENTRY_TYPE.BANK_ACCOUNT]: <Landmark className="h-5 w-5" />,
   [ENTRY_TYPE.SOFTWARE_LICENSE]: <KeySquare className="h-5 w-5" />,
+  [ENTRY_TYPE.SSH_KEY]: <Terminal className="h-5 w-5" />,
 };
 
 interface ShareEntryViewProps {
@@ -123,6 +125,9 @@ export function ShareEntryView({
           </Button>
           <CopyButton getValue={() => strVal} />
         </div>
+        {isShown && (
+          <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
+        )}
       </div>
     );
   };
@@ -338,6 +343,18 @@ export function ShareEntryView({
     </>
   );
 
+  const renderSshKeyFields = () => (
+    <>
+      {renderField(t("keyType"), data.keyType && data.keySize ? `${String(data.keyType).toUpperCase()} (${data.keySize} bit)` : data.keyType)}
+      {renderField(t("fingerprint"), data.fingerprint)}
+      {renderField(t("publicKey"), data.publicKey)}
+      {renderSensitiveField(t("privateKey"), data.privateKey, "privateKey")}
+      {renderSensitiveField(t("passphrase"), data.passphrase, "passphrase")}
+      {renderField(t("comment"), data.comment)}
+      {renderNotes(data.notes)}
+    </>
+  );
+
   const renderFields = () => {
     switch (entryType) {
       case ENTRY_TYPE.SECURE_NOTE:
@@ -352,6 +369,8 @@ export function ShareEntryView({
         return renderBankAccountFields();
       case ENTRY_TYPE.SOFTWARE_LICENSE:
         return renderSoftwareLicenseFields();
+      case ENTRY_TYPE.SSH_KEY:
+        return renderSshKeyFields();
       default:
         return renderLoginFields();
     }

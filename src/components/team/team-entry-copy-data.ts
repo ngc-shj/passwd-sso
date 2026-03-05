@@ -8,6 +8,7 @@ import type {
   PasskeyFormTranslator,
   SecureNoteFormTranslator,
   SoftwareLicenseFormTranslator,
+  SshKeyFormTranslator,
 } from "@/lib/translation-types";
 
 interface BuildTeamEntryCopyDataArgs {
@@ -18,6 +19,7 @@ interface BuildTeamEntryCopyDataArgs {
   tpk: PasskeyFormTranslator;
   tba: BankAccountFormTranslator;
   tsl: SoftwareLicenseFormTranslator;
+  tsk: SshKeyFormTranslator;
 }
 
 export function buildTeamEntryCopyData({
@@ -28,6 +30,7 @@ export function buildTeamEntryCopyData({
   tpk,
   tba,
   tsl,
+  tsk,
 }: BuildTeamEntryCopyDataArgs): Record<TeamEntryKind, EntryLocaleCopy> {
   return {
     passkey: {
@@ -92,6 +95,15 @@ export function buildTeamEntryCopyData({
       notesLabel: tsl("notes"),
       notesPlaceholder: tsl("notesPlaceholder"),
       tagsTitle: tsl("tags"),
+    },
+    sshKey: {
+      edit: tsk("editSshKey"),
+      create: tsk("newSshKey"),
+      titleLabel: tsk("title"),
+      titlePlaceholder: tsk("titlePlaceholder"),
+      notesLabel: tsk("notes"),
+      notesPlaceholder: tsk("notesPlaceholder"),
+      tagsTitle: tsk("tags"),
     },
   };
 }

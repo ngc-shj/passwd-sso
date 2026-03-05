@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CopyButton } from "@/components/passwords/copy-button";
@@ -25,7 +25,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, ShieldAlert } from "lucide-react";
+import { Link2, Loader2, Plus, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -129,16 +129,20 @@ export function ScimTokenManager({ locale }: Props) {
   };
 
   return (
-    <Card className="p-6 space-y-6">
-      <section>
-        <h2 className="text-lg font-semibold">{t("scimTitle")}</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("scimDescription")}
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Link2 className="h-5 w-5" />
+          <div>
+            <CardTitle>{t("scimTitle")}</CardTitle>
+            <CardDescription>{t("scimDescription")}</CardDescription>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {t("scimTenantScopeNote")}
         </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Tokens are tenant-scoped. Changes here affect SCIM access for all teams in this tenant.
-        </p>
-      </section>
+      </CardHeader>
+      <CardContent className="space-y-6">
 
       {/* SCIM Endpoint URL */}
       <section className="space-y-2">
@@ -299,6 +303,7 @@ export function ScimTokenManager({ locale }: Props) {
           </div>
         )}
       </section>
+      </CardContent>
     </Card>
   );
 }

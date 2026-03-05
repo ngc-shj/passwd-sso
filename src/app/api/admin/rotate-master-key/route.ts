@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Rate limit (global fixed key, applied after auth)
-  if (!(await rateLimiter.check("rl:admin:rotate"))) {
+  if (!(await rateLimiter.check("rl:admin:rotate")).allowed) {
     return NextResponse.json(
       { error: "Rate limit exceeded. Try again later." },
       { status: 429 }

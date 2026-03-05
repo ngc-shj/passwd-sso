@@ -4,7 +4,7 @@ import { NextRequest } from "next/server";
 
 const { mockFindUnique, mockCheck, mockAccessLogCreate, mockDecryptShareBinary } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockAccessLogCreate: vi.fn().mockReturnValue({ catch: vi.fn() }),
   mockDecryptShareBinary: vi.fn().mockReturnValue(Buffer.from("decrypted-file-content")),
 }));
@@ -52,7 +52,7 @@ function makeFileShare(overrides: Record<string, unknown> = {}) {
 describe("GET /s/[token]/download", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 404 for invalid token format (contains symbols)", async () => {
@@ -123,7 +123,7 @@ describe("GET /s/[token]/download", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
 
     const req = createDownloadRequest(VALID_TOKEN);
     const res = await GET(req as never, createParams({ token: VALID_TOKEN }));

@@ -32,6 +32,8 @@ const ALLOWED_FILES = new Set([
   "src/lib/tenant-auth.ts", // tenant role authorization (cross-tenant member lookup)
   "src/lib/vault-reset.ts", // admin vault reset execution (cross-tenant data deletion)
   "src/app/api/vault/admin-reset/route.ts", // admin vault reset token verification
+  "src/lib/api-key.ts", // API key validation
+  "src/lib/directory-sync/credentials.ts", // directory sync credential encryption
 ]);
 
 function getSourceFiles() {

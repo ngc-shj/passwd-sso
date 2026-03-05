@@ -24,6 +24,7 @@ import {
   Fingerprint,
   Landmark,
   KeySquare,
+  Terminal,
   FolderOpen,
   Plus,
   Link as LinkIcon,
@@ -97,6 +98,7 @@ export function CategoriesSection({
     { type: ENTRY_TYPE.PASSKEY, labelKey: "catPasskey", icon: Fingerprint },
     { type: ENTRY_TYPE.BANK_ACCOUNT, labelKey: "catBankAccount", icon: Landmark },
     { type: ENTRY_TYPE.SOFTWARE_LICENSE, labelKey: "catSoftwareLicense", icon: KeySquare },
+    { type: ENTRY_TYPE.SSH_KEY, labelKey: "catSshKey", icon: Terminal },
   ] as const;
 
   return (

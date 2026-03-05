@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { BankAccountFields } from "@/components/entry-fields/bank-account-fields";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
 import {
@@ -30,6 +31,7 @@ export function TeamBankAccountForm({
   defaultTags,
 }: TeamEntryFormProps) {
   const tba = useTranslations("BankAccountForm");
+  const ttm = useTranslations("TravelMode");
   const base = useTeamBaseFormModel({
     teamId,
     open,
@@ -72,6 +74,7 @@ export function TeamBankAccountForm({
           .sort(),
         teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
         requireReprompt: editData?.requireReprompt ?? false,
+        travelSafe: editData?.travelSafe ?? true,
         expiresAt: editData?.expiresAt ?? null,
       }),
     [editData, defaultFolderId, defaultTags],
@@ -93,6 +96,7 @@ export function TeamBankAccountForm({
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         teamFolderId: base.teamFolderId,
         requireReprompt: base.requireReprompt,
+        travelSafe: base.travelSafe,
         expiresAt: base.expiresAt,
       }),
     [
@@ -109,6 +113,7 @@ export function TeamBankAccountForm({
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
+      base.travelSafe,
       base.expiresAt,
     ],
   );
@@ -121,6 +126,7 @@ export function TeamBankAccountForm({
   const {
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildTeamFormSectionsProps({
@@ -143,6 +149,8 @@ export function TeamBankAccountForm({
     repromptPolicyForcedLabel: base.teamPolicy?.requireRepromptForAll
       ? base.t("requireRepromptPolicyForced")
       : undefined,
+    travelSafeTitle: ttm("travelSafe"),
+    travelSafeDescription: ttm("travelSafeDescription"),
     expirationTitle: base.t("expirationTitle"),
     expirationDescription: base.t("expirationDescription"),
     onCancel: () => base.handleOpenChange(false),
@@ -153,6 +161,7 @@ export function TeamBankAccountForm({
       totp: null,
       showTotpInput: false,
       requireReprompt: base.requireReprompt,
+      travelSafe: base.travelSafe,
       expiresAt: base.expiresAt,
     },
     setters: {
@@ -162,6 +171,7 @@ export function TeamBankAccountForm({
       setTotp: () => {},
       setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
+      setTravelSafe: base.setTravelSafe,
       setExpiresAt: base.setExpiresAt,
     },
   });
@@ -261,6 +271,7 @@ export function TeamBankAccountForm({
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
           <EntryRepromptSection {...repromptSectionProps} />
+          <EntryTravelSafeSection {...travelSafeSectionProps} />
           <EntryExpirationSection {...expirationSectionProps} />
           <EntryActionBar {...actionBarProps} />
         </form>

@@ -17,7 +17,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   const ip = forwarded
     ? forwarded.split(",")[0].trim()
     : req.headers.get("x-real-ip") ?? "unknown";
-  if (!(await downloadLimiter.check(`rl:send_download:${ip}`))) {
+  if (!(await downloadLimiter.check(`rl:send_download:${ip}`)).allowed) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 

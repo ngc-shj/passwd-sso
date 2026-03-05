@@ -1,11 +1,13 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockValidateExtensionToken, mockHasScope } = vi.hoisted(
+const { mockAuth, mockValidateExtensionToken, mockHasScope, mockValidateApiKey, mockHasApiKeyScope } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockValidateExtensionToken: vi.fn(),
     mockHasScope: vi.fn(),
+    mockValidateApiKey: vi.fn(),
+    mockHasApiKeyScope: vi.fn(),
   }),
 );
 
@@ -14,11 +16,22 @@ vi.mock("@/lib/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   hasScope: mockHasScope,
 }));
+vi.mock("@/lib/api-key", () => ({
+  validateApiKey: mockValidateApiKey,
+  hasApiKeyScope: mockHasApiKeyScope,
+}));
+vi.mock("@/lib/constants/api-key", () => ({
+  API_KEY_PREFIX: "api_",
+}));
 
 import { authOrToken } from "./auth-or-token";
 
-function makeRequest(): NextRequest {
-  return new NextRequest("http://localhost:3000/api/test");
+function makeRequest(bearerToken?: string): NextRequest {
+  const headers: Record<string, string> = {};
+  if (bearerToken) {
+    headers.Authorization = `Bearer ${bearerToken}`;
+  }
+  return new NextRequest("http://localhost:3000/api/test", { headers });
 }
 
 describe("authOrToken", () => {
@@ -26,6 +39,8 @@ describe("authOrToken", () => {
     mockAuth.mockReset();
     mockValidateExtensionToken.mockReset();
     mockHasScope.mockReset();
+    mockValidateApiKey.mockReset();
+    mockHasApiKeyScope.mockReset();
   });
 
   it("returns session result when session is valid", async () => {
@@ -102,5 +117,75 @@ describe("authOrToken", () => {
     );
     expect(result).toEqual({ type: "session", userId: "user-5" });
     expect(mockHasScope).not.toHaveBeenCalled();
+  });
+
+  // ── API key path tests ────────────────────────────────────
+
+  it("returns api_key result for valid API key", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateApiKey.mockResolvedValue({
+      ok: true,
+      data: {
+        userId: "u1",
+        tenantId: "t1",
+        apiKeyId: "ak1",
+        scopes: ["passwords:read"],
+      },
+    });
+
+    const result = await authOrToken(makeRequest("api_test123"));
+    expect(result).toEqual({
+      type: "api_key",
+      userId: "u1",
+      tenantId: "t1",
+      apiKeyId: "ak1",
+      scopes: ["passwords:read"],
+    });
+    expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  it("returns null when API key validation fails", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateApiKey.mockResolvedValue({ ok: false, error: "API_KEY_INVALID" });
+
+    const result = await authOrToken(makeRequest("api_invalid"));
+    expect(result).toBeNull();
+    expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  it("returns scope_insufficient when API key lacks required scope", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateApiKey.mockResolvedValue({
+      ok: true,
+      data: {
+        userId: "u2",
+        tenantId: "t2",
+        apiKeyId: "ak2",
+        scopes: ["passwords:read"],
+      },
+    });
+    mockHasApiKeyScope.mockReturnValue(false);
+
+    const result = await authOrToken(
+      makeRequest("api_test456"),
+      "passwords:write" as Parameters<typeof authOrToken>[1],
+    );
+    expect(result).toEqual({ type: "scope_insufficient" });
+  });
+
+  it("dispatches to extension token when Bearer lacks api_ prefix", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateExtensionToken.mockResolvedValue({
+      ok: true,
+      data: { userId: "u3", scopes: ["passwords:read"] },
+    });
+
+    const result = await authOrToken(makeRequest("ext_token_123"));
+    expect(result).toEqual({
+      type: "token",
+      userId: "u3",
+      scopes: ["passwords:read"],
+    });
+    expect(mockValidateApiKey).not.toHaveBeenCalled();
   });
 });

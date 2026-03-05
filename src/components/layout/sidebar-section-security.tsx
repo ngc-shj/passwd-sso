@@ -7,12 +7,13 @@ import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import type { VaultContext } from "@/hooks/use-vault-context";
 import {
+  Building2,
   Download,
   HeartPulse,
-  Monitor,
-  Settings,
   Shield,
   Upload,
+  UserRound,
+  Users,
 } from "lucide-react";
 
 interface SecurityTeam {
@@ -80,31 +81,95 @@ export function SecuritySection({
   );
 }
 
-interface UtilitiesSectionProps {
+interface SettingsNavSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
   tTeam: (key: string) => string;
   selectedTeam?: SecurityTeam | null;
   isTeamSettingsActive?: boolean;
+  isTenantSettingsActive?: boolean;
   isSettingsActive?: boolean;
-  isExportActive?: boolean;
-  isImportActive?: boolean;
+  isAdmin?: boolean;
   onNavigate: () => void;
 }
 
-export function UtilitiesSection({
+export function SettingsNavSection({
   isOpen,
   onOpenChange,
   t,
   tTeam,
   selectedTeam,
   isTeamSettingsActive,
+  isTenantSettingsActive,
   isSettingsActive,
+  isAdmin,
+  onNavigate,
+}: SettingsNavSectionProps) {
+  const scopedTeam = selectedTeam ?? null;
+
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader isOpen={isOpen}>{t("settingsNav")}</CollapsibleSectionHeader>
+      <CollapsibleContent>
+        <div className="space-y-1">
+          {scopedTeam &&
+            (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
+            <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+              <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
+                <Users className="h-4 w-4" />
+                {tTeam("teamSettings")}
+              </Link>
+            </Button>
+          ) : !scopedTeam && (
+            <>
+              <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+                <Link href="/dashboard/settings" onClick={onNavigate}>
+                  <UserRound className="h-4 w-4" />
+                  {t("settings")}
+                </Link>
+              </Button>
+              {isAdmin && (
+                <Button variant={isTenantSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+                  <Link href="/dashboard/tenant" onClick={onNavigate}>
+                    <Building2 className="h-4 w-4" />
+                    {t("tenantSettings")}
+                  </Link>
+                </Button>
+              )}
+              <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+                <Link href="/dashboard/teams" onClick={onNavigate}>
+                  <Users className="h-4 w-4" />
+                  {tTeam("teamSettings")}
+                </Link>
+              </Button>
+            </>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface ToolsSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  selectedTeam?: SecurityTeam | null;
+  isExportActive?: boolean;
+  isImportActive?: boolean;
+  onNavigate: () => void;
+}
+
+export function ToolsSection({
+  isOpen,
+  onOpenChange,
+  t,
+  selectedTeam,
   isExportActive,
   isImportActive,
   onNavigate,
-}: UtilitiesSectionProps) {
+}: ToolsSectionProps) {
   const scopedTeam = selectedTeam ?? null;
   const exportHref = scopedTeam
     ? `/dashboard/teams/${scopedTeam.id}/export`
@@ -115,33 +180,9 @@ export function UtilitiesSection({
 
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
-      <CollapsibleSectionHeader isOpen={isOpen}>{t("utilities")}</CollapsibleSectionHeader>
+      <CollapsibleSectionHeader isOpen={isOpen}>{t("tools")}</CollapsibleSectionHeader>
       <CollapsibleContent>
         <div className="space-y-1">
-          {scopedTeam &&
-            (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
-            <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-              <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
-                <Settings className="h-4 w-4" />
-                {tTeam("teamSettings")}
-              </Link>
-            </Button>
-          ) : !scopedTeam && (
-            <>
-              <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/settings" onClick={onNavigate}>
-                  <Monitor className="h-4 w-4" />
-                  {t("settings")}
-                </Link>
-              </Button>
-              <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/teams" onClick={onNavigate}>
-                  <Settings className="h-4 w-4" />
-                  {tTeam("teamSettings")}
-                </Link>
-              </Button>
-            </>
-          )}
           <Button variant={isExportActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
             <Link href={exportHref} onClick={onNavigate}>
               <Download className="h-4 w-4" />

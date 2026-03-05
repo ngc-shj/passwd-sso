@@ -8,7 +8,7 @@ const { mockAuth, mockCreate, mockAggregate, mockUserFindUnique, mockCheck, mock
     mockCreate: vi.fn(),
     mockAggregate: vi.fn(),
     mockUserFindUnique: vi.fn(),
-    mockCheck: vi.fn().mockResolvedValue(true),
+    mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockLogAudit: vi.fn(),
     mockFileTypeFromBuffer: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -77,7 +77,7 @@ describe("POST /api/sends/file", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
     mockFileTypeFromBuffer.mockResolvedValue(undefined); // text files
     mockAggregate.mockResolvedValue({ _sum: { sendSizeBytes: 0 } });
   });
@@ -98,7 +98,7 @@ describe("POST /api/sends/file", () => {
 
   it("returns 429 when rate limited", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
 
     const req = createMultipartRequest(
       "http://localhost/api/sends/file",

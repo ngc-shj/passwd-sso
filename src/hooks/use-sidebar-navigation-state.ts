@@ -66,6 +66,7 @@ export function useSidebarNavigationState({
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/settings`
       : false;
     const isSettings = cleanPath === "/dashboard/settings";
+    const isTenantSettings = cleanPath === "/dashboard/tenant";
     const isExport = teamMatch
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/export`
       : cleanPath === "/dashboard/export";
@@ -159,6 +160,7 @@ export function useSidebarNavigationState({
       activeAuditTeamId,
       isTeamsManage,
       isTeamSettings,
+      isTenantSettings,
       isSettings,
       isExport,
       isImport,

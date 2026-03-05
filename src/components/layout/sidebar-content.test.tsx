@@ -15,7 +15,8 @@ vi.mock("@/components/layout/vault-selector", () => ({
 
 vi.mock("@/components/layout/sidebar-section-security", () => ({
   SecuritySection: () => <div>security</div>,
-  UtilitiesSection: () => <div>utilities</div>,
+  SettingsNavSection: () => <div>settings-nav</div>,
+  ToolsSection: () => <div>tools</div>,
 }));
 
 vi.mock("@/components/layout/sidebar-sections", () => ({
@@ -49,9 +50,11 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     isSelectedVaultArchive: false,
     isSelectedVaultTrash: false,
     isTeamSettingsActive: false,
+    isTenantSettingsActive: false,
     isSettingsActive: false,
     isExportActive: false,
     isImportActive: false,
+    isAdmin: false,
     isWatchtower: false,
     isShareLinks: false,
     isEmergencyAccess: false,

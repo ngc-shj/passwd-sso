@@ -31,7 +31,7 @@ interface EntryBlob {
 
 export async function totpCommand(
   id: string,
-  options: { copy?: boolean },
+  options: { copy?: boolean; json?: boolean },
 ): Promise<void> {
   const key = getEncryptionKey();
   if (!key) {
@@ -72,6 +72,11 @@ export async function totpCommand(
 
     const period = blob.totp.period ?? 30;
     const remaining = period - (Math.floor(Date.now() / 1000) % period);
+
+    if (options.json) {
+      output.json({ code, remaining, period });
+      return;
+    }
 
     if (options.copy) {
       await copyToClipboard(code);

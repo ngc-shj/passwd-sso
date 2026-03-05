@@ -61,7 +61,7 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:recovery_key_recover:${session.user.id}`;
-  if (!(await recoverLimiter.check(rateKey))) {
+  if (!(await recoverLimiter.check(rateKey)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },

@@ -16,6 +16,7 @@ import {
 } from "@/components/passwords/entry-form-ui";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import {
   Select,
@@ -41,6 +42,7 @@ interface SecureNoteFormProps {
     tags: TagData[];
     folderId?: string | null;
     requireReprompt?: boolean;
+    travelSafe?: boolean;
     expiresAt?: string | null;
   };
   variant?: "page" | "dialog";
@@ -62,6 +64,7 @@ export function SecureNoteForm({
   const t = useTranslations("SecureNoteForm");
   const tPw = useTranslations("PasswordForm");
   const tc = useTranslations("Common");
+  const ttm = useTranslations("TravelMode");
   const base = usePersonalBaseFormModel({
     mode,
     initialId: initialData?.id,
@@ -77,6 +80,7 @@ export function SecureNoteForm({
     onCancel,
   });
   const [content, setContent] = useState(initialData?.content ?? "");
+  const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
   const baselineSnapshot = useMemo(
     () =>
@@ -88,6 +92,7 @@ export function SecureNoteForm({
           .sort(),
         folderId: initialData?.folderId ?? defaultFolderId ?? null,
         requireReprompt: initialData?.requireReprompt ?? false,
+        travelSafe: initialData?.travelSafe ?? true,
         expiresAt: initialData?.expiresAt ?? null,
       }),
     [initialData, defaultFolderId, defaultTags],
@@ -101,6 +106,7 @@ export function SecureNoteForm({
         selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
         folderId: base.folderId,
         requireReprompt: base.requireReprompt,
+        travelSafe,
         expiresAt: base.expiresAt,
       }),
     [
@@ -109,6 +115,7 @@ export function SecureNoteForm({
       base.selectedTags,
       base.folderId,
       base.requireReprompt,
+      travelSafe,
       base.expiresAt,
     ],
   );
@@ -123,6 +130,7 @@ export function SecureNoteForm({
   const {
     tagsAndFolderProps,
     repromptSectionProps,
+    travelSafeSectionProps,
     expirationSectionProps,
     actionBarProps,
   } = buildPersonalFormSectionsProps({
@@ -132,6 +140,8 @@ export function SecureNoteForm({
     sectionCardClass: dialogSectionClass,
     repromptTitle: tPw("requireReprompt"),
     repromptDescription: tPw("requireRepromptHelp"),
+    travelSafeTitle: ttm("travelSafe"),
+    travelSafeDescription: ttm("travelSafeDescription"),
     expirationTitle: tPw("expirationTitle"),
     expirationDescription: tPw("expirationDescription"),
     hasChanges,
@@ -148,6 +158,7 @@ export function SecureNoteForm({
       totp: null,
       showTotpInput: false,
       requireReprompt: base.requireReprompt,
+      travelSafe,
       expiresAt: base.expiresAt,
     },
     setters: {
@@ -157,6 +168,7 @@ export function SecureNoteForm({
       setTotp: () => {},
       setShowTotpInput: () => {},
       setRequireReprompt: base.setRequireReprompt,
+      setTravelSafe,
       setExpiresAt: base.setExpiresAt,
     },
   });
@@ -173,11 +185,13 @@ export function SecureNoteForm({
         content,
         tags,
         isMarkdown: true,
+        travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,
         snippet,
         tags,
+        travelSafe,
       }),
       entryType: ENTRY_TYPE.SECURE_NOTE,
     });
@@ -241,6 +255,7 @@ export function SecureNoteForm({
 
       <EntryTagsAndFolderSection {...tagsAndFolderProps} />
       <EntryRepromptSection {...repromptSectionProps} />
+      <EntryTravelSafeSection {...travelSafeSectionProps} />
       <EntryExpirationSection {...expirationSectionProps} />
       <EntryActionBar {...actionBarProps} />
     </form>

@@ -118,7 +118,7 @@ describe("DELETE /api/sessions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue(true);
+    mockRateLimiter.check.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -130,7 +130,7 @@ describe("DELETE /api/sessions", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue(false);
+    mockRateLimiter.check.mockResolvedValue({ allowed: false });
     const res = await DELETE(
       createRequest("DELETE", "http://localhost:3000/api/sessions"),
     );

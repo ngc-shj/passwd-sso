@@ -58,6 +58,7 @@ export function usePersonalLoginFormModel({
   return {
     t: translationBundle.t,
     tc: translationBundle.tc,
+    ttm: translationBundle.ttm,
     mode,
     formState,
     folders,

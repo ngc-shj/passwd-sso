@@ -59,6 +59,9 @@ e2e/test-results/
 test-results/
 load-test/setup/.load-test-auth.json
 
+# CLI secrets config (contains user-specific vault entry IDs)
+.passwd-sso-env.json
+
 # Secrets & Keys - NEVER commit
 *.pem
 *.key

@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   const { newBreachCount } = parsed.data;
 
-  const allowed = await alertLimiter.check(`rl:watchtower:alert:${session.user.id}`);
+  const { allowed } = await alertLimiter.check(`rl:watchtower:alert:${session.user.id}`);
   if (!allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },

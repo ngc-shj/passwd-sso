@@ -17,6 +17,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         deviceInfo: entry.deviceInfo || null,
         notes: entry.notes || null,
         tags: entry.tags,
+        travelSafe: entry.travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
@@ -24,6 +25,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         username: entry.username || null,
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
       }),
     };
   }
@@ -44,6 +46,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         expiryDate: entry.expiryDate || null,
         notes: entry.notes || null,
         tags: entry.tags,
+        travelSafe: entry.travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
@@ -51,6 +54,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         idNumberLast4,
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
       }),
     };
   }
@@ -70,6 +74,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         cvv: entry.cvv || null,
         notes: entry.notes || null,
         tags: entry.tags,
+        travelSafe: entry.travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
@@ -78,6 +83,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         lastFour,
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
       }),
     };
   }
@@ -98,6 +104,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         branchName: entry.branchName || null,
         notes: entry.notes || null,
         tags: entry.tags,
+        travelSafe: entry.travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
@@ -105,6 +112,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         accountNumberLast4,
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
       }),
     };
   }
@@ -122,6 +130,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         expirationDate: entry.expirationDate || null,
         notes: entry.notes || null,
         tags: entry.tags,
+        travelSafe: entry.travelSafe,
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
@@ -129,6 +138,35 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         licensee: entry.licensee || null,
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
+      }),
+    };
+  }
+
+  if (entry.entryType === ENTRY_TYPE.SSH_KEY) {
+    return {
+      fullBlob: JSON.stringify({
+        title: entry.title,
+        privateKey: entry.privateKey || null,
+        publicKey: entry.publicKey || null,
+        keyType: entry.keyType || null,
+        keySize: entry.keySize ? Number(entry.keySize) || null : null,
+        fingerprint: entry.fingerprint || null,
+        passphrase: entry.sshPassphrase || null,
+        comment: entry.sshComment || null,
+        notes: entry.notes || null,
+        tags: entry.tags,
+        travelSafe: entry.travelSafe,
+      }),
+      overviewBlob: JSON.stringify({
+        title: entry.title,
+        keyType: entry.keyType || null,
+        fingerprint: entry.fingerprint || null,
+        publicKey: entry.publicKey || null,
+        comment: entry.sshComment || null,
+        tags: entry.tags,
+        requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
       }),
     };
   }
@@ -139,6 +177,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         title: entry.title,
         content: entry.content || "",
         tags: entry.tags,
+        travelSafe: entry.travelSafe,
         isMarkdown: true,
       }),
       overviewBlob: JSON.stringify({
@@ -146,6 +185,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
         snippet: (entry.content || "").slice(0, 100),
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
+        travelSafe: entry.travelSafe,
       }),
     };
   }
@@ -170,6 +210,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
       ...(entry.passwordHistory.length > 0 && { passwordHistory: entry.passwordHistory }),
       ...(entry.customFields.length > 0 && { customFields: entry.customFields }),
       ...(entry.totp && { totp: entry.totp }),
+      travelSafe: entry.travelSafe,
     }),
     overviewBlob: JSON.stringify({
       title: entry.title,
@@ -177,6 +218,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
       urlHost,
       tags: entry.tags,
       requireReprompt: entry.requireReprompt,
+      travelSafe: entry.travelSafe,
     }),
   };
 }

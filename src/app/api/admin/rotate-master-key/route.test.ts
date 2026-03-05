@@ -16,7 +16,7 @@ const {
 } = vi.hoisted(() => ({
   mockShareUpdateMany: vi.fn(),
   mockUserFindUnique: vi.fn(),
-  mockCheck: vi.fn().mockResolvedValue(true),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
@@ -87,7 +87,7 @@ function createRequest(
 describe("POST /api/admin/rotate-master-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
 
     setEnv({
       SHARE_MASTER_KEY: V1_KEY,
@@ -117,7 +117,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
     const req = createRequest(
       { targetVersion: 2, operatorId: "user-1" },
       ADMIN_TOKEN
@@ -240,7 +240,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("checks rate limit after auth (429 only for authenticated requests)", async () => {
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
     // Unauthenticated request should get 401, not 429
     const unauthReq = createRequest(
       { targetVersion: 2, operatorId: "user-1" }

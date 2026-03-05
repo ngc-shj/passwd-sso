@@ -18,20 +18,20 @@ describe("checkScimRateLimit", () => {
   });
 
   it("returns true when within rate limit", async () => {
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
     const result = await checkScimRateLimit("team-1");
     expect(result).toBe(true);
     expect(mockCheck).toHaveBeenCalledWith("rl:scim:team-1");
   });
 
   it("returns false when rate limited", async () => {
-    mockCheck.mockResolvedValue(false);
+    mockCheck.mockResolvedValue({ allowed: false });
     const result = await checkScimRateLimit("team-1");
     expect(result).toBe(false);
   });
 
   it("uses team-specific key", async () => {
-    mockCheck.mockResolvedValue(true);
+    mockCheck.mockResolvedValue({ allowed: true });
     await checkScimRateLimit("team-abc");
     expect(mockCheck).toHaveBeenCalledWith("rl:scim:team-abc");
   });

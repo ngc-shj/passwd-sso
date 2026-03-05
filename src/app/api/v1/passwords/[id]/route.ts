@@ -1,0 +1,287 @@
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { updateE2EPasswordSchema } from "@/lib/validations";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { validateApiKeyOnly } from "@/lib/api-key";
+import { withRequestLog } from "@/lib/with-request-log";
+import { withTenantRls } from "@/lib/tenant-rls";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { API_KEY_SCOPE } from "@/lib/constants/api-key";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+
+const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
+
+function retryAfterHeaders(ms: number): HeadersInit {
+  return { "Retry-After": String(Math.ceil(ms / 1000)) };
+}
+
+import type { ValidatedApiKey } from "@/lib/api-key";
+
+type AuthCheckResult =
+  | { ok: false; error: NextResponse }
+  | { ok: true; data: ValidatedApiKey };
+
+async function checkAuth(
+  req: NextRequest,
+  scope: (typeof API_KEY_SCOPE)[keyof typeof API_KEY_SCOPE],
+): Promise<AuthCheckResult> {
+  const authResult = await validateApiKeyOnly(req, scope);
+  if (!authResult.ok) {
+    const status = authResult.error === "SCOPE_INSUFFICIENT" ? 403 : 401;
+    const error = status === 403 ? API_ERROR.API_KEY_SCOPE_INSUFFICIENT : API_ERROR.UNAUTHORIZED;
+    return { ok: false, error: NextResponse.json({ error }, { status }) };
+  }
+
+  const rl = await apiKeyLimiter.check(`rl:api_key:${authResult.data.apiKeyId}`);
+  if (!rl.allowed) {
+    return {
+      ok: false,
+      error: NextResponse.json(
+        { error: API_ERROR.RATE_LIMIT_EXCEEDED },
+        { status: 429, headers: retryAfterHeaders(rl.retryAfterMs!) },
+      ),
+    };
+  }
+
+  return { ok: true, data: authResult.data };
+}
+
+// GET /api/v1/passwords/[id]
+async function handleGET(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_READ);
+  if (!auth.ok) return auth.error;
+  const { userId, tenantId } = auth.data;
+  const { id } = await params;
+
+  const entry = await withTenantRls(prisma, tenantId, async () =>
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      include: { tags: { select: { id: true } } },
+    }),
+  );
+
+  if (!entry || entry.userId !== userId) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+
+  return NextResponse.json({
+    id: entry.id,
+    encryptedBlob: {
+      ciphertext: entry.encryptedBlob,
+      iv: entry.blobIv,
+      authTag: entry.blobAuthTag,
+    },
+    encryptedOverview: {
+      ciphertext: entry.encryptedOverview,
+      iv: entry.overviewIv,
+      authTag: entry.overviewAuthTag,
+    },
+    keyVersion: entry.keyVersion,
+    aadVersion: entry.aadVersion,
+    entryType: entry.entryType,
+    isFavorite: entry.isFavorite,
+    isArchived: entry.isArchived,
+    requireReprompt: entry.requireReprompt,
+    expiresAt: entry.expiresAt,
+    folderId: entry.folderId,
+    tagIds: entry.tags.map((t) => t.id),
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+  });
+}
+
+// PUT /api/v1/passwords/[id]
+async function handlePUT(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
+  if (!auth.ok) return auth.error;
+  const { userId, tenantId } = auth.data;
+  const { id } = await params;
+
+  const existing = await withTenantRls(prisma, tenantId, async () =>
+    prisma.passwordEntry.findUnique({ where: { id } }),
+  );
+
+  if (!existing || existing.userId !== userId) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+  }
+
+  const parsed = updateE2EPasswordSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const { encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, isArchived, entryType, requireReprompt, expiresAt } = parsed.data;
+
+  // Verify folder ownership
+  if (folderId) {
+    const folder = await withTenantRls(prisma, tenantId, async () =>
+      prisma.folder.findFirst({ where: { id: folderId, userId } }),
+    );
+    if (!folder) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+    }
+  }
+
+  // Verify tag ownership
+  if (tagIds?.length) {
+    const ownedCount = await withTenantRls(prisma, tenantId, async () =>
+      prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
+    );
+    if (ownedCount !== tagIds.length) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+    }
+  }
+
+  const updateData: Record<string, unknown> = {};
+
+  // Snapshot to history if encryptedBlob is changing
+  if (encryptedBlob) {
+    await withTenantRls(prisma, tenantId, async () =>
+      prisma.$transaction(async (tx) => {
+        await tx.passwordEntryHistory.create({
+          data: {
+            entryId: id,
+            tenantId: existing.tenantId,
+            encryptedBlob: existing.encryptedBlob,
+            blobIv: existing.blobIv,
+            blobAuthTag: existing.blobAuthTag,
+            keyVersion: existing.keyVersion,
+            aadVersion: existing.aadVersion,
+          },
+        });
+        const all = await tx.passwordEntryHistory.findMany({
+          where: { entryId: id },
+          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+          select: { id: true },
+        });
+        if (all.length > 20) {
+          await tx.passwordEntryHistory.deleteMany({
+            where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+          });
+        }
+      }),
+    );
+
+    updateData.encryptedBlob = encryptedBlob.ciphertext;
+    updateData.blobIv = encryptedBlob.iv;
+    updateData.blobAuthTag = encryptedBlob.authTag;
+  }
+  if (encryptedOverview) {
+    updateData.encryptedOverview = encryptedOverview.ciphertext;
+    updateData.overviewIv = encryptedOverview.iv;
+    updateData.overviewAuthTag = encryptedOverview.authTag;
+  }
+  if (keyVersion !== undefined) updateData.keyVersion = keyVersion;
+  if (aadVersion !== undefined) updateData.aadVersion = aadVersion;
+  if (folderId !== undefined) updateData.folderId = folderId;
+  if (isFavorite !== undefined) updateData.isFavorite = isFavorite;
+  if (isArchived !== undefined) updateData.isArchived = isArchived;
+  if (entryType !== undefined) updateData.entryType = entryType;
+  if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
+  if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
+  if (tagIds !== undefined) {
+    updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
+  }
+
+  const updated = await withTenantRls(prisma, tenantId, async () =>
+    prisma.passwordEntry.update({
+      where: { id },
+      data: updateData,
+      include: { tags: { select: { id: true } } },
+    }),
+  );
+
+  logAudit({
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.ENTRY_UPDATE,
+    userId,
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+    targetId: id,
+    ...extractRequestMeta(req),
+  });
+
+  return NextResponse.json({
+    id: updated.id,
+    encryptedOverview: {
+      ciphertext: updated.encryptedOverview,
+      iv: updated.overviewIv,
+      authTag: updated.overviewAuthTag,
+    },
+    keyVersion: updated.keyVersion,
+    aadVersion: updated.aadVersion,
+    entryType: updated.entryType,
+    requireReprompt: updated.requireReprompt,
+    expiresAt: updated.expiresAt,
+    tagIds: updated.tags.map((t) => t.id),
+    createdAt: updated.createdAt,
+    updatedAt: updated.updatedAt,
+  });
+}
+
+// DELETE /api/v1/passwords/[id]
+async function handleDELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
+  if (!auth.ok) return auth.error;
+  const { userId, tenantId } = auth.data;
+  const { id } = await params;
+
+  const { searchParams } = new URL(req.url);
+  const permanent = searchParams.get("permanent") === "true";
+
+  const existing = await withTenantRls(prisma, tenantId, async () =>
+    prisma.passwordEntry.findUnique({ where: { id } }),
+  );
+
+  if (!existing || existing.userId !== userId) {
+    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+
+  if (permanent) {
+    await withTenantRls(prisma, tenantId, async () =>
+      prisma.passwordEntry.delete({ where: { id } }),
+    );
+  } else {
+    await withTenantRls(prisma, tenantId, async () =>
+      prisma.passwordEntry.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      }),
+    );
+  }
+
+  logAudit({
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: permanent ? AUDIT_ACTION.ENTRY_PERMANENT_DELETE : AUDIT_ACTION.ENTRY_TRASH,
+    userId,
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+    targetId: id,
+    metadata: { permanent },
+    ...extractRequestMeta(req),
+  });
+
+  return NextResponse.json({ success: true });
+}
+
+export const GET = withRequestLog(handleGET);
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

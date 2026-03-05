@@ -84,6 +84,8 @@ interface PasswordCardProps {
   accountNumberLast4?: string | null;
   softwareName?: string | null;
   licensee?: string | null;
+  keyType?: string | null;
+  fingerprint?: string | null;
   tags: EntryTagNameColor[];
   isFavorite: boolean;
   isArchived: boolean;
@@ -158,6 +160,13 @@ interface VaultEntryFull {
   licensee?: string | null;
   purchaseDate?: string | null;
   expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  passphrase?: string | null;
+  comment?: string | null;
 }
 
 const CLIPBOARD_CLEAR_DELAY = 30_000;
@@ -198,6 +207,8 @@ export function PasswordCard({
   accountNumberLast4,
   softwareName,
   licensee,
+  keyType,
+  fingerprint,
   tags,
   isFavorite,
   isArchived,
@@ -226,6 +237,7 @@ export function PasswordCard({
   const isPasskey = entryType === ENTRY_TYPE.PASSKEY;
   const isBankAccount = entryType === ENTRY_TYPE.BANK_ACCOUNT;
   const isSoftwareLicense = entryType === ENTRY_TYPE.SOFTWARE_LICENSE;
+  const isSshKey = entryType === ENTRY_TYPE.SSH_KEY;
   const t = useTranslations("PasswordCard");
   const tDash = useTranslations("Dashboard");
   const tc = useTranslations("Common");
@@ -245,6 +257,7 @@ export function PasswordCard({
     [ENTRY_TYPE.PASSKEY]: tDash("catPasskey"),
     [ENTRY_TYPE.BANK_ACCOUNT]: tDash("catBankAccount"),
     [ENTRY_TYPE.SOFTWARE_LICENSE]: tDash("catSoftwareLicense"),
+    [ENTRY_TYPE.SSH_KEY]: tDash("catSshKey"),
   }[entryType] ?? entryType;
 
   const fetchDecryptedEntry = async (): Promise<{ entry: VaultEntryFull; raw: Record<string, unknown> }> => {
@@ -293,6 +306,15 @@ export function PasswordCard({
   };
 
   const fetchLicenseField = async (field: "licenseKey"): Promise<string> => {
+    if (getDetailProp) {
+      const detail = await getDetailProp();
+      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
+    }
+    const { entry } = await fetchDecryptedEntry();
+    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+  };
+
+  const fetchSshField = async (field: "fingerprint" | "publicKey"): Promise<string> => {
     if (getDetailProp) {
       const detail = await getDetailProp();
       return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
@@ -387,6 +409,13 @@ export function PasswordCard({
             licensee: entry.licensee,
             purchaseDate: entry.purchaseDate,
             expirationDate: entry.expirationDate,
+            privateKey: entry.privateKey,
+            publicKey: entry.publicKey,
+            keyType: entry.keyType,
+            keySize: entry.keySize,
+            fingerprint: entry.fingerprint,
+            sshPassphrase: entry.passphrase,
+            sshComment: entry.comment,
             createdAt: raw.createdAt as string,
             updatedAt: raw.updatedAt as string,
           });
@@ -503,6 +532,30 @@ export function PasswordCard({
     }
   };
 
+  const handleCopyFingerprint = async () => {
+    try {
+      const fp = await fetchSshField("fingerprint");
+      if (!fp) return;
+      await navigator.clipboard.writeText(fp);
+      toast.success(tCopy("copied"));
+      scheduleClearClipboard(fp);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
+  const handleCopyPublicKey = async () => {
+    try {
+      const pk = await fetchSshField("publicKey");
+      if (!pk) return;
+      await navigator.clipboard.writeText(pk);
+      toast.success(tCopy("copied"));
+      scheduleClearClipboard(pk);
+    } catch {
+      toast.error(t("networkError"));
+    }
+  };
+
   const handleCopyIdNumber = async () => {
     try {
       const num = await fetchIdentityField("idNumber");
@@ -600,7 +653,12 @@ export function PasswordCard({
               })()}
             </span>
             <div className="flex items-center gap-3 text-sm text-muted-foreground">
-              {isBankAccount ? (
+              {isSshKey ? (
+                <>
+                  {keyType && <span className="truncate font-mono">{keyType}</span>}
+                  {fingerprint && <span className="truncate font-mono text-xs">{fingerprint.slice(0, 16)}…</span>}
+                </>
+              ) : isBankAccount ? (
                 <>
                   {bankName && <span className="truncate">{bankName}</span>}
                   {accountNumberLast4 && <span className="truncate">•••• {accountNumberLast4}</span>}
@@ -675,12 +733,13 @@ export function PasswordCard({
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             >
-              {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && <CopyButton getValue={fetchPassword} />}
+              {!isNote && !isCreditCard && !isIdentity && !isPasskey && !isBankAccount && !isSoftwareLicense && !isSshKey && <CopyButton getValue={fetchPassword} />}
               {isCreditCard && <CopyButton getValue={() => fetchCardField("cardNumber")} />}
               {isIdentity && <CopyButton getValue={() => fetchIdentityField("idNumber")} />}
               {isPasskey && <CopyButton getValue={() => fetchPasskeyField("credentialId")} />}
               {isBankAccount && <CopyButton getValue={() => fetchBankField("accountNumber")} />}
               {isSoftwareLicense && <CopyButton getValue={() => fetchLicenseField("licenseKey")} />}
+              {isSshKey && <CopyButton getValue={() => fetchSshField("fingerprint")} />}
             </div>
             <div
               className="pointer-events-auto"
@@ -732,6 +791,17 @@ export function PasswordCard({
                   <DropdownMenuItem onSelect={handleCopyCvv}>
                     <Copy className="h-4 w-4" />
                     {t("copyCvv")}
+                  </DropdownMenuItem>
+                </>
+              ) : isSshKey ? (
+                <>
+                  <DropdownMenuItem onSelect={handleCopyFingerprint}>
+                    <Copy className="h-4 w-4" />
+                    {t("copyFingerprint")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={handleCopyPublicKey}>
+                    <Copy className="h-4 w-4" />
+                    {t("copyPublicKey")}
                   </DropdownMenuItem>
                 </>
               ) : isNote ? (
@@ -885,7 +955,7 @@ export function PasswordCard({
         passwordEntryId={isTeamMode ? undefined : id}
         teamPasswordEntryId={isTeamMode ? id : undefined}
         decryptedData={shareData}
-        entryType={isTeamMode ? entryType : undefined}
+        entryType={entryType}
         teamId={isTeamMode ? scopedTeamId : undefined}
       />
 

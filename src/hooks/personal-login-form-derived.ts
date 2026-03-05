@@ -23,6 +23,7 @@ export function buildPersonalInitialSnapshot(
     customFields: initialData?.customFields ?? [],
     totp: initialData?.totp ?? null,
     requireReprompt: initialData?.requireReprompt ?? false,
+    travelSafe: initialData?.travelSafe ?? true,
     expiresAt: initialData?.expiresAt ?? null,
     folderId: initialData?.folderId ?? defaults?.defaultFolderId ?? null,
   });
@@ -39,6 +40,7 @@ export function buildPersonalCurrentSnapshot({
   customFields,
   totp,
   requireReprompt,
+  travelSafe,
   expiresAt,
   folderId,
 }: BuildPersonalCurrentSnapshotArgs): string {
@@ -53,6 +55,7 @@ export function buildPersonalCurrentSnapshot({
     customFields,
     totp,
     requireReprompt,
+    travelSafe,
     expiresAt,
     folderId,
   });

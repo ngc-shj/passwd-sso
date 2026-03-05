@@ -76,3 +76,14 @@ export {
   applySharePermissions,
 } from "./share-permission";
 export type { SharePermissionValue } from "./share-permission";
+
+export {
+  API_KEY_PREFIX,
+  API_KEY_SCOPE,
+  API_KEY_SCOPES,
+  API_KEY_FORBIDDEN_SCOPES,
+  MAX_API_KEYS_PER_USER,
+  MAX_API_KEY_EXPIRY_DAYS,
+  DEFAULT_API_KEY_EXPIRY_DAYS,
+} from "./api-key";
+export type { ApiKeyScope } from "./api-key";

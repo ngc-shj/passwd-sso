@@ -1,0 +1,22 @@
+/** Env vars that must never be overwritten (case-insensitive). */
+export const BLOCKED_KEYS = new Set([
+  "PATH",
+  "LD_PRELOAD",
+  "LD_LIBRARY_PATH",
+  "DYLD_INSERT_LIBRARIES",
+  "DYLD_FRAMEWORK_PATH",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "PYTHONPATH",
+  "PYTHONSTARTUP",
+  "PYTHONUSERBASE",
+  "RUBYLIB",
+  "RUBYOPT",
+  "PERL5LIB",
+  "PERL5OPT",
+  "JAVA_TOOL_OPTIONS",
+  "_JAVA_OPTIONS",
+  "CLASSPATH",
+  "BASH_ENV",
+  "ENV",
+]);

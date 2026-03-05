@@ -71,6 +71,12 @@ async function handleApiAuth(request: NextRequest) {
     return handlePreflight(request);
   }
 
+  // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
+  // Route handlers handle all auth via validateApiKeyOnly().
+  if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
+    return NextResponse.next();
+  }
+
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
@@ -80,6 +86,7 @@ async function handleApiAuth(request: NextRequest) {
     API_PATH.VAULT_UNLOCK_DATA,
     API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
     API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
+    API_PATH.API_KEYS,  // API key management — validated by route handler via authOrToken
   ];
   const hasBearer = request.headers
     .get("authorization")
@@ -105,7 +112,7 @@ async function handleApiAuth(request: NextRequest) {
   if (
     pathname.startsWith(API_PATH.PASSWORDS) ||
     pathname.startsWith(API_PATH.TAGS) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/watchtower`) ||
+    pathname.startsWith(API_PATH.WATCHTOWER) ||
     pathname.startsWith(API_PATH.TEAMS) ||
     pathname.startsWith(API_PATH.AUDIT_LOGS) ||
     pathname.startsWith(API_PATH.SHARE_LINKS) ||
@@ -114,8 +121,12 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.SESSIONS) ||
     pathname.startsWith(API_PATH.NOTIFICATIONS) ||
     pathname.startsWith(API_PATH.USER_LOCALE) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/extension`) ||
-    pathname.startsWith(`${API_PATH.API_ROOT}/tenant`)
+    pathname.startsWith(API_PATH.EXTENSION) ||
+    pathname.startsWith(API_PATH.TENANT) ||
+    pathname.startsWith(API_PATH.API_KEYS) ||
+    pathname.startsWith(API_PATH.TRAVEL_MODE) ||
+    pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
+    pathname.startsWith(API_PATH.WEBAUTHN)
   ) {
     const hasSession = await hasValidSession(request);
     if (!hasSession) {

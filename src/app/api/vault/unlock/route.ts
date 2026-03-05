@@ -46,7 +46,7 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
-  if (!(await unlockLimiter.check(rateKey))) {
+  if (!(await unlockLimiter.check(rateKey)).allowed) {
     getLogger().warn({ userId: session.user.id }, "vault.unlock.rateLimited");
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },

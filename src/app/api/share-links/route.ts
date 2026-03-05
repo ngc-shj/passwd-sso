@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  if (!(await shareLinkLimiter.check(`rl:share_create:${session.user.id}`))) {
+  if (!(await shareLinkLimiter.check(`rl:share_create:${session.user.id}`)).allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 }
