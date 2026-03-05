@@ -13,6 +13,7 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
+    "generate:icons": "bash scripts/generate-icons.sh",
     "generate:key": "node -e \"console.log(require('crypto').randomBytes(32).toString('hex'))\"",
     "test": "vitest run",
     "test:watch": "vitest",

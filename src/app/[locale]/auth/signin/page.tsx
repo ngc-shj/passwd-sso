@@ -5,7 +5,8 @@ import { APP_NAME } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { SignInButton } from "@/components/auth/signin-button";
-import { Shield, KeyRound } from "lucide-react";
+import { Shield } from "lucide-react";
+import { AppIcon } from "@/components/ui/app-icon";
 
 export default async function SignInPage({
   params,
@@ -43,7 +44,7 @@ export default async function SignInPage({
       <Card className="w-full max-w-md">
         <CardHeader className="text-center space-y-4">
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
-            <KeyRound className="h-7 w-7 text-primary" />
+            <AppIcon className="h-7 w-7" />
           </div>
           <div>
             <CardTitle className="text-2xl">{APP_NAME}</CardTitle>
