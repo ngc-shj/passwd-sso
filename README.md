@@ -9,7 +9,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **SSO Authentication** - Google OIDC + SAML 2.0 (via [BoxyHQ SAML Jackson](https://github.com/boxyhq/jackson))
 - **End-to-End Encryption** - AES-256-GCM; the server never sees plaintext passwords
 - **Master Passphrase** - PBKDF2 (600k iterations) + HKDF key derivation with Secret Key
-- **Multiple Entry Types** - Passwords, secure notes, credit cards, identity/personal info, passkeys, bank accounts, and software licenses
+- **Multiple Entry Types** - Passwords, secure notes, credit cards, identity/personal info, passkeys, bank accounts, software licenses, and SSH keys
 - **Custom Field Types** - TEXT, HIDDEN, URL, BOOLEAN, DATE, and MONTH_YEAR
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** - Store and generate 2FA codes (otpauth:// URI support)
@@ -40,7 +40,15 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Multi-Tenant Isolation** - PostgreSQL FORCE ROW LEVEL SECURITY on 33 tables with IdP claim-based tenant resolution
 - **Self-Hosted** - Docker Compose with PostgreSQL, SAML Jackson, and Redis
 - **Tenant Admin** - Member management with search, SCIM token management, admin vault reset, and tenant-level settings
-- **CLI Tool** - Node.js CLI (`passwd-sso`) with 8 commands: login, unlock, status, list, get, generate, totp, export; OS keychain integration and XDG-compliant config
+- **SSH Agent** - CLI `passwd-sso agent` proxies SSH keys from the vault to `ssh`, `git`, and other tools via the SSH agent protocol
+- **CI/CD Secrets** - CLI `env` and `run` commands inject vault secrets into environment variables or subprocess commands
+- **API Keys** - Scoped REST API keys with SHA-256 hashed tokens and configurable expiration
+- **REST API v1** - Public API (`/api/v1/*`) for passwords, tags, and vault status with OpenAPI 3.1 spec
+- **TOTP QR Capture** - Camera-based QR code scanning for TOTP secret setup (MediaDevices + ImageCapture)
+- **Travel Mode** - Hide sensitive entries when crossing borders; remote disable restores access
+- **Directory Sync** - Sync organization members from Azure AD, Google Workspace, or Okta; encrypted credentials with server master key
+- **Passkey Vault Unlock** - Unlock vault with a FIDO2 passkey (WebAuthn PRF) instead of master passphrase
+- **CLI Tool** - Node.js CLI (`passwd-sso`) with 13 commands: login, unlock, status, list, get, generate, totp, export, env, run, agent, api-key, ssh-key; OS keychain integration and XDG-compliant config
 - **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, CC/address autofill, context menu, keyboard shortcuts, new-login detect & save
 
 ## Tech Stack
@@ -261,10 +269,16 @@ src/
 │   ├── watchtower/           # Security audit (HIBP, analysis)
 │   ├── health/               # Health check (liveness + readiness)
 │   ├── scim/v2/              # SCIM 2.0 provisioning (Users / Groups)
+│   ├── api-keys/             # API key management
+│   ├── v1/                   # REST API v1 (passwords, tags, vault status, OpenAPI)
+│   ├── travel-mode/          # Travel mode enable/disable/status
+│   ├── directory-sync/       # Directory sync config CRUD + run + logs
+│   ├── webauthn/             # WebAuthn register/authenticate/credentials
 │   └── csp-report/           # CSP violation reporting
 ├── components/
 │   ├── layout/               # Header, Sidebar, SearchBar
-│   ├── passwords/            # PasswordList, PasswordForm, Generator, entry type forms
+│   ├── passwords/            # PasswordList, PasswordForm, Generator, entry type forms, QR capture
+│   ├── settings/             # API key manager, directory sync, passkey credentials, travel mode
 │   ├── team/                 # Team vault UI (list, form, settings, invitations, policies)
 │   ├── notifications/        # Notification bell and dropdown
 │   ├── emergency-access/     # Emergency access UI
@@ -285,7 +299,14 @@ src/
 │   ├── export-crypto.ts      # Password-protected export encryption
 │   ├── team-auth.ts          # Team RBAC authorization helpers
 │   ├── audit.ts              # Audit log helpers
-│   ├── vault-context.tsx     # Vault lock/unlock state
+│   ├── vault-context.tsx     # Vault lock/unlock state + passkey unlock
+│   ├── api-key.ts            # API key validation and scope parsing
+│   ├── travel-mode.ts        # Travel mode filtering logic
+│   ├── webauthn-server.ts    # WebAuthn server (registration/authentication, PRF salt)
+│   ├── webauthn-client.ts    # WebAuthn browser client (credential create/get)
+│   ├── ssh-key.ts            # SSH key validation and fingerprint generation
+│   ├── openapi-spec.ts       # OpenAPI 3.1 specification
+│   ├── directory-sync/       # Azure AD, Google Workspace, Okta sync providers
 │   ├── password-generator.ts # Server-side secure generation
 │   ├── password-analyzer.ts  # Password strength analysis
 │   ├── credit-card.ts        # Credit card validation & formatting
@@ -302,8 +323,8 @@ extension/
 ├── src/popup/                # Extension popup UI
 └── manifest.config.ts        # MV3 manifest definition
 cli/
-├── src/commands/             # CLI commands (login, unlock, list, get, generate, totp, export, status)
-└── src/lib/                  # Keychain, config, API client helpers
+├── src/commands/             # CLI commands (login, unlock, status, list, get, generate, totp, export, env, run, agent, api-key, ssh-key)
+└── src/lib/                  # Keychain, config, API client, SSH agent protocol, OpenSSH key parser
 ```
 
 ## Security Model
@@ -328,6 +349,10 @@ cli/
 - **Tenant admin vault reset** - Tenant owner/admin can reset a member's vault with audit logging
 - **Multi-tenant isolation** - PostgreSQL FORCE RLS on 33 tables with CI guard scripts to prevent accidental RLS bypass
 - **SCIM 2.0** - Tenant-scoped Bearer tokens, Users/Groups endpoints (RFC 7644)
+- **Passkey vault unlock** - WebAuthn PRF-based vault unlock; passkey derives encryption key without master passphrase
+- **API key authentication** - Scoped API keys with SHA-256 hashed tokens and HMAC prefix verification
+- **Directory sync credentials** - Provider credentials encrypted with server master key (AES-256-GCM)
+- **Travel mode** - Hide entries marked `travelSafe=false`; remote disable with audit logging
 
 ## Deployment Guides
 
