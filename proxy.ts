@@ -5,7 +5,11 @@ import { proxy as handleProxy } from "./src/proxy";
 export function proxy(request: NextRequest) {
   // Guard: skip Next.js internals that the matcher regex may not exclude
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith("/_next") || pathname.startsWith("/_vercel")) {
+  if (
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/_vercel") ||
+    (!pathname.startsWith("/api/") && /\.(ico|png|svg|jpg|jpeg|gif|webp|css|js|woff2?|ttf|map|txt|webmanifest)$/.test(pathname))
+  ) {
     return NextResponse.next();
   }
 

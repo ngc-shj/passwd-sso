@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- shield -->
+  <path fill="#5B57D6"
+        d="M256 40
+           L420 110
+           L420 230
+           C420 340 350 420 256 470
+           C162 420 92 340 92 230
+           L92 110
+           Z"/>
+
+  <!-- keyhole circle -->
+  <circle cx="256" cy="205" r="48" fill="white"/>
+
+  <!-- keyhole body (trapezoid) -->
+  <path fill="white"
+        d="M232 245
+           L280 245
+           L300 360
+           L212 360
+           Z"/>
+</svg>

@@ -43,7 +43,9 @@ vi.mock("@/components/auth/signin-button", () => ({
 }));
 vi.mock("lucide-react", () => ({
   Shield: () => null,
-  KeyRound: () => null,
+}));
+vi.mock("@/components/ui/app-icon", () => ({
+  AppIcon: () => null,
 }));
 
 // ── Import after mocking ───────────────────────────────────
