@@ -12,6 +12,7 @@ import {
   SSH_AGENT_RSA_SHA2_256,
   SSH_AGENT_RSA_SHA2_512,
 } from "./ssh-agent-protocol.js";
+import { parseOpenSshPrivateKey } from "./openssh-key-parser.js";
 
 export interface LoadedSshKey {
   /** Entry ID from the vault */
@@ -37,18 +38,23 @@ const loadedKeys = new Map<string, LoadedSshKey>();
  *
  * @returns The public key blob for identity listing
  */
-export function loadKey(
+export async function loadKey(
   entryId: string,
   pem: string,
   publicKeyBlob: Buffer,
   comment: string,
   passphrase?: string,
-): LoadedSshKey {
-  const keyObject = createPrivateKey({
-    key: pem,
-    format: "pem",
-    ...(passphrase ? { passphrase } : {}),
-  });
+): Promise<LoadedSshKey> {
+  let keyObject: KeyObject;
+  try {
+    keyObject = createPrivateKey({
+      key: pem,
+      ...(passphrase ? { passphrase } : {}),
+    });
+  } catch {
+    // Fallback: manually parse OpenSSH format keys (handles encrypted keys)
+    keyObject = await parseOpenSshPrivateKey(pem, passphrase);
+  }
 
   const keyType = detectKeyType(keyObject);
 
@@ -95,9 +101,9 @@ export function findKeyByBlob(publicKeyBlob: Buffer): LoadedSshKey | undefined {
 export function clearKeys(): void {
   for (const key of loadedKeys.values()) {
     // Drop references to sensitive data (JS strings are immutable, cannot zero)
-    (key as Record<string, unknown>).keyObject = undefined;
-    (key as Record<string, unknown>).pem = "";
-    (key as Record<string, unknown>).passphrase = undefined;
+    (key as unknown as Record<string, unknown>).keyObject = undefined;
+    (key as unknown as Record<string, unknown>).pem = "";
+    (key as unknown as Record<string, unknown>).passphrase = undefined;
   }
   loadedKeys.clear();
 }

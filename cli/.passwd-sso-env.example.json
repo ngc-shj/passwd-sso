@@ -1,0 +1,14 @@
+{
+  "server": "https://localhost:3000/passwd-sso",
+  "apiKey": "api_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "secrets": {
+    "DATABASE_PASSWORD": {
+      "entry": "<entry-id-from-vault>",
+      "field": "password"
+    },
+    "DATABASE_USERNAME": {
+      "entry": "<entry-id-from-vault>",
+      "field": "username"
+    }
+  }
+}

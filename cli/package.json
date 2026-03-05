@@ -13,6 +13,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "bcrypt-pbkdf": "^1.0.2",
     "chalk": "^5.4.1",
     "cli-table3": "^0.6.5",
     "clipboardy": "^4.0.0",

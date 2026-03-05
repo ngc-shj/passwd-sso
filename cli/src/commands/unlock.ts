@@ -77,29 +77,21 @@ async function readPassphrase(prompt: string): Promise<string> {
   });
 }
 
-export async function unlockCommand(): Promise<void> {
-  if (isUnlocked()) {
-    output.info("Vault is already unlocked.");
-    return;
-  }
-
-  // Fetch unlock data
+/**
+ * Core unlock logic — derives encryption key from passphrase and stores it.
+ * Returns true on success, false on failure.
+ */
+async function unlockWithPassphrase(passphrase: string): Promise<boolean> {
   const res = await apiRequest<UnlockData>("/api/vault/unlock/data");
   if (!res.ok) {
     output.error(`Failed to fetch vault data: ${res.status}`);
-    return;
+    return false;
   }
 
   const data = res.data;
   if (!data.accountSalt || !data.encryptedSecretKey) {
     output.error("Vault is not set up. Please set up your vault in the web UI first.");
-    return;
-  }
-
-  const passphrase = await readPassphrase("Master passphrase: ");
-  if (!passphrase) {
-    output.error("Passphrase is required.");
-    return;
+    return false;
   }
 
   try {
@@ -115,18 +107,50 @@ export async function unlockCommand(): Promise<void> {
     const secretKey = await unwrapSecretKey(encryptedSecret, wrappingKey);
     const encryptionKey = await deriveEncryptionKey(secretKey);
 
-    // Verify with verification artifact
     if (data.verificationArtifact) {
       const valid = await verifyKey(encryptionKey, data.verificationArtifact);
       if (!valid) {
         output.error("Incorrect passphrase.");
-        return;
+        return false;
       }
     }
 
     setEncryptionKey(encryptionKey, data.userId);
-    output.success("Vault unlocked.");
+    return true;
   } catch {
     output.error("Failed to unlock vault. Check your passphrase.");
+    return false;
   }
+}
+
+export async function unlockCommand(): Promise<void> {
+  if (isUnlocked()) {
+    output.info("Vault is already unlocked.");
+    return;
+  }
+
+  const passphrase = await readPassphrase("Master passphrase: ");
+  if (!passphrase) {
+    output.error("Passphrase is required.");
+    return;
+  }
+
+  if (await unlockWithPassphrase(passphrase)) {
+    output.success("Vault unlocked.");
+  }
+}
+
+/**
+ * Auto-unlock using PSSO_PASSPHRASE env var if vault is locked.
+ * Returns true if vault is unlocked (already or just now), false otherwise.
+ */
+export async function autoUnlockIfNeeded(): Promise<boolean> {
+  if (isUnlocked()) return true;
+
+  const passphrase = process.env.PSSO_PASSPHRASE;
+  if (!passphrase) {
+    return false;
+  }
+
+  return unlockWithPassphrase(passphrase);
 }

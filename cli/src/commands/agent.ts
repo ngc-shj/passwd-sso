@@ -11,6 +11,7 @@ import { apiRequest } from "../lib/api-client.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import { getEncryptionKey, getUserId, isUnlocked } from "../lib/vault-state.js";
+import { autoUnlockIfNeeded } from "./unlock.js";
 import { loadKey, clearKeys } from "../lib/ssh-key-agent.js";
 import { startAgent, stopAgent } from "../lib/ssh-agent-socket.js";
 import * as output from "../lib/output.js";
@@ -56,8 +57,8 @@ function parsePublicKeyBlob(publicKeyStr: string): Buffer | null {
 }
 
 export async function agentCommand(opts: AgentOptions): Promise<void> {
-  if (!isUnlocked()) {
-    output.error("Vault is locked. Run `passwd-sso unlock` first.");
+  if (!await autoUnlockIfNeeded()) {
+    output.error("Vault is locked. Run `passwd-sso unlock` first, or set PSSO_PASSPHRASE.");
     process.exit(1);
   }
 
@@ -101,7 +102,7 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
       const publicKeyBlob = parsePublicKeyBlob(blob.publicKey);
       if (!publicKeyBlob) continue;
 
-      loadKey(
+      await loadKey(
         entry.id,
         blob.privateKey,
         publicKeyBlob,
