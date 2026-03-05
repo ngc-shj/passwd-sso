@@ -44,6 +44,18 @@ describe("API_PATH", () => {
     expect(API_PATH.CSP_REPORT).toBe("/api/csp-report");
     expect(API_PATH.HEALTH_LIVE).toBe("/api/health/live");
     expect(API_PATH.HEALTH_READY).toBe("/api/health/ready");
+    expect(API_PATH.EXTENSION).toBe("/api/extension");
+    expect(API_PATH.WATCHTOWER).toBe("/api/watchtower");
+    expect(API_PATH.TENANT).toBe("/api/tenant");
+    expect(API_PATH.API_KEYS).toBe("/api/api-keys");
+    expect(API_PATH.DIRECTORY_SYNC).toBe("/api/directory-sync");
+    expect(API_PATH.TRAVEL_MODE).toBe("/api/travel-mode");
+    expect(API_PATH.WEBAUTHN).toBe("/api/webauthn");
+    expect(API_PATH.WEBAUTHN_REGISTER_OPTIONS).toBe("/api/webauthn/register/options");
+    expect(API_PATH.WEBAUTHN_REGISTER_VERIFY).toBe("/api/webauthn/register/verify");
+    expect(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS).toBe("/api/webauthn/authenticate/options");
+    expect(API_PATH.WEBAUTHN_AUTHENTICATE_VERIFY).toBe("/api/webauthn/authenticate/verify");
+    expect(API_PATH.WEBAUTHN_CREDENTIALS).toBe("/api/webauthn/credentials");
   });
 
   it("builds emergency confirm path", () => {
@@ -117,6 +129,15 @@ describe("API_PATH", () => {
     );
     expect(apiPath.teamWebhookById("team-1", "wh-1")).toBe(
       "/api/teams/team-1/webhooks/wh-1"
+    );
+  });
+
+  it("builds directory sync and webauthn paths", () => {
+    expect(apiPath.directorySyncById("ds-1")).toBe("/api/directory-sync/ds-1");
+    expect(apiPath.directorySyncRun("ds-1")).toBe("/api/directory-sync/ds-1/run");
+    expect(apiPath.directorySyncLogs("ds-1")).toBe("/api/directory-sync/ds-1/logs");
+    expect(apiPath.webauthnCredentialById("cred-1")).toBe(
+      "/api/webauthn/credentials/cred-1"
     );
   });
 

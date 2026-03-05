@@ -77,7 +77,7 @@ async function handlePOST(_req: NextRequest) {
 
   return NextResponse.json({
     options,
-    prfSupported: true,
+    prfSupported: prfSalt !== null,
     prfSalt,
   });
 }

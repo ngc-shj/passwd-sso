@@ -7,7 +7,7 @@
 
 import { createServer } from "node:net";
 import type { Server, Socket } from "node:net";
-import { mkdirSync, statSync, chmodSync, unlinkSync } from "node:fs";
+import { mkdirSync, lstatSync, chmodSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import {
   readUint32,
@@ -45,8 +45,13 @@ function getSocketDir(): string {
 function ensureSocketDir(dir: string): void {
   mkdirSync(dir, { recursive: true, mode: 0o700 });
 
-  // Verify ownership and permissions (TOCTOU mitigation)
-  const stat = statSync(dir);
+  // Verify ownership and permissions (TOCTOU mitigation — lstatSync to avoid following symlinks)
+  const stat = lstatSync(dir);
+  if (!stat.isDirectory()) {
+    throw new Error(
+      `Socket path ${dir} is not a directory (possible symlink attack)`,
+    );
+  }
   const uid = process.getuid?.();
 
   if (uid !== undefined && stat.uid !== uid) {

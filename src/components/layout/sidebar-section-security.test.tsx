@@ -136,6 +136,41 @@ describe("SettingsNavSection", () => {
     );
   });
 
+  it("shows tenant settings link when isAdmin is true", () => {
+    render(
+      <SettingsNavSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tTeam={(k) => k}
+        selectedTeam={null}
+        isAdmin={true}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "tenantSettings" })).toHaveAttribute(
+      "href",
+      "/dashboard/tenant"
+    );
+  });
+
+  it("hides tenant settings link when isAdmin is false", () => {
+    render(
+      <SettingsNavSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tTeam={(k) => k}
+        selectedTeam={null}
+        isAdmin={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("link", { name: "tenantSettings" })).toBeNull();
+  });
+
   it("hides settings link when team is selected", () => {
     render(
       <SettingsNavSection

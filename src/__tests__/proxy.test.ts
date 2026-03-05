@@ -76,6 +76,42 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("bypasses session check for Bearer + /api/api-keys", async () => {
+    const res = await proxy(
+      createApiRequest("/api/api-keys", { Authorization: "Bearer tok123" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("bypasses session check for Bearer + /api/api-keys/[id]", async () => {
+    const res = await proxy(
+      createApiRequest("/api/api-keys/key-1", { Authorization: "Bearer tok123" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows /api/v1/passwords without session (public API)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/v1/passwords"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows /api/v1/vault/status without session (public API)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/v1/vault/status"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("does NOT bypass for Bearer + /api/tags (not in allowlist)", async () => {
     const res = await proxy(
       createApiRequest("/api/tags", {
