@@ -106,7 +106,7 @@ export async function verifyRegistration(
     expectedChallenge,
     expectedOrigin: rpOrigin,
     expectedRPID: rpId,
-    requireUserVerification: false,
+    requireUserVerification: true,
   };
 
   return verifyRegistrationResponse(opts);
@@ -154,7 +154,7 @@ export async function verifyAuthentication(
     expectedOrigin: rpOrigin,
     expectedRPID: rpId,
     authenticator: credential,
-    requireUserVerification: false,
+    requireUserVerification: true,
   };
 
   return verifyAuthenticationResponse(opts);

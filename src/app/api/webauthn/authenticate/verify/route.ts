@@ -116,7 +116,8 @@ async function handlePOST(req: NextRequest) {
     transports: storedCredential.transports as AuthenticatorDevice["transports"],
   };
 
-  const origin = `https://${rpId}`;
+  // WEBAUTHN_RP_ORIGIN allows http://localhost for local development
+  const origin = process.env.WEBAUTHN_RP_ORIGIN ?? `https://${rpId}`;
 
   let verification;
   try {

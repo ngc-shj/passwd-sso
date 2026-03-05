@@ -24,7 +24,14 @@ const verifyRegistrationSchema = z.object({
   prfEncryptedSecretKey: z.string().max(10_000).optional(),
   prfSecretKeyIv: z.string().max(24).optional(),
   prfSecretKeyAuthTag: z.string().max(32).optional(),
-});
+}).refine(
+  (d) => {
+    const prfFields = [d.prfEncryptedSecretKey, d.prfSecretKeyIv, d.prfSecretKeyAuthTag];
+    const provided = prfFields.filter(Boolean).length;
+    return provided === 0 || provided === 3;
+  },
+  { message: "PRF fields must be all provided or all omitted", path: ["prfEncryptedSecretKey"] },
+);
 
 // POST /api/webauthn/register/verify
 async function handlePOST(req: NextRequest) {
@@ -97,7 +104,8 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Use server-configured origin (never trust Origin header)
-  const origin = `https://${rpId}`;
+  // WEBAUTHN_RP_ORIGIN allows http://localhost for local development
+  const origin = process.env.WEBAUTHN_RP_ORIGIN ?? `https://${rpId}`;
 
   let verification;
   try {

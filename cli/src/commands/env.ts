@@ -73,8 +73,8 @@ export async function envCommand(opts: EnvOptions): Promise<void> {
     }
 
     const decrypted = await decryptData(
-      encryptionKey,
       data.encryptedBlob,
+      encryptionKey,
       additionalData,
     );
 

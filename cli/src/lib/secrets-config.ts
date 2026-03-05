@@ -56,7 +56,10 @@ export function loadSecretsConfig(configPath?: string): SecretsConfig {
  * If apiKey is configured, use the public /api/v1/ path.
  */
 export function getPasswordPath(entryId: string, useV1: boolean): string {
+  if (/[\/\\]/.test(entryId)) {
+    throw new Error(`Invalid entry ID: "${entryId}"`);
+  }
   return useV1
-    ? `/api/v1/passwords/${entryId}`
-    : `/api/passwords/${entryId}`;
+    ? `/api/v1/passwords/${encodeURIComponent(entryId)}`
+    : `/api/passwords/${encodeURIComponent(entryId)}`;
 }

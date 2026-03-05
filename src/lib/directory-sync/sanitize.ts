@@ -13,8 +13,12 @@ const MAX_LENGTH = 1_000;
 const SENSITIVE_PATTERNS: [RegExp, string][] = [
   // Bearer tokens: "Bearer eyJ…" → "Bearer [REDACTED]"
   [/Bearer\s+\S+/gi, "Bearer [REDACTED]"],
+  // Okta SSWS tokens: "SSWS xxx" → "SSWS [REDACTED]"
+  [/SSWS\s+\S+/gi, "SSWS [REDACTED]"],
   // Query/body param: token=xxx → token=[REDACTED]
   [/token=[^&\s"')]+/gi, "token=[REDACTED]"],
+  // Query/body param: api_token=xxx → api_token=[REDACTED]
+  [/api_token=[^&\s"')]+/gi, "api_token=[REDACTED]"],
   // Query/body param: client_secret=xxx → client_secret=[REDACTED]
   [/client_secret=[^&\s"')]+/gi, "client_secret=[REDACTED]"],
 ];

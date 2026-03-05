@@ -70,7 +70,7 @@ export async function agentCommand(opts: AgentOptions): Promise<void> {
   const userId = getUserId();
 
   // Fetch all SSH_KEY entries from the vault
-  const res = await apiRequest<VaultEntry[]>("/api/passwords?type=SSH_KEY");
+  const res = await apiRequest<VaultEntry[]>("/api/passwords?type=SSH_KEY&include=blob");
   if (!res.ok) {
     output.error(`Failed to fetch SSH keys: HTTP ${res.status}`);
     process.exit(1);

@@ -86,13 +86,18 @@ export function findKeyByBlob(publicKeyBlob: Buffer): LoadedSshKey | undefined {
 }
 
 /**
- * Clear all loaded keys. Zeroes PEM data in memory.
+ * Clear all loaded keys and release references.
+ *
+ * Note: JavaScript strings are immutable — we cannot zero key.pem in-place.
+ * We clear object references so GC can collect them sooner, but the original
+ * string data may persist in V8 heap until garbage collected.
  */
 export function clearKeys(): void {
   for (const key of loadedKeys.values()) {
-    // Best-effort zero of PEM data in memory
-    const buf = Buffer.from(key.pem);
-    buf.fill(0);
+    // Drop references to sensitive data (JS strings are immutable, cannot zero)
+    (key as Record<string, unknown>).keyObject = undefined;
+    (key as Record<string, unknown>).pem = "";
+    (key as Record<string, unknown>).passphrase = undefined;
   }
   loadedKeys.clear();
 }

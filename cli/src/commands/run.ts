@@ -19,8 +19,21 @@ const BLOCKED_KEYS = new Set([
   "LD_PRELOAD",
   "LD_LIBRARY_PATH",
   "DYLD_INSERT_LIBRARIES",
+  "DYLD_FRAMEWORK_PATH",
   "NODE_OPTIONS",
   "NODE_PATH",
+  "PYTHONPATH",
+  "PYTHONSTARTUP",
+  "PYTHONUSERBASE",
+  "RUBYLIB",
+  "RUBYOPT",
+  "PERL5LIB",
+  "PERL5OPT",
+  "JAVA_TOOL_OPTIONS",
+  "_JAVA_OPTIONS",
+  "CLASSPATH",
+  "BASH_ENV",
+  "ENV",
 ]);
 
 interface RunOptions {
@@ -89,8 +102,8 @@ export async function runCommand(opts: RunOptions): Promise<void> {
     }
 
     const decrypted = await decryptData(
-      encryptionKey,
       data.encryptedBlob,
+      encryptionKey,
       additionalData,
     );
 
