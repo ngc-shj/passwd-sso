@@ -8,7 +8,7 @@ export function proxy(request: NextRequest) {
   if (
     pathname.startsWith("/_next") ||
     pathname.startsWith("/_vercel") ||
-    /\.\w+$/.test(pathname) // static files (favicon.ico, icon.png, etc.)
+    (!pathname.startsWith("/api/") && /\.(ico|png|svg|jpg|jpeg|gif|webp|css|js|woff2?|ttf|map|txt|webmanifest)$/.test(pathname))
   ) {
     return NextResponse.next();
   }

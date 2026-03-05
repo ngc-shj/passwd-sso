@@ -5,6 +5,14 @@ set -euo pipefail
 # Prerequisites: rsvg-convert (librsvg), magick (ImageMagick)
 # macOS: brew install librsvg imagemagick
 
+for cmd in rsvg-convert magick; do
+  if ! command -v "$cmd" &>/dev/null; then
+    echo "Error: '$cmd' is not installed." >&2
+    echo "  macOS: brew install $([ "$cmd" = rsvg-convert ] && echo librsvg || echo imagemagick)" >&2
+    exit 1
+  fi
+done
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SVG="$REPO_ROOT/public/icon.svg"
 TMP_DIR="$(mktemp -d)"

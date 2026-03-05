@@ -22,6 +22,8 @@ export default function manifest(): MetadataRoute.Manifest {
         type: "image/svg+xml",
       },
     ],
+    start_url: `${BASE_PATH}/`,
+    scope: `${BASE_PATH}/`,
     theme_color: "#5B57D6",
     background_color: "#ffffff",
     display: "standalone",

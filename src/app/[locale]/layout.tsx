@@ -33,6 +33,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       icon: [
         { url: `${BASE_PATH}/favicon.ico`, sizes: "any" },
         { url: `${BASE_PATH}/icon.png`, type: "image/png", sizes: "32x32" },
+        { url: `${BASE_PATH}/icon.svg`, type: "image/svg+xml" },
       ],
       apple: `${BASE_PATH}/apple-icon.png`,
     },
