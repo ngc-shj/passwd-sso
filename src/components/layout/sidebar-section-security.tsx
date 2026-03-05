@@ -7,6 +7,7 @@ import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import type { VaultContext } from "@/hooks/use-vault-context";
 import {
+  Building2,
   Download,
   HeartPulse,
   Monitor,
@@ -87,9 +88,11 @@ interface UtilitiesSectionProps {
   tTeam: (key: string) => string;
   selectedTeam?: SecurityTeam | null;
   isTeamSettingsActive?: boolean;
+  isTenantSettingsActive?: boolean;
   isSettingsActive?: boolean;
   isExportActive?: boolean;
   isImportActive?: boolean;
+  isAdmin?: boolean;
   onNavigate: () => void;
 }
 
@@ -100,9 +103,11 @@ export function UtilitiesSection({
   tTeam,
   selectedTeam,
   isTeamSettingsActive,
+  isTenantSettingsActive,
   isSettingsActive,
   isExportActive,
   isImportActive,
+  isAdmin,
   onNavigate,
 }: UtilitiesSectionProps) {
   const scopedTeam = selectedTeam ?? null;
@@ -134,6 +139,14 @@ export function UtilitiesSection({
                   {t("settings")}
                 </Link>
               </Button>
+              {isAdmin && (
+                <Button variant={isTenantSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+                  <Link href="/dashboard/tenant" onClick={onNavigate}>
+                    <Building2 className="h-4 w-4" />
+                    {t("tenantSettings")}
+                  </Link>
+                </Button>
+              )}
               <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
                 <Link href="/dashboard/teams" onClick={onNavigate}>
                   <Settings className="h-4 w-4" />

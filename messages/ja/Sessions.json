@@ -1,8 +1,6 @@
 {
   "settingsTitle": "設定",
-  "settingsDescription": "個人設定とテナント設定を管理できます。",
-  "tabPersonal": "個人",
-  "tabTenant": "テナント",
+  "settingsDescription": "個人設定を管理できます。",
   "title": "セッション",
   "description": "アクティブなセッションを管理できます。不要なセッションを取り消すことができます。",
   "current": "現在",

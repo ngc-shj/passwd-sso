@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useTeamVaultContext } from "@/hooks/use-vault-context";
 import { useSetActiveVault } from "@/lib/active-vault-context";
+import { useTenantRole } from "@/hooks/use-tenant-role";
 
 interface SidebarProps {
   open: boolean;
@@ -87,6 +88,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   });
 
   const vaultContext = useTeamVaultContext(teams);
+  const { isAdmin } = useTenantRole();
   const setActiveVault = useSetActiveVault();
   useEffect(() => {
     setActiveVault(vaultContext);
@@ -95,6 +97,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     activeAuditTeamId,
     isTeamsManage,
     isTeamSettings,
+    isTenantSettings,
     isSettings,
     isExport,
     isImport,
@@ -155,9 +158,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isSelectedVaultArchive,
     isSelectedVaultTrash,
     isTeamSettingsActive: isTeamSettings || isTeamsManage,
+    isTenantSettingsActive: isTenantSettings,
     isSettingsActive: isSettings,
     isExportActive: isExport,
     isImportActive: isImport,
+    isAdmin,
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,

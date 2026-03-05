@@ -50,6 +50,7 @@ export const API_PATH = {
   TENANT_MEMBERS: "/api/tenant/members",
   API_KEYS: "/api/api-keys",
   TENANT_SCIM_TOKENS: "/api/tenant/scim-tokens",
+  DIRECTORY_SYNC: "/api/directory-sync",
   TENANT_ROLE: "/api/tenant/role",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
@@ -132,4 +133,10 @@ export const apiPath = {
   teamWebhooks: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/webhooks`,
   teamWebhookById: (teamId: string, webhookId: string) =>
     `${API_PATH.TEAMS}/${teamId}/webhooks/${webhookId}`,
+  directorySyncById: (configId: string) =>
+    `${API_PATH.DIRECTORY_SYNC}/${configId}`,
+  directorySyncRun: (configId: string) =>
+    `${API_PATH.DIRECTORY_SYNC}/${configId}/run`,
+  directorySyncLogs: (configId: string) =>
+    `${API_PATH.DIRECTORY_SYNC}/${configId}/logs`,
 } as const;

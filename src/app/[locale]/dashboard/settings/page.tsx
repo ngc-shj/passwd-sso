@@ -2,19 +2,14 @@
 
 import { useTranslations } from "next-intl";
 import { Settings } from "lucide-react";
-import { useTenantRole } from "@/hooks/use-tenant-role";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionsCard } from "@/components/sessions/sessions-card";
-import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
 import { CliTokenCard } from "@/components/settings/cli-token-card";
-import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 import { ApiKeyManager } from "@/components/settings/api-key-manager";
 import { TravelModeCard } from "@/components/settings/travel-mode-card";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
-  const { isAdmin } = useTenantRole();
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -31,31 +26,12 @@ export default function SettingsPage() {
           </div>
         </Card>
 
-        {isAdmin ? (
-          <Tabs defaultValue="personal" className="space-y-4">
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="personal">{t("tabPersonal")}</TabsTrigger>
-              <TabsTrigger value="tenant">{t("tabTenant")}</TabsTrigger>
-            </TabsList>
-            <TabsContent value="personal" className="mt-0 space-y-4">
-              <SessionsCard />
-              <CliTokenCard />
-              <ApiKeyManager />
-              <TravelModeCard />
-            </TabsContent>
-            <TabsContent value="tenant" className="mt-0 space-y-4">
-              <TenantMembersCard />
-              <ScimProvisioningCard />
-            </TabsContent>
-          </Tabs>
-        ) : (
-          <div className="space-y-4">
-            <SessionsCard />
-            <CliTokenCard />
-            <ApiKeyManager />
-            <TravelModeCard />
-          </div>
-        )}
+        <div className="space-y-4">
+          <SessionsCard />
+          <CliTokenCard />
+          <ApiKeyManager />
+          <TravelModeCard />
+        </div>
       </div>
     </div>
   );

@@ -104,6 +104,7 @@
   "keyPendingDesc": "An administrator needs to distribute the encryption key before you can access passwords. This happens automatically when an admin is online.",
   "scimTitle": "SCIM Provisioning",
   "scimDescription": "Connect your identity provider to automatically provision and deprovision members.",
+  "scimTenantScopeNote": "Tokens are tenant-scoped. Changes here affect SCIM access for all teams in this tenant.",
   "scimEndpointUrl": "SCIM Endpoint URL",
   "scimTokens": "SCIM Tokens",
   "scimNoTokens": "No SCIM tokens yet.",

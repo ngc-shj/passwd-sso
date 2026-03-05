@@ -104,6 +104,7 @@
   "keyPendingDesc": "パスワードにアクセスするには、管理者が暗号鍵を配布する必要があります。管理者がオンラインになると自動的に配布されます。",
   "scimTitle": "SCIM プロビジョニング",
   "scimDescription": "ID プロバイダーを接続して、メンバーの自動プロビジョニング・デプロビジョニングを行います。",
+  "scimTenantScopeNote": "トークンはテナントスコープです。ここでの変更はこのテナント内のすべてのチームの SCIM アクセスに影響します。",
   "scimEndpointUrl": "SCIM エンドポイント URL",
   "scimTokens": "SCIM トークン",
   "scimNoTokens": "SCIM トークンはまだありません。",
