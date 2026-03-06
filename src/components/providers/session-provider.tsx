@@ -17,8 +17,11 @@ function getAuthBasePath(): string {
 function SessionSync() {
   const { update } = useSession();
   const updateRef = useRef(update);
-  updateRef.current = update;
   const pathname = usePathname();
+
+  useEffect(() => {
+    updateRef.current = update;
+  }, [update]);
 
   useEffect(() => {
     updateRef.current();
