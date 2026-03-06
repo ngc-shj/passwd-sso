@@ -8,11 +8,6 @@ import { SignInButton } from "@/components/auth/signin-button";
 import { EmailSignInForm } from "@/components/auth/email-signin-form";
 import { PasskeySignInButton } from "@/components/auth/passkey-signin-button";
 import { SecurityKeySignInForm } from "@/components/auth/security-key-signin-form";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 
@@ -118,15 +113,15 @@ export default async function SignInPage({
           {showPasskeySignIn && (
             <>
               <PasskeySignInButton />
-              <Collapsible>
-                <CollapsibleTrigger className="flex w-full items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors py-1">
-                  <ChevronDown className="h-3 w-3" />
+              <details className="group">
+                <summary className="flex w-full cursor-pointer list-none items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors py-1 [&::-webkit-details-marker]:hidden">
+                  <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
                   {t("alternativeSignIn")}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-2">
+                </summary>
+                <div className="pt-2">
                   <SecurityKeySignInForm />
-                </CollapsibleContent>
-              </Collapsible>
+                </div>
+              </details>
             </>
           )}
           {showPasskeySignIn && showEmailSignIn && (

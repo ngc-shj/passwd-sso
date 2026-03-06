@@ -45,11 +45,6 @@ vi.mock("lucide-react", () => ({
   Shield: () => null,
   ChevronDown: () => null,
 }));
-vi.mock("@/components/ui/collapsible", () => ({
-  Collapsible: ({ children }: { children: unknown }) => children,
-  CollapsibleTrigger: ({ children }: { children: unknown }) => children,
-  CollapsibleContent: ({ children }: { children: unknown }) => children,
-}));
 vi.mock("@/components/auth/security-key-signin-form", () => ({
   SecurityKeySignInForm: () => null,
 }));
