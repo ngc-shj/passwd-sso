@@ -184,24 +184,52 @@ export async function verifyAuthentication(
  *
  * Uses HKDF-SHA256 with:
  *   ikm  = WEBAUTHN_PRF_SECRET (32 bytes from env)
- *   salt = `${rpId}:${userId}` (UTF-8)
+ *   salt = rpId (UTF-8)
  *   info = "prf-vault-unlock-v1" (UTF-8)
+ *
+ * The salt is RP-global (not per-user) because the PRF output is already
+ * unique per credential. This allows the sign-in flow (which doesn't know
+ * the userId upfront) to request PRF in the same ceremony.
+ *
+ * BREAKING CHANGE (from per-user salt `${rpId}:${userId}`):
+ * Existing PRF-wrapped keys created with the old per-user salt are
+ * incompatible. Users must delete and re-register their passkey to
+ * restore PRF vault auto-unlock. Manual passphrase unlock is unaffected.
  *
  * Returns the salt as a hex string (64 chars).
  */
-export function derivePrfSalt(userId: string): string {
+export function derivePrfSalt(): string {
   const rpId = getRpId();
   const ikm = getPrfSecret();
-  const salt = Buffer.from(`${rpId}:${userId}`, "utf-8");
+  const salt = Buffer.from(rpId, "utf-8");
   const info = Buffer.from("prf-vault-unlock-v1", "utf-8");
 
   const derived = hkdfSync("sha256", ikm, salt, info, 32);
   return Buffer.from(derived).toString("hex");
 }
 
+// ── Discoverable authentication (for sign-in) ──────────────
+
+/**
+ * Generate authentication options for discoverable credentials (passkey sign-in).
+ * Unlike generateAuthenticationOpts(), this uses empty allowCredentials
+ * so the browser presents all discoverable credentials for the RP.
+ */
+export async function generateDiscoverableAuthOpts() {
+  const rpId = getRpId();
+
+  const opts: GenerateAuthenticationOptionsOpts = {
+    rpID: rpId,
+    allowCredentials: [],
+    userVerification: "required",
+  };
+
+  return generateAuthenticationOptions(opts);
+}
+
 // ── Helpers ─────────────────────────────────────────────────
 
-function base64urlToUint8Array(base64url: string): Uint8Array {
+export function base64urlToUint8Array(base64url: string): Uint8Array {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (base64.length % 4)) % 4;
   const padded = base64 + "=".repeat(pad);

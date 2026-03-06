@@ -242,6 +242,31 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!baseResult) return false;
       }
 
+      // Reject nodemailer for SSO tenant users.
+      // Magic Link is for individual (bootstrap tenant) users only.
+      // Prevents bypassing SSO policy via direct API calls.
+      // Note: WebAuthn sign-in uses a custom route (/api/auth/passkey/verify)
+      // that has its own SSO tenant guard, bypassing Auth.js entirely.
+      const provider = params.account?.provider;
+      if (provider === "nodemailer") {
+        // Nodemailer requires email by definition. Block null-email as a safeguard.
+        if (!params.user?.email) return false;
+
+        const existingUser = await withBypassRls(prisma, async () =>
+          prisma.user.findUnique({
+            where: { email: params.user.email! },
+            select: {
+              id: true,
+              tenant: { select: { isBootstrap: true } },
+            },
+          }),
+        );
+        // Existing user in a non-bootstrap (SSO) tenant → reject
+        if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
+          return false;
+        }
+      }
+
       let userId = params.user?.id ?? null;
       if (!userId && params.user?.email) {
         const existing = await withBypassRls(prisma, async () =>
@@ -265,8 +290,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return ok;
     },
     async session({ session, user }) {
-      session.user.id = user.id;
-      return session;
+      // Auth.js v5 database strategy passes raw adapter fields;
+      // strip internal fields to prevent leaking sessionToken etc.
+      return {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image,
+        },
+        expires: session.expires,
+      };
     },
   },
   events: {

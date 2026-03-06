@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -37,7 +37,7 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
-  const { unlock, unlockWithPasskey } = useVault();
+  const { unlock, unlockWithPasskey, unlockWithStoredPrf } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
   const [showPassphrase, setShowPassphrase] = useState(false);
@@ -45,10 +45,14 @@ export function VaultLockScreen() {
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
+  const [prfChecked, setPrfChecked] = useState(false);
 
   // Check if user has PRF-capable passkeys
   useEffect(() => {
-    if (!isWebAuthnSupported()) return;
+    if (!isWebAuthnSupported()) {
+      setPrfChecked(true);
+      return;
+    }
 
     fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
       .then(async (res) => {
@@ -57,7 +61,8 @@ export function VaultLockScreen() {
           setHasPrfPasskeys(creds.some((c) => c.prfSupported));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPrfChecked(true));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -126,6 +131,49 @@ export function VaultLockScreen() {
       setPasskeyLoading(false);
     }
   }, [unlockWithPasskey, t, tw]);
+
+  // Track whether we arrived via WebAuthn sign-in.
+  // The ref persists across renders so we don't lose the flag while
+  // waiting for the hasPrfPasskeys query to resolve.
+  const webauthnSignInRef = useRef(
+    typeof window !== "undefined" &&
+      sessionStorage.getItem("psso:webauthn-signin") === "1",
+  );
+
+  // Auto-unlock vault after WebAuthn sign-in.
+  // If PRF output was captured during sign-in (single-ceremony flow),
+  // use it directly. Otherwise fall back to a separate ceremony.
+  useEffect(() => {
+    if (!webauthnSignInRef.current || !prfChecked) return;
+    // Consume flag (one-shot)
+    webauthnSignInRef.current = false;
+    sessionStorage.removeItem("psso:webauthn-signin");
+
+    const hasStoredPrf = !!(
+      sessionStorage.getItem("psso:prf-output") &&
+      sessionStorage.getItem("psso:prf-data")
+    );
+
+    if (hasStoredPrf) {
+      // Single-ceremony flow: use PRF output from sign-in (no second QR scan)
+      setPasskeyLoading(true);
+      unlockWithStoredPrf()
+        .then((ok) => {
+          if (!ok) setError(tw("unlockError"));
+        })
+        .catch((err) => {
+          if (err instanceof VaultUnlockError) {
+            setError(formatLockedUntil(err.lockedUntil, t));
+          } else {
+            setError(tw("unlockError"));
+          }
+        })
+        .finally(() => setPasskeyLoading(false));
+    }
+    // If sign-in did not produce PRF output (authenticator doesn't support PRF),
+    // do NOT auto-trigger a separate ceremony — the user can manually unlock
+    // with passphrase or click the passkey unlock button.
+  }, [prfChecked, hasPrfPasskeys, handlePasskeyUnlock, unlockWithStoredPrf, t, tw]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
