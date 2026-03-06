@@ -96,7 +96,11 @@ export default {
               );
               if (!rl.allowed) return; // silently drop — no user enumeration
 
-              const { subject, html, text } = magicLinkEmail(url);
+              // Extract locale from callbackUrl inside the magic link
+              // URL format: .../api/auth/callback/nodemailer?callbackUrl=.../ja/...&token=...
+              const cbUrl = new URL(url).searchParams.get("callbackUrl") ?? "";
+              const locale = cbUrl.match(/\/(?:ja|en)(?:\/|$)/)?.[0]?.replace(/\//g, "") ?? "ja";
+              const { subject, html, text } = magicLinkEmail(url, locale);
               await sendEmail({ to: email, subject, html, text });
             },
           }),

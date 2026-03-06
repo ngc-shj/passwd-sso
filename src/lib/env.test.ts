@@ -152,8 +152,21 @@ describe("env validation", () => {
       VERIFIER_PEPPER_KEY: VALID_HEX_64,
       REDIS_URL: "redis://localhost:6379",
       EMAIL_PROVIDER: "smtp",
+      SMTP_HOST: "smtp.example.com",
     });
     const { env } = await import("./env");
     expect(env.EMAIL_PROVIDER).toBe("smtp");
+  });
+
+  it("rejects production config with EMAIL_PROVIDER=smtp but no SMTP_HOST", async () => {
+    process.env = buildMinimalEnv({
+      NODE_ENV: "production",
+      AUTH_SECRET: "a".repeat(32),
+      AUTH_URL: "https://app.example.com",
+      VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      REDIS_URL: "redis://localhost:6379",
+      EMAIL_PROVIDER: "smtp",
+    });
+    await expect(import("./env")).rejects.toThrow("SMTP_HOST");
   });
 });

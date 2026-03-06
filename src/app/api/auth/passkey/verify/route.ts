@@ -79,7 +79,11 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // SSO tenant guard: reject non-bootstrap (SSO) tenant users
+  // SSO tenant guard: reject non-bootstrap (SSO) tenant users.
+  // This is intentionally simpler than ensureTenantMembershipForSignIn() in auth.ts
+  // because passkey sign-in is restricted to bootstrap-tenant users only (the sign-in
+  // page hides the passkey button when SSO is configured). We don't need tenant claim
+  // extraction, cross-tenant migration, or membership upsert here.
   const existingUser = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { email: user.email },

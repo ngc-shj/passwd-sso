@@ -104,3 +104,42 @@ describe("derivePrfSalt", () => {
     expect(() => derivePrfSalt("user-1")).toThrow("WEBAUTHN_RP_ID");
   });
 });
+
+describe("base64urlToUint8Array / uint8ArrayToBase64url", () => {
+  // These are pure functions — no env vars or module reset needed.
+  // Import once at the top of the describe block.
+  let base64urlToUint8Array: (s: string) => Uint8Array;
+  let uint8ArrayToBase64url: (b: Uint8Array) => string;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    const mod = await import("./webauthn-server");
+    base64urlToUint8Array = mod.base64urlToUint8Array;
+    uint8ArrayToBase64url = mod.uint8ArrayToBase64url;
+  });
+
+  it("roundtrips arbitrary bytes", () => {
+    const original = new Uint8Array([0, 1, 62, 63, 128, 255]);
+    const encoded = uint8ArrayToBase64url(original);
+    expect(base64urlToUint8Array(encoded)).toEqual(original);
+  });
+
+  it("handles empty input", () => {
+    expect(uint8ArrayToBase64url(new Uint8Array(0))).toBe("");
+    expect(base64urlToUint8Array("")).toEqual(new Uint8Array(0));
+  });
+
+  it("uses base64url characters (- and _ instead of + and /)", () => {
+    // Bytes 62 and 63 map to + and / in base64, but - and _ in base64url
+    const bytes = new Uint8Array([251, 239]); // encodes to ++/ in base64
+    const encoded = uint8ArrayToBase64url(bytes);
+    expect(encoded).not.toContain("+");
+    expect(encoded).not.toContain("/");
+    expect(encoded).not.toContain("=");
+  });
+
+  it("decodes a known base64url value", () => {
+    // "AQID" = [1, 2, 3]
+    expect(base64urlToUint8Array("AQID")).toEqual(new Uint8Array([1, 2, 3]));
+  });
+});

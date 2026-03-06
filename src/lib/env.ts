@@ -210,6 +210,19 @@ const envSchema = z
             "Email (EMAIL_PROVIDER)",
         });
       }
+
+      // SMTP_HOST required when EMAIL_PROVIDER=smtp in production
+      if (data.EMAIL_PROVIDER === "smtp") {
+        const smtpHost = process.env.SMTP_HOST?.trim();
+        if (!smtpHost) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["EMAIL_PROVIDER"],
+            message:
+              "SMTP_HOST is required when EMAIL_PROVIDER=smtp in production",
+          });
+        }
+      }
     }
 
     // ── Key rotation: current version key must exist ───────
