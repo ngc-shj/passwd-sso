@@ -20,7 +20,8 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Master password / passphrase | Done | Yes | Yes | |
 | Google OAuth 2.0 | Done | No | No | Workspace domain restriction supported |
 | SAML 2.0 SSO | Done | Yes | Yes | Via BoxyHQ SAML Jackson |
-| Passkey / WebAuthn | --- | Yes | Yes | |
+| Passkey / WebAuthn | Done | Yes | Yes | Discoverable + email-based (non-discoverable) sign-in, PRF vault auto-unlock |
+| Magic Link (email) | Done | No | No | Passwordless sign-in via email token |
 | MFA / 2FA (at login) | --- | Yes | Yes | |
 
 ## 2. Vault & Encryption
@@ -30,9 +31,9 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | E2E encryption | Done | Yes | Yes | Personal vault is E2E |
 | Server-side encryption (team) | Done | Yes | Yes | For sharing use cases |
 | Auto-lock | Done | Yes | Yes | 15 min idle / 5 min hidden tab |
-| Key rotation | --- (prepared) | Yes | No | |
+| Key rotation | Done | Yes | No | Personal vault + team vault + share master key |
 | Multiple vaults | --- | Yes | Yes | |
-| Travel Mode | --- | Yes | No | |
+| Travel Mode | Done | Yes | No | Hide selected vaults while traveling |
 
 ## 3. Entries & Attachments
 
@@ -43,7 +44,7 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Software license | Done | Yes | No | |
 | TOTP storage | Done | Yes | Yes | |
 | File attachments | Done | Yes | Yes | |
-| SSH keys | --- | Yes | No | |
+| SSH keys | Done | Yes | No | |
 | Custom fields (TEXT, HIDDEN, URL, BOOLEAN, DATE, MONTH_YEAR) | Done | Partial | Partial | |
 
 ## 4. Sharing & Team
@@ -96,4 +97,4 @@ Because competitor capabilities vary by plan and deployment model, always verify
 
 ---
 
-*Last updated: 2026-02-28*
+*Last updated: 2026-03-07*

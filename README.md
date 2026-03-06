@@ -47,6 +47,9 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **TOTP QR Capture** - Camera-based QR code scanning for TOTP secret setup (MediaDevices + ImageCapture)
 - **Travel Mode** - Hide sensitive entries when crossing borders; remote disable restores access
 - **Directory Sync** - Sync organization members from Azure AD, Google Workspace, or Okta; encrypted credentials with server master key
+- **Passkey Sign-In** - Passwordless sign-in with discoverable FIDO2 credentials (WebAuthn); PRF-capable keys auto-unlock vault
+- **Email + Security Key Sign-In** - Non-discoverable credential support via email lookup with timing-oracle mitigation
+- **Magic Link Sign-In** - Email-based passwordless authentication with locale-aware templates
 - **Passkey Vault Unlock** - Unlock vault with a FIDO2 passkey (WebAuthn PRF) instead of master passphrase
 - **CLI Tool** - Node.js CLI (`passwd-sso`) with 13 commands: login, unlock, status, list, get, generate, totp, export, env, run, agent, api-key, ssh-key; OS keychain integration and XDG-compliant config
 - **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, CC/address autofill, context menu, keyboard shortcuts, new-login detect & save
@@ -287,7 +290,7 @@ src/
 │   ├── vault/                # Vault lock/unlock UI, recovery key dialog/banner
 │   ├── tags/                 # TagInput, TagBadge
 │   ├── providers/            # Client-side providers (theme, session, etc.)
-│   ├── auth/                 # SignOutButton
+│   ├── auth/                 # SignOutButton, PasskeySignInButton, SecurityKeySignInForm, EmailSignInForm
 │   └── ui/                   # shadcn/ui components
 ├── lib/
 │   ├── crypto-client.ts      # Client-side E2E encryption (personal vault)
@@ -349,6 +352,9 @@ cli/
 - **Tenant admin vault reset** - Tenant owner/admin can reset a member's vault with audit logging
 - **Multi-tenant isolation** - PostgreSQL FORCE RLS on 33 tables with CI guard scripts to prevent accidental RLS bypass
 - **SCIM 2.0** - Tenant-scoped Bearer tokens, Users/Groups endpoints (RFC 7644)
+- **Passkey sign-in** - Discoverable and non-discoverable WebAuthn credential sign-in with user-enumeration mitigation
+- **Email + security key sign-in** - Non-discoverable credential support via email lookup with timing-oracle mitigation
+- **Magic link sign-in** - Time-limited email tokens with locale-aware templates
 - **Passkey vault unlock** - WebAuthn PRF-based vault unlock; passkey derives encryption key without master passphrase
 - **API key authentication** - Scoped API keys with SHA-256 hashed tokens and HMAC prefix verification
 - **Directory sync credentials** - Provider credentials encrypted with server master key (AES-256-GCM)

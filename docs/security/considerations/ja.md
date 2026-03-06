@@ -43,8 +43,24 @@
 ## 1.2 通信フロー（要点）
 
 ```text
-[Sign-in]
+[Sign-in: SSO (Google/SAML)]
 Browser -> Auth Provider/NextAuth -> session established
+
+[Sign-in: Passkey (discoverable)]
+Browser -> navigator.credentials.get(allowCredentials:[]) -> authenticator
+  -> POST /api/auth/passkey/verify -> session established
+  -> PRF output (if supported) -> vault auto-unlock via sessionStorage
+
+[Sign-in: Email + Security Key (non-discoverable)]
+Browser -> POST /api/auth/passkey/options/email {email}
+  -> server returns allowCredentials (user's credential IDs or dummy for unknown email)
+  -> navigator.credentials.get(allowCredentials:[...]) -> authenticator
+  -> POST /api/auth/passkey/verify -> session established
+
+[Sign-in: Magic Link]
+Browser -> POST /api/auth/[...nextauth] (email provider)
+  -> server sends email with token link
+  -> user clicks link -> session established
 
 [Personal Vault Write]
 Browser(WebCrypto) encrypts -> API -> DB stores ciphertext
@@ -193,6 +209,9 @@ Client(valid時):
 - Auth.js の DB セッションを利用（ブラウザ localStorage に JWT セッションを置かない）。
 - セッション有効期間と失効手順を運用で明確化する。
 - `GOOGLE_WORKSPACE_DOMAIN` や IdP 側ポリシーでサインイン対象を制限する。
+- パスキーサインイン: challenge は使い捨て（Redis GETDEL、5分 TTL）、IP 単位レート制限あり。
+- メールベースのパスキーオプション: 未登録メールにはダミー `allowCredentials` を返す（ユーザー列挙防止）。
+- SSOテナントユーザーはパスキーサインイン対象外（IdP フローを使用）。
 
 ## 4. Vault と鍵の取り扱い
 
