@@ -7,6 +7,13 @@ import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+// Rate limiters for magic link email (per-email address)
+const magicLinkEmailLimiter = createRateLimiter({
+  windowMs: 10 * 60_000,
+  max: 3,
+});
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
@@ -85,6 +92,12 @@ export default {
               : "smtp://localhost:1025",
             from: process.env.EMAIL_FROM || "noreply@localhost",
             async sendVerificationRequest({ identifier: email, url }) {
+              // Rate limit per email address (3 emails per 10 minutes)
+              const rl = await magicLinkEmailLimiter.check(
+                `magic-link:email:${email.toLowerCase()}`,
+              );
+              if (!rl.allowed) return; // silently drop — no user enumeration
+
               const { subject, html, text } = magicLinkEmail(url);
               await sendEmail({ to: email, subject, html, text });
             },

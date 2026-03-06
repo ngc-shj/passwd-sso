@@ -87,6 +87,9 @@ const envSchema = z
     AUTH_TENANT_CLAIM_KEYS: z.string().optional(),
     SAML_PROVIDER_NAME: z.string().default("SSO"),
 
+    // --- Email authentication (Magic Link) ---
+    EMAIL_PROVIDER: z.enum(["resend", "smtp"]).optional(),
+
     // --- Optional with defaults ---
     CSP_MODE: z.enum(["strict", "dev"]).optional(),
     BLOB_BACKEND: z.enum(["db", "s3", "azure", "gcs"]).default("db"),
@@ -194,7 +197,7 @@ const envSchema = z
         data.AUTH_JACKSON_SECRET &&
         data.JACKSON_URL
       );
-      const hasEmail = !!process.env.EMAIL_PROVIDER;
+      const hasEmail = !!data.EMAIL_PROVIDER;
 
       if (!hasGoogle && !hasJackson && !hasEmail) {
         ctx.addIssue({

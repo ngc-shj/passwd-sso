@@ -247,20 +247,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Prevents bypassing SSO policy via direct API calls.
       const provider = params.account?.provider;
       if (provider === "nodemailer" || provider === "webauthn") {
-        if (params.user?.email) {
-          const existingUser = await withBypassRls(prisma, async () =>
-            prisma.user.findUnique({
-              where: { email: params.user.email! },
-              select: {
-                id: true,
-                tenant: { select: { isBootstrap: true } },
-              },
-            }),
-          );
-          // Existing user in a non-bootstrap (SSO) tenant → reject
-          if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
-            return false;
-          }
+        // Both providers require email. Block null-email as a safeguard.
+        if (!params.user?.email) return false;
+
+        const existingUser = await withBypassRls(prisma, async () =>
+          prisma.user.findUnique({
+            where: { email: params.user.email! },
+            select: {
+              id: true,
+              tenant: { select: { isBootstrap: true } },
+            },
+          }),
+        );
+        // Existing user in a non-bootstrap (SSO) tenant → reject
+        if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
+          return false;
         }
       }
 

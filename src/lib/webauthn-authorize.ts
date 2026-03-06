@@ -14,24 +14,13 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import {
   verifyAuthentication,
   getRpOrigin,
-  uint8ArrayToBase64url,
+  base64urlToUint8Array,
 } from "@/lib/webauthn-server";
 import type { AuthenticatorDevice } from "@simplewebauthn/types";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 
-// ── Helpers ──────────────────────────────────────────────────
-
-function base64urlToUint8Array(base64url: string): Uint8Array {
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = (4 - (base64.length % 4)) % 4;
-  const padded = base64 + "=".repeat(pad);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
+// challengeId must be a 32-char hex string (16 random bytes)
+const CHALLENGE_ID_RE = /^[0-9a-f]{32}$/;
 
 // Dummy public key for timing equalization when credential not found.
 // This is an invalid key that will cause verification to fail, but ensures
@@ -54,6 +43,9 @@ export async function authorizeWebAuthn(
       : null;
 
   if (!credentialResponse || !challengeId) return null;
+
+  // Validate challengeId format before using in Redis key
+  if (!CHALLENGE_ID_RE.test(challengeId)) return null;
 
   // 1. Redis: consume challenge atomically
   const redis = getRedis();
@@ -129,12 +121,13 @@ export async function authorizeWebAuthn(
   if (!verified || !storedCredential) return null;
 
   // 6. CAS counter update (prevents replay/clone attacks)
+  // last_used_device is set to NULL here; device info is captured
+  // by session metadata when Auth.js creates the session.
   const updatedRows = await withBypassRls(prisma, async () =>
     prisma.$executeRaw`
       UPDATE "webauthn_credentials"
       SET counter = ${BigInt(newCounter)},
-          "last_used_at" = ${new Date()},
-          "last_used_device" = ${uint8ArrayToBase64url(base64urlToUint8Array(responseCredentialId))}
+          "last_used_at" = ${new Date()}
       WHERE id = ${storedCredential.id}
         AND counter = ${storedCredential.counter}
     `,

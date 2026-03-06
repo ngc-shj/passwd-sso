@@ -25,7 +25,7 @@ export default defineConfig({
         "src/lib/scim-token.ts",
         "src/lib/scim/*.ts",
       ],
-      exclude: ["src/app/api/auth/**"],
+      exclude: ["src/app/api/auth/\\[...nextauth\\]/**"],
     },
     isolate: true,
     testTimeout: 10000,

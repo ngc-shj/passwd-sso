@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -127,17 +127,21 @@ export function VaultLockScreen() {
     }
   }, [unlockWithPasskey, t, tw]);
 
-  // Auto-trigger passkey unlock after WebAuthn sign-in (PRF 2-stage flow)
-  useEffect(() => {
-    const flag = sessionStorage.getItem("psso:webauthn-signin");
-    if (!flag) return;
-    // Consume flag immediately (one-shot)
-    sessionStorage.removeItem("psso:webauthn-signin");
+  // Track whether we arrived via WebAuthn sign-in (PRF 2-stage flow).
+  // The ref persists across renders so we don't lose the flag while
+  // waiting for the hasPrfPasskeys query to resolve.
+  const webauthnSignInRef = useRef(
+    typeof window !== "undefined" &&
+      sessionStorage.getItem("psso:webauthn-signin") === "1",
+  );
 
-    // Only auto-unlock if user has PRF-capable passkeys
-    if (hasPrfPasskeys) {
-      handlePasskeyUnlock();
-    }
+  // Auto-trigger passkey unlock after WebAuthn sign-in
+  useEffect(() => {
+    if (!webauthnSignInRef.current || !hasPrfPasskeys) return;
+    // Consume flag (one-shot)
+    webauthnSignInRef.current = false;
+    sessionStorage.removeItem("psso:webauthn-signin");
+    handlePasskeyUnlock();
   }, [hasPrfPasskeys, handlePasskeyUnlock]);
 
   return (

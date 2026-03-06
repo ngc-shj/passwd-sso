@@ -26,6 +26,9 @@ export function EmailSignInForm() {
 
     setLoading(true);
     try {
+      // Always show "sent" regardless of whether the email exists or the
+      // signIn callback rejects it. This prevents user enumeration — an
+      // attacker cannot distinguish valid from invalid addresses.
       await signIn("nodemailer", {
         email: trimmed,
         redirect: false,
