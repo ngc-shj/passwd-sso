@@ -70,7 +70,7 @@ async function handlePOST(_req: NextRequest) {
   // Derive PRF salt so the client can use it during credential creation
   let prfSalt: string | null = null;
   try {
-    prfSalt = derivePrfSalt(userId);
+    prfSalt = derivePrfSalt();
   } catch {
     // PRF secret not configured — passkey will be registered without PRF
   }

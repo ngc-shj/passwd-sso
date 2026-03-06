@@ -4,7 +4,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { assertOrigin } from "@/lib/csrf";
-import { generateDiscoverableAuthOpts } from "@/lib/webauthn-server";
+import { generateDiscoverableAuthOpts, derivePrfSalt } from "@/lib/webauthn-server";
 import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";
@@ -59,9 +59,18 @@ async function handlePOST(req: NextRequest) {
     { EX: CHALLENGE_TTL_SECONDS },
   );
 
+  // Derive PRF salt so the client can request PRF in the same ceremony
+  let prfSalt: string | null = null;
+  try {
+    prfSalt = derivePrfSalt();
+  } catch {
+    // PRF secret not configured — sign-in will work without PRF
+  }
+
   return NextResponse.json({
     options,
     challengeId,
+    prfSalt,
   });
 }
 

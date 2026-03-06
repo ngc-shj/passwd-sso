@@ -42,7 +42,7 @@ function hexDecode(hex: string): Uint8Array {
   return bytes;
 }
 
-function hexEncode(buf: Uint8Array): string {
+export function hexEncode(buf: Uint8Array): string {
   return Array.from(buf)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");

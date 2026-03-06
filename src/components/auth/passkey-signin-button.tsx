@@ -5,9 +5,13 @@ import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Loader2, Fingerprint } from "lucide-react";
-import { isWebAuthnSupported, startPasskeyAuthentication } from "@/lib/webauthn-client";
+import { isWebAuthnSupported, startPasskeyAuthentication, hexEncode } from "@/lib/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { withBasePath } from "@/lib/url-helpers";
+
+/** sessionStorage keys for passing PRF data to vault auto-unlock */
+const SS_PRF_OUTPUT = "psso:prf-output";
+const SS_PRF_DATA = "psso:prf-data";
 
 export function PasskeySignInButton() {
   const t = useTranslations("Auth");
@@ -25,7 +29,7 @@ export function PasskeySignInButton() {
     setError(null);
 
     try {
-      // 1. Get discoverable credential options from server
+      // 1. Get discoverable credential options from server (includes prfSalt)
       const optionsRes = await fetch(
         withBasePath(API_PATH.AUTH_PASSKEY_OPTIONS),
         { method: "POST" },
@@ -36,10 +40,15 @@ export function PasskeySignInButton() {
         return;
       }
 
-      const { options, challengeId } = await optionsRes.json();
+      const { options, challengeId, prfSalt } = await optionsRes.json();
 
-      // 2. Run WebAuthn authentication (no PRF for sign-in)
-      const { responseJSON } = await startPasskeyAuthentication(options);
+      // 2. Run WebAuthn authentication WITH PRF if salt is available.
+      // This combines sign-in + PRF key derivation into a single ceremony
+      // so users only need one authenticator interaction (e.g., one QR scan).
+      const { responseJSON, prfOutput } = await startPasskeyAuthentication(
+        options,
+        prfSalt || undefined,
+      );
 
       // 3. Verify and create database session via custom route.
       // Auth.js Credentials provider only supports JWT sessions, which is
@@ -58,14 +67,25 @@ export function PasskeySignInButton() {
       );
 
       if (!verifyRes.ok) {
+        prfOutput?.fill(0);
         setError(t("passkeySignInFailed"));
         return;
       }
 
-      // 4. Set flag for PRF auto-unlock after dashboard navigation
+      const verifyData = await verifyRes.json();
+
+      // 4. If PRF output was obtained and server returned PRF-wrapped key,
+      // store both in sessionStorage for vault auto-unlock (no second ceremony).
+      if (prfOutput && verifyData.prf) {
+        sessionStorage.setItem(SS_PRF_OUTPUT, hexEncode(prfOutput));
+        sessionStorage.setItem(SS_PRF_DATA, JSON.stringify(verifyData.prf));
+        prfOutput.fill(0);
+      }
+
+      // 5. Set flag for vault auto-unlock after dashboard navigation
       sessionStorage.setItem("psso:webauthn-signin", "1");
 
-      // 5. Navigate to dashboard
+      // 6. Navigate to dashboard
       router.push("/dashboard");
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {

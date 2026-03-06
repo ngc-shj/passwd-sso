@@ -127,7 +127,10 @@ async function handlePOST(req: NextRequest) {
 
   // Set session cookie
   const basePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
-  const response = NextResponse.json({ ok: true });
+  const response = NextResponse.json({
+    ok: true,
+    ...(user.prf ? { prf: user.prf } : {}),
+  });
   response.cookies.set(SESSION_COOKIE_NAME, sessionToken, {
     path: `${basePath}/`,
     httpOnly: true,

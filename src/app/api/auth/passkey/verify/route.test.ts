@@ -274,4 +274,35 @@ describe("POST /api/auth/passkey/verify", () => {
     const res = await POST(req);
     expect(res.status).toBe(200);
   });
+
+  it("includes PRF data in response when credential supports PRF", async () => {
+    const prfData = {
+      prfEncryptedSecretKey: "enc-key-hex",
+      prfSecretKeyIv: "iv-hex",
+      prfSecretKeyAuthTag: "tag-hex",
+    };
+    mockAuthorizeWebAuthn.mockResolvedValue({ ...mockUser, prf: prfData });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.prf).toEqual(prfData);
+  });
+
+  it("omits PRF data when credential does not support PRF", async () => {
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(200);
+    expect(json.ok).toBe(true);
+    expect(json.prf).toBeUndefined();
+  });
 });

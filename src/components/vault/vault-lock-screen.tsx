@@ -37,7 +37,7 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
-  const { unlock, unlockWithPasskey } = useVault();
+  const { unlock, unlockWithPasskey, unlockWithStoredPrf } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
   const [showPassphrase, setShowPassphrase] = useState(false);
@@ -132,7 +132,7 @@ export function VaultLockScreen() {
     }
   }, [unlockWithPasskey, t, tw]);
 
-  // Track whether we arrived via WebAuthn sign-in (PRF 2-stage flow).
+  // Track whether we arrived via WebAuthn sign-in.
   // The ref persists across renders so we don't lose the flag while
   // waiting for the hasPrfPasskeys query to resolve.
   const webauthnSignInRef = useRef(
@@ -140,16 +140,40 @@ export function VaultLockScreen() {
       sessionStorage.getItem("psso:webauthn-signin") === "1",
   );
 
-  // Auto-trigger passkey unlock after WebAuthn sign-in
+  // Auto-unlock vault after WebAuthn sign-in.
+  // If PRF output was captured during sign-in (single-ceremony flow),
+  // use it directly. Otherwise fall back to a separate ceremony.
   useEffect(() => {
     if (!webauthnSignInRef.current || !prfChecked) return;
     // Consume flag (one-shot)
     webauthnSignInRef.current = false;
     sessionStorage.removeItem("psso:webauthn-signin");
-    if (hasPrfPasskeys) {
+
+    const hasStoredPrf = !!(
+      sessionStorage.getItem("psso:prf-output") &&
+      sessionStorage.getItem("psso:prf-data")
+    );
+
+    if (hasStoredPrf) {
+      // Single-ceremony flow: use PRF output from sign-in (no second QR scan)
+      setPasskeyLoading(true);
+      unlockWithStoredPrf()
+        .then((ok) => {
+          if (!ok) setError(tw("unlockError"));
+        })
+        .catch((err) => {
+          if (err instanceof VaultUnlockError) {
+            setError(formatLockedUntil(err.lockedUntil, t));
+          } else {
+            setError(tw("unlockError"));
+          }
+        })
+        .finally(() => setPasskeyLoading(false));
+    } else if (hasPrfPasskeys) {
+      // Fallback: trigger a separate WebAuthn ceremony
       handlePasskeyUnlock();
     }
-  }, [prfChecked, hasPrfPasskeys, handlePasskeyUnlock]);
+  }, [prfChecked, hasPrfPasskeys, handlePasskeyUnlock, unlockWithStoredPrf, t, tw]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">

@@ -184,15 +184,19 @@ export async function verifyAuthentication(
  *
  * Uses HKDF-SHA256 with:
  *   ikm  = WEBAUTHN_PRF_SECRET (32 bytes from env)
- *   salt = `${rpId}:${userId}` (UTF-8)
+ *   salt = rpId (UTF-8)
  *   info = "prf-vault-unlock-v1" (UTF-8)
+ *
+ * The salt is RP-global (not per-user) because the PRF output is already
+ * unique per credential. This allows the sign-in flow (which doesn't know
+ * the userId upfront) to request PRF in the same ceremony.
  *
  * Returns the salt as a hex string (64 chars).
  */
-export function derivePrfSalt(userId: string): string {
+export function derivePrfSalt(): string {
   const rpId = getRpId();
   const ikm = getPrfSecret();
-  const salt = Buffer.from(`${rpId}:${userId}`, "utf-8");
+  const salt = Buffer.from(rpId, "utf-8");
   const info = Buffer.from("prf-vault-unlock-v1", "utf-8");
 
   const derived = hkdfSync("sha256", ikm, salt, info, 32);

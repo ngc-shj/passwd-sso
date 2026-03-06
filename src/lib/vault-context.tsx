@@ -83,6 +83,7 @@ interface VaultContextValue {
   hasRecoveryKey: boolean;
   unlock: (passphrase: string) => Promise<boolean>;
   unlockWithPasskey: () => Promise<boolean>;
+  unlockWithStoredPrf: () => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
@@ -709,6 +710,127 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
   }, [session?.user?.id]);
 
+  // ─── Unlock with stored PRF (single-ceremony sign-in flow) ──────
+
+  /**
+   * Unlock the vault using PRF output stored in sessionStorage during sign-in.
+   * This avoids a second authenticator interaction (e.g., QR code scan) by
+   * reusing the PRF output obtained during the sign-in ceremony.
+   */
+  const unlockWithStoredPrf = useCallback(async (): Promise<boolean> => {
+    const prfOutputHex = sessionStorage.getItem("psso:prf-output");
+    const prfDataStr = sessionStorage.getItem("psso:prf-data");
+
+    // Always clean up immediately
+    sessionStorage.removeItem("psso:prf-output");
+    sessionStorage.removeItem("psso:prf-data");
+
+    if (!prfOutputHex || !prfDataStr) return false;
+
+    try {
+      const prfOutput = hexDecode(prfOutputHex);
+      const prfData = JSON.parse(prfDataStr);
+
+      // Fetch vault data
+      const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
+      if (!dataRes.ok) return false;
+      const vaultData = await dataRes.json();
+      if (!vaultData.accountSalt) return false;
+
+      // Unwrap secretKey using PRF output (no WebAuthn ceremony needed)
+      let secretKey: Uint8Array;
+      try {
+        secretKey = await unwrapSecretKeyWithPrf(
+          {
+            ciphertext: prfData.prfEncryptedSecretKey,
+            iv: prfData.prfSecretKeyIv,
+            authTag: prfData.prfSecretKeyAuthTag,
+          },
+          prfOutput,
+        );
+      } finally {
+        prfOutput.fill(0);
+      }
+
+      // Derive encryption key and verify with artifact
+      const encKey = await deriveEncryptionKey(secretKey);
+      if (vaultData.verificationArtifact) {
+        const valid = await verifyKey(encKey, vaultData.verificationArtifact);
+        if (!valid) {
+          secretKey.fill(0);
+          return false;
+        }
+      }
+
+      // Compute auth hash and verify with server
+      const authKey = await deriveAuthKey(secretKey);
+      const authHash = await computeAuthHash(authKey);
+
+      const unlockRes = await fetchApi(API_PATH.VAULT_UNLOCK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ authHash }),
+      });
+
+      if (!unlockRes.ok) {
+        const body = await unlockRes.json().catch(() => ({}));
+        if (body.error) {
+          throw new VaultUnlockError(body.error, body.lockedUntil);
+        }
+        secretKey.fill(0);
+        return false;
+      }
+
+      // Store refs (same as passkey unlock)
+      const accountSalt = hexDecode(vaultData.accountSalt);
+      secretKeyRef.current = new Uint8Array(secretKey);
+      keyVersionRef.current = vaultData.keyVersion ?? 1;
+      accountSaltRef.current = accountSalt;
+      wrappedKeyRef.current = {
+        ciphertext: vaultData.encryptedSecretKey,
+        iv: vaultData.secretKeyIv,
+        authTag: vaultData.secretKeyAuthTag,
+      };
+
+      // Restore ECDH private key if available
+      if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
+        try {
+          const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
+          const ecdhPrivDecrypted = await decryptBinary(
+            {
+              ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
+              iv: vaultData.ecdhPrivateKeyIv,
+              authTag: vaultData.ecdhPrivateKeyAuthTag,
+            },
+            ecdhWrapKey,
+          );
+          ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
+          ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
+        } catch {
+          // ECDH restoration failure is non-fatal
+        }
+      }
+
+      secretKey.fill(0);
+
+      // Auto-confirm pending emergency access grants
+      const userId = session?.user?.id;
+      if (userId && secretKeyRef.current) {
+        confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {});
+      }
+
+      // Set unlocked
+      setEncryptionKey(encKey);
+      setVaultStatus(VAULT_STATUS.UNLOCKED);
+      lastActivityRef.current = Date.now();
+
+      return true;
+    } catch (err) {
+      if (err instanceof VaultUnlockError) throw err;
+      return false;
+    }
+  }, [session?.user?.id]);
+
   // ─── Change Passphrase ────────────────────────────────────────
 
   const changePassphrase = useCallback(
@@ -805,6 +927,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         hasRecoveryKey,
         unlock,
         unlockWithPasskey,
+        unlockWithStoredPrf,
         lock,
         setup,
         changePassphrase,

@@ -30,9 +30,20 @@ const DUMMY_CRED_ID = new Uint8Array(32);
 
 // ── Main authorize function ──────────────────────────────────
 
+export interface WebAuthnAuthResult {
+  id: string;
+  email: string;
+  name: string | null;
+  prf?: {
+    prfEncryptedSecretKey: string;
+    prfSecretKeyIv: string;
+    prfSecretKeyAuthTag: string;
+  };
+}
+
 export async function authorizeWebAuthn(
   credentials: Record<string, unknown>,
-): Promise<{ id: string; email: string; name: string | null } | null> {
+): Promise<WebAuthnAuthResult | null> {
   const credentialResponse =
     typeof credentials.credentialResponse === "string"
       ? credentials.credentialResponse
@@ -138,9 +149,23 @@ export async function authorizeWebAuthn(
   // Users without email should not authenticate via passkey
   if (!storedCredential.user.email) return null;
 
+  // Include PRF-wrapped vault key if the credential supports PRF
+  const prf =
+    storedCredential.prfSupported &&
+    storedCredential.prfEncryptedSecretKey &&
+    storedCredential.prfSecretKeyIv &&
+    storedCredential.prfSecretKeyAuthTag
+      ? {
+          prfEncryptedSecretKey: storedCredential.prfEncryptedSecretKey,
+          prfSecretKeyIv: storedCredential.prfSecretKeyIv,
+          prfSecretKeyAuthTag: storedCredential.prfSecretKeyAuthTag,
+        }
+      : undefined;
+
   return {
     id: storedCredential.user.id,
     email: storedCredential.user.email,
     name: storedCredential.user.name ?? null,
+    prf,
   };
 }

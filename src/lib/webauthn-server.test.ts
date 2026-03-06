@@ -72,36 +72,37 @@ describe("derivePrfSalt", () => {
     vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
     vi.stubEnv("WEBAUTHN_PRF_SECRET", "a".repeat(64));
     const { derivePrfSalt } = await import("./webauthn-server");
-    const salt = derivePrfSalt("user-1");
+    const salt = derivePrfSalt();
     expect(salt).toMatch(/^[0-9a-f]{64}$/);
     // Same input → same output (deterministic)
-    expect(derivePrfSalt("user-1")).toBe(salt);
+    expect(derivePrfSalt()).toBe(salt);
   });
 
-  it("returns different salt for different users", async () => {
+  it("returns same salt regardless of caller (RP-global)", async () => {
     vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
     vi.stubEnv("WEBAUTHN_PRF_SECRET", "a".repeat(64));
     const { derivePrfSalt } = await import("./webauthn-server");
-    expect(derivePrfSalt("user-1")).not.toBe(derivePrfSalt("user-2"));
+    // Salt is RP-global, not per-user — multiple calls always return same value
+    expect(derivePrfSalt()).toBe(derivePrfSalt());
   });
 
   it("throws when WEBAUTHN_PRF_SECRET is missing", async () => {
     vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
     const { derivePrfSalt } = await import("./webauthn-server");
-    expect(() => derivePrfSalt("user-1")).toThrow("WEBAUTHN_PRF_SECRET");
+    expect(() => derivePrfSalt()).toThrow("WEBAUTHN_PRF_SECRET");
   });
 
   it("throws when WEBAUTHN_PRF_SECRET has wrong length", async () => {
     vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
     vi.stubEnv("WEBAUTHN_PRF_SECRET", "abcd");
     const { derivePrfSalt } = await import("./webauthn-server");
-    expect(() => derivePrfSalt("user-1")).toThrow();
+    expect(() => derivePrfSalt()).toThrow();
   });
 
   it("throws when WEBAUTHN_RP_ID is missing", async () => {
     vi.stubEnv("WEBAUTHN_PRF_SECRET", "a".repeat(64));
     const { derivePrfSalt } = await import("./webauthn-server");
-    expect(() => derivePrfSalt("user-1")).toThrow("WEBAUTHN_RP_ID");
+    expect(() => derivePrfSalt()).toThrow("WEBAUTHN_RP_ID");
   });
 });
 

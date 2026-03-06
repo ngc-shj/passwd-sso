@@ -57,7 +57,19 @@ const mockStoredCredential = {
   publicKey: "dGVzdC1wdWJsaWMta2V5",
   counter: BigInt(5),
   transports: ["internal"],
+  prfSupported: false,
+  prfEncryptedSecretKey: null,
+  prfSecretKeyIv: null,
+  prfSecretKeyAuthTag: null,
   user: { id: "user-1", email: "test@example.com", name: "Test User" },
+};
+
+const mockStoredCredentialWithPrf = {
+  ...mockStoredCredential,
+  prfSupported: true,
+  prfEncryptedSecretKey: "encrypted-key-hex",
+  prfSecretKeyIv: "iv-hex",
+  prfSecretKeyAuthTag: "auth-tag-hex",
 };
 
 const validCredentials = {
@@ -243,5 +255,26 @@ describe("authorizeWebAuthn", () => {
       email: "test@example.com",
       name: null,
     });
+  });
+
+  it("returns PRF data when credential supports PRF", async () => {
+    mockPrismaFindFirst.mockResolvedValue(mockStoredCredentialWithPrf);
+    const result = await authorizeWebAuthn(validCredentials);
+    expect(result).toEqual({
+      id: "user-1",
+      email: "test@example.com",
+      name: "Test User",
+      prf: {
+        prfEncryptedSecretKey: "encrypted-key-hex",
+        prfSecretKeyIv: "iv-hex",
+        prfSecretKeyAuthTag: "auth-tag-hex",
+      },
+    });
+  });
+
+  it("omits PRF data when credential does not support PRF", async () => {
+    const result = await authorizeWebAuthn(validCredentials);
+    expect(result).toBeDefined();
+    expect(result!.prf).toBeUndefined();
   });
 });

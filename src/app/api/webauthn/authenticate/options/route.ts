@@ -76,7 +76,7 @@ async function handlePOST(req: NextRequest) {
   // Derive PRF salt for vault unlock
   let prfSalt: string | null = null;
   try {
-    prfSalt = derivePrfSalt(userId);
+    prfSalt = derivePrfSalt();
   } catch {
     // PRF secret not configured — passkey will authenticate without PRF
   }
