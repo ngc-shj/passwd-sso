@@ -49,6 +49,7 @@
   "vaultUnlockDisabled": "非対応",
   "tryIt": "試してみる",
   "tryItSuccess": "パスキーの動作を確認しました！",
-  "notDiscoverable": "サインイン不可",
-  "notDiscoverableDescription": "このパスキーはDiscoverable Credentialではないため、サインインには使用できません。PRF対応の場合は保管庫のロック解除に使用できます。"
+  "notDiscoverable": "メール認証のみ",
+  "notDiscoverableDescription": "このパスキーはDiscoverable Credentialではありません。メール + セキュリティキーオプションでサインインできます。PRF対応の場合は保管庫のロック解除にも使用できます。",
+  "nonDiscoverableNonPrfWarning": "このパスキーはパスキーサインインにも保管庫のロック解除にも使用できません。サインインにはメール + セキュリティキーオプションをご利用ください。別の認証器の登録をお勧めします。"
 }

@@ -168,10 +168,17 @@ export function PasskeyCredentialsCard() {
       });
 
       if (verifyRes.ok) {
+        const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
-        if (!prfOutput) {
+
+        const isNonDiscoverable =
+          result.deviceType === "singleDevice" && !result.backedUp;
+        if (isNonDiscoverable && !prfOutput) {
+          toast.warning(t("nonDiscoverableNonPrfWarning"));
+        } else if (!prfOutput) {
           toast.warning(t("prfNotSupportedWarning"));
         }
+
         setNickname("");
         fetchCredentials();
       } else {

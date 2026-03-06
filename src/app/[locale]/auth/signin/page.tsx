@@ -7,7 +7,13 @@ import { Separator } from "@/components/ui/separator";
 import { SignInButton } from "@/components/auth/signin-button";
 import { EmailSignInForm } from "@/components/auth/email-signin-form";
 import { PasskeySignInButton } from "@/components/auth/passkey-signin-button";
-import { Shield } from "lucide-react";
+import { SecurityKeySignInForm } from "@/components/auth/security-key-signin-form";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 
 export default async function SignInPage({
@@ -110,7 +116,18 @@ export default async function SignInPage({
 
           {/* Individual user mode: passkey + email */}
           {showPasskeySignIn && (
-            <PasskeySignInButton />
+            <>
+              <PasskeySignInButton />
+              <Collapsible>
+                <CollapsibleTrigger className="flex w-full items-center justify-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors py-1">
+                  <ChevronDown className="h-3 w-3" />
+                  {t("alternativeSignIn")}
+                </CollapsibleTrigger>
+                <CollapsibleContent className="pt-2">
+                  <SecurityKeySignInForm />
+                </CollapsibleContent>
+              </Collapsible>
+            </>
           )}
           {showPasskeySignIn && showEmailSignIn && (
             <div className="relative">
