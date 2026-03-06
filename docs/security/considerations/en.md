@@ -43,8 +43,24 @@ This document summarizes practical security considerations for `passwd-sso` (web
 ## 1.2 Protocol Flow (Summary)
 
 ```text
-[Sign-in]
+[Sign-in: SSO (Google/SAML)]
 Browser -> Auth Provider/NextAuth -> session established
+
+[Sign-in: Passkey (discoverable)]
+Browser -> navigator.credentials.get(allowCredentials:[]) -> authenticator
+  -> POST /api/auth/passkey/verify -> session established
+  -> PRF output (if supported) -> vault auto-unlock via sessionStorage
+
+[Sign-in: Email + Security Key (non-discoverable)]
+Browser -> POST /api/auth/passkey/options/email {email}
+  -> server returns allowCredentials (user's credential IDs or dummy for unknown email)
+  -> navigator.credentials.get(allowCredentials:[...]) -> authenticator
+  -> POST /api/auth/passkey/verify -> session established
+
+[Sign-in: Magic Link]
+Browser -> POST /api/auth/[...nextauth] (email provider)
+  -> server sends email with token link
+  -> user clicks link -> session established
 
 [Personal Vault Write]
 Browser(WebCrypto) encrypts -> API -> DB stores ciphertext
@@ -193,6 +209,9 @@ Client(on valid):
 - Auth.js database sessions are used (no JWT session storage in browser localStorage).
 - Keep reasonable session lifetime and revocation procedures.
 - Restrict SSO domains/providers where possible (`GOOGLE_WORKSPACE_DOMAIN`, IdP controls).
+- Passkey sign-in: challenge is single-use (Redis GETDEL, 5-minute TTL), rate-limited per IP.
+- Email-based passkey options: returns dummy `allowCredentials` for unknown emails (user enumeration prevention).
+- SSO-tenant users are excluded from passkey sign-in (must use IdP flow).
 
 ## 4. Vault and Key Handling
 
