@@ -24,8 +24,10 @@ Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.y
 ### Authentication Flow
 
 - Auth.js v5 (beta.30) with database session strategy (not JWT)
-- Providers: Google OIDC + SAML 2.0 via BoxyHQ SAML Jackson (Docker container, NOT npm)
+- Providers: Google OIDC + SAML 2.0 via BoxyHQ SAML Jackson (Docker container, NOT npm) + Passkey (WebAuthn) + Magic Link (email)
 - Jackson exposes an OIDC interface; Auth.js connects as a standard OIDC provider
+- Passkey sign-in: discoverable (passwordless) + email-based (non-discoverable security keys)
+- PRF extension support for vault auto-unlock after passkey sign-in
 - Route protection: `proxy.ts` (root, entry point + CSP) → `src/proxy.ts` (Next.js 16 proxy pattern)
 - Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/api-keys/*`, `/api/v1/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
@@ -82,6 +84,9 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/webauthn/authenticate/verify` | POST | WebAuthn auth verify |
 | `/api/webauthn/credentials` | GET | List WebAuthn credentials |
 | `/api/webauthn/credentials/[id]` | DELETE | Delete WebAuthn credential |
+| `/api/auth/passkey/options` | POST | Passkey discoverable auth options |
+| `/api/auth/passkey/options/email` | POST | Email-based passkey auth options (non-discoverable) |
+| `/api/auth/passkey/verify` | POST | Passkey authentication verify + session creation |
 
 ### i18n
 

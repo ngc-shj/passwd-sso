@@ -65,16 +65,18 @@ export function SecuritySection({
               </Link>
             </Button>
           )}
-          <Button
-            variant={isEmergencyAccess ? "secondary" : "ghost"}
-            className="w-full justify-start gap-2"
-            asChild
-          >
-            <Link href="/dashboard/emergency-access" onClick={onNavigate}>
-              <HeartPulse className="h-4 w-4" />
-              {t("emergencyAccess")}
-            </Link>
-          </Button>
+          {vaultContext.type !== "team" && (
+            <Button
+              variant={isEmergencyAccess ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/emergency-access" onClick={onNavigate}>
+                <HeartPulse className="h-4 w-4" />
+                {t("emergencyAccess")}
+              </Link>
+            </Button>
+          )}
         </div>
       </CollapsibleContent>
     </Collapsible>
