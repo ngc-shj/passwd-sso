@@ -24,4 +24,12 @@ Created: 2026-03-06T00:00:00+09:00
 - **Impact scope**: Sign-in flow architecture — passkey sign-in bypasses Auth.js entirely
 - **Review resolution**: F9 (Round 2)
 
+### D4: derivePrfSalt changed from per-user to RP-global (BREAKING CHANGE)
+
+- **Plan description**: Not explicitly specified — plan assumed existing salt derivation
+- **Actual implementation**: Changed HKDF salt from `${rpId}:${userId}` to `rpId` only
+- **Reason**: The sign-in flow (discoverable credentials) does not know the userId before the WebAuthn ceremony. RP-global salt enables PRF in a single ceremony. The PRF output is already unique per credential, so per-user salt is redundant for security.
+- **Impact scope**: Existing PRF-wrapped keys (created with old per-user salt) become incompatible. Users must delete and re-register passkeys for PRF vault auto-unlock. Manual passphrase unlock is unaffected. Confirmed: no production PRF users exist at time of this change.
+- **Review resolution**: S1 (Round 6) — documented as breaking change; no compatibility layer needed
+
 ---

@@ -1,6 +1,6 @@
 # Code Review: webauthn-magic-link-signin
-Date: 2026-03-06T12:00:00+09:00
-Review round: 5 (converged)
+Date: 2026-03-06T14:30:00+09:00
+Review round: 7 (converged)
 
 ## Changes from Previous Round
 Initial review
@@ -231,6 +231,54 @@ Initial review
 
 ---
 
-## Round 5 (Convergence Confirmed)
+## Round 5 (Previously Converged)
 
-All three expert agents returned **"No findings"**. Code review complete.
+All three expert agents returned **"No findings"**.
+
+---
+
+## Round 6 (Post-manual-testing re-review)
+
+Fresh three-agent review after manual testing confirmed all flows work.
+
+### S1 (High): derivePrfSalt breaking change — per-user to RP-global salt
+
+- **File**: src/lib/webauthn-server.ts:196
+- **Problem**: HKDF salt changed from `${rpId}:${userId}` to `rpId` only. Existing PRF-wrapped keys incompatible.
+- **Resolution**: No production PRF users exist. Documented as breaking change in code comment and deviation log (D4). No compatibility layer needed.
+- Modified files: src/lib/webauthn-server.ts:191-195, docs/review/webauthn-magic-link-signin-deviation.md
+
+### S2 (Medium): Timing oracle in email passkey options
+
+- **File**: src/app/api/auth/passkey/options/email/route.ts:116-118
+- **Problem**: Known users trigger additional DB query; unknown users skip it. Timing difference enables user enumeration.
+- **Resolution**: Added dummy DB query (`findMany` with non-existent UUID) in the unknown-user path to equalize response time.
+- Modified file: src/app/api/auth/passkey/options/email/route.ts:116-125
+- Test updated: src/app/api/auth/passkey/options/email/route.test.ts:140-144,159-163
+
+### T4 (Low): Missing proxy test for /api/auth/passkey/options/email
+
+- **Resolution**: Added test case.
+- Modified file: src/__tests__/proxy.test.ts:219-226
+
+### Skipped findings (with rationale)
+
+| ID | Severity | Reason |
+|----|----------|--------|
+| F17 | Medium | Existing pattern in unlockWithPasskey — out of scope for this branch |
+| F18 | Low | Negligible modulo bias (86/256 vs 85/256) — no practical impact |
+| F19 | Low | useEffect deps protected by ref — no re-execution side effects |
+| S3 | Low | WebAuthn crypto makes brute-force infeasible |
+| S4 | Low | Existing code issue; AUTH_URL already required in production via env.ts |
+| T1 | Medium | Thin @simplewebauthn wrappers; type-protected parameter conversion |
+| T2 | Medium | DB failure → 500 is expected behavior; monitored at infra layer |
+| T3 | Medium | Dummy credential structure guaranteed by generateAuthenticationOpts passthrough |
+| T5-T7 | Low | Minor test quality improvements — current coverage sufficient |
+
+---
+
+## Round 7 (Convergence Confirmed)
+
+All three expert agents returned **"No findings"** on the Round 6 fixes.
+Local LLM pre-screening (gpt-oss:120b) also ran — all 7 findings were either already resolved or false positives.
+Code review complete.

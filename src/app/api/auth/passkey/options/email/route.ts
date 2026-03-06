@@ -114,6 +114,16 @@ async function handlePOST(req: NextRequest) {
     allowCredentials =
       credentials.length > 0 ? credentials : generateDummyCredentials();
   } else {
+    // Timing mitigation: run a dummy DB query so the response time is
+    // indistinguishable from the real-user path (prevents user enumeration
+    // via timing oracle).
+    await withBypassRls(prisma, async () =>
+      prisma.webAuthnCredential.findMany({
+        where: { userId: "00000000-0000-0000-0000-000000000000" },
+        select: { credentialId: true, transports: true },
+        take: 3,
+      }),
+    );
     allowCredentials = generateDummyCredentials();
   }
 

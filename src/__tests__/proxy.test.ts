@@ -215,6 +215,15 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("allows /api/auth/passkey/options/email without session (unauthenticated endpoint)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/auth/passkey/options/email"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
 });
 
 describe("proxy — CORS preflight and headers", () => {

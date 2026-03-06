@@ -191,6 +191,11 @@ export async function verifyAuthentication(
  * unique per credential. This allows the sign-in flow (which doesn't know
  * the userId upfront) to request PRF in the same ceremony.
  *
+ * BREAKING CHANGE (from per-user salt `${rpId}:${userId}`):
+ * Existing PRF-wrapped keys created with the old per-user salt are
+ * incompatible. Users must delete and re-register their passkey to
+ * restore PRF vault auto-unlock. Manual passphrase unlock is unaffected.
+ *
  * Returns the salt as a hex string (64 chars).
  */
 export function derivePrfSalt(): string {

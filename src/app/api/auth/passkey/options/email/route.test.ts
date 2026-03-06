@@ -137,8 +137,12 @@ describe("POST /api/auth/passkey/options/email", () => {
     expect(status).toBe(200);
     expect(json.options).toBeDefined();
     expect(json.challengeId).toMatch(/^[0-9a-f]{32}$/);
-    // Should NOT call webAuthnCredential.findMany for unknown user
-    expect(mockPrismaWebAuthnFindMany).not.toHaveBeenCalled();
+    // Timing mitigation: dummy DB query with non-existent UUID
+    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "00000000-0000-0000-0000-000000000000" },
+      }),
+    );
     // generateAuthenticationOpts was still called (with dummy creds)
     expect(mockGenerateAuthenticationOpts).toHaveBeenCalled();
   });
@@ -156,7 +160,12 @@ describe("POST /api/auth/passkey/options/email", () => {
     const { status } = await parseResponse(await POST(req));
 
     expect(status).toBe(200);
-    expect(mockPrismaWebAuthnFindMany).not.toHaveBeenCalled();
+    // Timing mitigation: dummy DB query for SSO tenant user too
+    expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { userId: "00000000-0000-0000-0000-000000000000" },
+      }),
+    );
   });
 
   it("allows user without tenant (null tenant)", async () => {
