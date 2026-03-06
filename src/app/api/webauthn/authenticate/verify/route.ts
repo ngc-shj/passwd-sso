@@ -10,6 +10,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   verifyAuthentication,
   getRpOrigin,
+  base64urlToUint8Array,
 } from "@/lib/webauthn-server";
 import type { AuthenticatorDevice } from "@simplewebauthn/types";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
@@ -173,20 +174,6 @@ async function handlePOST(req: NextRequest) {
     credentialId: storedCredential.credentialId,
     ...(prfData ? { prf: prfData } : {}),
   });
-}
-
-// ── Helper ──────────────────────────────────────────────────
-
-function base64urlToUint8Array(base64url: string): Uint8Array {
-  const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
-  const pad = (4 - (base64.length % 4)) % 4;
-  const padded = base64 + "=".repeat(pad);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
 }
 
 export const POST = withRequestLog(handlePOST);

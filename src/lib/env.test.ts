@@ -120,4 +120,53 @@ describe("env validation", () => {
     const { env } = await import("./env");
     expect(env.DATABASE_URL).toBe("postgresql://localhost:5432/test");
   });
+
+  it("accepts EMAIL_PROVIDER=smtp as valid", async () => {
+    process.env = buildMinimalEnv({ EMAIL_PROVIDER: "smtp" });
+    const { env } = await import("./env");
+    expect(env.EMAIL_PROVIDER).toBe("smtp");
+  });
+
+  it("accepts EMAIL_PROVIDER=resend as valid", async () => {
+    process.env = buildMinimalEnv({ EMAIL_PROVIDER: "resend" });
+    const { env } = await import("./env");
+    expect(env.EMAIL_PROVIDER).toBe("resend");
+  });
+
+  it("rejects invalid EMAIL_PROVIDER value", async () => {
+    process.env = buildMinimalEnv({ EMAIL_PROVIDER: "invalid" });
+    await expect(import("./env")).rejects.toThrow("Invalid environment variables");
+  });
+
+  it("EMAIL_PROVIDER is optional (undefined when not set)", async () => {
+    process.env = buildMinimalEnv();
+    const { env } = await import("./env");
+    expect(env.EMAIL_PROVIDER).toBeUndefined();
+  });
+
+  it("accepts production config with EMAIL_PROVIDER as sole auth provider", async () => {
+    process.env = buildMinimalEnv({
+      NODE_ENV: "production",
+      AUTH_SECRET: "a".repeat(32),
+      AUTH_URL: "https://app.example.com",
+      VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      REDIS_URL: "redis://localhost:6379",
+      EMAIL_PROVIDER: "smtp",
+      SMTP_HOST: "smtp.example.com",
+    });
+    const { env } = await import("./env");
+    expect(env.EMAIL_PROVIDER).toBe("smtp");
+  });
+
+  it("rejects production config with EMAIL_PROVIDER=smtp but no SMTP_HOST", async () => {
+    process.env = buildMinimalEnv({
+      NODE_ENV: "production",
+      AUTH_SECRET: "a".repeat(32),
+      AUTH_URL: "https://app.example.com",
+      VERIFIER_PEPPER_KEY: VALID_HEX_64,
+      REDIS_URL: "redis://localhost:6379",
+      EMAIL_PROVIDER: "smtp",
+    });
+    await expect(import("./env")).rejects.toThrow("SMTP_HOST");
+  });
 });

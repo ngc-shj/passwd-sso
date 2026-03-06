@@ -43,6 +43,10 @@ vi.mock("@/components/auth/signin-button", () => ({
 }));
 vi.mock("lucide-react", () => ({
   Shield: () => null,
+  ChevronDown: () => null,
+}));
+vi.mock("@/components/auth/security-key-signin-form", () => ({
+  SecurityKeySignInForm: () => null,
 }));
 vi.mock("@/components/ui/app-icon", () => ({
   AppIcon: () => null,

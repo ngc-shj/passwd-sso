@@ -11,6 +11,11 @@ const { mockSessionProvider } = vi.hoisted(() => ({
 
 vi.mock("next-auth/react", () => ({
   SessionProvider: mockSessionProvider,
+  useSession: () => ({ status: "unauthenticated", update: vi.fn() }),
+}));
+
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/dashboard",
 }));
 
 vi.mock("@/lib/constants", () => ({

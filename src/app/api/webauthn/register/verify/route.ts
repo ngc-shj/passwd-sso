@@ -15,6 +15,8 @@ import {
   getRpOrigin,
 } from "@/lib/webauthn-server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
+import { sendEmail } from "@/lib/email";
+import { passkeyRegisteredEmail } from "@/lib/email/templates/passkey-registered";
 
 export const runtime = "nodejs";
 
@@ -140,12 +142,14 @@ async function handlePOST(req: NextRequest) {
   const hasPrf = !!(prfEncryptedSecretKey && prfSecretKeyIv && prfSecretKeyAuthTag);
   const registeredDevice = parseDeviceFromUserAgent(req.headers.get("user-agent"));
 
+  let userLocale: string | null = null;
   const credential = await withUserTenantRls(userId, async () => {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { tenantId: true },
+      select: { tenantId: true, locale: true },
     });
     if (!user) throw new Error("USER_NOT_FOUND");
+    userLocale = user.locale;
 
     return prisma.webAuthnCredential.create({
       data: {
@@ -185,6 +189,17 @@ async function handlePOST(req: NextRequest) {
     },
     ...extractRequestMeta(req),
   });
+
+  // Send notification email (non-blocking)
+  if (session.user.email) {
+    const deviceName = nickname || registeredDevice || "Unknown";
+    const { subject, html, text } = passkeyRegisteredEmail(
+      deviceName,
+      new Date(),
+      userLocale ?? "ja",
+    );
+    sendEmail({ to: session.user.email, subject, html, text });
+  }
 
   return NextResponse.json(
     {

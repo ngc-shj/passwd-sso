@@ -34,6 +34,9 @@ const ALLOWED_FILES = new Set([
   "src/app/api/vault/admin-reset/route.ts", // admin vault reset token verification
   "src/lib/api-key.ts", // API key validation
   "src/lib/directory-sync/credentials.ts", // directory sync credential encryption
+  "src/lib/webauthn-authorize.ts", // WebAuthn credential verification (cross-tenant lookup)
+  "src/app/api/auth/passkey/verify/route.ts", // passkey sign-in session creation
+  "src/app/api/auth/passkey/options/email/route.ts", // email-based passkey allowCredentials lookup
 ]);
 
 function getSourceFiles() {

@@ -168,10 +168,17 @@ export function PasskeyCredentialsCard() {
       });
 
       if (verifyRes.ok) {
+        const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
-        if (!prfOutput) {
+
+        const isNonDiscoverable =
+          result.deviceType === "singleDevice" && !result.backedUp;
+        if (isNonDiscoverable && !prfOutput) {
+          toast.warning(t("nonDiscoverableNonPrfWarning"));
+        } else if (!prfOutput) {
           toast.warning(t("prfNotSupportedWarning"));
         }
+
         setNickname("");
         fetchCredentials();
       } else {
@@ -436,6 +443,18 @@ export function PasskeyCredentialsCard() {
                           ? t("deviceTypeSingleDevice")
                           : t("deviceTypeMultiDevice")}
                       </span>
+                      {/* Non-discoverable credential warning.
+                         Heuristic: singleDevice + not backed up strongly indicates
+                         a non-discoverable credential. WebAuthn L2 does not expose
+                         the resident key (rk) bit directly, so this is an approximation. */}
+                      {cred.deviceType === "singleDevice" && !cred.backedUp && (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+                          title={t("notDiscoverableDescription")}
+                        >
+                          {t("notDiscoverable")}
+                        </span>
+                      )}
                     </div>
 
                     {/* Metadata */}

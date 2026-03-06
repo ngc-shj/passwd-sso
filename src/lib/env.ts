@@ -87,6 +87,9 @@ const envSchema = z
     AUTH_TENANT_CLAIM_KEYS: z.string().optional(),
     SAML_PROVIDER_NAME: z.string().default("SSO"),
 
+    // --- Email authentication (Magic Link) ---
+    EMAIL_PROVIDER: z.enum(["resend", "smtp"]).optional(),
+
     // --- Optional with defaults ---
     CSP_MODE: z.enum(["strict", "dev"]).optional(),
     BLOB_BACKEND: z.enum(["db", "s3", "azure", "gcs"]).default("db"),
@@ -194,16 +197,31 @@ const envSchema = z
         data.AUTH_JACKSON_SECRET &&
         data.JACKSON_URL
       );
+      const hasEmail = !!data.EMAIL_PROVIDER;
 
-      if (!hasGoogle && !hasJackson) {
+      if (!hasGoogle && !hasJackson && !hasEmail) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["AUTH_GOOGLE_ID"],
           message:
             "At least one auth provider must be configured in production: " +
-            "Google (AUTH_GOOGLE_ID + AUTH_GOOGLE_SECRET) or " +
-            "SAML Jackson (AUTH_JACKSON_ID + AUTH_JACKSON_SECRET + JACKSON_URL)",
+            "Google (AUTH_GOOGLE_ID + AUTH_GOOGLE_SECRET), " +
+            "SAML Jackson (AUTH_JACKSON_ID + AUTH_JACKSON_SECRET + JACKSON_URL), or " +
+            "Email (EMAIL_PROVIDER)",
         });
+      }
+
+      // SMTP_HOST required when EMAIL_PROVIDER=smtp in production
+      if (data.EMAIL_PROVIDER === "smtp") {
+        const smtpHost = process.env.SMTP_HOST?.trim();
+        if (!smtpHost) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["EMAIL_PROVIDER"],
+            message:
+              "SMTP_HOST is required when EMAIL_PROVIDER=smtp in production",
+          });
+        }
       }
     }
 

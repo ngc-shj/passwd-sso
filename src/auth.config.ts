@@ -1,7 +1,17 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
+import Nodemailer from "next-auth/providers/nodemailer";
 import { API_PATH } from "@/lib/constants";
 import { isHttps } from "@/lib/url-helpers";
+import { sendEmail } from "@/lib/email";
+import { magicLinkEmail } from "@/lib/email/templates/magic-link";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+// Rate limiters for magic link email (per-email address)
+const magicLinkEmailLimiter = createRateLimiter({
+  windowMs: 10 * 60_000,
+  max: 3,
+});
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
@@ -64,6 +74,42 @@ export default {
           },
         ]
       : []),
+    // Magic Link (Email authentication)
+    ...(process.env.EMAIL_PROVIDER
+      ? [
+          Nodemailer({
+            server: process.env.SMTP_HOST
+              ? {
+                  host: process.env.SMTP_HOST,
+                  port: Number(process.env.SMTP_PORT || 587),
+                  auth: {
+                    user: process.env.SMTP_USER || "",
+                    pass: process.env.SMTP_PASS || "",
+                  },
+                }
+              : "smtp://localhost:1025",
+            from: process.env.EMAIL_FROM || "noreply@localhost",
+            async sendVerificationRequest({ identifier: email, url }) {
+              // Rate limit per email address (3 emails per 10 minutes)
+              const rl = await magicLinkEmailLimiter.check(
+                `magic-link:email:${email.toLowerCase()}`,
+              );
+              if (!rl.allowed) return; // silently drop — no user enumeration
+
+              // Extract locale from callbackUrl inside the magic link
+              // URL format: .../api/auth/callback/nodemailer?callbackUrl=.../ja/...&token=...
+              const cbUrl = new URL(url).searchParams.get("callbackUrl") ?? "";
+              const locale = cbUrl.match(/\/(?:ja|en)(?:\/|$)/)?.[0]?.replace(/\//g, "") ?? "ja";
+              const { subject, html, text } = magicLinkEmail(url, locale);
+              await sendEmail({ to: email, subject, html, text });
+            },
+          }),
+        ]
+      : []),
+    // WebAuthn sign-in is handled by a custom route (/api/auth/passkey/verify)
+    // that creates database sessions directly. Auth.js Credentials provider
+    // only supports JWT sessions, which is incompatible with this app's
+    // database session strategy.
   ],
 
   cookies: {

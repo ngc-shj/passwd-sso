@@ -95,6 +95,13 @@ describe("createCustomAdapter", () => {
           emailVerified: null,
           tenantId: "tenant-1",
         },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          image: true,
+          emailVerified: true,
+        },
       });
       expect(mockPrismaTenantMember.create).toHaveBeenCalledWith({
         data: {
@@ -142,6 +149,11 @@ describe("createCustomAdapter", () => {
           ipAddress: "192.168.1.1",
           userAgent: "Mozilla/5.0",
         },
+        select: {
+          sessionToken: true,
+          userId: true,
+          expires: true,
+        },
       });
       expect(result).toEqual({
         sessionToken: "tok-1",
@@ -171,6 +183,11 @@ describe("createCustomAdapter", () => {
           ipAddress: null,
           userAgent: null,
         }),
+        select: {
+          sessionToken: true,
+          userId: true,
+          expires: true,
+        },
       });
     });
 
@@ -198,6 +215,11 @@ describe("createCustomAdapter", () => {
         data: expect.objectContaining({
           userAgent: "X".repeat(512),
         }),
+        select: {
+          sessionToken: true,
+          userId: true,
+          expires: true,
+        },
       });
     });
   });
@@ -226,6 +248,7 @@ describe("createCustomAdapter", () => {
           providerAccountId: "google-1",
           session_state: "42",
         }),
+        select: { id: true },
       });
     });
 
@@ -265,6 +288,11 @@ describe("createCustomAdapter", () => {
       expect(mockPrismaSession.update).toHaveBeenCalledWith({
         where: { sessionToken: "tok-1" },
         data: { expires, lastActiveAt: now },
+        select: {
+          sessionToken: true,
+          userId: true,
+          expires: true,
+        },
       });
       expect(result).toEqual({
         sessionToken: "tok-1",
