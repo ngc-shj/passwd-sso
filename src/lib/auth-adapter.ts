@@ -91,6 +91,13 @@ export function createCustomAdapter(): Adapter {
               emailVerified: user.emailVerified,
               tenantId: tenant.id,
             },
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+              emailVerified: true,
+            },
           });
 
           await tx.tenantMember.create({
@@ -140,6 +147,7 @@ export function createCustomAdapter(): Adapter {
               ? String(account.session_state)
               : null,
           },
+          select: { id: true },
         });
       });
     },
@@ -159,6 +167,11 @@ export function createCustomAdapter(): Adapter {
             expires: session.expires,
             ipAddress: meta?.ip ?? null,
             userAgent: meta?.userAgent?.slice(0, 512) ?? null,
+          },
+          select: {
+            sessionToken: true,
+            userId: true,
+            expires: true,
           },
         });
       });
@@ -188,6 +201,11 @@ export function createCustomAdapter(): Adapter {
             data: {
               ...(session.expires ? { expires: session.expires } : {}),
               lastActiveAt: new Date(),
+            },
+            select: {
+              sessionToken: true,
+              userId: true,
+              expires: true,
             },
           }),
         );
