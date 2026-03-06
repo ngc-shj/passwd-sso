@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import {
   SessionProvider as NextAuthSessionProvider,
@@ -16,11 +16,13 @@ function getAuthBasePath(): string {
 // Refetch session on every navigation since next-auth v5 beta doesn't auto-fetch
 function SessionSync() {
   const { update } = useSession();
+  const updateRef = useRef(update);
+  updateRef.current = update;
   const pathname = usePathname();
 
   useEffect(() => {
-    update();
-  }, [pathname, update]);
+    updateRef.current();
+  }, [pathname]);
 
   return null;
 }
