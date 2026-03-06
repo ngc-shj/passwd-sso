@@ -29,6 +29,46 @@ export function createCustomAdapter(): Adapter {
   return {
     ...base,
 
+    async getSessionAndUser(
+      sessionToken: string,
+    ): Promise<{ session: AdapterSession; user: AdapterUser } | null> {
+      const result = await withBypassRls(prisma, async () =>
+        prisma.session.findUnique({
+          where: { sessionToken },
+          select: {
+            sessionToken: true,
+            userId: true,
+            expires: true,
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                image: true,
+                emailVerified: true,
+              },
+            },
+          },
+        }),
+      );
+      if (!result || !result.user.email) return null;
+
+      return {
+        session: {
+          sessionToken: result.sessionToken,
+          userId: result.userId,
+          expires: result.expires,
+        },
+        user: {
+          id: result.user.id,
+          name: result.user.name,
+          email: result.user.email,
+          image: result.user.image,
+          emailVerified: result.user.emailVerified,
+        },
+      };
+    },
+
     async createUser(
       user: Omit<AdapterUser, "id">,
     ): Promise<AdapterUser> {

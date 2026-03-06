@@ -290,8 +290,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return ok;
     },
     async session({ session, user }) {
-      session.user.id = user.id;
-      return session;
+      // Auth.js v5 database strategy passes raw adapter fields;
+      // strip internal fields to prevent leaking sessionToken etc.
+      return {
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          image: user.image,
+        },
+        expires: session.expires,
+      };
     },
   },
   events: {

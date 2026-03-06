@@ -5,35 +5,37 @@ import { useSession } from "next-auth/react";
 
 export function UserAvatar() {
   const { data: session } = useSession();
-  const [imgError, setImgError] = useState(false);
+  const [imgLoaded, setImgLoaded] = useState(false);
+  const user = session?.user;
 
-  if (!session?.user) {
+  if (!user) {
     return (
       <div className="h-8 w-8 rounded-full bg-muted animate-pulse" />
     );
   }
 
-  const initials = session.user.name
-    ? session.user.name
-        .split(" ")
-        .map((n) => n[0])
-        .join("")
-        .toUpperCase()
-        .slice(0, 2)
-    : "??";
+  const initials = (user.name ?? user.email ?? "?")
+    .split(/[\s@]/)
+    .filter(Boolean)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2) || "?";
 
-  return session.user.image && !imgError ? (
-    /* eslint-disable-next-line @next/next/no-img-element */
-    <img
-      src={session.user.image}
-      alt={session.user.name ?? "User"}
-      className="h-8 w-8 rounded-full"
-      referrerPolicy="no-referrer"
-      onError={() => setImgError(true)}
-    />
-  ) : (
-    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+  return (
+    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
       {initials}
+      {user.image && (
+        /* eslint-disable-next-line @next/next/no-img-element */
+        <img
+          src={user.image}
+          alt={user.name ?? "User"}
+          className={`absolute inset-0 h-8 w-8 rounded-full object-cover transition-opacity ${imgLoaded ? "opacity-100" : "opacity-0"}`}
+          referrerPolicy="no-referrer"
+          onLoad={() => setImgLoaded(true)}
+          onError={() => setImgLoaded(false)}
+        />
+      )}
     </div>
   );
 }
