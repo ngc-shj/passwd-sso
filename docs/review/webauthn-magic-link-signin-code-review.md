@@ -1,6 +1,6 @@
 # Code Review: webauthn-magic-link-signin
 Date: 2026-03-06T12:00:00+09:00
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
 Initial review
@@ -210,3 +210,21 @@ Initial review
 
 ### Security Findings (Round 3)
 - **No findings** — Security expert confirmed all controls are properly implemented.
+
+---
+
+## Round 4 Findings
+
+### F15 (Low): Duplicated base64urlToUint8Array in authenticate/verify
+- **Resolution**: Removed local copy, imported from @/lib/webauthn-server.
+- Modified file: src/app/api/webauthn/authenticate/verify/route.ts
+
+### F16 (Low): Passkey registration email always uses Japanese
+- **Resolution**: Added user.locale to query and pass to passkeyRegisteredEmail().
+- Modified file: src/app/api/webauthn/register/verify/route.ts
+
+### Security Findings (Round 4)
+- **No findings**
+
+### Testing Findings (Round 4)
+- **No findings**
