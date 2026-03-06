@@ -48,5 +48,7 @@
   "vaultUnlockEnabled": "Enabled",
   "vaultUnlockDisabled": "Not available",
   "tryIt": "Try it",
-  "tryItSuccess": "Passkey verified successfully!"
+  "tryItSuccess": "Passkey verified successfully!",
+  "notDiscoverable": "Sign-in not available",
+  "notDiscoverableDescription": "This passkey cannot be used for sign-in because it is not a discoverable credential. It can still be used for vault unlock if PRF is supported."
 }

@@ -1,7 +1,12 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
+import Credentials from "next-auth/providers/credentials";
+import Nodemailer from "next-auth/providers/nodemailer";
 import { API_PATH } from "@/lib/constants";
 import { isHttps } from "@/lib/url-helpers";
+import { sendEmail } from "@/lib/email";
+import { magicLinkEmail } from "@/lib/email/templates/magic-link";
+import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
 
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
@@ -62,6 +67,46 @@ export default {
               };
             },
           },
+        ]
+      : []),
+    // Magic Link (Email authentication)
+    ...(process.env.EMAIL_PROVIDER
+      ? [
+          Nodemailer({
+            server: process.env.SMTP_HOST
+              ? {
+                  host: process.env.SMTP_HOST,
+                  port: Number(process.env.SMTP_PORT || 587),
+                  auth: {
+                    user: process.env.SMTP_USER || "",
+                    pass: process.env.SMTP_PASS || "",
+                  },
+                }
+              : "smtp://localhost:1025",
+            from: process.env.EMAIL_FROM || "noreply@localhost",
+            async sendVerificationRequest({ identifier: email, url }) {
+              const { subject, html, text } = magicLinkEmail(url);
+              await sendEmail({ to: email, subject, html, text });
+            },
+          }),
+        ]
+      : []),
+    // WebAuthn (Passkey sign-in for individual users)
+    ...(process.env.WEBAUTHN_RP_ID
+      ? [
+          Credentials({
+            id: "webauthn",
+            name: "Passkey",
+            credentials: {
+              credentialResponse: { type: "text" },
+              challengeId: { type: "text" },
+            },
+            async authorize(credentials) {
+              return authorizeWebAuthn(
+                credentials as Record<string, unknown>,
+              );
+            },
+          }),
         ]
       : []),
   ],

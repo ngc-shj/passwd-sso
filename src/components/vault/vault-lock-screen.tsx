@@ -127,6 +127,19 @@ export function VaultLockScreen() {
     }
   }, [unlockWithPasskey, t, tw]);
 
+  // Auto-trigger passkey unlock after WebAuthn sign-in (PRF 2-stage flow)
+  useEffect(() => {
+    const flag = sessionStorage.getItem("psso:webauthn-signin");
+    if (!flag) return;
+    // Consume flag immediately (one-shot)
+    sessionStorage.removeItem("psso:webauthn-signin");
+
+    // Only auto-unlock if user has PRF-capable passkeys
+    if (hasPrfPasskeys) {
+      handlePasskeyUnlock();
+    }
+  }, [hasPrfPasskeys, handlePasskeyUnlock]);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
       <Card className="w-full max-w-sm rounded-xl border">

@@ -194,15 +194,17 @@ const envSchema = z
         data.AUTH_JACKSON_SECRET &&
         data.JACKSON_URL
       );
+      const hasEmail = !!process.env.EMAIL_PROVIDER;
 
-      if (!hasGoogle && !hasJackson) {
+      if (!hasGoogle && !hasJackson && !hasEmail) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ["AUTH_GOOGLE_ID"],
           message:
             "At least one auth provider must be configured in production: " +
-            "Google (AUTH_GOOGLE_ID + AUTH_GOOGLE_SECRET) or " +
-            "SAML Jackson (AUTH_JACKSON_ID + AUTH_JACKSON_SECRET + JACKSON_URL)",
+            "Google (AUTH_GOOGLE_ID + AUTH_GOOGLE_SECRET), " +
+            "SAML Jackson (AUTH_JACKSON_ID + AUTH_JACKSON_SECRET + JACKSON_URL), or " +
+            "Email (EMAIL_PROVIDER)",
         });
       }
     }

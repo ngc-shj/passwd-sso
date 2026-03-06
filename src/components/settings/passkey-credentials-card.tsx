@@ -436,6 +436,15 @@ export function PasskeyCredentialsCard() {
                           ? t("deviceTypeSingleDevice")
                           : t("deviceTypeMultiDevice")}
                       </span>
+                      {/* Non-discoverable credential warning */}
+                      {cred.deviceType === "singleDevice" && !cred.backedUp && (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+                          title={t("notDiscoverableDescription")}
+                        >
+                          {t("notDiscoverable")}
+                        </span>
+                      )}
                     </div>
 
                     {/* Metadata */}

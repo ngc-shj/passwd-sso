@@ -307,15 +307,17 @@ export interface PasskeyAuthenticationResult {
 
 export async function startPasskeyAuthentication(
   optionsJSON: Record<string, unknown>,
-  prfSalt: string, // hex
+  prfSalt?: string, // hex — omit for sign-in without PRF
 ): Promise<PasskeyAuthenticationResult> {
   const publicKeyOptions = toRequestOptions(optionsJSON);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (publicKeyOptions as any).extensions = {
-    ...publicKeyOptions.extensions,
-    prf: { eval: { first: toArrayBuffer(hexDecode(prfSalt)) } },
-  };
+  if (prfSalt) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (publicKeyOptions as any).extensions = {
+      ...publicKeyOptions.extensions,
+      prf: { eval: { first: toArrayBuffer(hexDecode(prfSalt)) } },
+    };
+  }
 
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), 120_000);

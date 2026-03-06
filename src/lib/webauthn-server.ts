@@ -199,9 +199,28 @@ export function derivePrfSalt(userId: string): string {
   return Buffer.from(derived).toString("hex");
 }
 
+// ── Discoverable authentication (for sign-in) ──────────────
+
+/**
+ * Generate authentication options for discoverable credentials (passkey sign-in).
+ * Unlike generateAuthenticationOpts(), this uses empty allowCredentials
+ * so the browser presents all discoverable credentials for the RP.
+ */
+export async function generateDiscoverableAuthOpts() {
+  const rpId = getRpId();
+
+  const opts: GenerateAuthenticationOptionsOpts = {
+    rpID: rpId,
+    allowCredentials: [],
+    userVerification: "required",
+  };
+
+  return generateAuthenticationOptions(opts);
+}
+
 // ── Helpers ─────────────────────────────────────────────────
 
-function base64urlToUint8Array(base64url: string): Uint8Array {
+export function base64urlToUint8Array(base64url: string): Uint8Array {
   const base64 = base64url.replace(/-/g, "+").replace(/_/g, "/");
   const pad = (4 - (base64.length % 4)) % 4;
   const padded = base64 + "=".repeat(pad);

@@ -5,6 +5,8 @@ import { APP_NAME } from "@/lib/constants";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { SignInButton } from "@/components/auth/signin-button";
+import { EmailSignInForm } from "@/components/auth/email-signin-form";
+import { PasskeySignInButton } from "@/components/auth/passkey-signin-button";
 import { Shield } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 
@@ -38,6 +40,13 @@ export default async function SignInPage({
     process.env.AUTH_JACKSON_ID &&
     process.env.AUTH_JACKSON_SECRET
   );
+  const hasSso = hasGoogle || hasSaml;
+  const hasEmail = !!process.env.EMAIL_PROVIDER;
+  const hasWebAuthn = !!process.env.WEBAUTHN_RP_ID;
+
+  // Passkey sign-in only available when SSO is not configured (individual user mode)
+  const showPasskeySignIn = !hasSso && hasWebAuthn;
+  const showEmailSignIn = !hasSso && hasEmail;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
@@ -54,6 +63,7 @@ export default async function SignInPage({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* SSO buttons (enterprise mode) */}
           {hasGoogle && (
             <SignInButton
               provider="google"
@@ -97,8 +107,25 @@ export default async function SignInPage({
               icon={<Shield className="h-5 w-5 text-blue-600" />}
             />
           )}
+
+          {/* Individual user mode: passkey + email */}
+          {showPasskeySignIn && (
+            <PasskeySignInButton />
+          )}
+          {showPasskeySignIn && showEmailSignIn && (
+            <div className="relative">
+              <Separator />
+              <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-card px-2 text-xs text-muted-foreground">
+                {t("orContinueWith")}
+              </span>
+            </div>
+          )}
+          {showEmailSignIn && (
+            <EmailSignInForm />
+          )}
+
           <p className="text-center text-xs text-muted-foreground pt-4">
-            {t("authorizedOnly")}
+            {hasSso ? t("authorizedOnly") : t("personalWelcome")}
           </p>
         </CardContent>
       </Card>

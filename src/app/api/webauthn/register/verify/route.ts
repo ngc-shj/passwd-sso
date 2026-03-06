@@ -15,6 +15,8 @@ import {
   getRpOrigin,
 } from "@/lib/webauthn-server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
+import { sendEmail } from "@/lib/email";
+import { passkeyRegisteredEmail } from "@/lib/email/templates/passkey-registered";
 
 export const runtime = "nodejs";
 
@@ -185,6 +187,16 @@ async function handlePOST(req: NextRequest) {
     },
     ...extractRequestMeta(req),
   });
+
+  // Send notification email (non-blocking)
+  if (session.user.email) {
+    const deviceName = nickname || registeredDevice || "Unknown";
+    const { subject, html, text } = passkeyRegisteredEmail(
+      deviceName,
+      new Date(),
+    );
+    sendEmail({ to: session.user.email, subject, html, text });
+  }
 
   return NextResponse.json(
     {

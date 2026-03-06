@@ -242,6 +242,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!baseResult) return false;
       }
 
+      // Reject nodemailer/webauthn for SSO tenant users.
+      // These providers are for individual (bootstrap tenant) users only.
+      // Prevents bypassing SSO policy via direct API calls.
+      const provider = params.account?.provider;
+      if (provider === "nodemailer" || provider === "webauthn") {
+        if (params.user?.email) {
+          const existingUser = await withBypassRls(prisma, async () =>
+            prisma.user.findUnique({
+              where: { email: params.user.email! },
+              select: {
+                id: true,
+                tenant: { select: { isBootstrap: true } },
+              },
+            }),
+          );
+          // Existing user in a non-bootstrap (SSO) tenant → reject
+          if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
+            return false;
+          }
+        }
+      }
+
       let userId = params.user?.id ?? null;
       if (!userId && params.user?.email) {
         const existing = await withBypassRls(prisma, async () =>
