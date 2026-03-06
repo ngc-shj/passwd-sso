@@ -242,12 +242,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!baseResult) return false;
       }
 
-      // Reject nodemailer/webauthn for SSO tenant users.
-      // These providers are for individual (bootstrap tenant) users only.
+      // Reject nodemailer for SSO tenant users.
+      // Magic Link is for individual (bootstrap tenant) users only.
       // Prevents bypassing SSO policy via direct API calls.
+      // Note: WebAuthn sign-in uses a custom route (/api/auth/passkey/verify)
+      // that has its own SSO tenant guard, bypassing Auth.js entirely.
       const provider = params.account?.provider;
-      if (provider === "nodemailer" || provider === "webauthn") {
-        // Both providers require email. Block null-email as a safeguard.
+      if (provider === "nodemailer") {
+        // Nodemailer requires email by definition. Block null-email as a safeguard.
         if (!params.user?.email) return false;
 
         const existingUser = await withBypassRls(prisma, async () =>

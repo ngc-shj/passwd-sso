@@ -45,10 +45,14 @@ export function VaultLockScreen() {
   const [passkeyLoading, setPasskeyLoading] = useState(false);
   const [error, setError] = useState("");
   const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
+  const [prfChecked, setPrfChecked] = useState(false);
 
   // Check if user has PRF-capable passkeys
   useEffect(() => {
-    if (!isWebAuthnSupported()) return;
+    if (!isWebAuthnSupported()) {
+      setPrfChecked(true);
+      return;
+    }
 
     fetchApi(API_PATH.WEBAUTHN_CREDENTIALS)
       .then(async (res) => {
@@ -57,7 +61,8 @@ export function VaultLockScreen() {
           setHasPrfPasskeys(creds.some((c) => c.prfSupported));
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setPrfChecked(true));
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -137,12 +142,14 @@ export function VaultLockScreen() {
 
   // Auto-trigger passkey unlock after WebAuthn sign-in
   useEffect(() => {
-    if (!webauthnSignInRef.current || !hasPrfPasskeys) return;
+    if (!webauthnSignInRef.current || !prfChecked) return;
     // Consume flag (one-shot)
     webauthnSignInRef.current = false;
     sessionStorage.removeItem("psso:webauthn-signin");
-    handlePasskeyUnlock();
-  }, [hasPrfPasskeys, handlePasskeyUnlock]);
+    if (hasPrfPasskeys) {
+      handlePasskeyUnlock();
+    }
+  }, [prfChecked, hasPrfPasskeys, handlePasskeyUnlock]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">

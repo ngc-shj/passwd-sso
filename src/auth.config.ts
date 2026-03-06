@@ -1,12 +1,10 @@
 import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
-import Credentials from "next-auth/providers/credentials";
 import Nodemailer from "next-auth/providers/nodemailer";
 import { API_PATH } from "@/lib/constants";
 import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
-import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 // Rate limiters for magic link email (per-email address)
@@ -104,24 +102,10 @@ export default {
           }),
         ]
       : []),
-    // WebAuthn (Passkey sign-in for individual users)
-    ...(process.env.WEBAUTHN_RP_ID
-      ? [
-          Credentials({
-            id: "webauthn",
-            name: "Passkey",
-            credentials: {
-              credentialResponse: { type: "text" },
-              challengeId: { type: "text" },
-            },
-            async authorize(credentials) {
-              return authorizeWebAuthn(
-                credentials as Record<string, unknown>,
-              );
-            },
-          }),
-        ]
-      : []),
+    // WebAuthn sign-in is handled by a custom route (/api/auth/passkey/verify)
+    // that creates database sessions directly. Auth.js Credentials provider
+    // only supports JWT sessions, which is incompatible with this app's
+    // database session strategy.
   ],
 
   cookies: {

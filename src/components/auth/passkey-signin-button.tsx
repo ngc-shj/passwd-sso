@@ -1,6 +1,5 @@
 "use client";
 
-import { signIn } from "next-auth/react";
 import { useState, useEffect } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
@@ -42,14 +41,23 @@ export function PasskeySignInButton() {
       // 2. Run WebAuthn authentication (no PRF for sign-in)
       const { responseJSON } = await startPasskeyAuthentication(options);
 
-      // 3. Send to Auth.js Credentials provider
-      const result = await signIn("webauthn", {
-        credentialResponse: JSON.stringify(responseJSON),
-        challengeId,
-        redirect: false,
-      });
+      // 3. Verify and create database session via custom route.
+      // Auth.js Credentials provider only supports JWT sessions, which is
+      // incompatible with this app's database session strategy. This custom
+      // route creates a database session directly.
+      const verifyRes = await fetch(
+        withBasePath(API_PATH.AUTH_PASSKEY_VERIFY),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            credentialResponse: JSON.stringify(responseJSON),
+            challengeId,
+          }),
+        },
+      );
 
-      if (result?.error) {
+      if (!verifyRes.ok) {
         setError(t("passkeySignInFailed"));
         return;
       }

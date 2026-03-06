@@ -223,6 +223,15 @@ describe("authorizeWebAuthn", () => {
     expect(mockWithBypassRls).toHaveBeenCalled();
   });
 
+  it("returns null when user.email is null", async () => {
+    mockPrismaFindFirst.mockResolvedValue({
+      ...mockStoredCredential,
+      user: { id: "user-1", email: null, name: "Test User" },
+    });
+    const result = await authorizeWebAuthn(validCredentials);
+    expect(result).toBeNull();
+  });
+
   it("returns null name when user.name is null", async () => {
     mockPrismaFindFirst.mockResolvedValue({
       ...mockStoredCredential,

@@ -24,6 +24,8 @@ export default defineConfig({
         "src/lib/auth-adapter.ts",
         "src/lib/scim-token.ts",
         "src/lib/scim/*.ts",
+        "src/lib/webauthn-authorize.ts",
+        "src/lib/webauthn-server.ts",
       ],
       exclude: ["src/app/api/auth/\\[...nextauth\\]/**"],
     },

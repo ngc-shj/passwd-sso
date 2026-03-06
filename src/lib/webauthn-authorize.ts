@@ -135,9 +135,12 @@ export async function authorizeWebAuthn(
 
   if (updatedRows === 0) return null;
 
+  // Users without email should not authenticate via passkey
+  if (!storedCredential.user.email) return null;
+
   return {
     id: storedCredential.user.id,
-    email: storedCredential.user.email!,
+    email: storedCredential.user.email,
     name: storedCredential.user.name ?? null,
   };
 }

@@ -38,6 +38,29 @@ describe("getRpOrigin", () => {
   });
 });
 
+describe("generateDiscoverableAuthOpts", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    delete process.env.WEBAUTHN_RP_ID;
+  });
+
+  it("returns options with empty allowCredentials and userVerification required", async () => {
+    vi.stubEnv("WEBAUTHN_RP_ID", "example.com");
+    const { generateDiscoverableAuthOpts } = await import("./webauthn-server");
+    const opts = await generateDiscoverableAuthOpts();
+    expect(opts.rpId).toBe("example.com");
+    // Discoverable: no allowCredentials filter
+    expect(opts.allowCredentials).toEqual([]);
+    expect(opts.userVerification).toBe("required");
+    expect(opts.challenge).toBeTruthy();
+  });
+
+  it("throws when WEBAUTHN_RP_ID is missing", async () => {
+    const { generateDiscoverableAuthOpts } = await import("./webauthn-server");
+    await expect(generateDiscoverableAuthOpts()).rejects.toThrow("WEBAUTHN_RP_ID");
+  });
+});
+
 describe("derivePrfSalt", () => {
   beforeEach(() => {
     vi.resetModules();
