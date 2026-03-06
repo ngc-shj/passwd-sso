@@ -63,6 +63,22 @@ describe("SecuritySection", () => {
     );
   });
 
+  it("hides emergency access when team is selected", () => {
+    render(
+      <SecuritySection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
+        isWatchtower={false}
+        isEmergencyAccess={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("link", { name: "emergencyAccess" })).toBeNull();
+  });
+
   it("hides watchtower for team viewers", () => {
     render(
       <SecuritySection
