@@ -328,7 +328,7 @@ describe("TeamLoginForm — folder selection", () => {
     });
   });
 
-  it("does NOT render folder selector when no folders", async () => {
+  it("renders folder selector with only __none__ option when no folders", async () => {
     setupFetch([]);
 
     await act(async () => {
@@ -348,12 +348,9 @@ describe("TeamLoginForm — folder selection", () => {
       expect(calls.some((u: string) => u.includes("/folders"))).toBe(true);
     });
 
-    // The folder section label should NOT appear (beyond tags/custom fields)
-    // "folder" as a label text should not be in the document
+    // Folder section should render even with no folders (allows future folder creation)
     const folderLabels = screen.queryAllByText("folder");
-    // When no folders exist, the folder EntrySectionCard should not render
-    // Check that the folder label from the folder section is absent
-    expect(folderLabels.length).toBe(0);
+    expect(folderLabels.length).toBe(1);
   });
 
   it("initializes teamFolderId from editData", async () => {

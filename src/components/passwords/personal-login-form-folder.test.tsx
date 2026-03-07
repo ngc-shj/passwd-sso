@@ -254,7 +254,7 @@ describe("PersonalLoginForm folder selector", () => {
     });
   });
 
-  it("does not render folder select when no folders exist", async () => {
+  it("renders folder select with only __none__ option when no folders exist", async () => {
     globalThis.fetch = mockFetch([]);
 
     await act(async () => {
@@ -268,13 +268,16 @@ describe("PersonalLoginForm folder selector", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // All selects should be custom field type selects only (no __none__ option)
+    // Folder select should still render with only the "no folder" option
     const selects = screen.queryAllByTestId("folder-select");
     const folderSelect = selects.find((s) => {
       const options = s.querySelectorAll("option");
       return Array.from(options).some((o) => o.value === "__none__");
     });
-    expect(folderSelect).toBeUndefined();
+    expect(folderSelect).toBeDefined();
+    const options = folderSelect!.querySelectorAll("option");
+    expect(options.length).toBe(1);
+    expect(options[0].value).toBe("__none__");
   });
 
   it("pre-selects folder from initialData.folderId", async () => {
