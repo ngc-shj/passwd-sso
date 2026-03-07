@@ -21,6 +21,9 @@ const {
   mockDecryptData,
   mockBuildPersonalEntryAAD,
   mockBuildTeamEntryAAD,
+  mockBuildItemKeyWrapAAD,
+  mockUnwrapItemKey,
+  mockDeriveItemEncryptionKey,
   mockAnalyzeStrength,
   mockCheckHIBP,
   mockDelay,
@@ -31,6 +34,9 @@ const {
   mockDecryptData: vi.fn(),
   mockBuildPersonalEntryAAD: vi.fn(),
   mockBuildTeamEntryAAD: vi.fn(),
+  mockBuildItemKeyWrapAAD: vi.fn(),
+  mockUnwrapItemKey: vi.fn(),
+  mockDeriveItemEncryptionKey: vi.fn(),
   mockAnalyzeStrength: vi.fn(),
   mockCheckHIBP: vi.fn(),
   mockDelay: vi.fn().mockResolvedValue(undefined),
@@ -49,6 +55,12 @@ vi.mock("@/lib/crypto-client", () => ({
 vi.mock("@/lib/crypto-aad", () => ({
   buildPersonalEntryAAD: mockBuildPersonalEntryAAD,
   buildTeamEntryAAD: mockBuildTeamEntryAAD,
+  buildItemKeyWrapAAD: mockBuildItemKeyWrapAAD,
+}));
+
+vi.mock("@/lib/crypto-team", () => ({
+  unwrapItemKey: mockUnwrapItemKey,
+  deriveItemEncryptionKey: mockDeriveItemEncryptionKey,
 }));
 
 vi.mock("@/lib/password-analyzer", () => ({
@@ -1404,7 +1416,7 @@ describe("useWatchtower", () => {
         expect.objectContaining({ id: "team-entry-1", scope: "team", teamId: "team-1" }),
       ]),
     );
-    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "team-entry-1", "blob");
+    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "team-entry-1", "blob", 0);
     expect(fetchSpy).not.toHaveBeenCalledWith("/api/passwords?include=blob");
     expect(fetchSpy).toHaveBeenCalledWith("/api/teams/team-1/passwords?type=LOGIN&include=blob");
     expect(fetchSpy).toHaveBeenCalledTimes(2);

@@ -3,6 +3,7 @@ import {
   buildPersonalEntryAAD,
   buildTeamEntryAAD,
   buildAttachmentAAD,
+  buildItemKeyWrapAAD,
   AAD_VERSION,
 } from "./crypto-aad";
 
@@ -33,13 +34,13 @@ describe("crypto-aad", () => {
       expect(aad.length).toBe(25);
     });
 
-    it("buildTeamEntryAAD produces correct binary layout with 3 fields", () => {
-      const aad = buildTeamEntryAAD("team-abc", "entry-def", "blob");
+    it("buildTeamEntryAAD produces correct binary layout with 4 fields", () => {
+      const aad = buildTeamEntryAAD("team-abc", "entry-def", "blob", 0);
       const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
 
       expect(String.fromCharCode(aad[0], aad[1])).toBe("OV");
       expect(view.getUint8(2)).toBe(AAD_VERSION);
-      expect(view.getUint8(3)).toBe(3); // 3 fields
+      expect(view.getUint8(3)).toBe(4); // 4 fields
 
       // Field 1: "team-abc" (8 bytes)
       expect(view.getUint16(4, false)).toBe(8);
@@ -52,6 +53,14 @@ describe("crypto-aad", () => {
         aad.slice(field3Start + 2, field3Start + 2 + 4)
       );
       expect(field3).toBe("blob");
+
+      // Field 4 (itemKeyVersion): "0" (1 byte)
+      const field4Start = field3Start + 2 + 4;
+      expect(view.getUint16(field4Start, false)).toBe(1);
+      const field4 = new TextDecoder().decode(
+        aad.slice(field4Start + 2, field4Start + 2 + 1)
+      );
+      expect(field4).toBe("0");
     });
 
     it("buildAttachmentAAD produces correct binary layout", () => {
@@ -164,6 +173,47 @@ describe("crypto-aad", () => {
         0x65, 0x31, // e1
       ]);
       expect(aad).toEqual(expected);
+    });
+  });
+
+  // ─── ItemKey AAD ────────────────────────────────────────────
+
+  describe("buildItemKeyWrapAAD", () => {
+    it("produces correct binary layout with IK scope", () => {
+      const aad = buildItemKeyWrapAAD("team-1", "entry-1", 3);
+      const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
+
+      expect(String.fromCharCode(aad[0], aad[1])).toBe("IK");
+      expect(view.getUint8(2)).toBe(AAD_VERSION);
+      expect(view.getUint8(3)).toBe(3); // 3 fields
+    });
+
+    it("different entries produce different AAD", () => {
+      const aad1 = buildItemKeyWrapAAD("team-1", "entry-1", 1);
+      const aad2 = buildItemKeyWrapAAD("team-1", "entry-2", 1);
+      expect(aad1).not.toEqual(aad2);
+    });
+
+    it("different teamKeyVersions produce different AAD", () => {
+      const aad1 = buildItemKeyWrapAAD("team-1", "entry-1", 1);
+      const aad2 = buildItemKeyWrapAAD("team-1", "entry-1", 2);
+      expect(aad1).not.toEqual(aad2);
+    });
+  });
+
+  // ─── OV scope with itemKeyVersion ──────────────────────────
+
+  describe("buildTeamEntryAAD itemKeyVersion", () => {
+    it("different itemKeyVersions produce different AAD", () => {
+      const v0 = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
+      const v1 = buildTeamEntryAAD("team-1", "entry-1", "blob", 1);
+      expect(v0).not.toEqual(v1);
+    });
+
+    it("defaults to itemKeyVersion=0 for backward compatibility", () => {
+      const explicit = buildTeamEntryAAD("team-1", "entry-1", "blob", 0);
+      const defaulted = buildTeamEntryAAD("team-1", "entry-1", "blob");
+      expect(explicit).toEqual(defaulted);
     });
   });
 

@@ -72,6 +72,12 @@ export async function GET(_req: NextRequest, { params }: Params) {
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
     teamKeyVersion: entry.teamKeyVersion,
+    itemKeyVersion: entry.itemKeyVersion,
+    ...(entry.itemKeyVersion >= 1 ? {
+      encryptedItemKey: entry.encryptedItemKey,
+      itemKeyIv: entry.itemKeyIv,
+      itemKeyAuthTag: entry.itemKeyAuthTag,
+    } : {}),
     requireReprompt: entry.requireReprompt,
     expiresAt: entry.expiresAt,
   });
@@ -108,6 +114,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
         blobAuthTag: true,
         aadVersion: true,
         teamKeyVersion: true,
+        itemKeyVersion: true,
+        encryptedItemKey: true,
+        itemKeyIv: true,
+        itemKeyAuthTag: true,
       },
     }),
   );
@@ -145,7 +155,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = parsed.data;
+  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = parsed.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
   // Validate teamKeyVersion matches current team key version (F-13)
@@ -190,6 +200,14 @@ export async function PUT(req: NextRequest, { params }: Params) {
     updateData.overviewAuthTag = encryptedOverview!.authTag;
     updateData.aadVersion = aadVersion;
     updateData.teamKeyVersion = teamKeyVersion;
+    if (itemKeyVersion !== undefined) {
+      updateData.itemKeyVersion = itemKeyVersion;
+      if (encryptedItemKey) {
+        updateData.encryptedItemKey = encryptedItemKey.ciphertext;
+        updateData.itemKeyIv = encryptedItemKey.iv;
+        updateData.itemKeyAuthTag = encryptedItemKey.authTag;
+      }
+    }
   }
 
   if (teamFolderId !== undefined) updateData.teamFolderId = teamFolderId;
@@ -213,6 +231,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
             blobAuthTag: entry.blobAuthTag,
             aadVersion: entry.aadVersion,
             teamKeyVersion: entry.teamKeyVersion,
+            itemKeyVersion: entry.itemKeyVersion,
+            encryptedItemKey: entry.encryptedItemKey,
+            itemKeyIv: entry.itemKeyIv,
+            itemKeyAuthTag: entry.itemKeyAuthTag,
             changedById: session.user.id,
           },
         });

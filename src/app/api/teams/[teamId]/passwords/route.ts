@@ -100,6 +100,12 @@ export async function GET(req: NextRequest, { params }: Params) {
       : {}),
     aadVersion: entry.aadVersion,
     teamKeyVersion: entry.teamKeyVersion,
+    itemKeyVersion: entry.itemKeyVersion,
+    ...(entry.itemKeyVersion >= 1 ? {
+      encryptedItemKey: entry.encryptedItemKey,
+      itemKeyIv: entry.itemKeyIv,
+      itemKeyAuthTag: entry.itemKeyAuthTag,
+    } : {}),
     isFavorite: entry.favorites.length > 0,
     isArchived: entry.isArchived,
     tags: entry.tags,
@@ -154,7 +160,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, entryType, tagIds, teamFolderId, requireReprompt, expiresAt } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, entryType, tagIds, teamFolderId, requireReprompt, expiresAt } = parsed.data;
 
   // Validate teamKeyVersion matches current team key version
   const team = await withTeamTenantRls(teamId, async () =>
@@ -198,6 +204,12 @@ export async function POST(req: NextRequest, { params }: Params) {
         overviewAuthTag: encryptedOverview.authTag,
         aadVersion,
         teamKeyVersion: teamKeyVersion,
+        itemKeyVersion,
+        ...(encryptedItemKey ? {
+          encryptedItemKey: encryptedItemKey.ciphertext,
+          itemKeyIv: encryptedItemKey.iv,
+          itemKeyAuthTag: encryptedItemKey.authTag,
+        } : {}),
         entryType,
         teamId: teamId,
         tenantId: team.tenantId,

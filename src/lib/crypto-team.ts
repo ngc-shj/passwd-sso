@@ -444,6 +444,105 @@ export async function decryptTeamAttachment(
   return decryptBinary(encrypted, teamEncryptionKey, aad);
 }
 
+// ─── ItemKey Hierarchy ───────────────────────────────────────────
+
+/** HKDF info for ItemKey → entry/attachment encryption key */
+export const HKDF_ITEM_ENC_INFO = "passwd-sso-item-enc-v1";
+
+/** Generate a random 256-bit ItemKey for a team password entry */
+export function generateItemKey(): Uint8Array {
+  return crypto.getRandomValues(new Uint8Array(32));
+}
+
+/**
+ * Derive AES-256-GCM encryption key from ItemKey.
+ * HKDF(itemKey, info="passwd-sso-item-enc-v1", salt=empty)
+ */
+export async function deriveItemEncryptionKey(
+  itemKey: Uint8Array
+): Promise<CryptoKey> {
+  const hkdfKey = await crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(itemKey),
+    "HKDF",
+    false,
+    ["deriveKey"]
+  );
+
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new ArrayBuffer(32),
+      info: textEncode(HKDF_ITEM_ENC_INFO),
+    },
+    hkdfKey,
+    { name: "AES-GCM", length: AES_KEY_LENGTH },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+
+/**
+ * Wrap ItemKey with TeamKey (AES-256-GCM) using AAD to prevent transplant.
+ */
+export async function wrapItemKey(
+  itemKey: Uint8Array,
+  teamEncryptionKey: CryptoKey,
+  aad: Uint8Array
+): Promise<EncryptedData> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
+
+  const encrypted = await crypto.subtle.encrypt(
+    {
+      name: "AES-GCM",
+      iv: toArrayBuffer(iv),
+      additionalData: toArrayBuffer(aad),
+    },
+    teamEncryptionKey,
+    toArrayBuffer(itemKey)
+  );
+
+  const encryptedBytes = new Uint8Array(encrypted);
+  const ciphertext = encryptedBytes.slice(0, encryptedBytes.length - 16);
+  const authTag = encryptedBytes.slice(encryptedBytes.length - 16);
+
+  return {
+    ciphertext: hexEncode(ciphertext),
+    iv: hexEncode(iv),
+    authTag: hexEncode(authTag),
+  };
+}
+
+/**
+ * Unwrap ItemKey with TeamKey (AES-256-GCM), verifying AAD.
+ */
+export async function unwrapItemKey(
+  encrypted: EncryptedData,
+  teamEncryptionKey: CryptoKey,
+  aad: Uint8Array
+): Promise<Uint8Array> {
+  const ciphertext = hexDecode(encrypted.ciphertext);
+  const iv = hexDecode(encrypted.iv);
+  const authTag = hexDecode(encrypted.authTag);
+
+  const combined = new Uint8Array(ciphertext.length + authTag.length);
+  combined.set(ciphertext);
+  combined.set(authTag, ciphertext.length);
+
+  const decrypted = await crypto.subtle.decrypt(
+    {
+      name: "AES-GCM",
+      iv: toArrayBuffer(iv),
+      additionalData: toArrayBuffer(aad),
+    },
+    teamEncryptionKey,
+    toArrayBuffer(combined)
+  );
+
+  return new Uint8Array(decrypted);
+}
+
 // ─── Re-exports for convenience ─────────────────────────────────
 
 export {

@@ -153,12 +153,21 @@ export const createTeamE2EPasswordSchema = z.object({
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
   teamKeyVersion: z.number().int().min(1),
+  itemKeyVersion: z.number().int().min(0).default(0),
+  encryptedItemKey: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
   tagIds: z.array(z.string().cuid()).optional(),
   teamFolderId: z.string().cuid().nullable().optional(),
   requireReprompt: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
-});
+}).refine(
+  (data) => {
+    if (data.itemKeyVersion >= 1 && !data.encryptedItemKey) return false;
+    if (data.itemKeyVersion === 0 && data.encryptedItemKey) return false;
+    return true;
+  },
+  { message: "encryptedItemKey is required when itemKeyVersion >= 1 and forbidden when 0" }
+);
 
 /** Schema for E2E team password update — full blob replacement or metadata-only update */
 export const updateTeamE2EPasswordSchema = z.object({
@@ -166,6 +175,8 @@ export const updateTeamE2EPasswordSchema = z.object({
   encryptedOverview: encryptedFieldSchema.optional(),
   aadVersion: z.number().int().min(1).optional(),
   teamKeyVersion: z.number().int().min(1).optional(),
+  itemKeyVersion: z.number().int().min(0).optional(),
+  encryptedItemKey: encryptedFieldSchema.optional(),
   tagIds: z.array(z.string().cuid()).optional(),
   teamFolderId: z.string().cuid().nullable().optional(),
   isArchived: z.boolean().optional(),

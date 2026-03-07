@@ -10,8 +10,9 @@
  *
  * Scopes:
  *   "PV" — Personal Vault entry  (userId, entryId)
- *   "OV" — Team Vault entry       (teamId, entryId, vaultType)
+ *   "OV" — Team Vault entry       (teamId, entryId, vaultType, itemKeyVersion)
  *   "AT" — Attachment             (entryId, attachmentId)
+ *   "IK" — ItemKey wrapping       (teamId, entryId, teamKeyVersion)
  */
 
 const AAD_VERSION = 1;
@@ -20,6 +21,7 @@ const AAD_VERSION = 1;
 const SCOPE_PERSONAL = "PV";
 const SCOPE_TEAM = "OV";
 const SCOPE_ATTACHMENT = "AT";
+const SCOPE_ITEM_KEY = "IK";
 
 /**
  * Encode fields into the length-prefixed binary AAD format.
@@ -105,15 +107,39 @@ export function buildPersonalEntryAAD(
 /**
  * Build AAD for Team Vault entry encryption.
  *
- * Binds ciphertext to specific team + entry + vault type.
+ * Binds ciphertext to specific team + entry + vault type + itemKeyVersion.
  * vaultType distinguishes "blob" vs "overview" to prevent cross-field replay.
+ * itemKeyVersion prevents version mismatch (0=TeamKey direct, >=1=ItemKey).
  */
 export function buildTeamEntryAAD(
   teamId: string,
   entryId: string,
-  vaultType: "blob" | "overview" = "blob"
+  vaultType: "blob" | "overview" = "blob",
+  itemKeyVersion: number = 0
 ): Uint8Array {
-  return buildAADBytes(SCOPE_TEAM, 3, [teamId, entryId, vaultType]);
+  return buildAADBytes(SCOPE_TEAM, 4, [
+    teamId,
+    entryId,
+    vaultType,
+    String(itemKeyVersion),
+  ]);
+}
+
+/**
+ * Build AAD for ItemKey wrapping (AES-GCM wrap of per-entry ItemKey with TeamKey).
+ *
+ * Prevents cross-entry transplant of encrypted ItemKey blobs.
+ */
+export function buildItemKeyWrapAAD(
+  teamId: string,
+  entryId: string,
+  teamKeyVersion: number
+): Uint8Array {
+  return buildAADBytes(SCOPE_ITEM_KEY, 3, [
+    teamId,
+    entryId,
+    String(teamKeyVersion),
+  ]);
 }
 
 /**
@@ -128,5 +154,5 @@ export function buildAttachmentAAD(
   return buildAADBytes(SCOPE_ATTACHMENT, 2, [entryId, attachmentId]);
 }
 
-// Re-export AAD_VERSION for tests and schema references
-export { AAD_VERSION };
+// Re-export for tests, schema references, and reuse by other AAD builders
+export { AAD_VERSION, buildAADBytes };

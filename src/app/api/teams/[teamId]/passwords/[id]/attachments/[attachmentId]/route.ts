@@ -72,6 +72,7 @@ export async function GET(
     authTag: attachment.authTag,
     keyVersion: attachment.keyVersion,
     aadVersion: attachment.aadVersion,
+    encryptionMode: attachment.encryptionMode,
   });
 }
 
