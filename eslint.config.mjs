@@ -14,6 +14,35 @@ const eslintConfig = defineConfig([
     "extension/**",
     "load-test/**",
   ]),
+  {
+    // Prevent plain fetch() in client-side code — use fetchApi() instead.
+    files: ["src/components/**/*.{ts,tsx}", "src/hooks/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.*", "**/__tests__/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "CallExpression[callee.name='fetch']",
+          message:
+            "Use fetchApi() from @/lib/url-helpers instead of plain fetch(). " +
+            "fetchApi() automatically prepends NEXT_PUBLIC_BASE_PATH.",
+        },
+        {
+          selector:
+            "CallExpression[callee.object.name='window'][callee.property.name='fetch']",
+          message:
+            "Use fetchApi() from @/lib/url-helpers instead of window.fetch(). " +
+            "fetchApi() automatically prepends NEXT_PUBLIC_BASE_PATH.",
+        },
+        {
+          selector: "AssignmentPattern > Identifier.right[name='fetch']",
+          message:
+            "Do not use plain fetch as a default parameter. " +
+            "Use fetchApi from @/lib/url-helpers instead.",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;

@@ -35,6 +35,7 @@ import {
 } from "./crypto-team";
 import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
 import {
   startPasskeyAuthentication,
@@ -453,7 +454,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     try {
       // 1. Fetch encrypted secret key + verification artifact (session-protected)
       const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
-      if (!dataRes.ok) return false;
+      if (!dataRes.ok) {
+        if (dataRes.status === 401) {
+          throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
+        }
+        return false;
+      }
       const vaultData = await dataRes.json();
 
       if (!vaultData.accountSalt) return false;
@@ -579,7 +585,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS, { method: "POST" }),
       ]);
 
-      if (!dataRes.ok || !optionsRes.ok) return false;
+      if (!dataRes.ok || !optionsRes.ok) {
+        if (dataRes.status === 401 || optionsRes.status === 401) {
+          throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
+        }
+        return false;
+      }
 
       const vaultData = await dataRes.json();
       const { options, prfSalt } = await optionsRes.json();
@@ -733,7 +744,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // Fetch vault data
       const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
-      if (!dataRes.ok) return false;
+      if (!dataRes.ok) {
+        if (dataRes.status === 401) {
+          throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
+        }
+        return false;
+      }
       const vaultData = await dataRes.json();
       if (!vaultData.accountSalt) return false;
 

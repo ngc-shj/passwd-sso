@@ -42,6 +42,12 @@ describe("toggleSelectAllIds", () => {
     const result = toggleSelectAllIds(["a", "b"], false);
     expect(result.size).toBe(0);
   });
+
+  it("caps at max when checked", () => {
+    const result = toggleSelectAllIds(["a", "b", "c", "d", "e"], true, 3);
+    expect(result.size).toBe(3);
+    expect(Array.from(result)).toEqual(["a", "b", "c"]);
+  });
 });
 
 describe("toggleSelectOneId", () => {
@@ -61,5 +67,20 @@ describe("toggleSelectOneId", () => {
     const prev = new Set(["a"]);
     toggleSelectOneId(prev, "b", true);
     expect(prev.size).toBe(1);
+  });
+
+  it("returns prev unchanged when at max", () => {
+    const prev = new Set(["a", "b", "c"]);
+    const result = toggleSelectOneId(prev, "d", true, 3);
+    expect(result).toBe(prev);
+    expect(result.size).toBe(3);
+  });
+
+  it("allows re-adding existing id when at max", () => {
+    const prev = new Set(["a", "b", "c"]);
+    const result = toggleSelectOneId(prev, "a", true, 3);
+    // At max but "a" is already selected — returns prev (no-op, size unchanged)
+    expect(result).toBe(prev);
+    expect(result.size).toBe(3);
   });
 });

@@ -1,3 +1,6 @@
+/** Maximum number of entries that can be selected for bulk operations. */
+export const MAX_BULK_SELECTION = 100;
+
 /**
  * Remove IDs from `prev` that no longer exist in `currentIds`.
  *
@@ -18,17 +21,24 @@ export function reconcileSelectedIds(
 export function toggleSelectAllIds(
   entryIds: readonly string[],
   checked: boolean,
+  max: number = MAX_BULK_SELECTION,
 ): Set<string> {
-  return checked ? new Set(entryIds) : new Set();
+  if (!checked) return new Set();
+  return new Set(entryIds.slice(0, max));
 }
 
 export function toggleSelectOneId(
   prev: Set<string>,
   id: string,
   checked: boolean,
+  max: number = MAX_BULK_SELECTION,
 ): Set<string> {
   const next = new Set(prev);
-  if (checked) next.add(id);
-  else next.delete(id);
+  if (checked) {
+    if (next.size >= max) return prev;
+    next.add(id);
+  } else {
+    next.delete(id);
+  }
   return next;
 }
