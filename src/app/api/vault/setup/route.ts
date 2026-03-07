@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -7,6 +7,7 @@ import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -14,6 +15,13 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 export const runtime = "nodejs";
 
 const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
+
+// P0: Only PBKDF2 (kdfType=0) is accepted.
+// Argon2id (kdfType=1) support added in P2.
+const kdfParamsSchema = z.object({
+  kdfType: z.literal(0),
+  kdfIterations: z.number().int().min(600_000).max(10_000_000),
+}).optional();
 
 const setupSchema = z.object({
   encryptedSecretKey: z.string().min(1),
@@ -32,6 +40,8 @@ const setupSchema = z.object({
   encryptedEcdhPrivateKey: z.string().min(1),
   ecdhPrivateKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
   ecdhPrivateKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
+  // KDF metadata (optional — server applies defaults if omitted)
+  kdfParams: kdfParamsSchema,
 });
 
 /**
@@ -39,7 +49,7 @@ const setupSchema = z.object({
  * Initial vault setup: store encrypted secret key and auth hash.
  * Called once when the user first sets a passphrase.
  */
-async function handlePOST(request: Request) {
+async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -86,6 +96,10 @@ async function handlePOST(request: Request) {
 
   const data = parsed.data;
 
+  // Apply KDF defaults if client omits kdfParams
+  const kdfType = data.kdfParams?.kdfType ?? 0;
+  const kdfIterations = data.kdfParams?.kdfIterations ?? 600_000;
+
   // Hash authHash with a server-side salt for storage
   // serverHash = SHA-256(authHash + serverSalt)
   const serverSalt = randomBytes(32).toString("hex");
@@ -106,6 +120,8 @@ async function handlePOST(request: Request) {
           masterPasswordServerHash: serverHash,
           masterPasswordServerSalt: serverSalt,
           keyVersion: 1,
+          kdfType,
+          kdfIterations,
           passphraseVerifierHmac: hmacVerifier(data.verifierHash),
           passphraseVerifierVersion: VERIFIER_VERSION,
           // ECDH key pair for team E2E encryption
@@ -128,7 +144,20 @@ async function handlePOST(request: Request) {
     ]),
   );
 
-  getLogger().info({ userId: session.user.id }, "vault.setup.success");
+  const { ip, userAgent } = extractRequestMeta(request);
+  logAudit({
+    scope: "PERSONAL",
+    action: "VAULT_SETUP",
+    userId: session.user.id,
+    metadata: { kdfType, kdfIterations },
+    ip,
+    userAgent,
+  });
+
+  getLogger().info(
+    { userId: session.user.id, kdfType, kdfIterations },
+    "vault.setup.success",
+  );
 
   return NextResponse.json({ success: true }, { status: 201 });
 }

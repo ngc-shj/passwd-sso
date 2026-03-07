@@ -52,6 +52,7 @@
   "RECOVERY_KEY_CREATED": "Recovery key created",
   "RECOVERY_KEY_REGENERATED": "Recovery key regenerated",
   "RECOVERY_PASSPHRASE_RESET": "Passphrase reset with recovery key",
+  "VAULT_SETUP": "Vault setup completed",
   "VAULT_RESET_EXECUTED": "Vault reset executed",
   "FOLDER_CREATE": "Created folder",
   "FOLDER_UPDATE": "Updated folder",

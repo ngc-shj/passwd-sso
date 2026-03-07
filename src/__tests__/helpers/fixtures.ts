@@ -17,6 +17,8 @@ export function makeUser(overrides: Record<string, unknown> = {}) {
     masterPasswordServerHash: null as string | null,
     masterPasswordServerSalt: null as string | null,
     keyVersion: 0,
+    kdfType: 0,
+    kdfIterations: 600_000,
     ...overrides,
   };
 }

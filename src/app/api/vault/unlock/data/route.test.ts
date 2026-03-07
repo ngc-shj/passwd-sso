@@ -79,6 +79,8 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv-hex",
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       passphraseVerifierHmac: null,
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue(null);
@@ -117,6 +119,8 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv-hex",
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       passphraseVerifierHmac: null,
       ecdhPublicKey: "ecdh-pub-jwk",
       encryptedEcdhPrivateKey: "ecdh-priv-enc",
@@ -139,6 +143,8 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv-hex",
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       hasVerifier: false,
       verificationArtifact: {
         ciphertext: "v-cipher",
@@ -168,6 +174,8 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv-hex",
       secretKeyAuthTag: "tag-hex",
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       passphraseVerifierHmac: null,
       // ECDH fields should NOT be selected for extension tokens
     });
@@ -190,6 +198,8 @@ describe("GET /api/vault/unlock/data", () => {
       secretKeyIv: "iv",
       secretKeyAuthTag: "tag",
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue(null);
 
