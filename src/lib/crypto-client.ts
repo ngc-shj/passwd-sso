@@ -110,6 +110,9 @@ export async function deriveWrappingKeyWithParams(
     throw new Error(`Unsupported kdfType: ${params.kdfType}. Only PBKDF2 (0) is supported.`);
   }
   const iterations = params?.kdfIterations ?? PBKDF2_ITERATIONS;
+  if (iterations < PBKDF2_ITERATIONS) {
+    throw new Error(`kdfIterations ${iterations} is below minimum ${PBKDF2_ITERATIONS}`);
+  }
 
   const keyMaterial = await crypto.subtle.importKey(
     "raw",

@@ -12,21 +12,6 @@ import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
-// ─── Known HKDF info strings (from ledger) ──────────────────────
-const KNOWN_HKDF_INFO = new Set([
-  "passwd-sso-enc-v1",
-  "passwd-sso-auth-v1",
-  "passwd-sso-team-v1",
-  "passwd-sso-team-enc-v1",
-  "passwd-sso-ecdh-v1",
-  "passwd-sso-emergency-v1",
-  "passwd-sso-recovery-wrap-v1",
-  "passwd-sso-recovery-verifier-v1",
-]);
-
-// ─── Known AAD scopes (from ledger) ──────────────────────────────
-const KNOWN_AAD_SCOPES = new Set(["PV", "OV", "AT", "OK"]);
-
 /**
  * Extract HKDF info strings from source code.
  * Matches patterns like: "passwd-sso-xxx-v1" in string literals.

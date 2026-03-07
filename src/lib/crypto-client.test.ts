@@ -9,11 +9,6 @@ import {
 const TEST_PASSPHRASE = "test-passphrase-for-unit-tests";
 const TEST_SALT = new Uint8Array(32).fill(0xab);
 
-async function exportRawKey(key: CryptoKey): Promise<string> {
-  const raw = await crypto.subtle.exportKey("raw", key);
-  return hexEncode(raw);
-}
-
 describe("deriveWrappingKeyWithParams", () => {
   it("produces the same key as deriveWrappingKey with default params", async () => {
     const [keyA, keyB] = await Promise.all([
@@ -54,6 +49,15 @@ describe("deriveWrappingKeyWithParams", () => {
         kdfIterations: 600_000,
       }),
     ).rejects.toThrow("Unsupported kdfType: 1");
+  });
+
+  it("throws on iterations below minimum", async () => {
+    await expect(
+      deriveWrappingKeyWithParams(TEST_PASSPHRASE, TEST_SALT, {
+        kdfType: 0,
+        kdfIterations: 100_000,
+      }),
+    ).rejects.toThrow("below minimum");
   });
 
   it("DEFAULT_KDF_PARAMS has expected values", () => {
