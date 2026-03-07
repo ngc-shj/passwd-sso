@@ -34,37 +34,7 @@ describe("invalidateUserSessions", () => {
   });
 
   it("deletes sessions, revokes extension tokens and API keys", async () => {
-    const result = await invalidateUserSessions("user-1");
-
-    expect(mockSession.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
-    });
-    expect(mockExtensionToken.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null },
-      data: { revokedAt: expect.any(Date) },
-    });
-    expect(mockApiKey.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", revokedAt: null },
-      data: { revokedAt: expect.any(Date) },
-    });
-    expect(result).toEqual({ sessions: 2, extensionTokens: 1, apiKeys: 3 });
-  });
-
-  it("uses withBypassRls", async () => {
-    await invalidateUserSessions("user-1");
-    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-  });
-
-  it("filters by userId only when no tenantId provided", async () => {
-    await invalidateUserSessions("user-1");
-
-    expect(mockSession.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
-    });
-  });
-
-  it("filters by tenantId when provided", async () => {
-    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+    const result = await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
 
     expect(mockSession.deleteMany).toHaveBeenCalledWith({
       where: { userId: "user-1", tenantId: "tenant-1" },
@@ -77,5 +47,34 @@ describe("invalidateUserSessions", () => {
       where: { userId: "user-1", revokedAt: null, tenantId: "tenant-1" },
       data: { revokedAt: expect.any(Date) },
     });
+    expect(result).toEqual({ sessions: 2, extensionTokens: 1, apiKeys: 3 });
+  });
+
+  it("uses withBypassRls", async () => {
+    await invalidateUserSessions("user-1", { tenantId: "tenant-1" });
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters queries by both userId and tenantId", async () => {
+    await invalidateUserSessions("user-1", { tenantId: "tenant-2" });
+
+    expect(mockSession.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", tenantId: "tenant-2" },
+    });
+    expect(mockExtensionToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-2" },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(mockApiKey.updateMany).toHaveBeenCalledWith({
+      where: { userId: "user-1", revokedAt: null, tenantId: "tenant-2" },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+
+  it("propagates error when a database operation fails", async () => {
+    mockSession.deleteMany.mockRejectedValue(new Error("db error"));
+    await expect(
+      invalidateUserSessions("user-1", { tenantId: "tenant-1" }),
+    ).rejects.toThrow("db error");
   });
 });

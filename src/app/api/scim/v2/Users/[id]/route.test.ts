@@ -499,6 +499,52 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
+
+  it("returns 200 and logs error when PUT deactivation invalidation fails", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: new Date(),
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
+    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+
+    const res = await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "u@example.com",
+          active: false,
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "session-invalidation-failed",
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+      }),
+    );
+  });
 });
 
 describe("PATCH /api/scim/v2/Users/[id]", () => {
@@ -707,6 +753,42 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
 
     expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
   });
+
+  it("returns 200 and logs error when PATCH deactivation invalidation fails", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: new Date(),
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+    mockTenantMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+
+    const res = await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: false }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(res!.status).toBe(200);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "session-invalidation-failed",
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+      }),
+    );
+  });
 });
 
 describe("DELETE /api/scim/v2/Users/[id]", () => {
@@ -789,6 +871,27 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     expect(mockLogger.error).toHaveBeenCalledWith(
       expect.objectContaining({ userId: "user-1" }),
       "session-invalidation-failed",
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+      }),
+    );
+  });
+
+  it("includes invalidation counts in audit metadata on DELETE success", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+    mockTransaction.mockResolvedValue([]);
+    mockInvalidateUserSessions.mockResolvedValue({ sessions: 2, extensionTokens: 1, apiKeys: 0 });
+
+    await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ sessions: 2, extensionTokens: 1, apiKeys: 0 }),
+      }),
     );
   });
 });

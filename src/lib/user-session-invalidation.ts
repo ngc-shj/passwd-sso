@@ -9,9 +9,9 @@ import { withBypassRls } from "@/lib/tenant-rls";
  */
 export async function invalidateUserSessions(
   userId: string,
-  options?: { tenantId?: string; reason?: string },
+  options: { tenantId: string; reason?: string },
 ): Promise<{ sessions: number; extensionTokens: number; apiKeys: number }> {
-  const tenantFilter = options?.tenantId ? { tenantId: options.tenantId } : {};
+  const tenantFilter = { tenantId: options.tenantId };
 
   return withBypassRls(prisma, async () => {
     const [sessionsResult, extensionTokensResult, apiKeysResult] =
