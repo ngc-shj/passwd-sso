@@ -78,7 +78,7 @@ export async function POST(
       userId: session.user.id,
       targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
       targetId: id,
-      metadata: { granteeId: grant.granteeId, permanent: true },
+      metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, permanent: true },
       ...extractRequestMeta(req),
     });
 
@@ -124,7 +124,7 @@ export async function POST(
       userId: session.user.id,
       targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
       targetId: id,
-      metadata: { granteeId: grant.granteeId, permanent: false },
+      metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, permanent: false },
       ...extractRequestMeta(req),
     });
 

@@ -288,20 +288,6 @@ export default function TeamAuditLogsPage({
       });
     }
 
-    const importFilename =
-      log.action === AUDIT_ACTION.ENTRY_CREATE &&
-      meta?.source === "import" &&
-      typeof meta.filename === "string"
-        ? meta.filename
-        : null;
-    const parentAction =
-      typeof meta?.parentAction === "string" ? meta.parentAction : null;
-    let parentActionText: string | null = null;
-    if (parentAction) {
-      const parentActionLabel = actionLabel(parentAction);
-      parentActionText = t("fromAction", { action: parentActionLabel });
-    }
-
     // Entry operations: show resolved entry name
     if (log.targetType === AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY && log.targetId) {
       const name = entryNames[log.targetId];
@@ -312,11 +298,7 @@ export default function TeamAuditLogsPage({
         ) {
           return `${name}（${t("permanentDelete")}）`;
         }
-        const suffixParts = [
-          importFilename ? t("fromFile", { filename: importFilename }) : null,
-          parentActionText,
-        ].filter(Boolean);
-        return suffixParts.length > 0 ? `${name} ${suffixParts.join(" ")}` : name;
+        return name;
       }
       return t("deletedEntry");
     }

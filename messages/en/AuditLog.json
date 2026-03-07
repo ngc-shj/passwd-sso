@@ -141,5 +141,11 @@
   "exportMeta": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted} / Teams: {teams}",
   "exportMetaTeam": "File: {filename} / Count: {entryCount} / Format: {format} / Encrypted: {encrypted}",
   "importMeta": "File: {filename} / Format: {format} / Encrypted: {encrypted} / Success: {successCount} / Failed: {failedCount} / Total: {requestedCount}",
-  "operatedBy": "Operated by {name}"
+  "operatedBy": "Operated by {name}",
+  "providerMeta": "Provider: {provider}",
+  "attemptsMeta": "Failed attempts: {attempts}",
+  "lockoutMeta": "Failed attempts: {attempts} / Locked for: {lockMinutes} min",
+  "revokedSessionsMeta": "Revoked sessions: {revokedCount}",
+  "vaultResetMeta": "Deleted entries: {deletedEntries} / Deleted attachments: {deletedAttachments}",
+  "eaVaultAccessMeta": "Entries accessed: {entryCount}"
 }

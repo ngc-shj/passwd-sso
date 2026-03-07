@@ -81,6 +81,7 @@ async function handlePOST(request: NextRequest) {
         passphraseVerifierHmac: true,
         passphraseVerifierVersion: true,
         recoveryKeySetAt: true,
+        keyVersion: true,
       },
     }),
   );
@@ -141,6 +142,7 @@ async function handlePOST(request: NextRequest) {
     scope: "PERSONAL",
     action: isRegeneration ? "RECOVERY_KEY_REGENERATED" : "RECOVERY_KEY_CREATED",
     userId: session.user.id,
+    metadata: { keyVersion: user.keyVersion },
     ip,
     userAgent,
   });
