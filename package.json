@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "check:team-auth-rls": "node scripts/check-team-auth-rls.mjs",
     "check:bypass-rls": "node scripts/check-bypass-rls.mjs",
+    "check:crypto-domains": "node scripts/check-crypto-domains.mjs",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",

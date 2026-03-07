@@ -91,6 +91,7 @@ jobs:
       - run: npm run lint
       - run: npm run check:team-auth-rls
       - run: npm run check:bypass-rls
+      - run: npm run check:crypto-domains
       - run: npm test
       - run: npm run build
 
@@ -231,12 +232,33 @@ jobs:
           path: e2e/playwright-report/
           retention-days: 7
 
+  # ─── Container Scan (Trivy) ─────────────────────────────────
+  container-scan:
+    name: "Trivy: Container image scan"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t passwd-sso:scan .
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "passwd-sso:scan"
+          scan-type: image
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          ignore-unfixed: true
+
   # ─── Security Audit: App ──────────────────────────────────
   audit-app:
     name: "Audit: App dependencies"
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true
     needs: changes
     if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
     steps:
@@ -248,14 +270,13 @@ jobs:
           cache: "npm"
 
       - run: npm ci
-      - run: npm audit --omit=dev
+      - run: npm audit --omit=dev --audit-level=high
 
   # ─── Security Audit: Extension ────────────────────────────
   audit-ext:
     name: "Audit: Extension dependencies"
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true
     needs: changes
     if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
     defaults:
@@ -271,14 +292,13 @@ jobs:
           cache-dependency-path: "extension/package-lock.json"
 
       - run: npm ci
-      - run: npm audit --omit=dev
+      - run: npm audit --omit=dev --audit-level=high
 
   # ─── Security Audit: CLI ──────────────────────────────────
   audit-cli:
     name: "Audit: CLI dependencies"
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    continue-on-error: true
     needs: changes
     if: needs.changes.outputs.cli == 'true' || needs.changes.outputs.ci == 'true'
     defaults:
@@ -294,7 +314,7 @@ jobs:
           cache-dependency-path: "cli/package-lock.json"
 
       - run: npm ci
-      - run: npm audit --omit=dev
+      - run: npm audit --omit=dev --audit-level=high
 
   # ─── License Audit ─────────────────────────────────────────
   license-audit:

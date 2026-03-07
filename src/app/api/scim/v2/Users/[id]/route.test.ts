@@ -12,6 +12,8 @@ const {
   mockTeamMemberKey,
   mockTransaction,
   mockWithTenantRls,
+  mockInvalidateUserSessions,
+  mockLogger,
 } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
@@ -22,6 +24,8 @@ const {
   mockTeamMemberKey: { deleteMany: vi.fn() },
   mockTransaction: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
+  mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
+  mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("@/lib/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
@@ -40,6 +44,12 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", () => ({ withTenantRls: mockWithTenantRls }));
+vi.mock("@/lib/user-session-invalidation", () => ({
+  invalidateUserSessions: mockInvalidateUserSessions,
+}));
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => mockLogger,
+}));
 
 import { GET, PUT, PATCH, DELETE } from "./route";
 
@@ -417,6 +427,78 @@ describe("PUT /api/scim/v2/Users/[id]", () => {
 
     expect(res!.status).toBe(409);
   });
+
+  it("triggers invalidateUserSessions on PUT deactivation", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: new Date(),
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
+
+    await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "u@example.com",
+          active: false,
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { tenantId: "tenant-1" });
+  });
+
+  it("does NOT trigger invalidateUserSessions on PUT reactivation", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        tenantMember: { update: mockTenantMember.update },
+        scimExternalMapping: {
+          findFirst: mockScimExternalMapping.findFirst,
+          deleteMany: mockScimExternalMapping.deleteMany,
+          create: mockScimExternalMapping.create,
+        },
+      }),
+    );
+    mockScimExternalMapping.deleteMany.mockResolvedValue({ count: 0 });
+
+    await PUT(
+      makeReq({
+        method: "PUT",
+        body: {
+          schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+          userName: "u@example.com",
+          active: true,
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+  });
 });
 
 describe("PATCH /api/scim/v2/Users/[id]", () => {
@@ -573,6 +655,58 @@ describe("PATCH /api/scim/v2/Users/[id]", () => {
     );
     expect(res!.status).toBe(429);
   });
+
+  it("triggers invalidateUserSessions on PATCH deactivation", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: null })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: new Date(),
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+    mockTenantMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: false }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { tenantId: "tenant-1" });
+  });
+
+  it("does NOT trigger invalidateUserSessions on PATCH reactivation", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", deactivatedAt: new Date() })
+      .mockResolvedValueOnce({
+        userId: "user-1",
+        deactivatedAt: null,
+        user: { id: "user-1", email: "u@example.com", name: "User" },
+      });
+    mockTenantMember.update.mockResolvedValue({});
+    mockScimExternalMapping.findFirst.mockResolvedValue(null);
+
+    await PATCH(
+      makeReq({
+        method: "PATCH",
+        body: {
+          schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+          Operations: [{ op: "replace", path: "active", value: true }],
+        },
+      }),
+      makeParams("user-1"),
+    );
+
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+  });
 });
 
 describe("DELETE /api/scim/v2/Users/[id]", () => {
@@ -630,5 +764,31 @@ describe("DELETE /api/scim/v2/Users/[id]", () => {
     mockCheckScimRateLimit.mockResolvedValue(false);
     const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
     expect(res!.status).toBe(429);
+  });
+
+  it("triggers invalidateUserSessions on SCIM DELETE", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+    mockTransaction.mockResolvedValue([]);
+
+    await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", { tenantId: "tenant-1" });
+  });
+
+  it("returns 204 even if session invalidation fails on DELETE", async () => {
+    mockTenantMember.findUnique
+      .mockResolvedValueOnce({ userId: "user-1" })
+      .mockResolvedValueOnce({ id: "tm1", role: "MEMBER", user: { email: "u@example.com" } });
+    mockTransaction.mockResolvedValue([]);
+    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+
+    const res = await DELETE(makeReq({ method: "DELETE" }), makeParams("user-1"));
+    expect(res!.status).toBe(204);
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "session-invalidation-failed",
+    );
   });
 });

@@ -11,6 +11,8 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { invalidateUserSessions } from "@/lib/user-session-invalidation";
+import { getLogger } from "@/lib/logger";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -218,6 +220,18 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     ]),
   );
 
+  // Session/token invalidation — outside transaction (fail-open)
+  let invalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let sessionInvalidationFailed = false;
+  try {
+    invalidationCounts = await invalidateUserSessions(target.userId, {
+      tenantId: target.tenantId,
+    });
+  } catch (error) {
+    sessionInvalidationFailed = true;
+    getLogger().error({ userId: target.userId, error }, "session-invalidation-failed");
+  }
+
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
@@ -225,7 +239,12 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: memberId,
-    metadata: { removedUserId: target.userId, removedRole: target.role },
+    metadata: {
+      removedUserId: target.userId,
+      removedRole: target.role,
+      ...(invalidationCounts ?? {}),
+      ...(sessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+    },
     ...extractRequestMeta(req),
   });
 
