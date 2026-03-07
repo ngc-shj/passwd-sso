@@ -1,14 +1,26 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockCheck, mockCreateNotification, mockLogAudit, mockSendEmail, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockCheck: vi.fn(),
-  mockCreateNotification: vi.fn(),
-  mockLogAudit: vi.fn(),
-  mockSendEmail: vi.fn(),
-  mockWithUserTenantRls: vi.fn(),
-}));
+const { mockAuth, mockCheck, mockCreateNotification, mockLogAudit, mockSendEmail, mockWithUserTenantRls, mockRequireTeamMember, MockTeamAuthError } = vi.hoisted(() => {
+  class _TeamAuthError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = "TeamAuthError";
+      this.status = status;
+    }
+  }
+  return {
+    mockAuth: vi.fn(),
+    mockCheck: vi.fn(),
+    mockCreateNotification: vi.fn(),
+    mockLogAudit: vi.fn(),
+    mockSendEmail: vi.fn(),
+    mockWithUserTenantRls: vi.fn(),
+    mockRequireTeamMember: vi.fn(),
+    MockTeamAuthError: _TeamAuthError,
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/rate-limit", () => ({
@@ -47,6 +59,10 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
+vi.mock("@/lib/team-auth", () => ({
+  requireTeamMember: mockRequireTeamMember,
+  TeamAuthError: MockTeamAuthError,
+}));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: vi.fn(() => "en") }));
 vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: vi.fn(() => "http://localhost") }));
 vi.mock("@/lib/notification-messages", () => ({
@@ -63,6 +79,7 @@ describe("POST /api/watchtower/alert", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: userId } });
     mockCheck.mockResolvedValue({ allowed: true });
+    mockRequireTeamMember.mockResolvedValue({ role: "MEMBER" });
     mockWithUserTenantRls.mockImplementation((_id: string, fn: () => unknown) => fn());
   });
 
@@ -147,5 +164,51 @@ describe("POST /api/watchtower/alert", () => {
   it("uses correct rate limit key", async () => {
     await POST(makeRequest({ newBreachCount: 1 }));
     expect(mockCheck).toHaveBeenCalledWith(`rl:watchtower:alert:${userId}`);
+  });
+
+  it("returns 404 when user is not a team member", async () => {
+    mockRequireTeamMember.mockRejectedValue(new MockTeamAuthError("NOT_FOUND", 404));
+    const res = await POST(makeRequest({ newBreachCount: 1, teamId: "team-abc" }));
+    expect(res.status).toBe(404);
+    expect(mockCreateNotification).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("uses team rate limit key when teamId is provided", async () => {
+    mockWithUserTenantRls.mockResolvedValue({ email: null, locale: "en" });
+    const res = await POST(makeRequest({ newBreachCount: 1, teamId: "team-abc" }));
+    expect(res.status).toBe(200);
+    expect(mockCheck).toHaveBeenCalledWith("rl:watchtower:alert:team:team-abc");
+  });
+
+  it("logs audit with TEAM scope when teamId is provided", async () => {
+    mockWithUserTenantRls.mockResolvedValue({ email: null, locale: "en" });
+    const res = await POST(makeRequest({ newBreachCount: 5, teamId: "team-abc" }));
+    expect(res.status).toBe(200);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "TEAM",
+        action: "WATCHTOWER_ALERT_SENT",
+        userId,
+        teamId: "team-abc",
+        metadata: { newBreachCount: 5, teamId: "team-abc" },
+      }),
+    );
+  });
+
+  it("logs audit with PERSONAL scope when no teamId", async () => {
+    mockWithUserTenantRls.mockResolvedValue({ email: null, locale: "en" });
+    const res = await POST(makeRequest({ newBreachCount: 2 }));
+    expect(res.status).toBe(200);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "PERSONAL",
+        action: "WATCHTOWER_ALERT_SENT",
+        userId,
+        metadata: { newBreachCount: 2 },
+      }),
+    );
   });
 });

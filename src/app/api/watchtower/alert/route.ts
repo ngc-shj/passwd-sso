@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
@@ -25,6 +26,7 @@ const alertLimiter = createRateLimiter({
 
 const alertSchema = z.object({
   newBreachCount: z.number().int().nonnegative().max(10000),
+  teamId: z.string().trim().min(1).optional(),
 });
 
 // POST /api/watchtower/alert
@@ -50,14 +52,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { newBreachCount } = parsed.data;
+  const { newBreachCount, teamId } = parsed.data;
 
-  const { allowed } = await alertLimiter.check(`rl:watchtower:alert:${session.user.id}`);
+  const rateLimitKey = teamId
+    ? `rl:watchtower:alert:team:${teamId}`
+    : `rl:watchtower:alert:${session.user.id}`;
+  const { allowed } = await alertLimiter.check(rateLimitKey);
   if (!allowed) {
     return NextResponse.json(
       { error: API_ERROR.RATE_LIMIT_EXCEEDED },
       { status: 429 },
     );
+  }
+
+  // Verify team membership when teamId is provided
+  if (teamId) {
+    try {
+      await requireTeamMember(session.user.id, teamId);
+    } catch (e) {
+      if (e instanceof TeamAuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
   }
 
   // Resolve user locale for i18n (notification + email)
@@ -80,10 +97,11 @@ export async function POST(req: NextRequest) {
 
   // Audit log
   logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.WATCHTOWER_ALERT_SENT,
     userId: session.user.id,
-    metadata: { newBreachCount },
+    ...(teamId ? { teamId } : {}),
+    metadata: { newBreachCount, ...(teamId ? { teamId } : {}) },
     ...extractRequestMeta(req),
   });
 
