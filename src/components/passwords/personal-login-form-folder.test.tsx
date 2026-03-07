@@ -254,7 +254,7 @@ describe("PersonalLoginForm folder selector", () => {
     });
   });
 
-  it("renders folder select with only __none__ option when no folders exist", async () => {
+  it("shows 'no folders yet' message instead of select when no folders exist", async () => {
     globalThis.fetch = mockFetch([]);
 
     await act(async () => {
@@ -268,16 +268,17 @@ describe("PersonalLoginForm folder selector", () => {
       await new Promise((r) => setTimeout(r, 50));
     });
 
-    // Folder select should still render with only the "no folder" option
+    // Folder section label should be visible
+    expect(screen.getByText("folder")).toBeDefined();
+    // Select should not render (no __none__ option)
     const selects = screen.queryAllByTestId("folder-select");
     const folderSelect = selects.find((s) => {
       const options = s.querySelectorAll("option");
       return Array.from(options).some((o) => o.value === "__none__");
     });
-    expect(folderSelect).toBeDefined();
-    const options = folderSelect!.querySelectorAll("option");
-    expect(options.length).toBe(1);
-    expect(options[0].value).toBe("__none__");
+    expect(folderSelect).toBeUndefined();
+    // "No folders yet" message should appear
+    expect(screen.getByText("noFoldersYet")).toBeDefined();
   });
 
   it("pre-selects folder from initialData.folderId", async () => {

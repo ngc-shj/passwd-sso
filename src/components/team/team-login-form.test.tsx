@@ -328,7 +328,7 @@ describe("TeamLoginForm — folder selection", () => {
     });
   });
 
-  it("renders folder selector with only __none__ option when no folders", async () => {
+  it("shows 'no folders yet' message instead of select when no folders", async () => {
     setupFetch([]);
 
     await act(async () => {
@@ -348,9 +348,11 @@ describe("TeamLoginForm — folder selection", () => {
       expect(calls.some((u: string) => u.includes("/folders"))).toBe(true);
     });
 
-    // Folder section should render even with no folders (allows future folder creation)
+    // Folder section label should be visible
     const folderLabels = screen.queryAllByText("folder");
     expect(folderLabels.length).toBe(1);
+    // "No folders yet" message should appear
+    expect(screen.getByText("noFoldersYet")).toBeDefined();
   });
 
   it("initializes teamFolderId from editData", async () => {
