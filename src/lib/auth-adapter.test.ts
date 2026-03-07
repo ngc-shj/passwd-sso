@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
@@ -21,6 +21,16 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockPrismaTransaction: vi.fn(),
   mockSessionMetaGetStore: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockTxSession: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  mockTxTenant: {
+    findUnique: vi.fn(),
+  },
+  mockLogAudit: vi.fn(),
+  mockCreateNotification: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -44,6 +54,15 @@ vi.mock("@auth/prisma-adapter", () => ({
     // Base adapter methods (not used in tests but spread into custom adapter)
   }),
 }));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+}));
+vi.mock("@/lib/notification", () => ({
+  createNotification: mockCreateNotification,
+}));
+vi.mock("@/lib/new-device-detection", () => ({
+  checkNewDeviceAndNotify: vi.fn(),
+}));
 
 import { createCustomAdapter } from "./auth-adapter";
 
@@ -54,11 +73,15 @@ describe("createCustomAdapter", () => {
     vi.clearAllMocks();
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
-        tenant: mockPrismaTenant,
+        tenant: { ...mockPrismaTenant, findUnique: mockTxTenant.findUnique },
         user: mockPrismaUser,
         tenantMember: mockPrismaTenantMember,
+        session: mockTxSession,
       }),
     );
+    // Default: no session limit
+    mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    mockTxSession.findMany.mockResolvedValue([]);
   });
 
   describe("createUser", () => {
@@ -127,7 +150,7 @@ describe("createCustomAdapter", () => {
         userAgent: "Mozilla/5.0",
       });
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
-      mockPrismaSession.create.mockResolvedValue({
+      mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
         expires,
@@ -140,7 +163,7 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockPrismaSession.create).toHaveBeenCalledWith({
+      expect(mockTxSession.create).toHaveBeenCalledWith({
         data: {
           sessionToken: "tok-1",
           userId: "u-1",
@@ -165,7 +188,7 @@ describe("createCustomAdapter", () => {
     it("sets null when sessionMetaStorage has no store (undefined)", async () => {
       mockSessionMetaGetStore.mockReturnValue(undefined);
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-2" });
-      mockPrismaSession.create.mockResolvedValue({
+      mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-2",
         userId: "u-2",
         expires,
@@ -178,7 +201,7 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockPrismaSession.create).toHaveBeenCalledWith({
+      expect(mockTxSession.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           ipAddress: null,
           userAgent: null,
@@ -198,7 +221,7 @@ describe("createCustomAdapter", () => {
         userAgent: longUA,
       });
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-3" });
-      mockPrismaSession.create.mockResolvedValue({
+      mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-3",
         userId: "u-3",
         expires,
@@ -211,7 +234,7 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockPrismaSession.create).toHaveBeenCalledWith({
+      expect(mockTxSession.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           userAgent: "X".repeat(512),
         }),
@@ -221,6 +244,72 @@ describe("createCustomAdapter", () => {
           expires: true,
         },
       });
+    });
+
+    it("evicts oldest session when at concurrent limit", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "new-device" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "old-s1", ipAddress: "1.1.1.1", userAgent: "old-1" },
+        { id: "old-s2", ipAddress: "2.2.2.2", userAgent: "old-2" },
+      ]);
+      mockTxSession.deleteMany.mockResolvedValue({ count: 1 });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      // Should evict oldest session (old-s1) to make room
+      expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["old-s1"] } },
+      });
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "SESSION_EVICTED",
+          targetId: "old-s1",
+        }),
+      );
+
+      expect(mockCreateNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "SESSION_EVICTED",
+          userId: "u-1",
+        }),
+      );
+    });
+
+    it("does not evict when under concurrent limit", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "ok" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 3 });
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
+      ]);
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-ok",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-ok",
+        userId: "u-1",
+        expires,
+      });
+
+      expect(mockTxSession.deleteMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
     });
   });
 

@@ -6,6 +6,9 @@ import { sessionMetaStorage } from "@/lib/session-meta";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
+import { logAudit } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { createNotification } from "@/lib/notification";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -159,20 +162,78 @@ export function createCustomAdapter(): Adapter {
       const created = await withBypassRls(prisma, async () => {
         const tenantId = await resolveTenantIdForUser(session.userId);
 
-        return prisma.session.create({
-          data: {
-            sessionToken: session.sessionToken,
-            userId: session.userId,
-            tenantId,
-            expires: session.expires,
-            ipAddress: meta?.ip ?? null,
-            userAgent: meta?.userAgent?.slice(0, 512) ?? null,
-          },
-          select: {
-            sessionToken: true,
-            userId: true,
-            expires: true,
-          },
+        return prisma.$transaction(async (tx) => {
+          // Check tenant's concurrent session limit
+          const tenant = await tx.tenant.findUnique({
+            where: { id: tenantId },
+            select: { maxConcurrentSessions: true },
+          });
+
+          const maxSessions = tenant?.maxConcurrentSessions;
+          if (maxSessions != null && maxSessions > 0) {
+            // Lock and count active sessions (ORDER BY id for consistent lock ordering)
+            const activeSessions = await tx.session.findMany({
+              where: {
+                userId: session.userId,
+                tenantId,
+                expires: { gt: new Date() },
+              },
+              select: { id: true, ipAddress: true, userAgent: true },
+              orderBy: { id: "asc" },
+            });
+
+            // Evict oldest sessions if at or over limit
+            if (activeSessions.length >= maxSessions) {
+              const toEvict = activeSessions.slice(0, activeSessions.length - maxSessions + 1);
+              await tx.session.deleteMany({
+                where: { id: { in: toEvict.map((s) => s.id) } },
+              });
+
+              // Fire-and-forget: audit + notify for each evicted session
+              for (const evicted of toEvict) {
+                logAudit({
+                  scope: AUDIT_SCOPE.PERSONAL,
+                  action: AUDIT_ACTION.SESSION_EVICTED,
+                  userId: session.userId,
+                  targetType: AUDIT_TARGET_TYPE.SESSION,
+                  targetId: evicted.id,
+                  metadata: {
+                    reason: "concurrent_session_limit",
+                    maxConcurrentSessions: maxSessions,
+                    newSessionIp: meta?.ip ?? null,
+                    newSessionUa: meta?.userAgent ?? null,
+                  },
+                  ip: meta?.ip ?? null,
+                  userAgent: meta?.userAgent ?? null,
+                });
+              }
+
+              createNotification({
+                userId: session.userId,
+                tenantId,
+                type: "SESSION_EVICTED",
+                title: "Session terminated",
+                body: `${toEvict.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
+                metadata: { evictedCount: toEvict.length },
+              });
+            }
+          }
+
+          return tx.session.create({
+            data: {
+              sessionToken: session.sessionToken,
+              userId: session.userId,
+              tenantId,
+              expires: session.expires,
+              ipAddress: meta?.ip ?? null,
+              userAgent: meta?.userAgent?.slice(0, 512) ?? null,
+            },
+            select: {
+              sessionToken: true,
+              userId: true,
+              expires: true,
+            },
+          });
         });
       });
 

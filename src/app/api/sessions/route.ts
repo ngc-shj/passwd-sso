@@ -51,7 +51,15 @@ async function handleGET(request: NextRequest) {
     }),
   );
 
-  const result = sessions.map((s) => ({
+  // Fetch tenant's maxConcurrentSessions for the response
+  const tenant = await withUserTenantRls(session.user.id, async () =>
+    prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { tenant: { select: { maxConcurrentSessions: true } } },
+    }),
+  );
+
+  const items = sessions.map((s) => ({
     id: s.id,
     createdAt: s.createdAt.toISOString(),
     lastActiveAt: s.lastActiveAt.toISOString(),
@@ -60,7 +68,11 @@ async function handleGET(request: NextRequest) {
     isCurrent: s.id === currentSessionId,
   }));
 
-  return NextResponse.json(result);
+  return NextResponse.json({
+    sessions: items,
+    sessionCount: items.length,
+    maxConcurrentSessions: tenant?.tenant?.maxConcurrentSessions ?? null,
+  });
 }
 
 async function handleDELETE(request: NextRequest) {
