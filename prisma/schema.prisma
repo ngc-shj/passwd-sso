@@ -522,6 +522,10 @@ model TeamPasswordEntry {
   overviewAuthTag   String    @map("overview_auth_tag") @db.VarChar(32)
   aadVersion        Int       @default(0) @map("aad_version")
   teamKeyVersion    Int       @default(0) @map("team_key_version")
+  itemKeyVersion    Int       @default(0) @map("item_key_version")
+  encryptedItemKey  String?   @map("encrypted_item_key") @db.Text
+  itemKeyIv         String?   @map("item_key_iv") @db.VarChar(24)
+  itemKeyAuthTag    String?   @map("item_key_auth_tag") @db.VarChar(32)
   entryType         EntryType @default(LOGIN) @map("entry_type")
 
   // Metadata (unencrypted)
@@ -811,8 +815,9 @@ model Attachment {
   encryptedData Bytes  @map("encrypted_data")
   iv            String @db.VarChar(24)
   authTag       String @map("auth_tag") @db.VarChar(32)
-  keyVersion    Int?   @map("key_version")
-  aadVersion    Int    @default(0) @map("aad_version")
+  keyVersion     Int?   @map("key_version")
+  aadVersion     Int    @default(0) @map("aad_version")
+  encryptionMode Int    @default(0) @map("encryption_mode")
 
   tenantId            String   @map("tenant_id")
   passwordEntryId     String?  @map("password_entry_id")
@@ -966,10 +971,14 @@ model TeamPasswordEntryHistory {
   encryptedBlob  String   @map("encrypted_blob") @db.Text
   blobIv         String   @map("blob_iv") @db.VarChar(24)
   blobAuthTag    String   @map("blob_auth_tag") @db.VarChar(32)
-  aadVersion     Int      @default(0) @map("aad_version")
-  teamKeyVersion Int      @default(0) @map("team_key_version")
-  changedById    String   @map("changed_by_id")
-  changedAt      DateTime @default(now()) @map("changed_at")
+  aadVersion       Int      @default(0) @map("aad_version")
+  teamKeyVersion   Int      @default(0) @map("team_key_version")
+  itemKeyVersion   Int      @default(0) @map("item_key_version")
+  encryptedItemKey String?  @map("encrypted_item_key") @db.Text
+  itemKeyIv        String?  @map("item_key_iv") @db.VarChar(24)
+  itemKeyAuthTag   String?  @map("item_key_auth_tag") @db.VarChar(32)
+  changedById      String   @map("changed_by_id")
+  changedAt        DateTime @default(now()) @map("changed_at")
 
   entry     TeamPasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   changedBy User              @relation(fields: [changedById], references: [id])

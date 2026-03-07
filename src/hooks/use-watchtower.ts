@@ -4,7 +4,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useVault } from "@/lib/vault-context";
 import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto-aad";
+import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto-aad";
+import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { getCooldownState } from "@/lib/watchtower/state";
 import {
@@ -729,14 +730,33 @@ async function fetchTeamWatchtowerEntries({
       ) {
         continue;
       }
-      const aad = buildTeamEntryAAD(teamId, raw.id, "blob");
+      const itemKeyVersion = typeof raw.itemKeyVersion === "number" ? raw.itemKeyVersion : 0;
+      const aad = buildTeamEntryAAD(teamId, raw.id, "blob", itemKeyVersion);
+
+      let decryptKey: CryptoKey = teamKey;
+      if (
+        itemKeyVersion >= 1 &&
+        typeof raw.encryptedItemKey === "string" &&
+        typeof raw.itemKeyIv === "string" &&
+        typeof raw.itemKeyAuthTag === "string" &&
+        typeof raw.teamKeyVersion === "number"
+      ) {
+        const ikAad = buildItemKeyWrapAAD(teamId, raw.id, raw.teamKeyVersion);
+        const rawItemKey = await unwrapItemKey(
+          { ciphertext: raw.encryptedItemKey, iv: raw.itemKeyIv, authTag: raw.itemKeyAuthTag },
+          teamKey,
+          ikAad,
+        );
+        decryptKey = await deriveItemEncryptionKey(rawItemKey);
+      }
+
       const plaintext = await decryptData(
         {
           ciphertext: raw.encryptedBlob,
           iv: raw.blobIv,
           authTag: raw.blobAuthTag,
         },
-        teamKey,
+        decryptKey,
         aad,
       );
       const parsed = JSON.parse(plaintext);

@@ -47,6 +47,8 @@ async function handleGET(req: NextRequest) {
         keyVersion: true,
         kdfType: true,
         kdfIterations: true,
+        kdfMemory: true,
+        kdfParallelism: true,
         passphraseVerifierHmac: true,
         // ECDH fields for team E2E (excluded for extension tokens)
         ...(!isExtensionToken && {
@@ -99,8 +101,10 @@ async function handleGET(req: NextRequest) {
     secretKeyIv: user.secretKeyIv,
     secretKeyAuthTag: user.secretKeyAuthTag,
     keyVersion: user.keyVersion,
-    kdfType: user.kdfType,
-    kdfIterations: user.kdfIterations,
+    kdfType: (user as Record<string, unknown>).kdfType,
+    kdfIterations: (user as Record<string, unknown>).kdfIterations,
+    kdfMemory: (user as Record<string, unknown>).kdfMemory ?? null,
+    kdfParallelism: (user as Record<string, unknown>).kdfParallelism ?? null,
     hasVerifier: !!user.passphraseVerifierHmac,
     verificationArtifact: vaultKey
       ? {

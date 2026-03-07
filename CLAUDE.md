@@ -17,6 +17,15 @@ npm run generate:key     # Generate 256-bit hex master key
 
 Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.yml up`
 
+## Mandatory Checks
+
+Before committing or reporting implementation complete, **always** run:
+
+1. `npx vitest run` — all tests must pass
+2. `npx next build` — production build must succeed (catches TypeScript errors, Turbopack module resolution, SSR bundling issues that `vitest` does not cover)
+
+These are non-negotiable. A passing test suite alone is insufficient — the build can fail due to SSR-only issues (e.g., browser-only WASM modules bundled for server, type mismatches in non-test code).
+
 ## Architecture
 
 **Stack:** Next.js 16 (App Router) + TypeScript 5.9 + Prisma 7 + PostgreSQL 16 + Auth.js v5 + Tailwind CSS 4 + shadcn/ui

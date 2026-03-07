@@ -13,6 +13,11 @@ import {
   buildTeamKeyWrapAAD,
   CURRENT_TEAM_WRAP_VERSION,
   HKDF_ECDH_WRAP_INFO,
+  HKDF_ITEM_ENC_INFO,
+  generateItemKey,
+  deriveItemEncryptionKey,
+  wrapItemKey,
+  unwrapItemKey,
   generateECDHKeyPair,
   exportPublicKey,
   exportPrivateKey,
@@ -510,6 +515,139 @@ describe("crypto-team", () => {
       // 7. Admin can decrypt member's entry
       const adminDecrypted = await decryptTeamEntry(newEncrypted, teamEncKey);
       expect(adminDecrypted).toBe(newEntry);
+    });
+  });
+
+  // ─── ItemKey Hierarchy ──────────────────────────────────────────
+
+  describe("generateItemKey", () => {
+    it("generates a 32-byte random key", () => {
+      const key = generateItemKey();
+      expect(key).toBeInstanceOf(Uint8Array);
+      expect(key.length).toBe(32);
+    });
+
+    it("generates unique keys each time", () => {
+      const key1 = generateItemKey();
+      const key2 = generateItemKey();
+      expect(hexEncode(key1)).not.toBe(hexEncode(key2));
+    });
+  });
+
+  describe("deriveItemEncryptionKey", () => {
+    it("derives an AES-256-GCM key from ItemKey", async () => {
+      const itemKey = generateItemKey();
+      const encKey = await deriveItemEncryptionKey(itemKey);
+      expect(encKey.algorithm).toMatchObject({ name: "AES-GCM", length: 256 });
+      expect(encKey.usages).toContain("encrypt");
+      expect(encKey.usages).toContain("decrypt");
+    });
+
+    it("produces deterministic output for same input", async () => {
+      const itemKey = generateItemKey();
+      const key1 = await deriveItemEncryptionKey(itemKey);
+      const key2 = await deriveItemEncryptionKey(itemKey);
+
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
+      const data = new TextEncoder().encode("item-key-test");
+      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBuf }, key1, data);
+      const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBuf }, key2, encrypted);
+      expect(new TextDecoder().decode(decrypted)).toBe("item-key-test");
+    });
+
+    it("different ItemKeys produce different encryption keys", async () => {
+      const key1 = await deriveItemEncryptionKey(generateItemKey());
+      const key2 = await deriveItemEncryptionKey(generateItemKey());
+
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
+      const data = new TextEncoder().encode("cross-key");
+      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBuf }, key1, data);
+      await expect(
+        crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBuf }, key2, encrypted),
+      ).rejects.toThrow();
+    });
+
+    it("produces different key than deriveTeamEncryptionKey (domain separation)", async () => {
+      const rawKey = generateItemKey();
+      const itemEncKey = await deriveItemEncryptionKey(rawKey);
+      const teamEncKey = await deriveTeamEncryptionKey(rawKey);
+
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
+      const data = new TextEncoder().encode("domain-sep");
+      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBuf }, itemEncKey, data);
+      await expect(
+        crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBuf }, teamEncKey, encrypted),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("wrapItemKey + unwrapItemKey (round-trip)", () => {
+    it("wraps and unwraps ItemKey with AAD", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
+      const itemKey = generateItemKey();
+      const aad = new TextEncoder().encode("IK-aad-test");
+
+      const wrapped = await wrapItemKey(itemKey, teamEncKey, aad);
+      expect(wrapped.ciphertext).toBeTruthy();
+      expect(wrapped.iv).toHaveLength(24);
+      expect(wrapped.authTag).toHaveLength(32);
+
+      const unwrapped = await unwrapItemKey(wrapped, teamEncKey, aad);
+      expect(unwrapped).toEqual(itemKey);
+    });
+
+    it("fails with wrong AAD (transplant prevention)", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
+      const itemKey = generateItemKey();
+      const aad1 = new TextEncoder().encode("entry-1");
+      const aad2 = new TextEncoder().encode("entry-2");
+
+      const wrapped = await wrapItemKey(itemKey, teamEncKey, aad1);
+      await expect(unwrapItemKey(wrapped, teamEncKey, aad2)).rejects.toThrow();
+    });
+
+    it("fails with wrong TeamKey", async () => {
+      const teamKey1 = generateTeamSymmetricKey();
+      const teamKey2 = generateTeamSymmetricKey();
+      const encKey1 = await deriveTeamEncryptionKey(teamKey1);
+      const encKey2 = await deriveTeamEncryptionKey(teamKey2);
+      const itemKey = generateItemKey();
+      const aad = new TextEncoder().encode("test");
+
+      const wrapped = await wrapItemKey(itemKey, encKey1, aad);
+      await expect(unwrapItemKey(wrapped, encKey2, aad)).rejects.toThrow();
+    });
+
+    it("unwrapped ItemKey can derive working encryption key", async () => {
+      const teamKey = generateTeamSymmetricKey();
+      const teamEncKey = await deriveTeamEncryptionKey(teamKey);
+      const itemKey = generateItemKey();
+      const aad = new TextEncoder().encode("test");
+
+      const wrapped = await wrapItemKey(itemKey, teamEncKey, aad);
+      const unwrapped = await unwrapItemKey(wrapped, teamEncKey, aad);
+
+      const origEncKey = await deriveItemEncryptionKey(itemKey);
+      const recoveredEncKey = await deriveItemEncryptionKey(unwrapped);
+
+      // Encrypt with original, decrypt with recovered
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const ivBuf = iv.buffer.slice(iv.byteOffset, iv.byteOffset + iv.byteLength) as ArrayBuffer;
+      const data = new TextEncoder().encode("round-trip-data");
+      const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv: ivBuf }, origEncKey, data);
+      const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: ivBuf }, recoveredEncKey, encrypted);
+      expect(new TextDecoder().decode(decrypted)).toBe("round-trip-data");
+    });
+  });
+
+  describe("HKDF_ITEM_ENC_INFO", () => {
+    it("has expected value for domain separation", () => {
+      expect(HKDF_ITEM_ENC_INFO).toBe("passwd-sso-item-enc-v1");
     });
   });
 

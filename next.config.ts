@@ -11,7 +11,7 @@ if (rawBasePath && !/^\/[\w-]+(?:\/[\w-]+)*$/.test(rawBasePath)) {
 const nextConfig: NextConfig = {
   basePath: rawBasePath || undefined,
   output: "standalone",
-  serverExternalPackages: ["file-type"],
+  serverExternalPackages: ["file-type", "argon2-browser"],
 
   // Security headers
   async headers() {

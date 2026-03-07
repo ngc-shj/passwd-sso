@@ -46,7 +46,7 @@ function buildCspHeader(nonce: string): string {
 
   const directives = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isProd ? "" : " 'unsafe-eval'"}`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${isProd ? "" : " 'unsafe-eval'"}`,
     cspMode === "dev"
       ? "style-src 'self' 'unsafe-inline'"
       : `style-src 'self' 'nonce-${nonce}'`,

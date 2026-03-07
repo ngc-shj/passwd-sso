@@ -349,4 +349,17 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       }),
     );
   });
+
+  it("rejects invalid encryptionMode", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ teamId: "o1", tenantId: "t1" });
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = { ...validFormFields(), encryptionMode: "2" };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
 });

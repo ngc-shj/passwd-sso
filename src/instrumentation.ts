@@ -3,4 +3,19 @@ export async function register() {
   // Throws with a detailed error listing ALL invalid/missing vars.
   // Does NOT run during `next build` — only `next dev` and `next start`.
   await import("@/lib/env");
+
+  // Initialize Sentry for server-side error tracking (opt-in via SENTRY_DSN)
+  if (process.env.SENTRY_DSN) {
+    await import("../sentry.server.config");
+  }
+}
+
+export async function onRequestError(
+  ...args: Parameters<import("next/dist/server/instrumentation/types").InstrumentationOnRequestError>
+) {
+  const dsn = process.env.SENTRY_DSN;
+  if (!dsn) return;
+
+  const { captureRequestError } = await import("@sentry/nextjs");
+  captureRequestError(...args);
 }
