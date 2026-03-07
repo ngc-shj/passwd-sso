@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { z } from "zod/v4";
 
@@ -76,17 +77,15 @@ async function handlePOST(request: NextRequest) {
   const { deletedEntries, deletedAttachments } =
     await executeVaultReset(userId);
 
-  const { ip, userAgent } = extractRequestMeta(request);
   logAudit({
-    scope: "PERSONAL",
-    action: "VAULT_RESET_EXECUTED",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
     userId,
     metadata: {
       deletedEntries,
       deletedAttachments,
     },
-    ip,
-    userAgent,
+    ...extractRequestMeta(request),
   });
 
   return NextResponse.json({ success: true });

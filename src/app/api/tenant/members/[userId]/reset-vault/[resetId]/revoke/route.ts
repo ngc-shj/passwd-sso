@@ -15,7 +15,7 @@ import {
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_SCOPE, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 
 export const runtime = "nodejs";
@@ -84,7 +84,7 @@ export async function POST(
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
     userId: session.user.id,
     tenantId: actor.tenantId,
-    targetType: "User",
+    targetType: AUDIT_TARGET_TYPE.USER,
     targetId: targetUserId,
     metadata: { revokedById: session.user.id, resetId },
     ...extractRequestMeta(req),

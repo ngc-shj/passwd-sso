@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 
@@ -207,18 +208,16 @@ async function handleReset(body: unknown, userId: string, request: NextRequest) 
     }),
   );
 
-  const { ip, userAgent } = extractRequestMeta(request);
   logAudit({
-    scope: "PERSONAL",
-    action: "RECOVERY_PASSPHRASE_RESET",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.RECOVERY_PASSPHRASE_RESET,
     userId,
     metadata: {
       keyVersion: user.keyVersion,
       recoveryKeyRegenerated: true,
       lockoutReset: true,
     },
-    ip,
-    userAgent,
+    ...extractRequestMeta(request),
   });
 
   return NextResponse.json({ success: true });

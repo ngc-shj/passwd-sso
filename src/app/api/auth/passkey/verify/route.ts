@@ -8,7 +8,7 @@ import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
 import { createCustomAdapter } from "@/lib/auth-adapter";
 import { sessionMetaStorage } from "@/lib/session-meta";
-import { logAudit } from "@/lib/audit";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -123,6 +123,8 @@ async function handlePOST(req: NextRequest) {
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.AUTH_LOGIN,
     userId: user.id,
+    metadata: { provider: "passkey" },
+    ...extractRequestMeta(req),
   });
 
   // Set session cookie

@@ -141,7 +141,6 @@ export async function POST(req: NextRequest) {
   }
 
   // Audit log (async nonblocking; logAudit handles errors internally)
-  const { ip } = extractRequestMeta(req);
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
@@ -149,9 +148,8 @@ export async function POST(req: NextRequest) {
     metadata: {
       targetVersion,
       revokedShares,
-      ip,
     },
-    ip,
+    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({

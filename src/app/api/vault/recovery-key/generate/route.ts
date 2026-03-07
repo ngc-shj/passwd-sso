@@ -9,6 +9,7 @@ import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 
@@ -136,13 +137,11 @@ async function handlePOST(request: NextRequest) {
 
   // Audit log
   const isRegeneration = !!user.recoveryKeySetAt;
-  const { ip, userAgent } = extractRequestMeta(request);
   logAudit({
-    scope: "PERSONAL",
-    action: isRegeneration ? "RECOVERY_KEY_REGENERATED" : "RECOVERY_KEY_CREATED",
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: isRegeneration ? AUDIT_ACTION.RECOVERY_KEY_REGENERATED : AUDIT_ACTION.RECOVERY_KEY_CREATED,
     userId: session.user.id,
-    ip,
-    userAgent,
+    ...extractRequestMeta(request),
   });
 
   return NextResponse.json({ success: true });

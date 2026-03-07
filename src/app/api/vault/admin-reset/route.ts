@@ -8,7 +8,7 @@ import { assertOrigin } from "@/lib/csrf";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_SCOPE, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
     userId: session.user.id,
     tenantId: resetRecord.tenantId,
     teamId: resetRecord.teamId ?? undefined,
-    targetType: "User",
+    targetType: AUDIT_TARGET_TYPE.USER,
     targetId: session.user.id,
     metadata: {
       deletedEntries,

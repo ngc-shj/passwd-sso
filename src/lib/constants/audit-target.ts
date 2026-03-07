@@ -1,4 +1,5 @@
 export const AUDIT_TARGET_TYPE = {
+  USER: "User",
   ATTACHMENT: "Attachment",
   EMERGENCY_ACCESS_GRANT: "EmergencyAccessGrant",
   FOLDER: "Folder",

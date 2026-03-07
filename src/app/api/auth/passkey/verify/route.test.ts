@@ -45,6 +45,7 @@ vi.mock("@/lib/session-meta", () => ({
 
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
 }));
 
 vi.mock("@/lib/constants", () => ({
@@ -168,11 +169,16 @@ describe("POST /api/auth/passkey/verify", () => {
     });
     await POST(req);
 
-    expect(mockLogAudit).toHaveBeenCalledWith({
-      scope: "PERSONAL",
-      action: "AUTH_LOGIN",
-      userId: "user-1",
-    });
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "PERSONAL",
+        action: "AUTH_LOGIN",
+        userId: "user-1",
+        metadata: { provider: "passkey" },
+        ip: "127.0.0.1",
+        userAgent: "test-agent",
+      }),
+    );
   });
 
   it("returns 403 when origin is invalid", async () => {

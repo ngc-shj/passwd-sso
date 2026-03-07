@@ -304,12 +304,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     },
   },
   events: {
-    async signIn({ user }) {
+    async signIn({ user, account }) {
       if (user.id) {
+        // NOTE: Auth.js events do not expose NextRequest, so ip/userAgent
+        // cannot be captured here. Passkey sign-in records them separately
+        // in /api/auth/passkey/verify.
         logAudit({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.AUTH_LOGIN,
           userId: user.id,
+          metadata: { provider: account?.provider ?? "unknown" },
         });
       }
     },

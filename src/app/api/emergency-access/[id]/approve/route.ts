@@ -55,7 +55,7 @@ export async function POST(
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
-    metadata: { granteeId: grant.granteeId, earlyApproval: true },
+    metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, earlyApproval: true },
     ...extractRequestMeta(req),
   });
 
