@@ -12,7 +12,7 @@ import {
   hexEncode,
 } from "@/lib/webauthn-client";
 import { API_PATH } from "@/lib/constants";
-import { withBasePath } from "@/lib/url-helpers";
+import { fetchApi } from "@/lib/url-helpers";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";
@@ -43,8 +43,8 @@ export function SecurityKeySignInForm() {
     setLoading(true);
     try {
       // 1. Get options with allowCredentials for this email
-      const optionsRes = await fetch(
-        withBasePath(API_PATH.AUTH_PASSKEY_OPTIONS_EMAIL),
+      const optionsRes = await fetchApi(
+        API_PATH.AUTH_PASSKEY_OPTIONS_EMAIL,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -66,8 +66,8 @@ export function SecurityKeySignInForm() {
       );
 
       // 3. Verify (reuses existing /api/auth/passkey/verify)
-      const verifyRes = await fetch(
-        withBasePath(API_PATH.AUTH_PASSKEY_VERIFY),
+      const verifyRes = await fetchApi(
+        API_PATH.AUTH_PASSKEY_VERIFY,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

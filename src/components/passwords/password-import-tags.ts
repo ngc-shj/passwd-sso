@@ -1,4 +1,5 @@
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface ExistingTag {
   id: string;
@@ -6,7 +7,7 @@ interface ExistingTag {
   color: string | null;
 }
 
-type FetchLike = typeof fetch;
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 export function resolveEntryTagIds(entry: ParsedEntry, tagNameToId: Map<string, string>): string[] {
   return Array.from(
@@ -23,7 +24,7 @@ export function resolveEntryTagIds(entry: ParsedEntry, tagNameToId: Map<string, 
 export async function resolveTagNameToIdForImport(
   entries: ParsedEntry[],
   tagsPath: string,
-  fetcher: FetchLike = fetch
+  fetcher: FetchLike = fetchApi
 ): Promise<Map<string, string>> {
   const tagNameToId = new Map<string, string>();
 

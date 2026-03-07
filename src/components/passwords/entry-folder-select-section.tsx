@@ -69,8 +69,6 @@ export function EntryFolderSelectSection({
 }: EntryFolderSelectSectionProps) {
   const t = useTranslations("PasswordForm");
 
-  if (folders.length === 0) return null;
-
   const sortedFolders = flattenFolderTree(folders);
 
   return (
