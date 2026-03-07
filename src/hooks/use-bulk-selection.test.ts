@@ -87,13 +87,13 @@ describe("useBulkSelection", () => {
     );
 
     // Initial: 0 selected
-    expect(onChange).toHaveBeenCalledWith(0, false);
+    expect(onChange).toHaveBeenCalledWith(0, false, false);
 
     act(() => result.current.toggleSelectOne("a", true));
-    expect(onChange).toHaveBeenCalledWith(1, false);
+    expect(onChange).toHaveBeenCalledWith(1, false, false);
 
     act(() => result.current.toggleSelectOne("b", true));
-    expect(onChange).toHaveBeenCalledWith(2, true);
+    expect(onChange).toHaveBeenCalledWith(2, true, false);
   });
 
   it("allSelected is false when entryIds is empty", () => {
@@ -113,6 +113,59 @@ describe("useBulkSelection", () => {
 
     act(() => result.current.clearSelection());
     expect(result.current.selectedIds.size).toBe(0);
+  });
+
+  it("caps toggleSelectOne at maxSelection", () => {
+    const ids = ["a", "b", "c", "d", "e"];
+    const { result } = renderHook(() =>
+      useBulkSelection({ entryIds: ids, selectionMode: true, maxSelection: 3 }),
+    );
+
+    act(() => result.current.toggleSelectOne("a", true));
+    act(() => result.current.toggleSelectOne("b", true));
+    act(() => result.current.toggleSelectOne("c", true));
+    expect(result.current.selectedIds.size).toBe(3);
+    expect(result.current.atLimit).toBe(true);
+
+    // Attempting to add a 4th should be ignored
+    act(() => result.current.toggleSelectOne("d", true));
+    expect(result.current.selectedIds.size).toBe(3);
+    expect(result.current.selectedIds.has("d")).toBe(false);
+
+    // Unchecking should allow adding again
+    act(() => result.current.toggleSelectOne("a", false));
+    expect(result.current.atLimit).toBe(false);
+    act(() => result.current.toggleSelectOne("d", true));
+    expect(result.current.selectedIds.has("d")).toBe(true);
+  });
+
+  it("caps toggleSelectAll at maxSelection", () => {
+    const ids = ["a", "b", "c", "d", "e"];
+    const { result } = renderHook(() =>
+      useBulkSelection({ entryIds: ids, selectionMode: true, maxSelection: 3 }),
+    );
+
+    act(() => result.current.toggleSelectAll(true));
+    expect(result.current.selectedIds.size).toBe(3);
+    // allSelected means "all selectable items selected" (capped by maxSelection)
+    expect(result.current.allSelected).toBe(true);
+    expect(result.current.atLimit).toBe(true);
+  });
+
+  it("notifies onSelectedCountChange with atLimit=true", () => {
+    const onChange = vi.fn();
+    const { result } = renderHook(() =>
+      useBulkSelection({
+        entryIds: ["a", "b", "c"],
+        selectionMode: true,
+        maxSelection: 2,
+        onSelectedCountChange: onChange,
+      }),
+    );
+
+    act(() => result.current.toggleSelectOne("a", true));
+    act(() => result.current.toggleSelectOne("b", true));
+    expect(onChange).toHaveBeenCalledWith(2, true, true);
   });
 
   it("exposes toggleSelectAll via selectAllRef", () => {

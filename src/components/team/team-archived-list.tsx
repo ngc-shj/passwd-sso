@@ -58,7 +58,7 @@ interface TeamArchivedListProps {
   refreshKey: number;
   sortBy?: EntrySortOption;
   selectionMode?: boolean;
-  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
 }
 
 export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedListProps>(
@@ -197,7 +197,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
 
   // Bulk selection — uses sortedFiltered (not entries) to fix reconciliation bug
   const entryIds = sortedFiltered.map((e) => e.id);
-  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+  const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,
     selectionMode: effectiveSelectionMode,
     selectAllRef: ref,
@@ -402,6 +402,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
               <Checkbox
                 className="mt-4"
                 checked={selectedIds.has(entry.id)}
+                disabled={atLimit && !selectedIds.has(entry.id)}
                 onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
                 aria-label={tl("selectEntry", { title: entry.title })}
               />

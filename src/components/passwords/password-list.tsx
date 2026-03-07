@@ -87,7 +87,7 @@ interface PasswordListProps {
   sortBy?: SortOption;
   onDataChange?: () => void;
   selectionMode?: boolean;
-  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
   selectAllRef?: React.Ref<PasswordListHandle>;
 }
 
@@ -224,7 +224,7 @@ export function PasswordList({
 
   // Bulk selection (replaces selectedIds state, reconcile/reset/count effects, useImperativeHandle)
   const entryIds = entries.map((e) => e.id);
-  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+  const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,
     selectionMode,
     selectAllRef,
@@ -345,6 +345,7 @@ export function PasswordList({
             <Checkbox
               className="mt-4"
               checked={selectedIds.has(entry.id)}
+              disabled={atLimit && !selectedIds.has(entry.id)}
               onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
               aria-label={t("selectEntry", { title: entry.title })}
             />

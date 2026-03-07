@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useCallback, useImperativeHandle } from "react";
 import type { Ref } from "react";
 import {
+  MAX_BULK_SELECTION,
   reconcileSelectedIds,
   toggleSelectAllIds,
   toggleSelectOneId,
@@ -19,13 +20,16 @@ export interface UseBulkSelectionOptions {
   selectionMode: boolean;
   /** Optional ref for parent to call toggleSelectAll imperatively */
   selectAllRef?: Ref<BulkSelectionHandle>;
+  /** Maximum number of items that can be selected (defaults to MAX_BULK_SELECTION) */
+  maxSelection?: number;
   /** Notify parent of selection count changes */
-  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
 }
 
 export interface UseBulkSelectionReturn {
   selectedIds: Set<string>;
   allSelected: boolean;
+  atLimit: boolean;
   toggleSelectOne: (id: string, checked: boolean) => void;
   toggleSelectAll: (checked: boolean) => void;
   clearSelection: () => void;
@@ -35,6 +39,7 @@ export function useBulkSelection({
   entryIds,
   selectionMode,
   selectAllRef,
+  maxSelection = MAX_BULK_SELECTION,
   onSelectedCountChange,
 }: UseBulkSelectionOptions): UseBulkSelectionReturn {
   const [rawSelectedIds, setRawSelectedIds] = useState<Set<string>>(new Set());
@@ -54,26 +59,28 @@ export function useBulkSelection({
     [rawSelectedIds, entryIds],
   );
 
+  const selectableCount = Math.min(entryIds.length, maxSelection);
   const allSelected =
-    entryIds.length > 0 && selectedIds.size === entryIds.length;
+    selectableCount > 0 && selectedIds.size === selectableCount;
+  const atLimit = selectedIds.size >= maxSelection;
 
   // Notify parent of count / allSelected changes
   useEffect(() => {
-    onSelectedCountChange?.(selectedIds.size, allSelected);
-  }, [selectedIds.size, allSelected, onSelectedCountChange]);
+    onSelectedCountChange?.(selectedIds.size, allSelected, atLimit);
+  }, [selectedIds.size, allSelected, atLimit, onSelectedCountChange]);
 
   const toggleSelectOne = useCallback(
     (id: string, checked: boolean) => {
-      setRawSelectedIds((prev) => toggleSelectOneId(prev, id, checked));
+      setRawSelectedIds((prev) => toggleSelectOneId(prev, id, checked, maxSelection));
     },
-    [],
+    [maxSelection],
   );
 
   const toggleSelectAll = useCallback(
     (checked: boolean) => {
-      setRawSelectedIds(toggleSelectAllIds(entryIds, checked));
+      setRawSelectedIds(toggleSelectAllIds(entryIds, checked, maxSelection));
     },
-    [entryIds],
+    [entryIds, maxSelection],
   );
 
   const clearSelection = useCallback(() => {
@@ -90,6 +97,7 @@ export function useBulkSelection({
   return {
     selectedIds,
     allSelected,
+    atLimit,
     toggleSelectOne,
     toggleSelectAll,
     clearSelection,
