@@ -51,4 +51,49 @@ Initial review
 
 ## Resolution Status
 
-(pending fixes)
+### F-1: Missing team membership verification (CRITICAL)
+- **Status**: RESOLVED (round 2)
+- **Action**: Added `requireTeamMember(session.user.id, teamId)` with `TeamAuthError` catch
+- **Modified file**: `src/app/api/watchtower/alert/route.ts:69-78`
+
+### F-2: Notification sent only to requesting user
+- **Status**: ACCEPTED (design decision)
+- **Action**: No code change — requesting user triggered the scan
+
+### S-1: Missing team membership verification (CRITICAL)
+- **Status**: RESOLVED (round 2)
+- **Action**: Same fix as F-1
+
+### S-2: Whitespace-only teamId accepted
+- **Status**: RESOLVED (round 2)
+- **Action**: Changed to `z.string().trim().min(1)`
+- **Modified file**: `src/app/api/watchtower/alert/route.ts:29`
+
+### T-1: No test for unauthorized team access
+- **Status**: RESOLVED (round 2)
+- **Action**: Added "returns 404 when user is not a team member" test with side-effect assertions
+- **Modified file**: `src/app/api/watchtower/alert/route.test.ts:169-175`
+
+### T-2: Missing response status assertion
+- **Status**: RESOLVED (round 2)
+- **Action**: Added `expect(res.status).toBe(200)` to team rate limit key test
+- **Modified file**: `src/app/api/watchtower/alert/route.test.ts:180`
+
+---
+
+## Round 2 Review
+
+Date: 2026-03-07
+Review round: 2
+
+### Changes from Previous Round
+All round 1 findings addressed: requireTeamMember() authorization added, whitespace validation tightened, test coverage expanded.
+
+### Functionality Findings
+No findings.
+
+### Security Findings
+No findings.
+
+### Testing Findings
+No findings.
