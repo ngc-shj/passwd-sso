@@ -145,4 +145,85 @@ describe("POST /api/vault/setup", () => {
     }));
     expect(res.status).toBe(400);
   });
+
+  // KDF metadata tests
+
+  it("stores KDF params when provided", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const bodyWithKdf = {
+      ...validBody,
+      kdfParams: { kdfType: 0, kdfIterations: 600_000 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithKdf }));
+    expect(res.status).toBe(201);
+    expect(mockPrismaUser.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kdfType: 0,
+          kdfIterations: 600_000,
+        }),
+      }),
+    );
+  });
+
+  it("applies default KDF params when omitted", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: validBody }));
+    expect(res.status).toBe(201);
+    expect(mockPrismaUser.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kdfType: 0,
+          kdfIterations: 600_000,
+        }),
+      }),
+    );
+  });
+
+  it("rejects kdfType=1 (Argon2id not yet supported)", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const bodyWithArgon2 = {
+      ...validBody,
+      kdfParams: { kdfType: 1, kdfIterations: 600_000 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithArgon2 }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects kdfIterations below 600_000 (downgrade prevention)", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const bodyWithLowIter = {
+      ...validBody,
+      kdfParams: { kdfType: 0, kdfIterations: 100_000 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithLowIter }));
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects float kdfIterations", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const bodyWithFloat = {
+      ...validBody,
+      kdfParams: { kdfType: 0, kdfIterations: 600_000.5 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithFloat }));
+    expect(res.status).toBe(400);
+  });
+
+  it("accepts custom high iteration count", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const bodyWithHighIter = {
+      ...validBody,
+      kdfParams: { kdfType: 0, kdfIterations: 1_000_000 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithHighIter }));
+    expect(res.status).toBe(201);
+    expect(mockPrismaUser.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kdfIterations: 1_000_000,
+        }),
+      }),
+    );
+  });
 });

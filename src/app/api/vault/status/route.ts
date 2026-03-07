@@ -29,6 +29,8 @@ async function handleGET(request: NextRequest) {
         vaultSetupAt: true,
         accountSalt: true,
         keyVersion: true,
+        kdfType: true,
+        kdfIterations: true,
         recoveryKeySetAt: true,
       },
     }),
@@ -42,6 +44,8 @@ async function handleGET(request: NextRequest) {
     setupRequired: !user.vaultSetupAt,
     accountSalt: user.accountSalt,
     keyVersion: user.keyVersion,
+    kdfType: user.kdfType,
+    kdfIterations: user.kdfIterations,
     hasRecoveryKey: !!user.recoveryKeySetAt,
   });
 }

@@ -15,6 +15,13 @@ export const runtime = "nodejs";
 
 const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
 
+// P0: Only PBKDF2 (kdfType=0) is accepted.
+// Argon2id (kdfType=1) support added in P2.
+const kdfParamsSchema = z.object({
+  kdfType: z.literal(0),
+  kdfIterations: z.number().int().min(600_000).max(10_000_000),
+}).optional();
+
 const setupSchema = z.object({
   encryptedSecretKey: z.string().min(1),
   secretKeyIv: z.string().regex(/^[0-9a-f]{24}$/), // 12 bytes hex
@@ -32,6 +39,8 @@ const setupSchema = z.object({
   encryptedEcdhPrivateKey: z.string().min(1),
   ecdhPrivateKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
   ecdhPrivateKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
+  // KDF metadata (optional — server applies defaults if omitted)
+  kdfParams: kdfParamsSchema,
 });
 
 /**
@@ -86,6 +95,10 @@ async function handlePOST(request: Request) {
 
   const data = parsed.data;
 
+  // Apply KDF defaults if client omits kdfParams
+  const kdfType = data.kdfParams?.kdfType ?? 0;
+  const kdfIterations = data.kdfParams?.kdfIterations ?? 600_000;
+
   // Hash authHash with a server-side salt for storage
   // serverHash = SHA-256(authHash + serverSalt)
   const serverSalt = randomBytes(32).toString("hex");
@@ -106,6 +119,8 @@ async function handlePOST(request: Request) {
           masterPasswordServerHash: serverHash,
           masterPasswordServerSalt: serverSalt,
           keyVersion: 1,
+          kdfType,
+          kdfIterations,
           passphraseVerifierHmac: hmacVerifier(data.verifierHash),
           passphraseVerifierVersion: VERIFIER_VERSION,
           // ECDH key pair for team E2E encryption
@@ -128,7 +143,10 @@ async function handlePOST(request: Request) {
     ]),
   );
 
-  getLogger().info({ userId: session.user.id }, "vault.setup.success");
+  getLogger().info(
+    { userId: session.user.id, kdfType, kdfIterations },
+    "vault.setup.success",
+  );
 
   return NextResponse.json({ success: true }, { status: 201 });
 }

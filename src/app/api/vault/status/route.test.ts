@@ -50,6 +50,8 @@ describe("GET /api/vault/status", () => {
       vaultSetupAt: null,
       accountSalt: null,
       keyVersion: 0,
+      kdfType: 0,
+      kdfIterations: 600_000,
       recoveryKeySetAt: null,
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
@@ -59,6 +61,8 @@ describe("GET /api/vault/status", () => {
       setupRequired: true,
       accountSalt: null,
       keyVersion: 0,
+      kdfType: 0,
+      kdfIterations: 600_000,
       hasRecoveryKey: false,
     });
   });
@@ -68,6 +72,8 @@ describe("GET /api/vault/status", () => {
       vaultSetupAt: new Date(),
       accountSalt: "a".repeat(64),
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       recoveryKeySetAt: null,
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
@@ -76,6 +82,8 @@ describe("GET /api/vault/status", () => {
     expect(json.setupRequired).toBe(false);
     expect(json.accountSalt).toBe("a".repeat(64));
     expect(json.keyVersion).toBe(1);
+    expect(json.kdfType).toBe(0);
+    expect(json.kdfIterations).toBe(600_000);
     expect(json.hasRecoveryKey).toBe(false);
   });
 
@@ -84,6 +92,8 @@ describe("GET /api/vault/status", () => {
       vaultSetupAt: new Date(),
       accountSalt: "a".repeat(64),
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       recoveryKeySetAt: new Date(),
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
@@ -101,12 +111,16 @@ describe("GET /api/vault/status", () => {
       vaultSetupAt: new Date(),
       accountSalt: "b".repeat(64),
       keyVersion: 1,
+      kdfType: 0,
+      kdfIterations: 600_000,
       recoveryKeySetAt: null,
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.accountSalt).toBe("b".repeat(64));
+    expect(json.kdfType).toBe(0);
+    expect(json.kdfIterations).toBe(600_000);
     expect(mockWithUserTenantRls).toHaveBeenCalledWith("token-user-id", expect.any(Function));
   });
 });

@@ -82,16 +82,32 @@ function textDecode(buf: ArrayBuffer): string {
   return new TextDecoder().decode(buf);
 }
 
+// ─── KDF Parameters ─────────────────────────────────────────────
+
+export interface KdfParams {
+  kdfType: number;     // 0 = PBKDF2-SHA256, 1 = Argon2id (future)
+  kdfIterations: number;
+}
+
+/** Default KDF params matching hardcoded constants */
+export const DEFAULT_KDF_PARAMS: KdfParams = {
+  kdfType: 0,
+  kdfIterations: PBKDF2_ITERATIONS,
+} as const;
+
 // ─── Key Derivation ─────────────────────────────────────────────
 
 /**
  * Derive a wrapping key from the user's passphrase + account salt.
- * Uses PBKDF2 with 600,000 iterations of SHA-256.
+ * Accepts optional KDF params from server; falls back to hardcoded defaults.
  */
-export async function deriveWrappingKey(
+export async function deriveWrappingKeyWithParams(
   passphrase: string,
-  accountSalt: Uint8Array
+  accountSalt: Uint8Array,
+  params?: KdfParams
 ): Promise<CryptoKey> {
+  const iterations = params?.kdfIterations ?? PBKDF2_ITERATIONS;
+
   const keyMaterial = await crypto.subtle.importKey(
     "raw",
     textEncode(passphrase),
@@ -104,7 +120,7 @@ export async function deriveWrappingKey(
     {
       name: "PBKDF2",
       salt: toArrayBuffer(accountSalt),
-      iterations: PBKDF2_ITERATIONS,
+      iterations,
       hash: "SHA-256",
     },
     keyMaterial,
@@ -112,6 +128,18 @@ export async function deriveWrappingKey(
     false, // non-extractable
     ["encrypt", "decrypt"]
   );
+}
+
+/**
+ * Derive a wrapping key from the user's passphrase + account salt.
+ * Uses PBKDF2 with 600,000 iterations of SHA-256.
+ * @deprecated Use deriveWrappingKeyWithParams() for new code.
+ */
+export async function deriveWrappingKey(
+  passphrase: string,
+  accountSalt: Uint8Array
+): Promise<CryptoKey> {
+  return deriveWrappingKeyWithParams(passphrase, accountSalt);
 }
 
 /**

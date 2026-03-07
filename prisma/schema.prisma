@@ -81,6 +81,15 @@ model User {
   masterPasswordServerSalt String?   @map("master_password_server_salt") @db.VarChar(64)
   keyVersion               Int       @default(0) @map("key_version")
 
+  // KDF metadata — per-user params for future algorithm migration
+  kdfType        Int @default(0) @map("kdf_type")
+  // 0 = PBKDF2-SHA256 (only value accepted in P0)
+  kdfIterations  Int @default(600000) @map("kdf_iterations")
+  kdfMemory      Int? @map("kdf_memory")
+  // Argon2id memory cost in KiB (future, P2)
+  kdfParallelism Int? @map("kdf_parallelism")
+  // Argon2id parallelism (future, P2)
+
   // HMAC(pepper, SHA-256(PBKDF2(passphrase, verifierSalt))) — 本人確認用、暗号鍵導出には使わない
   passphraseVerifierHmac    String? @map("passphrase_verifier_hmac") @db.VarChar(64)
   passphraseVerifierVersion Int     @default(1) @map("passphrase_verifier_version")
