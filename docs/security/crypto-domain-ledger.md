@@ -20,6 +20,7 @@ Last verified: 2026-03-07
 | Emergency access | `passwd-sso-emergency-v1` | Derive AES key from ECDH shared secret for emergency access | Random (32 bytes per escrow) | crypto-emergency.ts | `HKDF_INFO_BY_VERSION[1]` |
 | Recovery key wrap | `passwd-sso-recovery-wrap-v1` | Derive AES key from recovery key for secret key wrapping | Random (32 bytes per wrap) | crypto-recovery.ts | `HKDF_RECOVERY_WRAP_INFO` |
 | Recovery verifier | `passwd-sso-recovery-verifier-v1` | Derive verification hash from recovery key | Empty (32 bytes) | crypto-recovery.ts | `HKDF_RECOVERY_VERIFIER_INFO` |
+| Item entry enc | `passwd-sso-item-enc-v1` | Derive AES key from ItemKey for entry/attachment encryption | Empty (32 bytes) | crypto-team.ts | `HKDF_ITEM_ENC_INFO` |
 
 ---
 
@@ -28,9 +29,10 @@ Last verified: 2026-03-07
 | Scope | Code constant | Purpose | Fields | File |
 |---|---|---|---|---|
 | `PV` | `SCOPE_PERSONAL` | Personal vault entry encryption | userId, entryId | crypto-aad.ts |
-| `OV` | `SCOPE_TEAM` | Team vault entry encryption | teamId, entryId, vaultType | crypto-aad.ts |
+| `OV` | `SCOPE_TEAM` | Team vault entry encryption | teamId, entryId, vaultType, itemKeyVersion | crypto-aad.ts |
 | `AT` | `SCOPE_ATTACHMENT` | Attachment encryption | entryId, attachmentId | crypto-aad.ts |
 | `OK` | `AAD_SCOPE_TEAM_KEY` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion | crypto-team.ts |
+| `IK` | `SCOPE_ITEM_KEY` | ItemKey wrapping | teamId, entryId, teamKeyVersion | crypto-aad.ts |
 
 ### AAD Binary Format (common)
 
@@ -67,7 +69,10 @@ AAD version: `1` for all scopes.
 
 | Parameter | Value | Scope |
 |---|---|---|
-| PBKDF2 iterations | 600,000 | Vault wrapping + verifier |
+| PBKDF2 iterations | 600,000 | Vault wrapping (kdfType=0) + verifier |
+| Argon2id iterations | 3 | Vault wrapping (kdfType=1) |
+| Argon2id memory | 65,536 KiB (64 MiB) | Vault wrapping (kdfType=1) |
+| Argon2id parallelism | 4 | Vault wrapping (kdfType=1) |
 | AES key length | 256 bits | All encryption |
 | GCM IV length | 12 bytes (96 bits) | All AES-GCM |
 | HKDF hash | SHA-256 | All HKDF derivations |
@@ -79,12 +84,15 @@ AAD version: `1` for all scopes.
 
 ```
 Personal Vault:
-  passphrase + accountSalt -> PBKDF2(600k) -> wrappingKey
+  passphrase + accountSalt -> PBKDF2(600k) -> wrappingKey   [kdfType=0]
+  passphrase + accountSalt -> Argon2id(t=3,m=64M,p=4) -> wrappingKey  [kdfType=1]
   secretKey -> HKDF("passwd-sso-enc-v1", salt=empty) -> encryptionKey
   secretKey -> HKDF("passwd-sso-auth-v1", salt=empty) -> authKey
 
 Team Vault:
-  teamKey -> HKDF("passwd-sso-team-enc-v1", salt=empty) -> teamEncryptionKey
+  teamKey -> HKDF("passwd-sso-team-enc-v1", salt=empty) -> teamEncryptionKey (legacy, itemKeyVersion=0)
+  teamKey -> AES-GCM-wrap(ItemKey, AAD="IK") -> encryptedItemKey (itemKeyVersion>=1)
+  ItemKey -> HKDF("passwd-sso-item-enc-v1", salt=empty) -> itemEncryptionKey (itemKeyVersion>=1)
   ECDH(ephemeral, member) -> HKDF("passwd-sso-team-v1", salt=random) -> teamWrappingKey
   secretKey -> HKDF("passwd-sso-ecdh-v1", salt=empty) -> ecdhWrappingKey
 

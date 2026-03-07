@@ -145,6 +145,8 @@ describe("GET /api/vault/unlock/data", () => {
       keyVersion: 1,
       kdfType: 0,
       kdfIterations: 600_000,
+      kdfMemory: null,
+      kdfParallelism: null,
       hasVerifier: false,
       verificationArtifact: {
         ciphertext: "v-cipher",

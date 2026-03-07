@@ -85,14 +85,24 @@ function textDecode(buf: ArrayBuffer): string {
 // ─── KDF Parameters ─────────────────────────────────────────────
 
 export interface KdfParams {
-  kdfType: number;     // 0 = PBKDF2-SHA256, 1 = Argon2id (future)
+  kdfType: number;     // 0 = PBKDF2-SHA256, 1 = Argon2id
   kdfIterations: number;
+  kdfMemory?: number;       // Argon2id memory cost in KiB
+  kdfParallelism?: number;  // Argon2id parallelism
 }
 
 /** Default KDF params matching hardcoded constants */
 export const DEFAULT_KDF_PARAMS: KdfParams = {
   kdfType: 0,
   kdfIterations: PBKDF2_ITERATIONS,
+} as const;
+
+/** Argon2id KDF params for new vault setup */
+export const ARGON2ID_KDF_PARAMS: KdfParams = {
+  kdfType: 1,
+  kdfIterations: 3,
+  kdfMemory: 65536,      // 64 MiB
+  kdfParallelism: 4,
 } as const;
 
 // ─── Key Derivation ─────────────────────────────────────────────
@@ -106,9 +116,16 @@ export async function deriveWrappingKeyWithParams(
   accountSalt: Uint8Array,
   params?: KdfParams
 ): Promise<CryptoKey> {
-  if (params?.kdfType !== undefined && params.kdfType !== 0) {
-    throw new Error(`Unsupported kdfType: ${params.kdfType}. Only PBKDF2 (0) is supported.`);
+  const kdfType = params?.kdfType ?? 0;
+
+  if (kdfType === 1) {
+    return deriveWrappingKeyArgon2id(passphrase, accountSalt, params!);
   }
+
+  if (kdfType !== 0) {
+    throw new Error(`Unsupported kdfType: ${kdfType}`);
+  }
+
   const iterations = params?.kdfIterations ?? PBKDF2_ITERATIONS;
   if (iterations < PBKDF2_ITERATIONS) {
     throw new Error(`kdfIterations ${iterations} is below minimum ${PBKDF2_ITERATIONS}`);
@@ -132,6 +149,57 @@ export async function deriveWrappingKeyWithParams(
     keyMaterial,
     { name: "AES-GCM", length: AES_KEY_LENGTH },
     false, // non-extractable
+    ["encrypt", "decrypt"]
+  );
+}
+
+/**
+ * Hash passphrase with Argon2id. Returns 32-byte raw hash.
+ * Uses argon2-browser (WASM) in browser, can be overridden for Node/tests.
+ */
+export async function argon2idHash(
+  passphrase: string,
+  salt: Uint8Array,
+  time: number,
+  mem: number,
+  parallelism: number
+): Promise<Uint8Array> {
+  // Dynamic import with variable to prevent Turbopack/webpack from statically
+  // resolving argon2-browser during SSR bundling (WASM + fs are browser-only)
+  const moduleName = "argon2-browser";
+  const { default: argon2 } = await import(/* webpackIgnore: true */ moduleName);
+  const result = await argon2.hash({
+    pass: passphrase,
+    salt,
+    time,
+    mem,
+    parallelism,
+    hashLen: 32,
+    type: argon2.ArgonType.Argon2id,
+  });
+  return result.hash;
+}
+
+async function deriveWrappingKeyArgon2id(
+  passphrase: string,
+  accountSalt: Uint8Array,
+  params: KdfParams
+): Promise<CryptoKey> {
+  const memory = params.kdfMemory ?? 65536;
+  const parallelism = params.kdfParallelism ?? 4;
+  const iterations = params.kdfIterations ?? 3;
+
+  if (memory < 16384) throw new Error(`Argon2id memory ${memory} KiB is below minimum 16384`);
+  if (parallelism < 1) throw new Error(`Argon2id parallelism ${parallelism} is below minimum 1`);
+  if (iterations < 1) throw new Error(`Argon2id iterations ${iterations} is below minimum 1`);
+
+  const hash = await argon2idHash(passphrase, accountSalt, iterations, memory, parallelism);
+
+  return crypto.subtle.importKey(
+    "raw",
+    toArrayBuffer(hash),
+    { name: "AES-GCM" },
+    false,
     ["encrypt", "decrypt"]
   );
 }

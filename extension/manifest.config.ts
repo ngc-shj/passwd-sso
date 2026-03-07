@@ -77,6 +77,9 @@ export default defineManifest({
       matches: ["https://*/*", "http://localhost/*"],
     },
   ],
+  content_security_policy: {
+    extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'",
+  },
   icons: {
     "16": "public/icons/icon-16.png",
     "48": "public/icons/icon-48.png",

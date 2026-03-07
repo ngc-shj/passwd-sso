@@ -25,16 +25,28 @@ const encryptedFieldSchema = z.object({
   authTag: z.string().length(32),
 });
 
+// v0 (legacy): full re-encrypt of blob + overview
+const rotateEntryV0Schema = z.object({
+  id: z.string().min(1),
+  itemKeyVersion: z.literal(0).default(0),
+  encryptedBlob: encryptedFieldSchema,
+  encryptedOverview: encryptedFieldSchema,
+  aadVersion: z.number().int().min(1),
+});
+
+// v1+ (ItemKey): only rewrap the ItemKey with new TeamKey
+const rotateEntryV1Schema = z.object({
+  id: z.string().min(1),
+  itemKeyVersion: z.number().int().min(1),
+  encryptedItemKey: encryptedFieldSchema,
+  aadVersion: z.number().int().min(1),
+});
+
+const rotateEntrySchema = z.union([rotateEntryV1Schema, rotateEntryV0Schema]);
+
 const rotateKeySchema = z.object({
   newTeamKeyVersion: z.number().int().min(2).max(10_000),
-  entries: z.array(
-    z.object({
-      id: z.string().min(1),
-      encryptedBlob: encryptedFieldSchema,
-      encryptedOverview: encryptedFieldSchema,
-      aadVersion: z.number().int().min(1),
-    })
-  ).max(1000),
+  entries: z.array(rotateEntrySchema).max(1000),
   memberKeys: z.array(
     z.object({
       userId: z.string().min(1),
@@ -156,21 +168,32 @@ export async function POST(req: NextRequest, { params }: Params) {
       // a stale version, but the ID set verification above guarantees completeness (F-29).
       // Note: Prisma interactive transaction auto-rolls back on any thrown error.
         await Promise.all(entries.map(async (entry) => {
+          const data: Record<string, unknown> = {
+            aadVersion: entry.aadVersion,
+            teamKeyVersion: newTeamKeyVersion,
+          };
+
+          if (entry.itemKeyVersion >= 1 && "encryptedItemKey" in entry) {
+            // ItemKey entry: rewrap ItemKey only
+            data.encryptedItemKey = entry.encryptedItemKey.ciphertext;
+            data.itemKeyIv = entry.encryptedItemKey.iv;
+            data.itemKeyAuthTag = entry.encryptedItemKey.authTag;
+          } else if ("encryptedBlob" in entry) {
+            // Legacy entry: full re-encrypt
+            data.encryptedBlob = entry.encryptedBlob.ciphertext;
+            data.blobIv = entry.encryptedBlob.iv;
+            data.blobAuthTag = entry.encryptedBlob.authTag;
+            data.encryptedOverview = entry.encryptedOverview.ciphertext;
+            data.overviewIv = entry.encryptedOverview.iv;
+            data.overviewAuthTag = entry.encryptedOverview.authTag;
+          }
+
           const result = await tx.teamPasswordEntry.updateMany({
             where: {
               id: entry.id,
               teamId: teamId,
             },
-            data: {
-              encryptedBlob: entry.encryptedBlob.ciphertext,
-              blobIv: entry.encryptedBlob.iv,
-              blobAuthTag: entry.encryptedBlob.authTag,
-              encryptedOverview: entry.encryptedOverview.ciphertext,
-              overviewIv: entry.encryptedOverview.iv,
-              overviewAuthTag: entry.encryptedOverview.authTag,
-              aadVersion: entry.aadVersion,
-              teamKeyVersion: newTeamKeyVersion,
-            },
+            data,
           });
           if (result.count !== 1) {
             throw new Error("ENTRY_COUNT_MISMATCH");

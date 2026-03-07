@@ -61,6 +61,7 @@ export async function GET(
         filename: true,
         contentType: true,
         sizeBytes: true,
+        encryptionMode: true,
         createdAt: true,
       },
       orderBy: { createdAt: "desc" },
@@ -144,6 +145,7 @@ export async function POST(
   const sizeBytes = formData.get("sizeBytes") as string | null;
   const teamKeyVersionStr = formData.get("teamKeyVersion") as string | null;
   const aadVersionStr = formData.get("aadVersion") as string | null;
+  const encryptionModeStr = formData.get("encryptionMode") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
     return NextResponse.json(
@@ -206,6 +208,15 @@ export async function POST(
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
   const teamKeyVersion = teamKeyVersionStr ? parseInt(teamKeyVersionStr, 10) : 1;
+  const encryptionMode = encryptionModeStr ? parseInt(encryptionModeStr, 10) : 0;
+
+  // Validate encryptionMode: 0 = TeamKey direct, 1 = ItemKey
+  if (encryptionMode !== 0 && encryptionMode !== 1) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR },
+      { status: 400 }
+    );
+  }
 
   // Validate teamKeyVersion matches current team key version (S-20/F-23)
   const team = await withTeamTenantRls(teamId, async () =>
@@ -240,6 +251,7 @@ export async function POST(
           authTag,
           aadVersion,
           keyVersion: teamKeyVersion,
+          encryptionMode,
           tenantId: entry.tenantId,
           teamPasswordEntryId: id,
           createdById: session.user.id,

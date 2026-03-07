@@ -16,12 +16,18 @@ export const runtime = "nodejs";
 
 const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
 
-// P0: Only PBKDF2 (kdfType=0) is accepted.
-// Argon2id (kdfType=1) support added in P2.
-const kdfParamsSchema = z.object({
-  kdfType: z.literal(0),
-  kdfIterations: z.number().int().min(600_000).max(10_000_000),
-}).optional();
+const kdfParamsSchema = z.discriminatedUnion("kdfType", [
+  z.object({
+    kdfType: z.literal(0),
+    kdfIterations: z.number().int().min(600_000).max(10_000_000),
+  }),
+  z.object({
+    kdfType: z.literal(1),
+    kdfIterations: z.number().int().min(1).max(100),
+    kdfMemory: z.number().int().min(16384).max(4194304), // 16 MiB – 4 GiB in KiB
+    kdfParallelism: z.number().int().min(1).max(16),
+  }),
+]).optional();
 
 const setupSchema = z.object({
   encryptedSecretKey: z.string().min(1),
@@ -99,6 +105,8 @@ async function handlePOST(request: NextRequest) {
   // Apply KDF defaults if client omits kdfParams
   const kdfType = data.kdfParams?.kdfType ?? 0;
   const kdfIterations = data.kdfParams?.kdfIterations ?? 600_000;
+  const kdfMemory = data.kdfParams && "kdfMemory" in data.kdfParams ? data.kdfParams.kdfMemory : null;
+  const kdfParallelism = data.kdfParams && "kdfParallelism" in data.kdfParams ? data.kdfParams.kdfParallelism : null;
 
   // Hash authHash with a server-side salt for storage
   // serverHash = SHA-256(authHash + serverSalt)
@@ -122,6 +130,8 @@ async function handlePOST(request: NextRequest) {
           keyVersion: 1,
           kdfType,
           kdfIterations,
+          kdfMemory,
+          kdfParallelism,
           passphraseVerifierHmac: hmacVerifier(data.verifierHash),
           passphraseVerifierVersion: VERIFIER_VERSION,
           // ECDH key pair for team E2E encryption
@@ -149,7 +159,7 @@ async function handlePOST(request: NextRequest) {
     scope: "PERSONAL",
     action: "VAULT_SETUP",
     userId: session.user.id,
-    metadata: { kdfType, kdfIterations },
+    metadata: { kdfType, kdfIterations, ...(kdfMemory != null ? { kdfMemory, kdfParallelism } : {}) },
     ip,
     userAgent,
   });

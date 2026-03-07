@@ -3,6 +3,7 @@ import {
   entryTypeSchema,
   createE2EPasswordSchema,
   updateE2EPasswordSchema,
+  updateTeamE2EPasswordSchema,
   createShareLinkSchema,
   teamMemberKeySchema,
   generatePasswordSchema,
@@ -348,5 +349,71 @@ describe("generatePasswordSchema", () => {
     expect(result.success).toBe(true);
     expect(result.data!.includeChars).toBe("");
     expect(result.data!.excludeChars).toBe("");
+  });
+});
+
+describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", () => {
+  const encField = { ciphertext: "a".repeat(10), iv: "a".repeat(24), authTag: "b".repeat(32) };
+
+  it("accepts metadata-only update without itemKeyVersion", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({ isArchived: true });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts itemKeyVersion=0 without encryptedItemKey", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      encryptedBlob: encField,
+      encryptedOverview: encField,
+      aadVersion: 1,
+      teamKeyVersion: 1,
+      itemKeyVersion: 0,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts itemKeyVersion=1 with encryptedItemKey", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      encryptedBlob: encField,
+      encryptedOverview: encField,
+      aadVersion: 1,
+      teamKeyVersion: 1,
+      itemKeyVersion: 1,
+      encryptedItemKey: encField,
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects itemKeyVersion>=1 without encryptedItemKey", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      encryptedBlob: encField,
+      encryptedOverview: encField,
+      aadVersion: 1,
+      teamKeyVersion: 1,
+      itemKeyVersion: 1,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects itemKeyVersion=0 with encryptedItemKey", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      encryptedBlob: encField,
+      encryptedOverview: encField,
+      aadVersion: 1,
+      teamKeyVersion: 1,
+      itemKeyVersion: 0,
+      encryptedItemKey: encField,
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects encryptedItemKey when itemKeyVersion is omitted", () => {
+    const result = updateTeamE2EPasswordSchema.safeParse({
+      encryptedBlob: encField,
+      encryptedOverview: encField,
+      aadVersion: 1,
+      teamKeyVersion: 1,
+      encryptedItemKey: encField,
+    });
+    expect(result.success).toBe(false);
   });
 });
