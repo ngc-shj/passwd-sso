@@ -8,6 +8,7 @@ RUN npm ci --ignore-scripts
 # Stage 2: Build the application
 FROM node:20-alpine AS builder
 WORKDIR /app
+RUN apk upgrade --no-cache zlib
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
 COPY --from=deps /app/node_modules ./node_modules
@@ -18,6 +19,7 @@ RUN npx next build
 # Stage 3: Production image
 FROM node:20-alpine AS runner
 WORKDIR /app
+RUN apk upgrade --no-cache zlib
 
 ENV NODE_ENV=production
 
@@ -33,7 +35,7 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 
 # Install prisma CLI + all deps for migrate deploy
-RUN npm install prisma --no-save
+RUN npm install prisma --no-save --ignore-scripts
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
 COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg

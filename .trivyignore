@@ -1,0 +1,4 @@
+# Trivy ignore file
+# Add CVE IDs (one per line) to suppress known vulnerabilities
+# that cannot be fixed by upgrading dependencies.
+# Example: CVE-2024-00000
