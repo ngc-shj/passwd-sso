@@ -1,0 +1,22 @@
+# Trivy ignore file
+# These CVEs exist in Node.js 20's bundled npm (usr/local/lib/node_modules/npm/)
+# and cannot be fixed by application-level dependency management.
+# They will be resolved when the base image (node:20-alpine) is updated.
+
+# cross-spawn ReDoS (in npm's bundled copy, not app deps)
+CVE-2024-21538
+
+# glob command injection (npm internal)
+CVE-2025-64756
+
+# minimatch ReDoS (npm internal)
+CVE-2026-26996
+CVE-2026-27903
+CVE-2026-27904
+
+# node-tar path traversal (npm internal)
+CVE-2026-23745
+CVE-2026-23950
+CVE-2026-24842
+CVE-2026-26960
+CVE-2026-29786
