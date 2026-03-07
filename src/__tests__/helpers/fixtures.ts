@@ -132,6 +132,43 @@ export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
   };
 }
 
+export function makeSession(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "session-1",
+    sessionToken: "token-abc",
+    userId: "test-user-id",
+    tenantId: "tenant-1",
+    expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    ...overrides,
+  };
+}
+
+export function makeExtensionToken(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "ext-token-1",
+    userId: "test-user-id",
+    tenantId: "tenant-1",
+    tokenHash: "a".repeat(64),
+    revokedAt: null as Date | null,
+    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
+
+export function makeApiKey(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "api-key-1",
+    userId: "test-user-id",
+    tenantId: "tenant-1",
+    name: "Test API Key",
+    tokenHash: "b".repeat(64),
+    revokedAt: null as Date | null,
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
+
 export function makeTeamTag(overrides: Record<string, unknown> = {}) {
   return {
     id: "team-tag-1",

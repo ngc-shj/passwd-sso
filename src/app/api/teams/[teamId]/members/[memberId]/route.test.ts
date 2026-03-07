@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimExternalMapping, mockTransaction, mockRequireTeamPermission, mockIsRoleAbove, TeamAuthError, mockWithTeamTenantRls, mockInvalidateUserSessions, mockLogger, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -28,6 +28,9 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeamMemberKey, mockPrismaScimE
     mockIsRoleAbove: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockInvalidateUserSessions: vi.fn().mockResolvedValue({ sessions: 1, extensionTokens: 0, apiKeys: 0 }),
+    mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    mockLogAudit: vi.fn(),
   };
 });
 
@@ -48,6 +51,16 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/user-session-invalidation", () => ({
+  invalidateUserSessions: mockInvalidateUserSessions,
+}));
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => mockLogger,
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+  extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 
 import { PUT, DELETE } from "./route";
@@ -372,5 +385,119 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockPrismaTeamMember.delete).toHaveBeenCalledWith({
       where: { id: MEMBER_ID },
     });
+  });
+
+  it("triggers invalidateUserSessions with tenantId on member removal", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockTransaction.mockResolvedValue([]);
+
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(mockInvalidateUserSessions).toHaveBeenCalledWith("target-user", { tenantId: "tenant-1" });
+  });
+
+  it("returns 200 even if session invalidation fails", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockTransaction.mockResolvedValue([]);
+    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+
+    const res = await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("logs error when session invalidation fails", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockTransaction.mockResolvedValue([]);
+    const dbError = new Error("db error");
+    mockInvalidateUserSessions.mockRejectedValue(dbError);
+
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(mockLogger.error).toHaveBeenCalledWith(
+      { userId: "target-user", error: dbError },
+      "session-invalidation-failed",
+    );
+  });
+
+  it("includes sessionInvalidationFailed in audit metadata on failure", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockTransaction.mockResolvedValue([]);
+    mockInvalidateUserSessions.mockRejectedValue(new Error("db error"));
+
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ sessionInvalidationFailed: true }),
+      }),
+    );
+  });
+
+  it("includes invalidation counts in audit metadata on success", async () => {
+    mockPrismaTeamMember.findUnique.mockResolvedValue({
+      id: MEMBER_ID,
+      teamId: TEAM_ID,
+      tenantId: "tenant-1",
+      userId: "target-user",
+      role: TEAM_ROLE.MEMBER,
+      deactivatedAt: null,
+    });
+    mockTransaction.mockResolvedValue([]);
+    mockInvalidateUserSessions.mockResolvedValue({ sessions: 2, extensionTokens: 1, apiKeys: 0 });
+
+    await DELETE(
+      createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`),
+      createParams({ teamId: TEAM_ID, memberId: MEMBER_ID }),
+    );
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          sessions: 2,
+          extensionTokens: 1,
+          apiKeys: 0,
+        }),
+      }),
+    );
   });
 });
