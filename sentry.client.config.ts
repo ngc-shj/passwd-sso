@@ -10,7 +10,7 @@ if (dsn) {
     replaysSessionSampleRate: 0,
     replaysOnErrorSampleRate: 0,
     beforeSend(event) {
-      return scrubSentryEvent(event as unknown as Record<string, unknown>) as typeof event;
+      return scrubSentryEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
     },
   });
 }

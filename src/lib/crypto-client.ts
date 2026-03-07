@@ -164,7 +164,10 @@ export async function argon2idHash(
   mem: number,
   parallelism: number
 ): Promise<Uint8Array> {
-  const { default: argon2 } = await import("argon2-browser");
+  // Dynamic import with variable to prevent Turbopack/webpack from statically
+  // resolving argon2-browser during SSR bundling (WASM + fs are browser-only)
+  const moduleName = "argon2-browser";
+  const { default: argon2 } = await import(/* webpackIgnore: true */ moduleName);
   const result = await argon2.hash({
     pass: passphrase,
     salt,

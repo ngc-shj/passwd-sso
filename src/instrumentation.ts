@@ -11,7 +11,7 @@ export async function register() {
 }
 
 export async function onRequestError(
-  ...args: Parameters<NonNullable<typeof import("next/server").NextConfig["onRequestError"]>>
+  ...args: Parameters<import("next/dist/server/instrumentation/types").InstrumentationOnRequestError>
 ) {
   const dsn = process.env.SENTRY_DSN;
   if (!dsn) return;

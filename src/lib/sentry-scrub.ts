@@ -64,28 +64,30 @@ export function scrubObject(obj: unknown, depth = 0): unknown {
  * Exported for use in sentry.client.config.ts and instrumentation.ts.
  */
 export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T {
+  const e = event as Record<string, unknown>;
+
   // Scrub extra data
-  if (event.extra && typeof event.extra === "object") {
-    event.extra = scrubObject(event.extra) as typeof event.extra;
+  if (e.extra && typeof e.extra === "object") {
+    e.extra = scrubObject(e.extra);
   }
 
   // Scrub contexts
-  if (event.contexts && typeof event.contexts === "object") {
-    event.contexts = scrubObject(event.contexts) as typeof event.contexts;
+  if (e.contexts && typeof e.contexts === "object") {
+    e.contexts = scrubObject(e.contexts);
   }
 
   // Scrub breadcrumbs
-  if (Array.isArray(event.breadcrumbs)) {
-    event.breadcrumbs = event.breadcrumbs.map((bc: Record<string, unknown>) => {
+  if (Array.isArray(e.breadcrumbs)) {
+    e.breadcrumbs = (e.breadcrumbs as Array<Record<string, unknown>>).map((bc) => {
       if (bc.data && typeof bc.data === "object") {
         return { ...bc, data: scrubObject(bc.data) };
       }
       return bc;
-    }) as typeof event.breadcrumbs;
+    });
   }
 
   // Scrub request body (may be object or serialized JSON string)
-  const request = event.request as Record<string, unknown> | undefined;
+  const request = e.request as Record<string, unknown> | undefined;
   if (request?.data) {
     if (typeof request.data === "object") {
       request.data = scrubObject(request.data);
@@ -100,24 +102,22 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
   }
 
   // Scrub exception stack local variables
-  if (Array.isArray(event.exception)) {
-    const exc = event.exception as Array<Record<string, unknown>>;
-    const values = exc;
-    for (const frame of values) {
+  if (Array.isArray(e.exception)) {
+    for (const frame of e.exception as Array<Record<string, unknown>>) {
       if (frame.values && Array.isArray(frame.values)) {
         for (const v of frame.values as Array<Record<string, unknown>>) {
           if (v.stacktrace && typeof v.stacktrace === "object") {
-            v.stacktrace = scrubObject(v.stacktrace) as typeof v.stacktrace;
+            v.stacktrace = scrubObject(v.stacktrace);
           }
         }
       }
     }
-  } else if (event.exception && typeof event.exception === "object") {
-    const exc = event.exception as Record<string, unknown>;
+  } else if (e.exception && typeof e.exception === "object") {
+    const exc = e.exception as Record<string, unknown>;
     if (Array.isArray(exc.values)) {
       for (const v of exc.values as Array<Record<string, unknown>>) {
         if (v.stacktrace && typeof v.stacktrace === "object") {
-          v.stacktrace = scrubObject(v.stacktrace) as typeof v.stacktrace;
+          v.stacktrace = scrubObject(v.stacktrace);
         }
       }
     }
