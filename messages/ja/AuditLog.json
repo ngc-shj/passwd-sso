@@ -62,6 +62,8 @@
   "MASTER_KEY_ROTATION": "マスターキーローテーション",
   "SESSION_REVOKE": "セッションを取り消し",
   "SESSION_REVOKE_ALL": "他のすべてのセッションを取り消し",
+  "SESSION_EVICTED": "セッション強制終了（同時接続制限）",
+  "ENTRY_HISTORY_REENCRYPT": "履歴エントリーの再暗号化",
   "TEAM_E2E_MIGRATION": "チーム E2E 移行",
   "TEAM_KEY_ROTATION": "チームキーローテーション",
   "TEAM_MEMBER_KEY_DISTRIBUTE": "メンバー鍵を配布",

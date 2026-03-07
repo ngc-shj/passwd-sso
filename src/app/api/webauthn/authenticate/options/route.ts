@@ -70,7 +70,8 @@ async function handlePOST(req: NextRequest) {
   await redis.set(
     `webauthn:challenge:authenticate:${userId}`,
     options.challenge,
-    { EX: CHALLENGE_TTL_SECONDS },
+    "EX",
+    CHALLENGE_TTL_SECONDS,
   );
 
   // Derive PRF salt for vault unlock

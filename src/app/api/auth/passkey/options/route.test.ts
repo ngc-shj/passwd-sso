@@ -83,7 +83,8 @@ describe("POST /api/auth/passkey/options", () => {
     expect(mockRedisSet).toHaveBeenCalledWith(
       expect.stringMatching(/^webauthn:challenge:signin:[0-9a-f]{32}$/),
       "test-challenge-base64url",
-      { EX: 300 },
+      "EX",
+      300,
     );
   });
 

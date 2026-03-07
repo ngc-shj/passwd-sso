@@ -62,7 +62,7 @@ export async function authorizeWebAuthn(
   const redis = getRedis();
   if (!redis) return null;
 
-  const challenge = await redis.getDel(
+  const challenge = await redis.getdel(
     `webauthn:challenge:signin:${challengeId}`,
   );
   if (!challenge) return null;

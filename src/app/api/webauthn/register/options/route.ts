@@ -64,7 +64,8 @@ async function handlePOST(_req: NextRequest) {
   await redis.set(
     `webauthn:challenge:register:${userId}`,
     options.challenge,
-    { EX: CHALLENGE_TTL_SECONDS },
+    "EX",
+    CHALLENGE_TTL_SECONDS,
   );
 
   // Derive PRF salt so the client can use it during credential creation

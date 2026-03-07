@@ -91,7 +91,7 @@ async function handlePOST(req: NextRequest) {
   } = parsed.data;
 
   // Consume challenge from Redis (separate key from authentication)
-  const challenge = await redis.getDel(`webauthn:challenge:register:${userId}`);
+  const challenge = await redis.getdel(`webauthn:challenge:register:${userId}`);
   if (!challenge) {
     return NextResponse.json(
       { error: API_ERROR.VALIDATION_ERROR, details: "Challenge expired or already used" },
