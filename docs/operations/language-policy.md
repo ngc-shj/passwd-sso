@@ -38,9 +38,8 @@ Use English as the single source of truth for implementation-heavy or developer-
   - `docs/security/cors-policy.md`
   - `docs/security/license-policy.md`
   - `docs/security/security-review.md`
-- Review artifacts and working notes:
-  - `docs/review/**`
-  - `docs/temp/**`
+- Archived review artifacts and working notes:
+  - `docs/archive/**`
 
 ## Authoring Rules
 
