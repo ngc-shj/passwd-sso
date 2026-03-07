@@ -198,27 +198,27 @@ npm run build
 
 ## インポート用サンプル
 
-- passwd-sso JSON サンプル: [`docs/samples/passwd-sso.json`](docs/samples/passwd-sso.json)
-- passwd-sso CSV サンプル: [`docs/samples/passwd-sso.csv`](docs/samples/passwd-sso.csv)
+- passwd-sso JSON サンプル: [`docs/assets/passwd-sso.json`](docs/assets/passwd-sso.json)
+- passwd-sso CSV サンプル: [`docs/assets/passwd-sso.csv`](docs/assets/passwd-sso.csv)
 
 ## スクリーンショット
 
 ### ダッシュボード
 
-![passwd-sso ダッシュボード](docs/images/passwd-sso-dashboard.png)
+![passwd-sso ダッシュボード](docs/assets/passwd-sso-dashboard.png)
 
 ### エントリー詳細（AWS 3フィールド例）
 
-![passwd-sso エントリー詳細](docs/images/passwd-sso-entry-detail.png)
+![passwd-sso エントリー詳細](docs/assets/passwd-sso-entry-detail.png)
 
 ### パスワードジェネレーター
 
-![passwd-sso パスワードジェネレーター](docs/images/passwd-sso-password-generator.png)
+![passwd-sso パスワードジェネレーター](docs/assets/passwd-sso-password-generator.png)
 
 ### 拡張スクリーンショット（AWS IAM 3フィールド補完）
 
-![passwd-sso 拡張 aws 補完 1](docs/images/passwd-sso-extension-aws-fill-1.png)
-![passwd-sso 拡張 aws 補完 2](docs/images/passwd-sso-extension-aws-fill-2.png)
+![passwd-sso 拡張 aws 補完 1](docs/assets/passwd-sso-extension-aws-fill-1.png)
+![passwd-sso 拡張 aws 補完 2](docs/assets/passwd-sso-extension-aws-fill-2.png)
 
 ## スクリプト
 

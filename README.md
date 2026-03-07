@@ -198,27 +198,27 @@ npm run build
 
 ## Import Samples
 
-- passwd-sso JSON sample: [`docs/samples/passwd-sso.json`](docs/samples/passwd-sso.json)
-- passwd-sso CSV sample: [`docs/samples/passwd-sso.csv`](docs/samples/passwd-sso.csv)
+- passwd-sso JSON sample: [`docs/assets/passwd-sso.json`](docs/assets/passwd-sso.json)
+- passwd-sso CSV sample: [`docs/assets/passwd-sso.csv`](docs/assets/passwd-sso.csv)
 
 ## Screenshots
 
 ### Dashboard
 
-![passwd-sso dashboard](docs/images/passwd-sso-dashboard.png)
+![passwd-sso dashboard](docs/assets/passwd-sso-dashboard.png)
 
 ### Entry Detail (AWS 3-field example)
 
-![passwd-sso entry detail](docs/images/passwd-sso-entry-detail.png)
+![passwd-sso entry detail](docs/assets/passwd-sso-entry-detail.png)
 
 ### Password Generator
 
-![passwd-sso password generator](docs/images/passwd-sso-password-generator.png)
+![passwd-sso password generator](docs/assets/passwd-sso-password-generator.png)
 
 ### Extension Screenshots (AWS IAM 3-field fill)
 
-![passwd-sso extension aws fill 1](docs/images/passwd-sso-extension-aws-fill-1.png)
-![passwd-sso extension aws fill 2](docs/images/passwd-sso-extension-aws-fill-2.png)
+![passwd-sso extension aws fill 1](docs/assets/passwd-sso-extension-aws-fill-1.png)
+![passwd-sso extension aws fill 2](docs/assets/passwd-sso-extension-aws-fill-2.png)
 
 ## Scripts
 
