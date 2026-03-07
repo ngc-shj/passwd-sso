@@ -1,5 +1,15 @@
 import type { NextConfig } from "next";
+import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
+
+// Build metadata for reproducible build tracking
+function getGitSha(): string {
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf-8" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 const rawBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "";
 if (rawBasePath && !/^\/[\w-]+(?:\/[\w-]+)*$/.test(rawBasePath)) {
@@ -12,6 +22,11 @@ const nextConfig: NextConfig = {
   basePath: rawBasePath || undefined,
   output: "standalone",
   serverExternalPackages: ["file-type", "argon2-browser"],
+
+  env: {
+    NEXT_PUBLIC_BUILD_SHA: getGitSha(),
+    NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
+  },
 
   // Security headers
   async headers() {
