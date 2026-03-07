@@ -55,7 +55,6 @@ describe("audit log i18n keys", () => {
       "bulkArchiveMeta",
       "bulkUnarchiveMeta",
       "bulkRestoreMeta",
-      "fromAction",
       "importMeta",
       "exportMeta",
       "exportMetaTeam",

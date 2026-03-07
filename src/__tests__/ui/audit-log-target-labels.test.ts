@@ -27,8 +27,7 @@ describe("audit log target labels", () => {
       expect(page).toContain('t("bulkArchiveMeta"');
       expect(page).toContain('t("bulkUnarchiveMeta"');
       expect(page).toContain('t("bulkRestoreMeta"');
-      expect(page).toContain("meta?.parentAction");
-      expect(page).toContain('t("fromAction"');
+      // import source/parentAction are export-only (not shown in UI)
     }
   });
 

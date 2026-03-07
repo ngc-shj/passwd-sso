@@ -133,7 +133,7 @@ export async function POST(
   const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS);
 
   // Create the reset record (teamId: null for tenant-level resets)
-  await withTenantRls(prisma, actor.tenantId, async () =>
+  const resetRecord = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.adminVaultReset.create({
       data: {
         tenantId: actor.tenantId,
@@ -154,6 +154,7 @@ export async function POST(
     tenantId: actor.tenantId,
     targetType: "User",
     targetId: targetUserId,
+    metadata: { resetId: resetRecord.id },
     ...extractRequestMeta(req),
   });
 
