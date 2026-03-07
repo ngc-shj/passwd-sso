@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, Fingerprint } from "lucide-react";
 import { isWebAuthnSupported, startPasskeyAuthentication, hexEncode } from "@/lib/webauthn-client";
 import { API_PATH } from "@/lib/constants";
-import { withBasePath } from "@/lib/url-helpers";
+import { fetchApi } from "@/lib/url-helpers";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";
@@ -30,8 +30,8 @@ export function PasskeySignInButton() {
 
     try {
       // 1. Get discoverable credential options from server (includes prfSalt)
-      const optionsRes = await fetch(
-        withBasePath(API_PATH.AUTH_PASSKEY_OPTIONS),
+      const optionsRes = await fetchApi(
+        API_PATH.AUTH_PASSKEY_OPTIONS,
         { method: "POST" },
       );
 
@@ -54,8 +54,8 @@ export function PasskeySignInButton() {
       // Auth.js Credentials provider only supports JWT sessions, which is
       // incompatible with this app's database session strategy. This custom
       // route creates a database session directly.
-      const verifyRes = await fetch(
-        withBasePath(API_PATH.AUTH_PASSKEY_VERIFY),
+      const verifyRes = await fetchApi(
+        API_PATH.AUTH_PASSKEY_VERIFY,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

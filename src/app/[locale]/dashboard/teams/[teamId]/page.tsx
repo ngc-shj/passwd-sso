@@ -36,6 +36,7 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
+import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
@@ -112,6 +113,7 @@ export default function TeamDashboardPage({
   const trashListRef = useRef<TeamTrashListHandle>(null);
   const [childSelectedCount, setChildSelectedCount] = useState(0);
   const [childAllSelected, setChildAllSelected] = useState(false);
+  const [childAtLimit, setChildAtLimit] = useState(false);
   const isTeamArchive = activeScope === "archive";
   const isTeamTrash = activeScope === "trash";
   const isTeamFavorites = activeScope === "favorites";
@@ -532,7 +534,7 @@ export default function TeamDashboardPage({
 
   // Bulk selection for main password list
   const entryIds = sortedFiltered.map((e) => e.id);
-  const { selectedIds, allSelected, toggleSelectOne, toggleSelectAll, clearSelection } =
+  const { selectedIds, allSelected, atLimit, toggleSelectOne, toggleSelectAll, clearSelection } =
     useBulkSelection({
       entryIds,
       selectionMode,
@@ -622,6 +624,11 @@ export default function TeamDashboardPage({
                       ? tl("selectedCount", { count: isTeamSpecialView ? childSelectedCount : selectedIds.size })
                       : tDash("selectAll")}
                   </span>
+                  {(isTeamSpecialView ? childAtLimit : atLimit) && (
+                    <span className="text-xs text-amber-600 whitespace-nowrap">
+                      {tl("selectionLimit", { max: MAX_BULK_SELECTION })}
+                    </span>
+                  )}
                 </div>
                 <Button
                   variant="outline"
@@ -744,9 +751,10 @@ export default function TeamDashboardPage({
             refreshKey={refreshKey}
             sortBy={sortBy}
             selectionMode={selectionMode}
-            onSelectedCountChange={(count, allSel) => {
+            onSelectedCountChange={(count, allSel, limit) => {
               setChildSelectedCount(count);
               setChildAllSelected(allSel);
+              setChildAtLimit(limit);
             }}
           />
         ) : isTeamTrash ? (
@@ -757,9 +765,10 @@ export default function TeamDashboardPage({
             refreshKey={refreshKey}
             sortBy={sortBy}
             selectionMode={selectionMode}
-            onSelectedCountChange={(count, allSel) => {
+            onSelectedCountChange={(count, allSel, limit) => {
               setChildSelectedCount(count);
               setChildAllSelected(allSel);
+              setChildAtLimit(limit);
             }}
           />
         ) : loading ? (
@@ -786,6 +795,7 @@ export default function TeamDashboardPage({
                   <Checkbox
                     className="mt-4"
                     checked={selectedIds.has(entry.id)}
+                    disabled={atLimit && !selectedIds.has(entry.id)}
                     onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
                     aria-label={tl("selectEntry", { title: entry.title })}
                   />

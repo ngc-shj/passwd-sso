@@ -69,8 +69,6 @@ export function EntryFolderSelectSection({
 }: EntryFolderSelectSectionProps) {
   const t = useTranslations("PasswordForm");
 
-  if (folders.length === 0) return null;
-
   const sortedFolders = flattenFolderTree(folders);
 
   return (
@@ -82,23 +80,27 @@ export function EntryFolderSelectSection({
         </Label>
         <p className="text-xs text-muted-foreground">{t("folderHint")}</p>
       </div>
-      <Select
-        value={value ?? "__none__"}
-        onValueChange={(next) => onChange(next === "__none__" ? null : next)}
-      >
-        <SelectTrigger>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__none__">{t("noFolder")}</SelectItem>
-          {sortedFolders.map((folder) => (
-            <SelectItem key={folder.id} value={folder.id}>
-              {withIndent(folder, sortedFolders)}
-              {folder.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
+      {folders.length === 0 ? (
+        <p className="text-sm text-amber-600">{t("noFoldersYet")}</p>
+      ) : (
+        <Select
+          value={value ?? "__none__"}
+          onValueChange={(next) => onChange(next === "__none__" ? null : next)}
+        >
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">{t("noFolder")}</SelectItem>
+            {sortedFolders.map((folder) => (
+              <SelectItem key={folder.id} value={folder.id}>
+                {withIndent(folder, sortedFolders)}
+                {folder.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
     </EntrySectionCard>
   );
 }

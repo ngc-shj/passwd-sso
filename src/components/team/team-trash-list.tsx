@@ -56,7 +56,7 @@ interface TeamTrashListProps {
   refreshKey: number;
   sortBy?: EntrySortOption;
   selectionMode?: boolean;
-  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
 }
 
 export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>(
@@ -174,7 +174,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   const sortedFilteredIds = sortedFiltered.map((e) => e.id);
 
-  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+  const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds: sortedFilteredIds,
     selectionMode: effectiveSelectionMode,
     selectAllRef: ref,
@@ -251,6 +251,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
               {effectiveSelectionMode && (
                 <Checkbox
                   checked={selectedIds.has(entry.id)}
+                  disabled={atLimit && !selectedIds.has(entry.id)}
                   onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
                   aria-label={tl("selectEntry", { title: entry.title })}
                 />

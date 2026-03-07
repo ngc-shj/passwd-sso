@@ -45,7 +45,7 @@ export type TrashListHandle = BulkSelectionHandle;
 interface TrashListProps {
   refreshKey: number;
   selectionMode?: boolean;
-  onSelectedCountChange?: (count: number, allSelected: boolean) => void;
+  onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
   selectAllRef?: React.Ref<TrashListHandle>;
 }
 
@@ -107,7 +107,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
   }, [fetchTrash, refreshKey]);
 
   const entryIds = entries.map((e) => e.id);
-  const { selectedIds, toggleSelectOne, clearSelection } = useBulkSelection({
+  const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,
     selectionMode,
     selectAllRef,
@@ -228,6 +228,7 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
               {selectionMode && (
                 <Checkbox
                   checked={selectedIds.has(entry.id)}
+                  disabled={atLimit && !selectedIds.has(entry.id)}
                   onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
                   aria-label={tl("selectEntry", { title: entry.title })}
                 />

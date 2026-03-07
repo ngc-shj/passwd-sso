@@ -1,4 +1,5 @@
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface ExistingFolder {
   id: string;
@@ -6,7 +7,7 @@ interface ExistingFolder {
   parentId: string | null;
 }
 
-type FetchLike = typeof fetch;
+type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 const PATH_SEPARATOR = " / ";
 const MAX_IMPORT_FOLDERS = 200;
@@ -43,7 +44,7 @@ function findFolder(
 export async function resolveFolderPathsForImport(
   entries: ParsedEntry[],
   foldersApiPath: string,
-  fetcher: FetchLike = fetch,
+  fetcher: FetchLike = fetchApi,
 ): Promise<Map<string, string>> {
   const pathToId = new Map<string, string>();
 

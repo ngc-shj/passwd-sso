@@ -25,6 +25,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, CheckSquare, Landmark, KeySquare, FolderOpen, Tag, Terminal } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { usePersonalTags } from "@/hooks/use-personal-tags";
 import { buildFolderPath } from "@/lib/folder-path";
@@ -54,6 +55,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedCount, setSelectedCount] = useState(0);
   const [allSelected, setAllSelected] = useState(false);
+  const [selectionAtLimit, setSelectionAtLimit] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const passwordListRef = useRef<PasswordListHandle>(null);
   const trashListRef = useRef<TrashListHandle>(null);
@@ -136,9 +138,10 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     setSelectionMode(false);
   }
 
-  const handleSelectedCountChange = useCallback((count: number, isAllSelected: boolean) => {
+  const handleSelectedCountChange = useCallback((count: number, isAllSelected: boolean, isAtLimit: boolean) => {
     setSelectedCount(count);
     setAllSelected(isAllSelected);
+    setSelectionAtLimit(isAtLimit);
   }, []);
 
   const activeListRef = isTrash ? trashListRef : passwordListRef;
@@ -247,6 +250,11 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
                       ? tl("selectedCount", { count: selectedCount })
                       : t("selectAll")}
                   </span>
+                  {selectionAtLimit && (
+                    <span className="text-xs text-amber-600 whitespace-nowrap">
+                      {tl("selectionLimit", { max: MAX_BULK_SELECTION })}
+                    </span>
+                  )}
                 </div>
                 <Button
                   variant="outline"

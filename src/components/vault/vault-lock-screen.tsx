@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
+import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
@@ -19,7 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
-import { Fingerprint, Loader2, Lock, Eye, EyeOff } from "lucide-react";
+import { Fingerprint, Loader2, Lock, LogIn, Eye, EyeOff } from "lucide-react";
 
 /** @internal Exported for testing */
 export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
@@ -37,6 +38,7 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
+  const router = useRouter();
   const { unlock, unlockWithPasskey, unlockWithStoredPrf } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
@@ -46,6 +48,7 @@ export function VaultLockScreen() {
   const [error, setError] = useState("");
   const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
   const [prfChecked, setPrfChecked] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   // Check if user has PRF-capable passkeys
   useEffect(() => {
@@ -80,6 +83,9 @@ export function VaultLockScreen() {
     } catch (err) {
       if (err instanceof VaultUnlockError) {
         switch (err.code) {
+          case API_ERROR.UNAUTHORIZED:
+            setSessionExpired(true);
+            return;
           case API_ERROR.ACCOUNT_LOCKED:
             setError(formatLockedUntil(err.lockedUntil, t));
             break;
@@ -112,6 +118,9 @@ export function VaultLockScreen() {
     } catch (err) {
       if (err instanceof VaultUnlockError) {
         switch (err.code) {
+          case API_ERROR.UNAUTHORIZED:
+            setSessionExpired(true);
+            return;
           case API_ERROR.ACCOUNT_LOCKED:
             setError(formatLockedUntil(err.lockedUntil, t));
             break;
@@ -163,6 +172,10 @@ export function VaultLockScreen() {
         })
         .catch((err) => {
           if (err instanceof VaultUnlockError) {
+            if (err.code === API_ERROR.UNAUTHORIZED) {
+              setSessionExpired(true);
+              return;
+            }
             setError(formatLockedUntil(err.lockedUntil, t));
           } else {
             setError(tw("unlockError"));
@@ -174,6 +187,31 @@ export function VaultLockScreen() {
     // do NOT auto-trigger a separate ceremony — the user can manually unlock
     // with passphrase or click the passkey unlock button.
   }, [prfChecked, hasPrfPasskeys, handlePasskeyUnlock, unlockWithStoredPrf, t, tw]);
+
+  if (sessionExpired) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
+        <Card className="w-full max-w-sm rounded-xl border">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <LogIn className="h-6 w-6 text-muted-foreground" />
+            </div>
+            <CardTitle>{t("sessionExpired")}</CardTitle>
+            <CardDescription>{t("sessionExpiredDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button
+              className="w-full"
+              onClick={() => router.push("/auth/signin")}
+            >
+              <LogIn className="h-4 w-4 mr-2" />
+              {t("goToSignIn")}
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
