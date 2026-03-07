@@ -13,6 +13,8 @@ import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { invalidateUserSessions } from "@/lib/user-session-invalidation";
+import { getLogger } from "@/lib/logger";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -205,6 +207,18 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
   const { resource, userId, auditAction } = resultResponse;
 
+  // Session invalidation on deactivation (fail-open)
+  let invalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let sessionInvalidationFailed = false;
+  if (auditAction === AUDIT_ACTION.SCIM_USER_DEACTIVATE) {
+    try {
+      invalidationCounts = await invalidateUserSessions(userId, { tenantId });
+    } catch (error) {
+      sessionInvalidationFailed = true;
+      getLogger().error({ userId, error }, "session-invalidation-failed");
+    }
+  }
+
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
@@ -212,7 +226,13 @@ export async function PUT(req: NextRequest, { params }: Params) {
     tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
-    metadata: { active, externalId, name: name?.formatted },
+    metadata: {
+      active,
+      externalId,
+      name: name?.formatted,
+      ...(invalidationCounts ?? {}),
+      ...(sessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+    },
     ...extractRequestMeta(req),
   });
 
@@ -307,6 +327,18 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
   const { resource, userId, auditAction } = resultResponse;
 
+  // Session invalidation on deactivation (fail-open)
+  let patchInvalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let patchSessionInvalidationFailed = false;
+  if (auditAction === AUDIT_ACTION.SCIM_USER_DEACTIVATE) {
+    try {
+      patchInvalidationCounts = await invalidateUserSessions(userId, { tenantId });
+    } catch (error) {
+      patchSessionInvalidationFailed = true;
+      getLogger().error({ userId, error }, "session-invalidation-failed");
+    }
+  }
+
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
@@ -314,7 +346,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
-    metadata: { active: patchResult.active, name: patchResult.name },
+    metadata: {
+      active: patchResult.active,
+      name: patchResult.name,
+      ...(patchInvalidationCounts ?? {}),
+      ...(patchSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+    },
     ...extractRequestMeta(req),
   });
 
@@ -386,6 +423,16 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
   const { userId, member } = resultResponse;
 
+  // Session invalidation after deletion (fail-open)
+  let deleteInvalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
+  let deleteSessionInvalidationFailed = false;
+  try {
+    deleteInvalidationCounts = await invalidateUserSessions(userId, { tenantId });
+  } catch (error) {
+    deleteSessionInvalidationFailed = true;
+    getLogger().error({ userId, error }, "session-invalidation-failed");
+  }
+
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
@@ -393,7 +440,11 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
-    metadata: { email: member.user?.email ?? null },
+    metadata: {
+      email: member.user?.email ?? null,
+      ...(deleteInvalidationCounts ?? {}),
+      ...(deleteSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
+    },
     ...extractRequestMeta(req),
   });
 

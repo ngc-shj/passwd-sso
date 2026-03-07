@@ -37,6 +37,7 @@ const ALLOWED_FILES = new Set([
   "src/lib/webauthn-authorize.ts", // WebAuthn credential verification (cross-tenant lookup)
   "src/app/api/auth/passkey/verify/route.ts", // passkey sign-in session creation
   "src/app/api/auth/passkey/options/email/route.ts", // email-based passkey allowCredentials lookup
+  "src/lib/user-session-invalidation.ts", // session/token invalidation on member removal
 ]);
 
 function getSourceFiles() {
