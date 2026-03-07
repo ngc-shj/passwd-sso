@@ -554,12 +554,16 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
 
   // After analysis completes, check for new breaches and send alert.
   useEffect(() => {
-    if (!report || scope.type !== "personal") return;
+    if (!report) return;
+
+    const lsKey = scope.type === "team"
+      ? `${LS_LAST_KNOWN_BREACH_COUNT}:${scope.teamId}`
+      : LS_LAST_KNOWN_BREACH_COUNT;
 
     const currentBreachCount = report.breached.length;
     let lastKnown = 0;
     try {
-      const stored = window.localStorage.getItem(LS_LAST_KNOWN_BREACH_COUNT);
+      const stored = window.localStorage.getItem(lsKey);
       if (stored) lastKnown = Number(stored) || 0;
     } catch {
       // localStorage unavailable
@@ -567,23 +571,25 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
 
     // Always update lastKnownBreachCount with current value
     try {
-      window.localStorage.setItem(LS_LAST_KNOWN_BREACH_COUNT, String(currentBreachCount));
+      window.localStorage.setItem(lsKey, String(currentBreachCount));
     } catch {
       // localStorage unavailable
     }
 
     if (hasNewBreaches(currentBreachCount, lastKnown)) {
       const newBreachCount = currentBreachCount - lastKnown;
+      const payload: Record<string, unknown> = { newBreachCount };
+      if (scope.type === "team") payload.teamId = scope.teamId;
       // Fire alert API — fire-and-forget
       void fetchApi(API_PATH.WATCHTOWER_ALERT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ newBreachCount }),
+        body: JSON.stringify(payload),
       }).catch(() => {
         // Alert send failure should not affect UI
       });
     }
-  }, [report, scope.type]);
+  }, [report, scope]);
 
   return {
     report,
