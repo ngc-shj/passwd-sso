@@ -214,7 +214,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 
 | Action | Scope | targetType | metadata | UI display |
 |--------|-------|------------|----------|------------|
-| `WATCHTOWER_ALERT_SENT` | PERSONAL | — | `{ alertType, count }` | alertType, count |
+| `WATCHTOWER_ALERT_SENT` | PERSONAL/TEAM | — | `{ newBreachCount, teamId? }` | newBreachCount |
 
 ### Admin (`group:admin`)
 
