@@ -106,6 +106,9 @@ export async function deriveWrappingKeyWithParams(
   accountSalt: Uint8Array,
   params?: KdfParams
 ): Promise<CryptoKey> {
+  if (params?.kdfType !== undefined && params.kdfType !== 0) {
+    throw new Error(`Unsupported kdfType: ${params.kdfType}. Only PBKDF2 (0) is supported.`);
+  }
   const iterations = params?.kdfIterations ?? PBKDF2_ITERATIONS;
 
   const keyMaterial = await crypto.subtle.importKey(

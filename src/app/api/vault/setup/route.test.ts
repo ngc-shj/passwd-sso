@@ -28,6 +28,10 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(),
+  extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
+}));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
@@ -208,6 +212,26 @@ describe("POST /api/vault/setup", () => {
     };
     const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body: bodyWithFloat }));
     expect(res.status).toBe(400);
+  });
+
+  it("rejects kdfIterations above 10_000_000", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const body = {
+      ...validBody,
+      kdfParams: { kdfType: 0, kdfIterations: 20_000_000 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body }));
+    expect(res.status).toBe(400);
+  });
+
+  it("ignores unknown kdfMemory/kdfParallelism fields", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({ vaultSetupAt: null, tenantId: "t1" });
+    const body = {
+      ...validBody,
+      kdfParams: { kdfType: 0, kdfIterations: 600_000, kdfMemory: 65536, kdfParallelism: 4 },
+    };
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/vault/setup", { body }));
+    expect(res.status).toBe(201);
   });
 
   it("accepts custom high iteration count", async () => {

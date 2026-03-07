@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes } from "crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
@@ -7,6 +7,7 @@ import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -48,7 +49,7 @@ const setupSchema = z.object({
  * Initial vault setup: store encrypted secret key and auth hash.
  * Called once when the user first sets a passphrase.
  */
-async function handlePOST(request: Request) {
+async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -142,6 +143,16 @@ async function handlePOST(request: Request) {
       }),
     ]),
   );
+
+  const { ip, userAgent } = extractRequestMeta(request);
+  logAudit({
+    scope: "PERSONAL",
+    action: "VAULT_SETUP",
+    userId: session.user.id,
+    metadata: { kdfType, kdfIterations },
+    ip,
+    userAgent,
+  });
 
   getLogger().info(
     { userId: session.user.id, kdfType, kdfIterations },

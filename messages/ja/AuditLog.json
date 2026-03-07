@@ -52,6 +52,7 @@
   "RECOVERY_KEY_CREATED": "回復キー作成",
   "RECOVERY_KEY_REGENERATED": "回復キー再生成",
   "RECOVERY_PASSPHRASE_RESET": "回復キーによるパスフレーズ再設定",
+  "VAULT_SETUP": "保管庫セットアップ完了",
   "VAULT_RESET_EXECUTED": "保管庫リセット実行",
   "FOLDER_CREATE": "フォルダ作成",
   "FOLDER_UPDATE": "フォルダ更新",

@@ -9,7 +9,6 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { globSync } from "node:fs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
