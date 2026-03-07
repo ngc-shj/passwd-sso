@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: grant.id,
-    metadata: { ownerId: grant.ownerId },
+    metadata: { ownerId: grant.ownerId, rejectedBy: session.user.id },
     ...extractRequestMeta(req),
   });
 

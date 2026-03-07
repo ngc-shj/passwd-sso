@@ -68,7 +68,7 @@ export async function GET(
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
-    metadata: { ownerId: grant.ownerId, entryCount: entries.length },
+    metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, entryCount: entries.length },
     ...extractRequestMeta(req),
   });
 

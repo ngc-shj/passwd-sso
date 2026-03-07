@@ -52,7 +52,7 @@ export async function POST(
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
-    metadata: { ownerId: grant.ownerId },
+    metadata: { ownerId: grant.ownerId, declinedBy: session.user.id },
     ...extractRequestMeta(req),
   });
 

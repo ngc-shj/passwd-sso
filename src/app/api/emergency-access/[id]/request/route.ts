@@ -66,7 +66,7 @@ export async function POST(
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
-    metadata: { ownerId: grant.ownerId, waitDays: grant.waitDays },
+    metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, waitDays: grant.waitDays },
     ...extractRequestMeta(req),
   });
 
