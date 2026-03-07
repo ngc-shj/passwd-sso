@@ -8,7 +8,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 - **SSO Authentication** - Google OIDC + SAML 2.0 (via [BoxyHQ SAML Jackson](https://github.com/boxyhq/jackson))
 - **End-to-End Encryption** - AES-256-GCM; the server never sees plaintext passwords
-- **Master Passphrase** - PBKDF2 (600k iterations) + HKDF key derivation with Secret Key
+- **Master Passphrase** - PBKDF2 (600k iterations) or Argon2id (64 MB) + HKDF key derivation with Secret Key
 - **Multiple Entry Types** - Passwords, secure notes, credit cards, identity/personal info, passkeys, bank accounts, software licenses, and SSH keys
 - **Custom Field Types** - TEXT, HIDDEN, URL, BOOLEAN, DATE, and MONTH_YEAR
 - **Password Generator** - Random passwords (8-128 chars) and diceware passphrases (3-10 words)
@@ -20,7 +20,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Share Links & Permissions** - Time-limited sharing with access logs and visibility controls (`view all`, `hide password`, `overview only`)
 - **Audit Logs & Webhooks** - Personal and team audit logs with filters, CSV/JSONL download, and team webhook delivery
 - **Emergency Access** - Request/approve temporary vault access with key exchange
-- **Session Management** - List active sessions and revoke single/all sessions
+- **Session Management** - List active sessions and revoke single/all sessions; automatic invalidation on team member removal
 - **Notifications** - In-app and email notifications for emergency-access events and new-device logins
 - **Key Rotation** - Rotate vault encryption key with passphrase verification
 - **Secure Notes** - Prebuilt templates and safe Markdown preview/rendering
@@ -53,6 +53,8 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Passkey Vault Unlock** - Unlock vault with a FIDO2 passkey (WebAuthn PRF) instead of master passphrase
 - **CLI Tool** - Node.js CLI (`passwd-sso`) with 13 commands: login, unlock, status, list, get, generate, totp, export, env, run, agent, api-key, ssh-key; OS keychain integration and XDG-compliant config
 - **Browser Extension (Chrome/Edge, MV3)** - Manual autofill, inline suggestions, AWS 3-field fill, CC/address autofill, context menu, keyboard shortcuts, new-login detect & save
+- **Error Tracking** - Sentry integration with recursive sensitive data scrubbing (no plaintext secrets leave the client)
+- **CI Security Scanning** - CodeQL SAST, Trivy container scanning, crypto domain ledger verification, npm audit blocking
 
 ## Tech Stack
 
@@ -333,7 +335,7 @@ cli/
 ## Security Model
 
 - **Zero-knowledge** - The server stores only AES-256-GCM ciphertext; it cannot decrypt user data
-- **Key derivation** - Passphrase -> PBKDF2 (600k) -> wrapping key -> wraps random 256-bit secret key
+- **Key derivation** - Passphrase -> PBKDF2 (600k) or Argon2id (64 MB) -> wrapping key -> wraps random 256-bit secret key
 - **Domain separation** - Secret key -> HKDF -> separate encryption key + auth key
 - **Secret Key** - Additional account-specific salt for defense against server compromise
 - **AAD binding** - Additional Authenticated Data ties ciphertext to user and entry IDs
@@ -341,7 +343,7 @@ cli/
 - **Session security** - Database sessions (not JWT), 8-hour timeout with 1-hour extension
 - **Auto-lock** - Vault locks after 15 min idle or 5 min tab hidden
 - **Clipboard clear** - Copied passwords auto-clear after 30 seconds
-- **Team vault** - End-to-end encryption (ECDH-P256) with per-member key distribution
+- **Team vault** - End-to-end encryption (ECDH-P256) with per-member key distribution and per-entry ItemKey hierarchy
 - **RBAC** - Owner / Admin / Member / Viewer role-based access control for teams
 - **Recovery Key** - 256-bit random → HKDF → AES-256-GCM wrap of secret key; server stores only HMAC(pepper, verifierHash)
 - **Vault Reset** - Last-resort full data deletion with fixed confirmation token
@@ -372,6 +374,8 @@ cli/
 ## Security Documentation
 
 - [Security Policy](SECURITY.md)
+- [Cryptography Whitepaper](docs/security/cryptography-whitepaper.md) — full key hierarchy and crypto design
+- [Threat Model (STRIDE)](docs/security/threat-model.md) — systematic threat analysis
 - [Security Considerations (English)](docs/security/considerations/en.md) / [日本語](docs/security/considerations/ja.md)
 
 ## License
