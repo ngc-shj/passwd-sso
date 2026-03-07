@@ -246,7 +246,7 @@ jobs:
         run: docker build --build-arg DATABASE_URL=postgresql://dummy:dummy@localhost:5432/dummy -t passwd-sso:scan .
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.35.0
         with:
           image-ref: "passwd-sso:scan"
           scan-type: image
