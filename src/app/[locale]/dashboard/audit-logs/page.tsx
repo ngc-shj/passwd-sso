@@ -260,7 +260,7 @@ export default function AuditLogsPage() {
   };
 
   const getEmergencyDetail = (log: AuditLogItem): string | null => {
-    const meta = log.metadata as { ownerId?: string; granteeId?: string; granteeEmail?: string; permanent?: boolean } | null;
+    const meta = log.metadata as { ownerId?: string; granteeId?: string; granteeEmail?: string; permanent?: boolean; entryCount?: number } | null;
     const owner = resolveUser(meta?.ownerId) ?? t("unknownUser");
     const grantee = resolveUser(meta?.granteeId, meta?.granteeEmail ?? null) ?? t("unknownUser");
     const viewer = formatViewer(log) ?? t("unknownUser");
@@ -280,8 +280,13 @@ export default function AuditLogsPage() {
         return t("eaAccessActivatedFor", { user: meta?.granteeId ? grantee : owner });
       case AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE:
         return t("eaAccessRevokedFor", { user: grantee });
-      case AUDIT_ACTION.EMERGENCY_VAULT_ACCESS:
-        return t("viewedByOwner", { viewer, owner });
+      case AUDIT_ACTION.EMERGENCY_VAULT_ACCESS: {
+        const base = t("viewedByOwner", { viewer, owner });
+        const entryCount = typeof meta?.entryCount === "number" ? meta.entryCount : null;
+        return entryCount !== null
+          ? `${base} — ${t("eaVaultAccessMeta", { entryCount })}`
+          : base;
+      }
       default:
         return null;
     }
@@ -383,20 +388,6 @@ export default function AuditLogsPage() {
       });
     }
 
-    const importFilename =
-      log.action === AUDIT_ACTION.ENTRY_CREATE &&
-      meta?.source === "import" &&
-      typeof meta.filename === "string"
-        ? meta.filename
-        : null;
-    const parentAction =
-      typeof meta?.parentAction === "string" ? meta.parentAction : null;
-    let parentActionText: string | null = null;
-    if (parentAction) {
-      const parentActionLabel = actionLabel(parentAction);
-      parentActionText = t("fromAction", { action: parentActionLabel });
-    }
-
     // Entry operations: show resolved entry name
     if (
       log.targetType === AUDIT_TARGET_TYPE.PASSWORD_ENTRY &&
@@ -410,11 +401,7 @@ export default function AuditLogsPage() {
         ) {
           return `${name}（${t("permanentDelete")}）`;
         }
-        const suffixParts = [
-          importFilename ? t("fromFile", { filename: importFilename }) : null,
-          parentActionText,
-        ].filter(Boolean);
-        return suffixParts.length > 0 ? `${name} ${suffixParts.join(" ")}` : name;
+        return name;
       }
       return t("deletedEntry");
     }
@@ -430,6 +417,35 @@ export default function AuditLogsPage() {
         from: String(meta.previousRole),
         to: String(meta.newRole),
       });
+    }
+
+    // Auth login: show provider
+    if (log.action === AUDIT_ACTION.AUTH_LOGIN && meta?.provider) {
+      return t("providerMeta", { provider: String(meta.provider) });
+    }
+
+    // Vault unlock failed: show attempts
+    if (log.action === AUDIT_ACTION.VAULT_UNLOCK_FAILED && typeof meta?.attempts === "number") {
+      return t("attemptsMeta", { attempts: meta.attempts });
+    }
+
+    // Vault lockout: show attempts and lock duration
+    if (log.action === AUDIT_ACTION.VAULT_LOCKOUT_TRIGGERED && meta) {
+      const attempts = typeof meta.attempts === "number" ? meta.attempts : 0;
+      const lockMinutes = typeof meta.lockMinutes === "number" ? meta.lockMinutes : 0;
+      return t("lockoutMeta", { attempts, lockMinutes });
+    }
+
+    // Session revoke all: show revoked count
+    if (log.action === AUDIT_ACTION.SESSION_REVOKE_ALL && typeof meta?.revokedCount === "number") {
+      return t("revokedSessionsMeta", { revokedCount: meta.revokedCount });
+    }
+
+    // Vault reset: show deleted counts
+    if (log.action === AUDIT_ACTION.VAULT_RESET_EXECUTED && meta) {
+      const deletedEntries = typeof meta.deletedEntries === "number" ? meta.deletedEntries : 0;
+      const deletedAttachments = typeof meta.deletedAttachments === "number" ? meta.deletedAttachments : 0;
+      return t("vaultResetMeta", { deletedEntries, deletedAttachments });
     }
 
     return null;
