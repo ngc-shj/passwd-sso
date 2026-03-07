@@ -84,10 +84,43 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     }) as typeof event.breadcrumbs;
   }
 
-  // Scrub request body
+  // Scrub request body (may be object or serialized JSON string)
   const request = event.request as Record<string, unknown> | undefined;
-  if (request?.data && typeof request.data === "object") {
-    request.data = scrubObject(request.data);
+  if (request?.data) {
+    if (typeof request.data === "object") {
+      request.data = scrubObject(request.data);
+    } else if (typeof request.data === "string") {
+      try {
+        const parsed = JSON.parse(request.data);
+        request.data = JSON.stringify(scrubObject(parsed));
+      } catch {
+        request.data = REDACTED;
+      }
+    }
+  }
+
+  // Scrub exception stack local variables
+  if (Array.isArray(event.exception)) {
+    const exc = event.exception as Array<Record<string, unknown>>;
+    const values = exc;
+    for (const frame of values) {
+      if (frame.values && Array.isArray(frame.values)) {
+        for (const v of frame.values as Array<Record<string, unknown>>) {
+          if (v.stacktrace && typeof v.stacktrace === "object") {
+            v.stacktrace = scrubObject(v.stacktrace) as typeof v.stacktrace;
+          }
+        }
+      }
+    }
+  } else if (event.exception && typeof event.exception === "object") {
+    const exc = event.exception as Record<string, unknown>;
+    if (Array.isArray(exc.values)) {
+      for (const v of exc.values as Array<Record<string, unknown>>) {
+        if (v.stacktrace && typeof v.stacktrace === "object") {
+          v.stacktrace = scrubObject(v.stacktrace) as typeof v.stacktrace;
+        }
+      }
+    }
   }
 
   return event;

@@ -185,6 +185,62 @@ describe("scrubSentryEvent", () => {
     expect(reqData.authHash).toBe("[Redacted]");
   });
 
+  it("scrubs request.data when it is a JSON string", () => {
+    const event = {
+      request: {
+        url: "/api/vault/setup",
+        method: "POST",
+        data: JSON.stringify({ username: "alice", password: "secret" }),
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const reqData = (result.request as Record<string, unknown>).data as string;
+    const parsed = JSON.parse(reqData);
+    expect(parsed.username).toBe("alice");
+    expect(parsed.password).toBe("[Redacted]");
+  });
+
+  it("redacts request.data string when not valid JSON", () => {
+    const event = {
+      request: {
+        url: "/api/vault/setup",
+        method: "POST",
+        data: "not-json-body",
+      },
+    };
+    const result = scrubSentryEvent(event);
+    expect((result.request as Record<string, unknown>).data).toBe("[Redacted]");
+  });
+
+  it("scrubs exception.values stacktrace", () => {
+    const event = {
+      exception: {
+        values: [
+          {
+            type: "Error",
+            value: "test",
+            stacktrace: {
+              frames: [
+                {
+                  filename: "app.js",
+                  vars: { password: "leak", safeVar: "ok" },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const exc = result.exception as Record<string, unknown>;
+    const values = exc.values as Array<Record<string, unknown>>;
+    const st = values[0].stacktrace as Record<string, unknown>;
+    const frames = st.frames as Array<Record<string, unknown>>;
+    const vars = frames[0].vars as Record<string, unknown>;
+    expect(vars.password).toBe("[Redacted]");
+    expect(vars.safeVar).toBe("ok");
+  });
+
   it("handles event without optional fields", () => {
     const event = { message: "test error" };
     const result = scrubSentryEvent(event);

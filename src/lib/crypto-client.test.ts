@@ -209,6 +209,30 @@ describe("deriveWrappingKeyWithParams (Argon2id)", () => {
     ).rejects.toThrow();
   });
 
+  it("rejects memory below minimum", async () => {
+    await expect(
+      deriveWrappingKeyWithParams(TEST_PASSPHRASE, TEST_SALT, {
+        kdfType: 1, kdfIterations: 1, kdfMemory: 1024, kdfParallelism: 1,
+      }),
+    ).rejects.toThrow("below minimum 16384");
+  });
+
+  it("rejects parallelism below minimum", async () => {
+    await expect(
+      deriveWrappingKeyWithParams(TEST_PASSPHRASE, TEST_SALT, {
+        kdfType: 1, kdfIterations: 1, kdfMemory: 16384, kdfParallelism: 0,
+      }),
+    ).rejects.toThrow("below minimum 1");
+  });
+
+  it("rejects iterations below minimum", async () => {
+    await expect(
+      deriveWrappingKeyWithParams(TEST_PASSPHRASE, TEST_SALT, {
+        kdfType: 1, kdfIterations: 0, kdfMemory: 16384, kdfParallelism: 1,
+      }),
+    ).rejects.toThrow("below minimum 1");
+  });
+
   it("different params produce different keys", async () => {
     const params2 = { ...ARGON2_TEST_PARAMS, kdfParallelism: 2 };
     const key1 = await deriveWrappingKeyWithParams(

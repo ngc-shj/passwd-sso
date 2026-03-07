@@ -29,7 +29,7 @@ Last verified: 2026-03-07
 | Scope | Code constant | Purpose | Fields | File |
 |---|---|---|---|---|
 | `PV` | `SCOPE_PERSONAL` | Personal vault entry encryption | userId, entryId | crypto-aad.ts |
-| `OV` | `SCOPE_TEAM` | Team vault entry encryption | teamId, entryId, vaultType | crypto-aad.ts |
+| `OV` | `SCOPE_TEAM` | Team vault entry encryption | teamId, entryId, vaultType, itemKeyVersion | crypto-aad.ts |
 | `AT` | `SCOPE_ATTACHMENT` | Attachment encryption | entryId, attachmentId | crypto-aad.ts |
 | `OK` | `AAD_SCOPE_TEAM_KEY` | Team member key wrapping | teamId, toUserId, keyVersion, wrapVersion | crypto-team.ts |
 | `IK` | `SCOPE_ITEM_KEY` | ItemKey wrapping | teamId, entryId, teamKeyVersion | crypto-aad.ts |

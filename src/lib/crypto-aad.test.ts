@@ -217,6 +217,19 @@ describe("crypto-aad", () => {
     });
   });
 
+  // ─── Cross-scope collision resistance ────────────────────────
+
+  describe("IK vs OV cross-scope", () => {
+    it("IK AAD and OV AAD never collide for same IDs", () => {
+      const ikAAD = buildItemKeyWrapAAD("team-1", "entry-1", 1);
+      const ovAAD = buildTeamEntryAAD("team-1", "entry-1", "blob", 1);
+      expect(ikAAD).not.toEqual(ovAAD);
+      // Scope prefix must differ
+      expect(String.fromCharCode(ikAAD[0], ikAAD[1])).toBe("IK");
+      expect(String.fromCharCode(ovAAD[0], ovAAD[1])).toBe("OV");
+    });
+  });
+
   // ─── AAD_VERSION ──────────────────────────────────────────────
 
   describe("AAD_VERSION", () => {

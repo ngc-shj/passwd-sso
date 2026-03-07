@@ -210,6 +210,14 @@ export async function POST(
   const teamKeyVersion = teamKeyVersionStr ? parseInt(teamKeyVersionStr, 10) : 1;
   const encryptionMode = encryptionModeStr ? parseInt(encryptionModeStr, 10) : 0;
 
+  // Validate encryptionMode: 0 = TeamKey direct, 1 = ItemKey
+  if (encryptionMode !== 0 && encryptionMode !== 1) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR },
+      { status: 400 }
+    );
+  }
+
   // Validate teamKeyVersion matches current team key version (S-20/F-23)
   const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({

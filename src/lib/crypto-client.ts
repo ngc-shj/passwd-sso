@@ -186,6 +186,10 @@ async function deriveWrappingKeyArgon2id(
   const parallelism = params.kdfParallelism ?? 4;
   const iterations = params.kdfIterations ?? 3;
 
+  if (memory < 16384) throw new Error(`Argon2id memory ${memory} KiB is below minimum 16384`);
+  if (parallelism < 1) throw new Error(`Argon2id parallelism ${parallelism} is below minimum 1`);
+  if (iterations < 1) throw new Error(`Argon2id iterations ${iterations} is below minimum 1`);
+
   const hash = await argon2idHash(passphrase, accountSalt, iterations, memory, parallelism);
 
   return crypto.subtle.importKey(
