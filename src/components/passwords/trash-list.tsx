@@ -115,6 +115,8 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
           (e.username?.toLowerCase().includes(q) ?? false) ||
           (e.fullName?.toLowerCase().includes(q) ?? false) ||
           (e.brand?.toLowerCase().includes(q) ?? false) ||
+          (e.lastFour?.includes(q) ?? false) ||
+          (e.idNumberLast4?.includes(q) ?? false) ||
           (e.snippet?.toLowerCase().includes(q) ?? false)
         );
       })
@@ -199,14 +201,12 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
     );
   }
 
-  if (entries.length === 0 || filtered.length === 0) {
+  if (entries.length === 0) {
     return (
       <Card className="rounded-xl border bg-card/80 p-10">
         <div className="flex flex-col items-center justify-center text-center">
           <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
-          <p className="text-muted-foreground">
-            {entries.length === 0 ? tl("noTrash") : tl("noMatch")}
-          </p>
+          <p className="text-muted-foreground">{tl("noTrash")}</p>
         </div>
       </Card>
     );
@@ -237,6 +237,13 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
       </div>
 
       <div className="space-y-2">
+        {filtered.length === 0 && (
+          <Card className="rounded-xl border bg-card/80 p-10">
+            <div className="flex flex-col items-center justify-center text-center">
+              <p className="text-muted-foreground">{tl("noMatch")}</p>
+            </div>
+          </Card>
+        )}
         {filtered.map((entry) => (
           <Card key={entry.id} className="transition-colors hover:bg-accent">
             <CardContent className="flex items-center gap-3 px-4 py-2">
