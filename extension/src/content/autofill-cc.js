@@ -200,7 +200,7 @@ function performCreditCardAutofill(payload) {
   if (cardholderName && payload.cardholderName) {
     setInputValue(cardholderName, payload.cardholderName);
   }
-  if (cardNumber && payload.cardNumber) {
+  if (payload.cardNumber) {
     setInputValue(cardNumber, payload.cardNumber);
   }
 

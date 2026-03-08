@@ -82,7 +82,6 @@ export async function recordFailure(
   request?: NextRequest,
 ): Promise<RecordFailureResult | null> {
   const now = new Date();
-  let lockTimeout = false;
 
   try {
     const result = await prisma.$transaction(async (tx) => {
@@ -218,7 +217,6 @@ export async function recordFailure(
   } catch (err) {
     // lock_timeout: transaction rolled back, counter NOT incremented
     if (isLockTimeoutError(err)) {
-      lockTimeout = true;
       getLogger().warn({ userId }, "vault.unlock.lockTimeout");
 
       // Record audit even on lock_timeout (async nonblocking, outside transaction)
@@ -240,7 +238,7 @@ export async function recordFailure(
       return null;
     }
     // Unexpected error — log and re-throw
-    getLogger().error({ err, userId, lockTimeout }, "vault.lockout.recordFailure.error");
+    getLogger().error({ err, userId }, "vault.lockout.recordFailure.error");
     throw err;
   }
 }
