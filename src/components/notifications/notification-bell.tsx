@@ -30,6 +30,20 @@ interface NotificationItem {
 const POLL_INTERVAL_MS = 60_000;
 const PAGE_LIMIT = 10;
 
+/** Resolve notification body using i18n when a translation key exists for the type */
+function resolveNotificationBody(
+  n: NotificationItem,
+  t: ReturnType<typeof useTranslations<"Notifications">>,
+): string {
+  const bodyKey = `body_${n.type}` as Parameters<typeof t>[0];
+  if (!t.has(bodyKey)) return n.body;
+  const meta = (n.metadata && typeof n.metadata === "object" ? n.metadata : {}) as Record<string, unknown>;
+  return t(bodyKey, {
+    count: String(meta.evictedCount ?? 0),
+    max: String(meta.maxConcurrentSessions ?? "?"),
+  });
+}
+
 export function NotificationBell() {
   const t = useTranslations("Notifications");
   const locale = useLocale();
@@ -202,7 +216,9 @@ export function NotificationBell() {
                     {!n.isRead && (
                       <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />
                     )}
-                    <span className="text-sm font-medium">{n.title}</span>
+                    <span className="text-sm font-medium">
+                      {t.has(`type_${n.type}`) ? t(`type_${n.type}`) : n.title}
+                    </span>
                   </div>
                   <button
                     type="button"
@@ -216,7 +232,7 @@ export function NotificationBell() {
                   </button>
                 </div>
                 <p className="text-xs text-muted-foreground line-clamp-2">
-                  {n.body}
+                  {resolveNotificationBody(n, t)}
                 </p>
                 <span className="text-[10px] text-muted-foreground">
                   {formatRelativeTime(n.createdAt, locale)}

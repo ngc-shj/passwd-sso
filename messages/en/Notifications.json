@@ -19,5 +19,7 @@
   "type_WATCHTOWER_ALERT": "Watchtower alert",
   "type_POLICY_UPDATE": "Policy update",
   "type_ADMIN_VAULT_RESET": "Admin vault reset",
-  "type_ADMIN_VAULT_RESET_REVOKED": "Vault reset cancelled"
+  "type_ADMIN_VAULT_RESET_REVOKED": "Vault reset cancelled",
+  "type_SESSION_EVICTED": "Session terminated",
+  "body_SESSION_EVICTED": "{count} session(s) terminated due to concurrent session limit (max: {max})."
 }
