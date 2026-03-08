@@ -489,4 +489,178 @@ describe("MatchList", () => {
 
     setTimeoutSpy.mockRestore();
   });
+
+  it("shows team badge for entries with teamName", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Team Entry",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+          teamId: "team-1",
+          teamName: "Engineering",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    expect(await screen.findByText("Team Entry")).toBeInTheDocument();
+    expect(screen.getByText("Engineering")).toBeInTheDocument();
+  });
+
+  it("does not show team badge for personal entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Personal Entry",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    expect(await screen.findByText("Personal Entry")).toBeInTheDocument();
+    // No team badge present
+    const badges = document.querySelectorAll(".text-purple-700");
+    expect(badges).toHaveLength(0);
+  });
+
+  it("passes teamId in COPY_PASSWORD message for team entries", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Team Entry",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            teamId: "team-1",
+            teamName: "Engineering",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_PASSWORD",
+        password: "secret",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: "COPY_PASSWORD",
+        entryId: "pw-1",
+        teamId: "team-1",
+      });
+    });
+  });
+
+  it("passes teamId in AUTOFILL message for team entries", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Team Entry",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            teamId: "team-1",
+            teamName: "Engineering",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const fillButton = await screen.findByRole("button", { name: "Fill" });
+    fireEvent.click(fillButton);
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: "AUTOFILL",
+        entryId: "pw-1",
+        tabId: 1,
+        teamId: "team-1",
+      });
+    });
+    closeSpy.mockRestore();
+  });
+
+  it("passes teamId in COPY_TOTP message for team entries", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Team Entry",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            teamId: "team-1",
+            teamName: "Engineering",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_TOTP",
+        code: "123456",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+
+    const totpButton = await screen.findByRole("button", { name: "TOTP" });
+    fireEvent.click(totpButton);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: "COPY_TOTP",
+        entryId: "pw-1",
+        teamId: "team-1",
+      });
+    });
+  });
+
+  it("uses unique keys for team entries with same id as personal entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Personal",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "pw-1",
+          title: "Team Copy",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+          teamId: "team-1",
+          teamName: "Engineering",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    expect(await screen.findByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("Team Copy")).toBeInTheDocument();
+  });
 });

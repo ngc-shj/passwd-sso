@@ -1466,12 +1466,11 @@ describe("failsafe responses", () => {
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "FETCH_PASSWORDS" });
-    // The inner catch in FETCH_PASSWORDS handles this, returning the correct shape
+    // Promise.allSettled gracefully handles partial failures — returns empty entries
     expect(res).toEqual(
       expect.objectContaining({
         type: "FETCH_PASSWORDS",
-        entries: null,
-        error: expect.any(String),
+        entries: [],
       }),
     );
   });

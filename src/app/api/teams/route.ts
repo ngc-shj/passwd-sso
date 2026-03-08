@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { authOrToken } from "@/lib/auth-or-token";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { TEAM_ROLE } from "@/lib/constants";
+import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
@@ -12,16 +13,17 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { getLogger } from "@/lib/logger";
 
 // GET /api/teams — List teams the user belongs to
-export async function GET() {
-  const session = await auth();
-  if (!session?.user?.id) {
+export async function GET(req: NextRequest) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
+  if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { userTenantId, memberships } = await withBypassRls(prisma, async () => {
-    const uid = await resolveUserTenantIdFromClient(prisma, session.user.id);
+    const uid = await resolveUserTenantIdFromClient(prisma, userId);
     const data = await prisma.teamMember.findMany({
-      where: { userId: session.user.id, deactivatedAt: null },
+      where: { userId, deactivatedAt: null },
       include: {
         team: {
           select: {
@@ -60,7 +62,7 @@ export async function GET() {
   const crossTenantTeams = teams.filter((t) => t.isCrossTenant);
   if (crossTenantTeams.length > 0) {
     logger.info(
-      { userId: session.user.id, crossTenantTeamIds: crossTenantTeams.map((t) => t.id) },
+      { userId, crossTenantTeamIds: crossTenantTeams.map((t) => t.id) },
       "Cross-tenant team memberships detected",
     );
   }

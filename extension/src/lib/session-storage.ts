@@ -10,6 +10,8 @@ export interface SessionState {
   expiresAt: number; // ms timestamp
   userId?: string;
   vaultSecretKey?: string;
+  /** Encrypted ECDH private key (hex) for team key derivation — re-unwrapped on SW restart */
+  ecdhEncrypted?: { ciphertext: string; iv: string; authTag: string };
 }
 
 export async function persistSession(state: SessionState): Promise<void> {

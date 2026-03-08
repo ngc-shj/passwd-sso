@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,6 +12,7 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaT
   }
   return {
     mockAuth: vi.fn(),
+    mockAuthOrToken: vi.fn(),
     mockPrismaTeamPasswordEntry: {
       findMany: vi.fn(),
       create: vi.fn(),
@@ -27,6 +28,7 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaT
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
@@ -52,14 +54,14 @@ const now = new Date("2025-01-01T00:00:00Z");
 describe("GET /api/teams/[teamId]/passwords", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue(null);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
       createParams({ teamId: TEAM_ID }),
@@ -348,6 +350,55 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     );
     const call = mockPrismaTeamPasswordEntry.findMany.mock.calls[0][0];
     expect(call.where).not.toHaveProperty("teamFolderId");
+  });
+
+  it("accepts extension Bearer token via authOrToken", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "token",
+      userId: "ext-user-id",
+      scopes: ["passwords:read"],
+    });
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
+      {
+        id: "pw-ext",
+        entryType: ENTRY_TYPE.LOGIN,
+        encryptedOverview: "enc-overview",
+        overviewIv: "aabbccdd11223344",
+        overviewAuthTag: "aabbccdd11223344aabbccdd11223344",
+        aadVersion: 1,
+        teamKeyVersion: 1,
+        itemKeyVersion: 0,
+        isArchived: false,
+        favorites: [],
+        tags: [],
+        createdBy: { id: "ext-user-id", name: "Ext", email: "ext@example.com", image: null },
+        updatedBy: { id: "ext-user-id", name: "Ext", email: "ext@example.com" },
+        createdAt: now,
+        updatedAt: now,
+        deletedAt: null,
+        requireReprompt: false,
+        expiresAt: null,
+      },
+    ]);
+
+    const req = createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+      headers: { Authorization: "Bearer ext-token-value" },
+    });
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toHaveLength(1);
+    expect(json[0].id).toBe("pw-ext");
+    expect(mockAuthOrToken).toHaveBeenCalledWith(req, "passwords:read");
+  });
+
+  it("returns 401 when extension token lacks required scope", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const req = createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+      headers: { Authorization: "Bearer ext-token-no-scope" },
+    });
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
+    expect(res.status).toBe(401);
   });
 });
 

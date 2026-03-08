@@ -162,7 +162,7 @@ describe("GET /api/vault/unlock/data", () => {
     });
   });
 
-  it("excludes ECDH fields when using extension token", async () => {
+  it("includes ECDH fields when using extension token", async () => {
     mockAuth.mockResolvedValue(null);
     mockExtTokenFindUnique.mockResolvedValue({
       id: "tok-3",
@@ -181,17 +181,20 @@ describe("GET /api/vault/unlock/data", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       passphraseVerifierHmac: null,
-      // ECDH fields should NOT be selected for extension tokens
+      ecdhPublicKey: "ecdh-pub",
+      encryptedEcdhPrivateKey: "ecdh-priv-enc",
+      ecdhPrivateKeyIv: "ecdh-iv",
+      ecdhPrivateKeyAuthTag: "ecdh-tag",
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue(null);
 
     const res = await GET(reqWithAuth("c".repeat(64)));
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.ecdhPublicKey).toBeUndefined();
-    expect(json.encryptedEcdhPrivateKey).toBeUndefined();
-    expect(json.ecdhPrivateKeyIv).toBeUndefined();
-    expect(json.ecdhPrivateKeyAuthTag).toBeUndefined();
+    expect(json.ecdhPublicKey).toBe("ecdh-pub");
+    expect(json.encryptedEcdhPrivateKey).toBe("ecdh-priv-enc");
+    expect(json.ecdhPrivateKeyIv).toBe("ecdh-iv");
+    expect(json.ecdhPrivateKeyAuthTag).toBe("ecdh-tag");
   });
 
   it("returns null verificationArtifact when vaultKey not found", async () => {
