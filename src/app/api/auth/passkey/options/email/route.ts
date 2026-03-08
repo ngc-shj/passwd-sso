@@ -25,12 +25,21 @@ const emailSchema = z.object({
  * Returns 1-3 random credential IDs so the response shape is
  * indistinguishable from a real user's credentials.
  */
+function uniformRandom(max: number): number {
+  // Rejection sampling: discard values >= largest multiple of max to avoid bias
+  const limit = 256 - (256 % max);
+  let value: number;
+  do {
+    value = randomBytes(1)[0];
+  } while (value >= limit);
+  return value % max;
+}
+
 function generateDummyCredentials(): Array<{
   credentialId: string;
   transports: string[];
 }> {
-  // Reduce modulo bias (negligible for dummy credential count 1-3)
-  const count = 1 + Math.floor((randomBytes(1)[0] / 256) * 3);
+  const count = 1 + uniformRandom(3);
   return Array.from({ length: count }, () => ({
     credentialId: randomBytes(32).toString("base64url"),
     transports: ["usb"] as string[],
