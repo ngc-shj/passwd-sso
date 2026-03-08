@@ -90,6 +90,7 @@ const ATTACHMENT = {
   encryptedData: Buffer.from("encrypted-data"),
   keyVersion: 1,
   aadVersion: 1,
+  encryptionMode: 1,
 };
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", () => {
@@ -153,6 +154,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]", ()
     expect(json.authTag).toBe("b".repeat(32));
     expect(json.keyVersion).toBe(1);
     expect(json.aadVersion).toBe(1);
+    expect(json.encryptionMode).toBe(1);
   });
 });
 

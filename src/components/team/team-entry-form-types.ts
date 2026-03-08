@@ -75,6 +75,12 @@ export interface TeamEntryFormEditData {
   requireReprompt?: boolean;
   travelSafe?: boolean;
   expiresAt?: string | null;
+  // ItemKey fields for v>=1 entries
+  itemKeyVersion?: number;
+  teamKeyVersion?: number;
+  encryptedItemKey?: string;
+  itemKeyIv?: string;
+  itemKeyAuthTag?: string;
 }
 
 export interface TeamEntryFormProps {

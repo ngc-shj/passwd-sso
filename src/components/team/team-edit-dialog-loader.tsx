@@ -35,7 +35,7 @@ export function TeamEditDialogLoader({
 }: TeamEditDialogLoaderProps) {
   const t = useTranslations("PasswordForm");
   const td = useTranslations("PasswordDetail");
-  const { getTeamEncryptionKey } = useTeamVault();
+  const { getEntryDecryptionKey } = useTeamVault();
   const [data, setData] = useState<TeamEntryFormEditData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -54,17 +54,23 @@ export function TeamEditDialogLoader({
         if (!res.ok) throw new Error(td("notFound"));
         const raw = await res.json();
 
-        const teamKey = await getTeamEncryptionKey(teamId);
-        if (!teamKey) throw new Error(td("notFound"));
+        const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;
+        const decryptKey = await getEntryDecryptionKey(teamId, id, {
+          itemKeyVersion,
+          encryptedItemKey: raw.encryptedItemKey as string | undefined,
+          itemKeyIv: raw.itemKeyIv as string | undefined,
+          itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+          teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
+        });
 
-        const aad = buildTeamEntryAAD(teamId, id, "blob");
+        const aad = buildTeamEntryAAD(teamId, id, "blob", itemKeyVersion);
         const json = await decryptData(
           {
             ciphertext: raw.encryptedBlob as string,
             iv: raw.blobIv as string,
             authTag: raw.blobAuthTag as string,
           },
-          teamKey,
+          decryptKey,
           aad,
         );
         const blob = JSON.parse(json) as Record<string, unknown>;
@@ -128,6 +134,11 @@ export function TeamEditDialogLoader({
           requireReprompt: raw.requireReprompt ?? false,
           travelSafe: (blob.travelSafe as boolean | undefined) ?? true,
           expiresAt: raw.expiresAt ?? null,
+          itemKeyVersion: raw.itemKeyVersion as number | undefined,
+          teamKeyVersion: raw.teamKeyVersion as number | undefined,
+          encryptedItemKey: raw.encryptedItemKey as string | undefined,
+          itemKeyIv: raw.itemKeyIv as string | undefined,
+          itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
         });
         setError(null);
       } catch (e) {
@@ -143,7 +154,7 @@ export function TeamEditDialogLoader({
     return () => {
       cancelled = true;
     };
-  }, [getTeamEncryptionKey, id, open, td, teamId]);
+  }, [getEntryDecryptionKey, id, open, td, teamId]);
 
   if (!data) {
     return (

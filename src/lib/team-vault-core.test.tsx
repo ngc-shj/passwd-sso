@@ -8,16 +8,30 @@ const {
   mockUnwrapTeamKey,
   mockDeriveTeamEncryptionKey,
   mockCreateTeamKeyEscrow,
+  mockUnwrapItemKey,
+  mockDeriveItemEncryptionKey,
 } = vi.hoisted(() => ({
   mockUnwrapTeamKey: vi.fn(),
   mockDeriveTeamEncryptionKey: vi.fn(),
   mockCreateTeamKeyEscrow: vi.fn(),
+  mockUnwrapItemKey: vi.fn(),
+  mockDeriveItemEncryptionKey: vi.fn(),
+}));
+
+const { mockBuildItemKeyWrapAAD } = vi.hoisted(() => ({
+  mockBuildItemKeyWrapAAD: vi.fn(),
 }));
 
 vi.mock("@/lib/crypto-team", () => ({
   unwrapTeamKey: (...args: unknown[]) => mockUnwrapTeamKey(...args),
   deriveTeamEncryptionKey: (...args: unknown[]) => mockDeriveTeamEncryptionKey(...args),
   createTeamKeyEscrow: (...args: unknown[]) => mockCreateTeamKeyEscrow(...args),
+  unwrapItemKey: (...args: unknown[]) => mockUnwrapItemKey(...args),
+  deriveItemEncryptionKey: (...args: unknown[]) => mockDeriveItemEncryptionKey(...args),
+}));
+
+vi.mock("@/lib/crypto-aad", () => ({
+  buildItemKeyWrapAAD: (...args: unknown[]) => mockBuildItemKeyWrapAAD(...args),
 }));
 
 import {
@@ -187,6 +201,198 @@ describe("team-vault-core", () => {
     );
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
     errorSpy.mockRestore();
+  });
+
+  describe("getItemEncryptionKey", () => {
+    function setupTeamKeyMocks() {
+      mockUnwrapTeamKey.mockResolvedValue(new Uint8Array([7, 7, 7, 7]));
+      mockDeriveTeamEncryptionKey.mockResolvedValue({ type: "secret" } as CryptoKey);
+    }
+
+    function setupEntryFetch(overrides: Record<string, unknown> = {}) {
+      const entryData = {
+        itemKeyVersion: 1,
+        encryptedItemKey: "enc-ik",
+        itemKeyIv: "ik-iv",
+        itemKeyAuthTag: "ik-tag",
+        teamKeyVersion: 3,
+        ...overrides,
+      };
+      return entryData;
+    }
+
+    function setupFetchMock(entryData: Record<string, unknown>) {
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url.includes("/passwords/entry-1")) {
+          return { ok: true, json: async () => entryData };
+        }
+        // TeamMemberKey fetch for getTeamEncryptionKey
+        return {
+          ok: true,
+          json: async () => ({
+            encryptedTeamKey: "cipher",
+            teamKeyIv: "iv",
+            teamKeyAuthTag: "tag",
+            ephemeralPublicKey: "epk",
+            hkdfSalt: "salt",
+            keyVersion: 3,
+            wrapVersion: 1,
+          }),
+        };
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      return fetchMock;
+    }
+
+    it("fetches entry, unwraps ItemKey, derives encryption key, and caches", async () => {
+      setupTeamKeyMocks();
+      const rawItemKey = new Uint8Array([1, 2, 3, 4]);
+      const itemEncKey = { type: "secret", usage: "item" } as unknown as CryptoKey;
+      mockUnwrapItemKey.mockResolvedValue(rawItemKey);
+      mockDeriveItemEncryptionKey.mockResolvedValue(itemEncKey);
+      mockBuildItemKeyWrapAAD.mockReturnValue(new Uint8Array([99]));
+
+      const entryData = setupEntryFetch();
+      const fetchMock = setupFetchMock(entryData);
+
+      const { result } = renderHook(() => useTeamVault(), {
+        wrapper: makeWrapper(),
+      });
+
+      let key: CryptoKey | null = null;
+      await act(async () => {
+        key = await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      expect(key).toBe(itemEncKey);
+      expect(mockBuildItemKeyWrapAAD).toHaveBeenCalledWith("team-1", "entry-1", 3);
+      expect(mockUnwrapItemKey).toHaveBeenCalledWith(
+        { ciphertext: "enc-ik", iv: "ik-iv", authTag: "ik-tag" },
+        expect.anything(),
+        new Uint8Array([99]),
+      );
+      expect(mockDeriveItemEncryptionKey).toHaveBeenCalledWith(rawItemKey);
+      expect(Array.from(rawItemKey)).toEqual([0, 0, 0, 0]); // zeroed
+
+      // Second call should use cache (no additional fetch)
+      const entryFetchCount = fetchMock.mock.calls.filter(
+        (c) => (c[0] as string).includes("/passwords/entry-1"),
+      ).length;
+
+      await act(async () => {
+        key = await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      const entryFetchCountAfter = fetchMock.mock.calls.filter(
+        (c) => (c[0] as string).includes("/passwords/entry-1"),
+      ).length;
+      expect(entryFetchCountAfter).toBe(entryFetchCount); // no new fetch
+      expect(key).toBe(itemEncKey);
+    });
+
+    it("throws when itemKeyVersion < 1", async () => {
+      setupTeamKeyMocks();
+      const entryData = setupEntryFetch({ itemKeyVersion: 0 });
+      setupFetchMock(entryData);
+
+      const { result } = renderHook(() => useTeamVault(), {
+        wrapper: makeWrapper(),
+      });
+
+      await expect(
+        act(async () => {
+          await result.current.getItemEncryptionKey("team-1", "entry-1");
+        }),
+      ).rejects.toThrow("Entry does not have ItemKey");
+    });
+
+    it("throws when entry fetch fails", async () => {
+      globalThis.fetch = vi.fn(async () => ({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      })) as unknown as typeof fetch;
+
+      const { result } = renderHook(() => useTeamVault(), {
+        wrapper: makeWrapper(),
+      });
+
+      await expect(
+        act(async () => {
+          await result.current.getItemEncryptionKey("team-1", "entry-1");
+        }),
+      ).rejects.toThrow("Failed to fetch entry ItemKey data");
+    });
+
+    it("invalidateTeamKey clears ItemKey cache", async () => {
+      setupTeamKeyMocks();
+      const itemEncKey = { type: "secret", usage: "item" } as unknown as CryptoKey;
+      mockUnwrapItemKey.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
+      mockDeriveItemEncryptionKey.mockResolvedValue(itemEncKey);
+      mockBuildItemKeyWrapAAD.mockReturnValue(new Uint8Array([99]));
+
+      const entryData = setupEntryFetch();
+      const fetchMock = setupFetchMock(entryData);
+
+      const { result } = renderHook(() => useTeamVault(), {
+        wrapper: makeWrapper(),
+      });
+
+      await act(async () => {
+        await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      const fetchesBefore = fetchMock.mock.calls.filter(
+        (c) => (c[0] as string).includes("/passwords/entry-1"),
+      ).length;
+
+      // Invalidate and re-fetch
+      await act(async () => {
+        result.current.invalidateTeamKey("team-1");
+        mockUnwrapItemKey.mockResolvedValue(new Uint8Array([5, 6, 7, 8]));
+        await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      const fetchesAfter = fetchMock.mock.calls.filter(
+        (c) => (c[0] as string).includes("/passwords/entry-1"),
+      ).length;
+      expect(fetchesAfter).toBeGreaterThan(fetchesBefore);
+    });
+
+    it("clearAll clears ItemKey cache", async () => {
+      setupTeamKeyMocks();
+      const itemEncKey = { type: "secret", usage: "item" } as unknown as CryptoKey;
+      mockUnwrapItemKey.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
+      mockDeriveItemEncryptionKey.mockResolvedValue(itemEncKey);
+      mockBuildItemKeyWrapAAD.mockReturnValue(new Uint8Array([99]));
+
+      const entryData = setupEntryFetch();
+      const fetchMock = setupFetchMock(entryData);
+
+      const { result } = renderHook(() => useTeamVault(), {
+        wrapper: makeWrapper(),
+      });
+
+      await act(async () => {
+        await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      const fetchesBefore = fetchMock.mock.calls.filter(
+        (c) => (c[0] as string).includes("/passwords/entry-1"),
+      ).length;
+
+      // Clear all and re-fetch
+      await act(async () => {
+        result.current.clearAll();
+        mockUnwrapItemKey.mockResolvedValue(new Uint8Array([5, 6, 7, 8]));
+        await result.current.getItemEncryptionKey("team-1", "entry-1");
+      });
+
+      const fetchesAfter = fetchMock.mock.calls.filter(
+        (c) => (c[0] as string).includes("/passwords/entry-1"),
+      ).length;
+      expect(fetchesAfter).toBeGreaterThan(fetchesBefore);
+    });
   });
 
   it("distributes pending keys on unlock, skips missing public keys, and cleans up listeners", async () => {

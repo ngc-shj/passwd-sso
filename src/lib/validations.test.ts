@@ -383,7 +383,7 @@ describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", (
     expect(result.success).toBe(true);
   });
 
-  it("rejects itemKeyVersion>=1 without encryptedItemKey", () => {
+  it("allows itemKeyVersion>=1 without encryptedItemKey (reuse existing)", () => {
     const result = updateTeamE2EPasswordSchema.safeParse({
       encryptedBlob: encField,
       encryptedOverview: encField,
@@ -391,7 +391,7 @@ describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", (
       teamKeyVersion: 1,
       itemKeyVersion: 1,
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it("rejects itemKeyVersion=0 with encryptedItemKey", () => {

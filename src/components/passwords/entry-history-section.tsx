@@ -132,7 +132,7 @@ export function EntryHistorySection({
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
   const { encryptionKey, userId } = useVault();
-  const { getTeamEncryptionKey } = useTeamVault();
+  const { getEntryDecryptionKey } = useTeamVault();
   const { requireVerification, repromptDialog } = useReprompt();
   const [expanded, setExpanded] = useState(false);
   const [histories, setHistories] = useState<HistoryEntry[]>([]);
@@ -193,10 +193,17 @@ export function EntryHistorySection({
         const res = await fetchApi(apiPath.teamPasswordHistoryById(scopedTeamId, entryId, h.id));
         if (!res.ok) return;
         const data = await res.json();
-        const teamKey = await getTeamEncryptionKey(scopedTeamId);
-        if (!teamKey) return;
+        // Use the history record's own itemKeyVersion for AAD and key selection
+        const historyItemKeyVersion = (data.itemKeyVersion as number) ?? 0;
+        const decryptKey = await getEntryDecryptionKey(scopedTeamId, entryId, {
+          itemKeyVersion: historyItemKeyVersion,
+          encryptedItemKey: data.encryptedItemKey,
+          itemKeyIv: data.itemKeyIv,
+          itemKeyAuthTag: data.itemKeyAuthTag,
+          teamKeyVersion: data.teamKeyVersion ?? 1,
+        });
         const aad = data.aadVersion >= 1
-          ? buildTeamEntryAAD(scopedTeamId, entryId, "blob")
+          ? buildTeamEntryAAD(scopedTeamId, entryId, "blob", historyItemKeyVersion)
           : undefined;
         const plaintext = await decryptData(
           {
@@ -204,7 +211,7 @@ export function EntryHistorySection({
             iv: data.blobIv,
             authTag: data.blobAuthTag,
           },
-          teamKey,
+          decryptKey,
           aad,
         );
         setViewData(JSON.parse(plaintext));
