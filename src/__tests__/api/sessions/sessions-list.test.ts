@@ -34,7 +34,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }) }),
 }));
 vi.mock("@/lib/with-request-log", () => ({
-  withRequestLog: (handler: Function) => handler,
+  withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 
 import { GET } from "@/app/api/sessions/route";
