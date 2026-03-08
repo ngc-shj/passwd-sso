@@ -40,17 +40,6 @@ async function aesEncrypt(
   };
 }
 
-/** Generate a random AES-256-GCM key. */
-async function makeAesKey(
-  extractable = false,
-): Promise<CryptoKey> {
-  return crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 },
-    extractable,
-    ["encrypt", "decrypt"],
-  );
-}
-
 /** Generate an ECDH P-256 key pair. */
 async function makeEcdhKeyPair(): Promise<CryptoKeyPair> {
   return crypto.subtle.generateKey(
