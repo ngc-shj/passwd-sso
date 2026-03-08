@@ -67,6 +67,7 @@ export const API_ERROR = {
   INVALID_FILENAME: "INVALID_FILENAME",
   INVALID_IV_FORMAT: "INVALID_IV_FORMAT",
   INVALID_AUTH_TAG_FORMAT: "INVALID_AUTH_TAG_FORMAT",
+  ITEM_KEY_REQUIRED: "ITEM_KEY_REQUIRED",
 
   // ── Teams ─────────────────────────────────────────────────
   SLUG_ALREADY_TAKEN: "SLUG_ALREADY_TAKEN",
@@ -198,6 +199,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   INVALID_FILENAME: "invalidFilename",
   INVALID_IV_FORMAT: "invalidRequest",
   INVALID_AUTH_TAG_FORMAT: "invalidRequest",
+  ITEM_KEY_REQUIRED: "itemKeyRequired",
   SLUG_ALREADY_TAKEN: "slugAlreadyTaken",
   TEAM_NOT_FOUND: "teamNotFound",
   MEMBER_NOT_FOUND: "memberNotFound",
