@@ -68,6 +68,7 @@
   "tenantTabMembers": "Members",
   "tenantTabScim": "SCIM",
   "tenantTabDirectorySync": "Directory Sync",
+  "tenantTabSecurity": "Security",
   "select": "Select",
   "close": "Close",
   "selectAll": "Select All",

@@ -38,6 +38,7 @@ const ALLOWED_FILES = new Set([
   "src/app/api/auth/passkey/verify/route.ts", // passkey sign-in session creation
   "src/app/api/auth/passkey/options/email/route.ts", // email-based passkey allowCredentials lookup
   "src/lib/user-session-invalidation.ts", // session/token invalidation on member removal
+  "src/app/api/tenant/policy/route.ts", // tenant policy update (admin-only, bypasses RLS for tenant record)
 ]);
 
 function getSourceFiles() {

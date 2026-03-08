@@ -1,9 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
+    findUnique: vi.fn(),
+    delete: vi.fn(),
   },
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -11,6 +13,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   },
   mockPrismaTenant: {
     create: vi.fn(),
+    findUnique: vi.fn(),
   },
   mockPrismaTenantMember: {
     create: vi.fn(),
@@ -21,6 +24,16 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockPrismaTransaction: vi.fn(),
   mockSessionMetaGetStore: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockTxSession: {
+    create: vi.fn(),
+    findMany: vi.fn(),
+    deleteMany: vi.fn(),
+  },
+  mockTxTenant: {
+    findUnique: vi.fn(),
+  },
+  mockLogAudit: vi.fn(),
+  mockCreateNotification: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -44,6 +57,15 @@ vi.mock("@auth/prisma-adapter", () => ({
     // Base adapter methods (not used in tests but spread into custom adapter)
   }),
 }));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+}));
+vi.mock("@/lib/notification", () => ({
+  createNotification: mockCreateNotification,
+}));
+vi.mock("@/lib/new-device-detection", () => ({
+  checkNewDeviceAndNotify: vi.fn(),
+}));
 
 import { createCustomAdapter } from "./auth-adapter";
 
@@ -54,11 +76,15 @@ describe("createCustomAdapter", () => {
     vi.clearAllMocks();
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
-        tenant: mockPrismaTenant,
+        tenant: { ...mockPrismaTenant, findUnique: mockTxTenant.findUnique },
         user: mockPrismaUser,
         tenantMember: mockPrismaTenantMember,
+        session: mockTxSession,
       }),
     );
+    // Default: no session limit
+    mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
+    mockTxSession.findMany.mockResolvedValue([]);
   });
 
   describe("createUser", () => {
@@ -127,7 +153,7 @@ describe("createCustomAdapter", () => {
         userAgent: "Mozilla/5.0",
       });
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
-      mockPrismaSession.create.mockResolvedValue({
+      mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
         expires,
@@ -140,7 +166,7 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockPrismaSession.create).toHaveBeenCalledWith({
+      expect(mockTxSession.create).toHaveBeenCalledWith({
         data: {
           sessionToken: "tok-1",
           userId: "u-1",
@@ -165,7 +191,7 @@ describe("createCustomAdapter", () => {
     it("sets null when sessionMetaStorage has no store (undefined)", async () => {
       mockSessionMetaGetStore.mockReturnValue(undefined);
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-2" });
-      mockPrismaSession.create.mockResolvedValue({
+      mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-2",
         userId: "u-2",
         expires,
@@ -178,7 +204,7 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockPrismaSession.create).toHaveBeenCalledWith({
+      expect(mockTxSession.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           ipAddress: null,
           userAgent: null,
@@ -198,7 +224,7 @@ describe("createCustomAdapter", () => {
         userAgent: longUA,
       });
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-3" });
-      mockPrismaSession.create.mockResolvedValue({
+      mockTxSession.create.mockResolvedValue({
         sessionToken: "tok-3",
         userId: "u-3",
         expires,
@@ -211,7 +237,7 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockPrismaSession.create).toHaveBeenCalledWith({
+      expect(mockTxSession.create).toHaveBeenCalledWith({
         data: expect.objectContaining({
           userAgent: "X".repeat(512),
         }),
@@ -221,6 +247,101 @@ describe("createCustomAdapter", () => {
           expires: true,
         },
       });
+    });
+
+    it("evicts oldest session when at concurrent limit", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "new-device" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "old-s1", ipAddress: "1.1.1.1", userAgent: "old-1" },
+        { id: "old-s2", ipAddress: "2.2.2.2", userAgent: "old-2" },
+      ]);
+      mockTxSession.deleteMany.mockResolvedValue({ count: 1 });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      // Should evict oldest session (old-s1) to make room
+      expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["old-s1"] } },
+      });
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "SESSION_EVICTED",
+          targetId: "old-s1",
+        }),
+      );
+
+      expect(mockCreateNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: "SESSION_EVICTED",
+          userId: "u-1",
+        }),
+      );
+    });
+
+    it("evicts multiple sessions when well over limit", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "new" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
+        { id: "s2", ipAddress: "2.2.2.2", userAgent: "ua2" },
+        { id: "s3", ipAddress: "3.3.3.3", userAgent: "ua3" },
+      ]);
+      mockTxSession.deleteMany.mockResolvedValue({ count: 2 });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      // Should evict s1 and s2 (oldest 2) to make room for new session
+      expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["s1", "s2"] } },
+      });
+    });
+
+    it("does not evict when under concurrent limit", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "ok" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 3 });
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
+      ]);
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-ok",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-ok",
+        userId: "u-1",
+        expires,
+      });
+
+      expect(mockTxSession.deleteMany).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
     });
   });
 
@@ -269,10 +390,18 @@ describe("createCustomAdapter", () => {
   });
 
   describe("updateSession", () => {
-    it("updates lastActiveAt and passes expires when provided", async () => {
+    afterEach(() => vi.useRealTimers());
+
+    it("reads current session, checks idle, then updates lastActiveAt", async () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 
+      // findUnique returns current session (recently active)
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date("2025-03-15T11:59:00Z"),
+        tenantId: "tenant-1",
+      });
+      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: null });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -285,6 +414,12 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
+      // Should first read current session
+      expect(mockPrismaSession.findUnique).toHaveBeenCalledWith({
+        where: { sessionToken: "tok-1" },
+        select: { lastActiveAt: true, tenantId: true },
+      });
+      // Then update
       expect(mockPrismaSession.update).toHaveBeenCalledWith({
         where: { sessionToken: "tok-1" },
         data: { expires, lastActiveAt: now },
@@ -299,11 +434,14 @@ describe("createCustomAdapter", () => {
         userId: "u-1",
         expires,
       });
-
-      vi.useRealTimers();
     });
 
     it("omits expires from data when not provided", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date(),
+        tenantId: "tenant-1",
+      });
+      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: null });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -318,13 +456,32 @@ describe("createCustomAdapter", () => {
       expect(callData).toHaveProperty("lastActiveAt");
     });
 
-    it("returns null when session not found (P2025)", async () => {
-      const { Prisma } = await import("@prisma/client");
-      const p2025 = new Prisma.PrismaClientKnownRequestError(
-        "Record not found",
-        { code: "P2025", clientVersion: "7.0.0" },
-      );
-      mockPrismaSession.update.mockRejectedValue(p2025);
+    it("deletes session when idle timeout exceeded", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // Session was last active 10 minutes ago
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date("2025-03-15T11:49:00Z"),
+        tenantId: "tenant-1",
+      });
+      // Tenant has 5 minute idle timeout
+      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: 5 });
+      mockPrismaSession.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-1" });
+
+      expect(result).toBeNull();
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({
+        where: { sessionToken: "tok-1" },
+      });
+      // Should NOT call update
+      expect(mockPrismaSession.update).not.toHaveBeenCalled();
+    });
+
+    it("returns null when session not found", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue(null);
 
       const adapter = createCustomAdapter();
       const result = await adapter.updateSession!({ sessionToken: "deleted-tok" });
@@ -332,8 +489,30 @@ describe("createCustomAdapter", () => {
       expect(result).toBeNull();
     });
 
+    it("returns null on P2025 during update", async () => {
+      const { Prisma } = await import("@prisma/client");
+      const p2025 = new Prisma.PrismaClientKnownRequestError(
+        "Record not found",
+        { code: "P2025", clientVersion: "7.0.0" },
+      );
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date(),
+        tenantId: null,
+      });
+      mockPrismaSession.update.mockRejectedValue(p2025);
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-1" });
+
+      expect(result).toBeNull();
+    });
+
     it("re-throws non-P2025 Prisma errors", async () => {
       const otherErr = new Error("connection lost");
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date(),
+        tenantId: null,
+      });
       mockPrismaSession.update.mockRejectedValue(otherErr);
 
       const adapter = createCustomAdapter();

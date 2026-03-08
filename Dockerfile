@@ -1,12 +1,13 @@
 # Stage 1: Install dependencies
-FROM node:20-alpine AS deps
+# Pin base image to digest for reproducible builds (update with: docker pull node:20-alpine)
+FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS deps
 RUN apk add --no-cache libc6-compat && apk upgrade --no-cache zlib
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
 # Stage 2: Build the application
-FROM node:20-alpine AS builder
+FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS builder
 WORKDIR /app
 RUN apk upgrade --no-cache zlib
 ARG DATABASE_URL
@@ -17,7 +18,7 @@ RUN npx prisma generate
 RUN npx next build
 
 # Stage 3: Production image
-FROM node:20-alpine AS runner
+FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS runner
 WORKDIR /app
 RUN apk upgrade --no-cache zlib
 

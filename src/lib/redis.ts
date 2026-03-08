@@ -1,17 +1,38 @@
-import { createClient } from "redis";
-
-type RedisClient = ReturnType<typeof createClient>;
+import Redis from "ioredis";
 
 const globalForRedis = globalThis as unknown as {
-  redisClient?: RedisClient;
+  redisClient?: Redis;
 };
 
-export function getRedis(): RedisClient | null {
+export function getRedis(): Redis | null {
   const url = process.env.REDIS_URL;
   if (!url) return null;
 
   if (!globalForRedis.redisClient) {
-    const client = createClient({ url });
+    let client: Redis;
+
+    if (process.env.REDIS_SENTINEL === "true") {
+      const hosts = process.env.REDIS_SENTINEL_HOSTS ?? "";
+      const masterName = process.env.REDIS_SENTINEL_MASTER_NAME ?? "mymaster";
+      const sentinelPassword = process.env.REDIS_SENTINEL_PASSWORD;
+      const useTls = process.env.REDIS_SENTINEL_TLS === "true";
+
+      const sentinels = hosts.split(",").map((h) => {
+        const [host, port] = h.trim().split(":");
+        return { host, port: parseInt(port || "26379", 10) };
+      });
+
+      client = new Redis({
+        sentinels,
+        name: masterName,
+        sentinelPassword: sentinelPassword || undefined,
+        ...(useTls ? { tls: {}, sentinelTLS: {} } : {}),
+        lazyConnect: true,
+      });
+    } else {
+      client = new Redis(url, { lazyConnect: true });
+    }
+
     client.on("error", () => {});
     client.connect().catch(() => {});
     globalForRedis.redisClient = client;

@@ -93,7 +93,7 @@ describe("authorizeWebAuthn", () => {
     vi.clearAllMocks();
     vi.stubEnv("WEBAUTHN_RP_ID", "localhost");
 
-    mockGetRedis.mockReturnValue({ getDel: mockRedisGetDel });
+    mockGetRedis.mockReturnValue({ getdel: mockRedisGetDel });
     mockRedisGetDel.mockResolvedValue(STORED_CHALLENGE);
     mockGetRpOrigin.mockReturnValue("http://localhost:3000");
     mockBase64urlToUint8Array.mockReturnValue(new Uint8Array(32));

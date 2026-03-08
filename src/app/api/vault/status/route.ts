@@ -32,6 +32,7 @@ async function handleGET(request: NextRequest) {
         kdfType: true,
         kdfIterations: true,
         recoveryKeySetAt: true,
+        tenant: { select: { vaultAutoLockMinutes: true } },
       },
     }),
   );
@@ -47,6 +48,7 @@ async function handleGET(request: NextRequest) {
     kdfType: user.kdfType,
     kdfIterations: user.kdfIterations,
     hasRecoveryKey: !!user.recoveryKeySetAt,
+    vaultAutoLockMinutes: user.tenant?.vaultAutoLockMinutes ?? null,
   });
 }
 

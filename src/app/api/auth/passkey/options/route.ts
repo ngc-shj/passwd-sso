@@ -56,7 +56,8 @@ async function handlePOST(req: NextRequest) {
   await redis.set(
     `webauthn:challenge:signin:${challengeId}`,
     options.challenge,
-    { EX: CHALLENGE_TTL_SECONDS },
+    "EX",
+    CHALLENGE_TTL_SECONDS,
   );
 
   // Derive PRF salt so the client can request PRF in the same ceremony

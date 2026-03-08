@@ -54,6 +54,7 @@ export const API_PATH = {
   API_KEYS: "/api/api-keys",
   TENANT_SCIM_TOKENS: "/api/tenant/scim-tokens",
   DIRECTORY_SYNC: "/api/directory-sync",
+  TENANT_POLICY: "/api/tenant/policy",
   TENANT_ROLE: "/api/tenant/role",
   TRAVEL_MODE: "/api/travel-mode",
   WEBAUTHN: "/api/webauthn",

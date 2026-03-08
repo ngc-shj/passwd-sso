@@ -380,9 +380,12 @@ model Tenant {
   isBootstrap Boolean  @default(false) @map("is_bootstrap")
   name        String
   slug        String   @unique
-  description String?  @db.Text
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  description           String?  @db.Text
+  maxConcurrentSessions    Int?     @map("max_concurrent_sessions")
+  sessionIdleTimeoutMinutes Int?     @map("session_idle_timeout_minutes")
+  vaultAutoLockMinutes      Int?     @map("vault_auto_lock_minutes")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
 
   users                      User[]
   accounts                   Account[]
@@ -772,6 +775,8 @@ enum AuditAction {
   DIRECTORY_SYNC_CONFIG_DELETE
   DIRECTORY_SYNC_RUN
   DIRECTORY_SYNC_STALE_RESET
+  SESSION_EVICTED
+  ENTRY_HISTORY_REENCRYPT
 }
 
 enum AuditScope {
@@ -1019,6 +1024,7 @@ enum NotificationType {
   POLICY_UPDATE
   ADMIN_VAULT_RESET
   ADMIN_VAULT_RESET_REVOKED
+  SESSION_EVICTED
 }
 
 model Notification {

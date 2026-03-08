@@ -34,12 +34,12 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     try {
       const count = await redis.incr(key);
       if (count === 1) {
-        await redis.pExpire(key, windowMs);
+        await redis.pexpire(key, windowMs);
       }
       if (count <= max) {
         return { allowed: true };
       }
-      const ttl = await redis.pTTL(key);
+      const ttl = await redis.pttl(key);
       return {
         allowed: false,
         retryAfterMs: ttl > 0 ? ttl : windowMs,
