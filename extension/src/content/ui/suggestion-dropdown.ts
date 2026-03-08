@@ -11,7 +11,7 @@ export interface DropdownOptions {
   entries: DecryptedEntry[];
   vaultLocked: boolean;
   disconnected?: boolean;
-  onSelect: (entryId: string) => void;
+  onSelect: (entryId: string, teamId?: string) => void;
   onDismiss: () => void;
   lockedMessage: string;
   disconnectedMessage?: string;
@@ -23,7 +23,7 @@ let currentDropdown: HTMLDivElement | null = null;
 let activeIndex = -1;
 let itemElements: HTMLDivElement[] = [];
 let currentOnDismiss: (() => void) | null = null;
-let currentOnSelect: ((entryId: string) => void) | null = null;
+let currentOnSelect: ((entryId: string, teamId?: string) => void) | null = null;
 let outsideClickHandler: ((e: MouseEvent) => void) | null = null;
 
 function isSafeSelectClick(e: MouseEvent, item: HTMLDivElement): boolean {
@@ -77,6 +77,7 @@ export function showDropdown(opts: DropdownOptions): void {
       item.className = "psso-item";
       item.setAttribute("role", "option");
       item.setAttribute("data-entry-id", entry.id);
+      if (entry.teamId) item.setAttribute("data-team-id", entry.teamId);
 
       item.innerHTML = `
         <div class="psso-item-icon">${KEY_ICON}</div>
@@ -91,7 +92,7 @@ export function showDropdown(opts: DropdownOptions): void {
         e.preventDefault();
         if (!isSafeSelectClick(e, item)) return;
         try {
-          opts.onSelect(entry.id);
+          opts.onSelect(entry.id, entry.teamId);
         } catch {
           // Extension context may have been invalidated — swallow silently
         }
@@ -168,10 +169,12 @@ export function handleDropdownKeydown(e: KeyboardEvent): boolean {
     case "Enter": {
       if (activeIndex >= 0 && activeIndex < itemElements.length) {
         e.preventDefault();
-        const entryId = itemElements[activeIndex]?.getAttribute("data-entry-id");
+        const activeItem = itemElements[activeIndex];
+        const entryId = activeItem?.getAttribute("data-entry-id");
+        const teamId = activeItem?.getAttribute("data-team-id") ?? undefined;
         if (entryId && currentOnSelect) {
           try {
-            currentOnSelect(entryId);
+            currentOnSelect(entryId, teamId);
           } catch {
             // Extension context may have been invalidated — swallow silently
           }

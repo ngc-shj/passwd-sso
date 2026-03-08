@@ -248,7 +248,7 @@ async function hydrateFromSession(): Promise<void> {
     }
 
     // Restore ECDH private key for team features
-    if (state.ecdhEncrypted) {
+    if (state.ecdhEncrypted && currentVaultSecretKeyHex) {
       try {
         const secretKeyForEcdh = hexDecode(currentVaultSecretKeyHex!);
         const ecdhWrappingKey = await deriveEcdhWrappingKey(secretKeyForEcdh);
@@ -765,7 +765,16 @@ async function getTeamEncryptionKey(
 ): Promise<CryptoKey | null> {
   if (!ecdhPrivateKeyBytes || !currentUserId) return null;
 
-  // Fetch member key to determine actual keyVersion
+  // Check cache first when keyVersion is known (avoids redundant network request)
+  if (keyVersion != null) {
+    const earlyKey = `${teamId}:${keyVersion}`;
+    const earlyCached = teamKeyCache.get(earlyKey);
+    if (earlyCached && Date.now() - earlyCached.cachedAt < TEAM_KEY_CACHE_TTL_MS) {
+      return earlyCached.key;
+    }
+  }
+
+  // Fetch member key from server
   const queryParam = keyVersion != null ? `?keyVersion=${keyVersion}` : "";
   const res = await swFetch(`${extApiPath.teamMemberKey(teamId)}${queryParam}`);
   if (!res.ok) return null;
