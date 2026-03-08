@@ -135,7 +135,8 @@ async function handlePOST(req: NextRequest) {
   await redis.set(
     `webauthn:challenge:signin:${challengeId}`,
     options.challenge,
-    { EX: CHALLENGE_TTL_SECONDS },
+    "EX",
+    CHALLENGE_TTL_SECONDS,
   );
 
   let prfSalt: string | null = null;

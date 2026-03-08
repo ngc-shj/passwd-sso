@@ -41,6 +41,7 @@
     "serverUrlPlaceholder": "https://example.com",
     "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
     "autoLock": "Auto-lock (minutes)",
+    "autoLockTenantNote": "Tenant admin may override this setting.",
     "never": "Never",
     "save": "Save",
     "saved": "Saved!",

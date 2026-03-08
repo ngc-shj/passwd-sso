@@ -1,13 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } =
+const { mockAuth, mockPrismaSession, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } =
   vi.hoisted(() => ({
     mockAuth: vi.fn(),
     mockPrismaSession: {
       findUnique: vi.fn(),
       findMany: vi.fn(),
       deleteMany: vi.fn(),
+    },
+    mockPrismaUser: {
+      findUnique: vi.fn(),
     },
     mockRateLimiter: { check: vi.fn() },
     mockLogAudit: vi.fn(),
@@ -16,7 +19,7 @@ const { mockAuth, mockPrismaSession, mockRateLimiter, mockLogAudit, mockWithUser
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { session: mockPrismaSession },
+  prisma: { session: mockPrismaSession, user: mockPrismaUser },
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
@@ -71,6 +74,7 @@ describe("GET /api/sessions", () => {
         userAgent: "Chrome/120",
       },
     ]);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: null } });
 
     const req = createRequest("GET", "http://localhost:3000/api/sessions", {
       headers: { Cookie: "authjs.session-token=current-token" },
@@ -79,11 +83,12 @@ describe("GET /api/sessions", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json).toHaveLength(2);
-    expect(json[0].isCurrent).toBe(true);
-    expect(json[1].isCurrent).toBe(false);
+    expect(json.sessions).toHaveLength(2);
+    expect(json.sessions[0].isCurrent).toBe(true);
+    expect(json.sessions[1].isCurrent).toBe(false);
+    expect(json.sessionCount).toBe(2);
     // sessionToken must not be exposed
-    expect(json[0]).not.toHaveProperty("sessionToken");
+    expect(json.sessions[0]).not.toHaveProperty("sessionToken");
   });
 
   it("marks all sessions as non-current when cookie is missing", async () => {
@@ -96,21 +101,25 @@ describe("GET /api/sessions", () => {
         userAgent: null,
       },
     ]);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenant: null });
     const req = createRequest("GET", "http://localhost:3000/api/sessions");
     const res = await GET(req);
     const json = await res.json();
-    expect(json).toHaveLength(1);
-    expect(json[0].isCurrent).toBe(false);
+    expect(json.sessions).toHaveLength(1);
+    expect(json.sessions[0].isCurrent).toBe(false);
     // findUnique should not be called when no cookie
     expect(mockPrismaSession.findUnique).not.toHaveBeenCalled();
   });
 
   it("returns empty array when no sessions", async () => {
     mockPrismaSession.findMany.mockResolvedValue([]);
+    mockPrismaUser.findUnique.mockResolvedValue({ tenant: null });
     const req = createRequest("GET", "http://localhost:3000/api/sessions");
     const res = await GET(req);
     const json = await res.json();
-    expect(json).toEqual([]);
+    expect(json.sessions).toEqual([]);
+    expect(json.sessionCount).toBe(0);
+    expect(json.maxConcurrentSessions).toBeNull();
   });
 });
 

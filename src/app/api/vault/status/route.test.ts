@@ -53,6 +53,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
+      tenant: { vaultAutoLockMinutes: null },
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     const json = await res.json();
@@ -64,6 +65,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       hasRecoveryKey: false,
+      vaultAutoLockMinutes: null,
     });
   });
 
@@ -75,6 +77,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
+      tenant: { vaultAutoLockMinutes: null },
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     const json = await res.json();
@@ -95,6 +98,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: new Date(),
+      tenant: { vaultAutoLockMinutes: null },
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     const json = await res.json();
@@ -114,6 +118,7 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
+      tenant: { vaultAutoLockMinutes: 30 },
     });
     const res = await GET(new NextRequest("http://localhost/api/vault/status"));
     const json = await res.json();

@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
 import { DirectorySyncCard } from "@/components/settings/directory-sync-card";
+import { TenantSessionPolicyCard } from "@/components/settings/tenant-session-policy-card";
 import { Loader2 } from "lucide-react";
 
 export default function TenantSettingsPage() {
@@ -55,13 +56,17 @@ export default function TenantSettingsPage() {
         </Card>
 
         <Tabs defaultValue="members" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="members">{t("tenantTabMembers")}</TabsTrigger>
+            <TabsTrigger value="security">{t("tenantTabSecurity")}</TabsTrigger>
             <TabsTrigger value="scim">{t("tenantTabScim")}</TabsTrigger>
             <TabsTrigger value="directory-sync">{t("tenantTabDirectorySync")}</TabsTrigger>
           </TabsList>
           <TabsContent value="members" className="mt-0 space-y-4">
             <TenantMembersCard />
+          </TabsContent>
+          <TabsContent value="security" className="mt-0 space-y-4">
+            <TenantSessionPolicyCard />
           </TabsContent>
           <TabsContent value="scim" className="mt-0 space-y-4">
             <ScimProvisioningCard />

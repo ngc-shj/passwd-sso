@@ -62,6 +62,8 @@
   "MASTER_KEY_ROTATION": "Master key rotation",
   "SESSION_REVOKE": "Revoked session",
   "SESSION_REVOKE_ALL": "Revoked all other sessions",
+  "SESSION_EVICTED": "Session evicted (concurrent limit)",
+  "ENTRY_HISTORY_REENCRYPT": "Re-encrypted history entry",
   "TEAM_E2E_MIGRATION": "Team E2E migration",
   "TEAM_KEY_ROTATION": "Team key rotation",
   "TEAM_MEMBER_KEY_DISTRIBUTE": "Distributed member key",

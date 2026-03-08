@@ -118,6 +118,9 @@ export function App() {
               <option value={30}>30</option>
               <option value={60}>60</option>
             </select>
+            <span className="text-xs text-gray-400">
+              {t("options.autoLockTenantNote")}
+            </span>
           </label>
         </div>
 

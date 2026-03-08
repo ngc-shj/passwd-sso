@@ -68,7 +68,8 @@ export function SessionsCard() {
     try {
       const res = await fetchApi(API_PATH.SESSIONS);
       if (res.ok) {
-        setSessions(await res.json());
+        const data = await res.json();
+        setSessions(Array.isArray(data) ? data : data.sessions ?? []);
       } else {
         toast.error(t("fetchError"));
       }

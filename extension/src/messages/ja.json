@@ -41,6 +41,7 @@
     "serverUrlPlaceholder": "https://example.com",
     "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
     "autoLock": "自動ロック（分）",
+    "autoLockTenantNote": "テナント管理者がポリシーを設定している場合はそちらが優先されます。",
     "never": "しない",
     "save": "保存",
     "saved": "保存しました",
