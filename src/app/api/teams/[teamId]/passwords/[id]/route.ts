@@ -160,6 +160,23 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = parsed.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
+  // Prevent itemKeyVersion downgrade (v1→v0) — cryptographic downgrade attack
+  if (itemKeyVersion !== undefined && itemKeyVersion < (entry.itemKeyVersion ?? 0)) {
+    return NextResponse.json(
+      { error: API_ERROR.ITEM_KEY_VERSION_DOWNGRADE },
+      { status: 400 }
+    );
+  }
+
+  // Upgrading v0→v>=1 requires encryptedItemKey; reusing v>=1 does not
+  const existingVersion = entry.itemKeyVersion ?? 0;
+  if (itemKeyVersion !== undefined && itemKeyVersion >= 1 && existingVersion < 1 && !encryptedItemKey) {
+    return NextResponse.json(
+      { error: API_ERROR.ITEM_KEY_REQUIRED },
+      { status: 400 }
+    );
+  }
+
   // Validate teamKeyVersion matches current team key version (F-13)
   if (isFullUpdate) {
     const team = await withTeamTenantRls(teamId, async () =>

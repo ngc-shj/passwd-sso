@@ -195,11 +195,12 @@ export const updateTeamE2EPasswordSchema = z.object({
   { message: "Encrypted fields must be all present or all absent" },
 ).refine(
   (data) => {
-    if (data.itemKeyVersion !== undefined && data.itemKeyVersion >= 1 && !data.encryptedItemKey) return false;
+    // For updates: itemKeyVersion>=1 without encryptedItemKey is valid (reuse existing)
+    // encryptedItemKey without itemKeyVersion>=1 is invalid
     if ((data.itemKeyVersion === undefined || data.itemKeyVersion === 0) && data.encryptedItemKey) return false;
     return true;
   },
-  { message: "encryptedItemKey is required when itemKeyVersion >= 1 and forbidden when 0" },
+  { message: "encryptedItemKey is forbidden when itemKeyVersion is 0 or absent" },
 );
 
 export const updateTeamSchema = z.object({

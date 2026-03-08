@@ -8,11 +8,13 @@ import React from "react";
 const {
   mockFetch,
   mockGetTeamEncryptionKey,
+  mockGetEntryDecryptionKey,
   mockDecryptData,
   mockBuildTeamEntryAAD,
 } = vi.hoisted(() => ({
   mockFetch: vi.fn(),
   mockGetTeamEncryptionKey: vi.fn(),
+  mockGetEntryDecryptionKey: vi.fn(),
   mockDecryptData: vi.fn(),
   mockBuildTeamEntryAAD: vi.fn(),
 }));
@@ -24,6 +26,7 @@ vi.mock("next-intl", () => ({
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamEncryptionKey,
+    getEntryDecryptionKey: mockGetEntryDecryptionKey,
   }),
 }));
 
@@ -79,11 +82,13 @@ describe("TeamEditDialogLoader", () => {
   beforeEach(() => {
     mockFetch.mockReset();
     mockGetTeamEncryptionKey.mockReset();
+    mockGetEntryDecryptionKey.mockReset();
     mockDecryptData.mockReset();
     mockBuildTeamEntryAAD.mockReset();
     globalThis.fetch = mockFetch as unknown as typeof fetch;
     mockBuildTeamEntryAAD.mockReturnValue("aad-token");
     mockGetTeamEncryptionKey.mockResolvedValue({} as CryptoKey);
+    mockGetEntryDecryptionKey.mockResolvedValue({} as CryptoKey);
   });
 
   it("loads, decrypts, and passes edit data into TeamEditDialog", async () => {
@@ -127,7 +132,7 @@ describe("TeamEditDialogLoader", () => {
     });
 
     expect(mockFetch).toHaveBeenCalledWith("/api/teams/team-1/passwords/entry-1");
-    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "entry-1", "blob");
+    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "entry-1", "blob", 0);
     expect(mockDecryptData).toHaveBeenCalledWith(
       {
         ciphertext: "cipher",
@@ -145,6 +150,51 @@ describe("TeamEditDialogLoader", () => {
     expect(screen.getByTestId("tag-count")).toHaveTextContent("1");
   });
 
+  it("passes correct ItemKey data to getEntryDecryptionKey for v1 entry", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "entry-1",
+        entryType: "LOGIN",
+        encryptedBlob: "cipher",
+        blobIv: "iv",
+        blobAuthTag: "tag",
+        tags: [],
+        itemKeyVersion: 1,
+        teamKeyVersion: 2,
+        encryptedItemKey: "ek-ct",
+        itemKeyIv: "ek-iv",
+        itemKeyAuthTag: "ek-at",
+      }),
+    });
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({ title: "V1 entry", username: "bob" }),
+    );
+
+    render(
+      <TeamEditDialogLoader
+        teamId="team-1"
+        id="entry-1"
+        open={true}
+        onOpenChange={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("edit-dialog")).toBeInTheDocument();
+    });
+
+    expect(mockGetEntryDecryptionKey).toHaveBeenCalledWith("team-1", "entry-1", {
+      itemKeyVersion: 1,
+      encryptedItemKey: "ek-ct",
+      itemKeyIv: "ek-iv",
+      itemKeyAuthTag: "ek-at",
+      teamKeyVersion: 2,
+    });
+    expect(mockBuildTeamEntryAAD).toHaveBeenCalledWith("team-1", "entry-1", "blob", 1);
+  });
+
   it("shows an error state when the team key is unavailable", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
@@ -156,7 +206,7 @@ describe("TeamEditDialogLoader", () => {
         tags: [],
       }),
     });
-    mockGetTeamEncryptionKey.mockResolvedValue(null);
+    mockGetEntryDecryptionKey.mockRejectedValue(new Error("notFound"));
 
     render(
       <TeamEditDialogLoader
