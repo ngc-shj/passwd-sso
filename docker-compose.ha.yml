@@ -1,0 +1,78 @@
+# Redis Sentinel HA overlay
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ha.yml up
+#
+# Provides: 1 master + 2 replicas + 3 sentinels
+# App connects via ioredis Sentinel mode (REDIS_SENTINEL=true)
+
+x-sentinel: &sentinel
+  image: redis:7-alpine
+  entrypoint: ["/bin/sh", "-c", "cp /etc/sentinel-template.conf /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"]
+  volumes:
+    - ./infra/redis/sentinel.conf:/etc/sentinel-template.conf:ro
+  depends_on:
+    redis:
+      condition: service_healthy
+    redis-replica-1:
+      condition: service_healthy
+    redis-replica-2:
+      condition: service_healthy
+  restart: unless-stopped
+  networks:
+    - internal
+
+services:
+  # Override base redis to act as master with explicit role
+  redis:
+    command: ["redis-server", "--appendonly", "yes"]
+
+  redis-replica-1:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  redis-replica-2:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--replicaof", "redis", "6379"]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - internal
+
+  sentinel-1:
+    <<: *sentinel
+  sentinel-2:
+    <<: *sentinel
+  sentinel-3:
+    <<: *sentinel
+
+  # Override app environment for Sentinel mode
+  app:
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - REDIS_SENTINEL=true
+      - REDIS_SENTINEL_HOSTS=sentinel-1:26379,sentinel-2:26379,sentinel-3:26379
+      - REDIS_SENTINEL_MASTER_NAME=mymaster
+    depends_on:
+      sentinel-1:
+        condition: service_started
+      sentinel-2:
+        condition: service_started
+      sentinel-3:
+        condition: service_started
