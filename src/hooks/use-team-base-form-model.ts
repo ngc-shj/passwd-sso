@@ -62,7 +62,7 @@ export function useTeamBaseFormModel({
     editData?.id,
   );
   const { folders: teamFolders } = useTeamFolders(open, teamId);
-  const { getTeamKeyInfo } = useTeamVault();
+  const { getTeamKeyInfo, getEntryDecryptionKey } = useTeamVault();
 
   const entryCopy = useMemo(
     () =>
@@ -136,6 +136,7 @@ export function useTeamBaseFormModel({
       setSaving,
       handleOpenChange: onOpenChange,
       onSaved,
+      getEntryDecryptionKey,
     });
   };
 

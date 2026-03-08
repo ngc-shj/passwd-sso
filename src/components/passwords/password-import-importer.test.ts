@@ -18,6 +18,12 @@ vi.mock("@/lib/crypto-client", () => ({
   encryptData: mockEncryptData,
 }));
 
+vi.mock("@/lib/crypto-team", () => ({
+  generateItemKey: () => new Uint8Array(32),
+  wrapItemKey: async () => ({ ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-at" }),
+  deriveItemEncryptionKey: async () => ({} as CryptoKey),
+}));
+
 import { runImportEntries } from "@/components/passwords/password-import-importer";
 
 function response(ok: boolean): Response {

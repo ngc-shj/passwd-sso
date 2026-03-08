@@ -13,5 +13,6 @@
   "fileTooLarge": "File size exceeds the limit ({max})",
   "tooManyFiles": "Maximum {max} attachments per entry",
   "invalidExtension": "File extension not allowed. Allowed: {allowed}",
-  "invalidContentType": "File type not allowed"
+  "invalidContentType": "File type not allowed",
+  "legacyEncryption": "This attachment uses legacy encryption and cannot be decrypted. Please re-upload."
 }

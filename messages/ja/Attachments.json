@@ -13,5 +13,6 @@
   "fileTooLarge": "ファイルサイズが上限（{max}）を超えています",
   "tooManyFiles": "添付ファイルは最大{max}件までです",
   "invalidExtension": "許可されていない拡張子です。許可: {allowed}",
-  "invalidContentType": "許可されていないファイル形式です"
+  "invalidContentType": "許可されていないファイル形式です",
+  "legacyEncryption": "この添付ファイルは旧形式で暗号化されており復号できません。再アップロードしてください。"
 }

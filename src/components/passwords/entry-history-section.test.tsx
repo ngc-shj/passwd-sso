@@ -44,6 +44,7 @@ vi.mock("@/lib/crypto-client", () => ({
 vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamEncryptionKey,
+    getEntryDecryptionKey: mockGetTeamEncryptionKey,
   }),
 }));
 

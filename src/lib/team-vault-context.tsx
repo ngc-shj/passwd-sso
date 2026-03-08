@@ -9,4 +9,5 @@ export {
 export type {
   TeamKeyInfo,
   TeamVaultContextValue,
+  EntryItemKeyData,
 } from "./team-vault-core";
