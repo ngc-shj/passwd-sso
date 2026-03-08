@@ -1,14 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
-  ALARM_VAULT_LOCK,
-  ALARM_TOKEN_REFRESH,
   ALARM_CLEAR_CLIPBOARD,
-  CMD_TRIGGER_AUTOFILL,
   CMD_COPY_PASSWORD,
   CMD_COPY_USERNAME,
   CMD_LOCK_VAULT,
   EXT_ENTRY_TYPE,
-  SESSION_KEY,
 } from "../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 

@@ -25,35 +25,25 @@ export async function streamBodyToBuffer(body: unknown): Promise<Buffer> {
   if (Buffer.isBuffer(body)) return body;
   if (body instanceof Uint8Array) return Buffer.from(body);
 
+  if (typeof body !== "object") throw new Error("Unsupported object body type");
+  const obj = body as Record<string | symbol, unknown>;
+
   if (
-    typeof body === "object" &&
-    body !== null &&
-    "transformToByteArray" in body &&
-    typeof (body as { transformToByteArray: () => Promise<Uint8Array> })
-      .transformToByteArray === "function"
+    "transformToByteArray" in obj &&
+    typeof obj.transformToByteArray === "function"
   ) {
     const bytes = await (
-      body as { transformToByteArray: () => Promise<Uint8Array> }
+      obj as unknown as { transformToByteArray: () => Promise<Uint8Array> }
     ).transformToByteArray();
     return Buffer.from(bytes);
   }
 
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    Symbol.asyncIterator in body
-  ) {
-    return readAsyncIterable(body as AsyncIterable<unknown>);
+  if (Symbol.asyncIterator in obj) {
+    return readAsyncIterable(obj as unknown as AsyncIterable<unknown>);
   }
 
-  if (
-    typeof body === "object" &&
-    body !== null &&
-    "getReader" in body &&
-    typeof (body as { getReader: () => ReadableStreamDefaultReader<Uint8Array> })
-      .getReader === "function"
-  ) {
-    return readWebStream(body as ReadableStream<Uint8Array>);
+  if ("getReader" in obj && typeof obj.getReader === "function") {
+    return readWebStream(obj as unknown as ReadableStream<Uint8Array>);
   }
 
   throw new Error("Unsupported object body type");
