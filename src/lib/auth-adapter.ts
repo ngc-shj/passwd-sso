@@ -230,7 +230,11 @@ export function createCustomAdapter(): Adapter {
 
       // Fire audit + notification outside the RLS transaction context
       if (evictionInfo) {
-        const { tenantId, maxSessions, evicted } = evictionInfo;
+        const { tenantId, maxSessions, evicted } = evictionInfo as {
+          tenantId: string;
+          maxSessions: number;
+          evicted: { id: string; ipAddress: string | null; userAgent: string | null }[];
+        };
         for (const ev of evicted) {
           logAudit({
             scope: AUDIT_SCOPE.PERSONAL,
@@ -256,7 +260,7 @@ export function createCustomAdapter(): Adapter {
           type: "SESSION_EVICTED",
           title: "Session terminated",
           body: `${evicted.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
-          metadata: { evictedCount: evicted.length },
+          metadata: { evictedCount: evicted.length, maxConcurrentSessions: maxSessions },
         });
       }
 
@@ -271,6 +275,44 @@ export function createCustomAdapter(): Adapter {
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
       try {
+        // Read current session BEFORE updating lastActiveAt so we can check idle timeout
+        const current = await withBypassRls(prisma, async () =>
+          prisma.session.findUnique({
+            where: { sessionToken: session.sessionToken },
+            select: {
+              lastActiveAt: true,
+              tenantId: true,
+            },
+          }),
+        );
+
+        if (!current) return null;
+
+        // Check idle timeout before refreshing the session
+        if (current.lastActiveAt && current.tenantId) {
+          const tenant = await withBypassRls(prisma, async () =>
+            prisma.tenant.findUnique({
+              where: { id: current.tenantId! },
+              select: { sessionIdleTimeoutMinutes: true },
+            }),
+          );
+
+          const timeout = tenant?.sessionIdleTimeoutMinutes;
+          if (timeout != null && timeout > 0) {
+            const idleSince = Date.now() - current.lastActiveAt.getTime();
+            if (idleSince > timeout * 60_000) {
+              // Session exceeded idle timeout — delete and return null (forces sign-out)
+              await withBypassRls(prisma, async () =>
+                prisma.session.delete({
+                  where: { sessionToken: session.sessionToken },
+                }),
+              );
+              return null;
+            }
+          }
+        }
+
+        // Session is still valid — update lastActiveAt
         const updated = await withBypassRls(prisma, async () =>
           prisma.session.update({
             where: { sessionToken: session.sessionToken },

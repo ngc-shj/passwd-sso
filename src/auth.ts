@@ -229,8 +229,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     strategy: "database",
     // Session expires after 8 hours (workday)
     maxAge: 8 * 60 * 60,
-    // Extend session on activity within last 1 hour
-    updateAge: 60 * 60,
+    // Check session freshness every 30 seconds (required for idle timeout enforcement)
+    updateAge: 30,
   },
   ...authConfig,
   callbacks: {

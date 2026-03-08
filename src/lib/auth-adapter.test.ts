@@ -4,6 +4,8 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
+    findUnique: vi.fn(),
+    delete: vi.fn(),
   },
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -11,6 +13,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   },
   mockPrismaTenant: {
     create: vi.fn(),
+    findUnique: vi.fn(),
   },
   mockPrismaTenantMember: {
     create: vi.fn(),
@@ -358,10 +361,16 @@ describe("createCustomAdapter", () => {
   });
 
   describe("updateSession", () => {
-    it("updates lastActiveAt and passes expires when provided", async () => {
+    it("reads current session, checks idle, then updates lastActiveAt", async () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 
+      // findUnique returns current session (recently active)
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date("2025-03-15T11:59:00Z"),
+        tenantId: "tenant-1",
+      });
+      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: null });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -374,6 +383,12 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
+      // Should first read current session
+      expect(mockPrismaSession.findUnique).toHaveBeenCalledWith({
+        where: { sessionToken: "tok-1" },
+        select: { lastActiveAt: true, tenantId: true },
+      });
+      // Then update
       expect(mockPrismaSession.update).toHaveBeenCalledWith({
         where: { sessionToken: "tok-1" },
         data: { expires, lastActiveAt: now },
@@ -393,6 +408,11 @@ describe("createCustomAdapter", () => {
     });
 
     it("omits expires from data when not provided", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date(),
+        tenantId: "tenant-1",
+      });
+      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: null });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -407,13 +427,34 @@ describe("createCustomAdapter", () => {
       expect(callData).toHaveProperty("lastActiveAt");
     });
 
-    it("returns null when session not found (P2025)", async () => {
-      const { Prisma } = await import("@prisma/client");
-      const p2025 = new Prisma.PrismaClientKnownRequestError(
-        "Record not found",
-        { code: "P2025", clientVersion: "7.0.0" },
-      );
-      mockPrismaSession.update.mockRejectedValue(p2025);
+    it("deletes session when idle timeout exceeded", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // Session was last active 10 minutes ago
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date("2025-03-15T11:49:00Z"),
+        tenantId: "tenant-1",
+      });
+      // Tenant has 5 minute idle timeout
+      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: 5 });
+      mockPrismaSession.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-1" });
+
+      expect(result).toBeNull();
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({
+        where: { sessionToken: "tok-1" },
+      });
+      // Should NOT call update
+      expect(mockPrismaSession.update).not.toHaveBeenCalled();
+
+      vi.useRealTimers();
+    });
+
+    it("returns null when session not found", async () => {
+      mockPrismaSession.findUnique.mockResolvedValue(null);
 
       const adapter = createCustomAdapter();
       const result = await adapter.updateSession!({ sessionToken: "deleted-tok" });
@@ -421,8 +462,30 @@ describe("createCustomAdapter", () => {
       expect(result).toBeNull();
     });
 
+    it("returns null on P2025 during update", async () => {
+      const { Prisma } = await import("@prisma/client");
+      const p2025 = new Prisma.PrismaClientKnownRequestError(
+        "Record not found",
+        { code: "P2025", clientVersion: "7.0.0" },
+      );
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date(),
+        tenantId: null,
+      });
+      mockPrismaSession.update.mockRejectedValue(p2025);
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-1" });
+
+      expect(result).toBeNull();
+    });
+
     it("re-throws non-P2025 Prisma errors", async () => {
       const otherErr = new Error("connection lost");
+      mockPrismaSession.findUnique.mockResolvedValue({
+        lastActiveAt: new Date(),
+        tenantId: null,
+      });
       mockPrismaSession.update.mockRejectedValue(otherErr);
 
       const adapter = createCustomAdapter();
