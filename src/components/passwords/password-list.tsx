@@ -315,12 +315,16 @@ export function PasswordList({
         {archivedOnly ? (
           <>
             <Archive className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <p className="text-muted-foreground">{t("noArchive")}</p>
+            <p className="text-muted-foreground">
+              {searchQuery ? t("noMatch") : t("noArchive")}
+            </p>
           </>
         ) : favoritesOnly ? (
           <>
             <Star className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <p className="text-muted-foreground">{t("noFavorites")}</p>
+            <p className="text-muted-foreground">
+              {searchQuery ? t("noMatch") : t("noFavorites")}
+            </p>
           </>
         ) : (
           <>
@@ -328,9 +332,11 @@ export function PasswordList({
             <p className="text-muted-foreground">
               {searchQuery ? t("noMatch") : t("noPasswords")}
             </p>
-            <p className="text-sm text-muted-foreground mt-1">
-              {t("addFirst")}
-            </p>
+            {!searchQuery && (
+              <p className="text-sm text-muted-foreground mt-1">
+                {t("addFirst")}
+              </p>
+            )}
           </>
         )}
       </div>

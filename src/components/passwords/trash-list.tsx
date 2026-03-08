@@ -44,12 +44,13 @@ export type TrashListHandle = BulkSelectionHandle;
 
 interface TrashListProps {
   refreshKey: number;
+  searchQuery?: string;
   selectionMode?: boolean;
   onSelectedCountChange?: (count: number, allSelected: boolean, atLimit: boolean) => void;
   selectAllRef?: React.Ref<TrashListHandle>;
 }
 
-export function TrashList({ refreshKey, selectionMode = false, onSelectedCountChange, selectAllRef }: TrashListProps) {
+export function TrashList({ refreshKey, searchQuery = "", selectionMode = false, onSelectedCountChange, selectAllRef }: TrashListProps) {
   const t = useTranslations("Trash");
   const tl = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
@@ -106,7 +107,21 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
     fetchTrash();
   }, [fetchTrash, refreshKey]);
 
-  const entryIds = entries.map((e) => e.id);
+  const filtered = searchQuery
+    ? entries.filter((e) => {
+        const q = searchQuery.toLowerCase();
+        return (
+          e.title.toLowerCase().includes(q) ||
+          (e.username?.toLowerCase().includes(q) ?? false) ||
+          (e.fullName?.toLowerCase().includes(q) ?? false) ||
+          (e.brand?.toLowerCase().includes(q) ?? false) ||
+          (e.lastFour?.includes(q) ?? false) ||
+          (e.idNumberLast4?.includes(q) ?? false) ||
+          (e.snippet?.toLowerCase().includes(q) ?? false)
+        );
+      })
+    : entries;
+  const entryIds = filtered.map((e) => e.id);
   const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,
     selectionMode,
@@ -222,7 +237,14 @@ export function TrashList({ refreshKey, selectionMode = false, onSelectedCountCh
       </div>
 
       <div className="space-y-2">
-        {entries.map((entry) => (
+        {filtered.length === 0 && (
+          <Card className="rounded-xl border bg-card/80 p-10">
+            <div className="flex flex-col items-center justify-center text-center">
+              <p className="text-muted-foreground">{tl("noMatch")}</p>
+            </div>
+          </Card>
+        )}
+        {filtered.map((entry) => (
           <Card key={entry.id} className="transition-colors hover:bg-accent">
             <CardContent className="flex items-center gap-3 px-4 py-2">
               {selectionMode && (
