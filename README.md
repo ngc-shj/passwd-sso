@@ -235,7 +235,7 @@ Zero-knowledge architecture — the server stores only ciphertext and cannot dec
 - **Domain separation** — Secret key → HKDF → separate encryption key + auth key
 - **Secret Key** — Account-specific salt for defense against server compromise
 - **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs
-- **Session security** — Database sessions (not JWT), 8-hour timeout, auto-lock after 15 min idle
+- **Session security** — Database sessions (not JWT), 8-hour timeout, auto-lock after 15 min idle or 5 min tab hidden
 - **Clipboard clear** — Copied passwords auto-clear after 30 seconds
 - **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation
 

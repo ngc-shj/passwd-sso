@@ -1,17 +1,13 @@
-# Setup Docs Policy
+# Setup Docs
 
-## Decision
+Language policy: English-only (Class B). See [../operations/language-policy.md](../operations/language-policy.md).
 
-Setup documentation is **English-only** (Class B in `../policy/language-policy.md`).
+| Document | Description |
+| --- | --- |
+| [docker/en.md](docker/en.md) | Docker Compose setup (includes sub-path deployment) |
+| [aws/en.md](aws/en.md) | AWS deployment |
+| [azure/en.md](azure/en.md) | Azure deployment |
+| [gcp/en.md](gcp/en.md) | GCP deployment |
+| [vercel/en.md](vercel/en.md) | Vercel deployment |
 
-## Why
-
-- Reduces drift between language variants
-- Lowers maintenance and review cost
-- Keeps deployment/security instructions consistent
-
-## Language handling
-
-- Each setup platform keeps only `en.md`.
-- Non-English setup variants are removed.
-- In case of translation needs, use external/localized guides outside `docs/setup`.
+Each platform keeps only `en.md`. For localized guides, use external resources outside `docs/setup`.
