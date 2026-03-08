@@ -12,8 +12,21 @@ import {
   hexDecode,
   unwrapSecretKey,
   verifyKey,
+  type EncryptedData,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import {
+  deriveEcdhWrappingKey,
+  unwrapEcdhPrivateKey,
+  importEcdhPrivateKey,
+  unwrapTeamKey,
+  deriveTeamEncryptionKey,
+  unwrapItemKey,
+  deriveItemEncryptionKey,
+  buildTeamEntryAAD,
+  buildItemKeyWrapAAD,
+  type TeamKeyWrapContext,
+} from "../lib/crypto-team";
 import { getSettings } from "../lib/storage";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
@@ -58,6 +71,20 @@ let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
 // Tenant policy auto-lock override (null = use local setting)
 let tenantAutoLockMinutes: number | null = null;
+
+// ── Team key state ──────────────────────────────────────────────
+let ecdhPrivateKeyBytes: Uint8Array | null = null;
+/** Encrypted ECDH data for session persistence (re-unwrap on SW restart) */
+let ecdhEncryptedData: { ciphertext: string; iv: string; authTag: string } | null = null;
+
+interface TeamKeyCacheEntry {
+  key: CryptoKey;
+  cachedAt: number;
+}
+const teamKeyCache = new Map<string, TeamKeyCacheEntry>();
+const TEAM_KEY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_TEAM_KEY_CACHE = 50;
+const MAX_TEAMS = 10;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
@@ -115,10 +142,18 @@ async function getCachedEntries(): Promise<DecryptedEntry[]> {
   if (cachedEntries && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
     return cachedEntries;
   }
-  const res = await swFetch(EXT_API_PATH.PASSWORDS);
-  if (!res.ok) return [];
-  const raw = (await res.json()) as RawEntry[];
-  const entries = await decryptOverviews(raw);
+  const [personalResult, teamResult] = await Promise.allSettled([
+    (async () => {
+      const res = await swFetch(EXT_API_PATH.PASSWORDS);
+      if (!res.ok) return [];
+      const raw = (await res.json()) as RawEntry[];
+      return decryptOverviews(raw);
+    })(),
+    fetchAllTeamEntries(),
+  ]);
+  const personal = personalResult.status === "fulfilled" ? personalResult.value : [];
+  const team = teamResult.status === "fulfilled" ? teamResult.value : [];
+  const entries = [...personal, ...team];
   cachedEntries = entries;
   cacheTimestamp = Date.now();
   return entries;
@@ -139,6 +174,13 @@ function clearVault(): void {
   currentUserId = null;
   currentVaultSecretKeyHex = null;
   tenantAutoLockMinutes = null;
+  // Zero-clear ECDH private key bytes (defense-in-depth)
+  if (ecdhPrivateKeyBytes) {
+    ecdhPrivateKeyBytes.fill(0);
+    ecdhPrivateKeyBytes = null;
+  }
+  ecdhEncryptedData = null;
+  teamKeyCache.clear();
   invalidateCache();
   invalidateContextMenu();
   pendingSavePrompts.clear();
@@ -174,6 +216,7 @@ function persistState(): void {
       expiresAt: tokenExpiresAt,
       userId: currentUserId ?? undefined,
       vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
+      ecdhEncrypted: ecdhEncryptedData ?? undefined,
     }).catch(() => {});
   }
 }
@@ -202,6 +245,23 @@ async function hydrateFromSession(): Promise<void> {
       encryptionKey = null;
       currentVaultSecretKeyHex = null;
       persistState();
+    }
+
+    // Restore ECDH private key for team features
+    if (state.ecdhEncrypted && currentVaultSecretKeyHex) {
+      try {
+        const secretKeyForEcdh = hexDecode(currentVaultSecretKeyHex!);
+        const ecdhWrappingKey = await deriveEcdhWrappingKey(secretKeyForEcdh);
+        secretKeyForEcdh.fill(0);
+        ecdhPrivateKeyBytes = await unwrapEcdhPrivateKey(
+          state.ecdhEncrypted,
+          ecdhWrappingKey,
+        );
+        ecdhEncryptedData = state.ecdhEncrypted;
+      } catch {
+        ecdhPrivateKeyBytes = null;
+        ecdhEncryptedData = null;
+      }
     }
   }
 
@@ -345,8 +405,8 @@ initContextMenu({
   extractHost,
   isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
-  performAutofill: async (entryId, tabId) => {
-    await performAutofillForEntry(entryId, tabId);
+  performAutofill: async (entryId, tabId, teamId) => {
+    await performAutofillForEntry(entryId, tabId, undefined, teamId);
   },
 });
 
@@ -549,26 +609,29 @@ chrome.commands.onCommand.addListener(async (command) => {
       }
 
       // Fetch full blob to get password/username
-      const res = await swFetch(extApiPath.passwordById(match.id));
-      if (!res.ok) {
-        return;
+      let blob: { password?: string | null; username?: string | null };
+
+      if (match.teamId) {
+        const result = await fetchAndDecryptTeamBlob(match.teamId, match.id);
+        if (!result) return;
+        blob = result.blob as typeof blob;
+      } else {
+        const res = await swFetch(extApiPath.passwordById(match.id));
+        if (!res.ok) return;
+
+        const data = (await res.json()) as {
+          encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+          aadVersion?: number;
+          id: string;
+        };
+
+        const aad =
+          (data.aadVersion ?? 0) >= 1
+            ? buildPersonalEntryAAD(currentUserId!, data.id)
+            : undefined;
+        const plaintext = await decryptData(data.encryptedBlob, encryptionKey!, aad);
+        blob = JSON.parse(plaintext) as typeof blob;
       }
-
-      const data = (await res.json()) as {
-        encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-        aadVersion?: number;
-        id: string;
-      };
-
-      const aad =
-        (data.aadVersion ?? 0) >= 1
-          ? buildPersonalEntryAAD(currentUserId!, data.id)
-          : undefined;
-      const plaintext = await decryptData(data.encryptedBlob, encryptionKey!, aad);
-      const blob = JSON.parse(plaintext) as {
-        password?: string | null;
-        username?: string | null;
-      };
 
       const value =
         command === CMD_COPY_PASSWORD
@@ -637,7 +700,8 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   if (!encryptionKey || !currentUserId) return [];
   // Defense-in-depth: API should already filter these, but exclude
   // trashed/archived entries client-side in case of stale cache or API bug.
-  const active = raw.filter((item) => !item.deletedAt && !item.isArchived);
+  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY]);
+  const active = raw.filter((item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType));
   const entries: DecryptedEntry[] = [];
   for (const item of active) {
     const aad =
@@ -675,37 +739,338 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   return entries;
 }
 
+// ── Team types ──────────────────────────────────────────────────
+
+type RawTeamEntry = {
+  id: string;
+  entryType: string;
+  encryptedOverview: string;
+  overviewIv: string;
+  overviewAuthTag: string;
+  aadVersion?: number;
+  teamKeyVersion: number;
+  itemKeyVersion?: number;
+  encryptedItemKey?: string;
+  itemKeyIv?: string;
+  itemKeyAuthTag?: string;
+  deletedAt?: string | null;
+  isArchived?: boolean;
+};
+
+// ── Team key management ─────────────────────────────────────────
+
+async function getTeamEncryptionKey(
+  teamId: string,
+  keyVersion?: number,
+): Promise<CryptoKey | null> {
+  if (!ecdhPrivateKeyBytes || !currentUserId) return null;
+
+  // Check cache first when keyVersion is known (avoids redundant network request)
+  // Include userId in cache key to prevent cross-user cache reuse
+  if (keyVersion != null) {
+    const earlyKey = `${currentUserId}:${teamId}:${keyVersion}`;
+    const earlyCached = teamKeyCache.get(earlyKey);
+    if (earlyCached && Date.now() - earlyCached.cachedAt < TEAM_KEY_CACHE_TTL_MS) {
+      return earlyCached.key;
+    }
+  }
+
+  // Fetch member key from server
+  const queryParam = keyVersion != null ? `?keyVersion=${keyVersion}` : "";
+  const res = await swFetch(`${extApiPath.teamMemberKey(teamId)}${queryParam}`);
+  if (!res.ok) return null;
+
+  const memberKey = (await res.json()) as {
+    encryptedTeamKey: string;
+    teamKeyIv: string;
+    teamKeyAuthTag: string;
+    ephemeralPublicKey: string;
+    hkdfSalt: string;
+    keyVersion: number;
+    wrapVersion: number;
+  };
+
+  const cacheKey = `${currentUserId}:${teamId}:${memberKey.keyVersion}`;
+
+  // Check cache
+  const cached = teamKeyCache.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt < TEAM_KEY_CACHE_TTL_MS) {
+    return cached.key;
+  }
+
+  // Import ECDH private key and unwrap team key
+  const memberPrivateKey = await importEcdhPrivateKey(ecdhPrivateKeyBytes);
+
+  const ctx: TeamKeyWrapContext = {
+    teamId,
+    toUserId: currentUserId,
+    keyVersion: memberKey.keyVersion,
+    wrapVersion: memberKey.wrapVersion,
+  };
+
+  const encrypted: EncryptedData = {
+    ciphertext: memberKey.encryptedTeamKey,
+    iv: memberKey.teamKeyIv,
+    authTag: memberKey.teamKeyAuthTag,
+  };
+
+  const teamKeyBytes = await unwrapTeamKey(
+    encrypted,
+    memberKey.ephemeralPublicKey,
+    memberPrivateKey,
+    memberKey.hkdfSalt,
+    ctx,
+  );
+
+  const teamEncKey = await deriveTeamEncryptionKey(teamKeyBytes);
+  teamKeyBytes.fill(0);
+
+  // LRU eviction if cache is full
+  if (teamKeyCache.size >= MAX_TEAM_KEY_CACHE) {
+    let oldestKey: string | undefined;
+    let oldestTime = Infinity;
+    for (const [k, v] of teamKeyCache) {
+      if (v.cachedAt < oldestTime) {
+        oldestTime = v.cachedAt;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey) teamKeyCache.delete(oldestKey);
+  }
+
+  teamKeyCache.set(cacheKey, { key: teamEncKey, cachedAt: Date.now() });
+  return teamEncKey;
+}
+
+// ── Team overview decryption ────────────────────────────────────
+
+async function decryptTeamOverviews(
+  teamId: string,
+  teamName: string,
+  raw: RawTeamEntry[],
+): Promise<DecryptedEntry[]> {
+  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY]);
+  const active = raw.filter(
+    (item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType),
+  );
+
+  async function decryptSingleEntry(item: RawTeamEntry): Promise<DecryptedEntry | null> {
+    const itemKeyVersion = item.itemKeyVersion ?? 0;
+    let decryptionKey: CryptoKey | null;
+
+    if (itemKeyVersion >= 1) {
+      // ItemKey required but missing — skip entry
+      if (!item.encryptedItemKey || !item.itemKeyIv || !item.itemKeyAuthTag) return null;
+      const teamEncKey = await getTeamEncryptionKey(teamId, item.teamKeyVersion);
+      if (!teamEncKey) return null;
+      const itemKeyWrapAAD = buildItemKeyWrapAAD(teamId, item.id, item.teamKeyVersion);
+      const itemKeyBytes = await unwrapItemKey(
+        { ciphertext: item.encryptedItemKey, iv: item.itemKeyIv, authTag: item.itemKeyAuthTag },
+        teamEncKey,
+        itemKeyWrapAAD,
+      );
+      decryptionKey = await deriveItemEncryptionKey(itemKeyBytes);
+      itemKeyBytes.fill(0);
+    } else {
+      decryptionKey = await getTeamEncryptionKey(teamId, item.teamKeyVersion);
+    }
+
+    if (!decryptionKey) return null;
+    const aad = buildTeamEntryAAD(teamId, item.id, "overview", itemKeyVersion);
+    const plaintext = await decryptData(
+      { ciphertext: item.encryptedOverview, iv: item.overviewIv, authTag: item.overviewAuthTag },
+      decryptionKey,
+      aad,
+    );
+    const overview = JSON.parse(plaintext) as {
+      title?: string;
+      username?: string;
+      urlHost?: string;
+      cardholderName?: string;
+      fullName?: string;
+    };
+    return {
+      id: item.id,
+      title: overview.title ?? "",
+      username: overview.username ?? overview.cardholderName ?? overview.fullName ?? "",
+      urlHost: overview.urlHost ?? "",
+      entryType: item.entryType,
+      teamId,
+      teamName,
+    };
+  }
+
+  const entries: DecryptedEntry[] = [];
+  for (const item of active) {
+    try {
+      const result = await decryptSingleEntry(item);
+      if (result) entries.push(result);
+    } catch {
+      // Invalidate cache and retry once
+      const cacheKey = `${teamId}:${item.teamKeyVersion}`;
+      if (teamKeyCache.has(cacheKey)) {
+        teamKeyCache.delete(cacheKey);
+        try {
+          const result = await decryptSingleEntry(item);
+          if (result) entries.push(result);
+        } catch {
+          // Second attempt failed — skip this entry
+        }
+      }
+    }
+  }
+  return entries;
+}
+
+// ── Fetch all team entries ──────────────────────────────────────
+
+async function fetchAllTeamEntries(): Promise<DecryptedEntry[]> {
+  if (!ecdhPrivateKeyBytes || !currentUserId) return [];
+
+  try {
+    const teamsRes = await swFetch(EXT_API_PATH.TEAMS);
+    if (!teamsRes.ok) return [];
+
+    const teams = (await teamsRes.json()) as Array<{ id: string; name: string }>;
+    const limitedTeams = teams.slice(0, MAX_TEAMS);
+
+    const results = await Promise.allSettled(
+      limitedTeams.map(async (team) => {
+        const res = await swFetch(extApiPath.teamPasswords(team.id));
+        if (!res.ok) return [];
+        const raw = (await res.json()) as RawTeamEntry[];
+        return decryptTeamOverviews(team.id, team.name, raw);
+      }),
+    );
+
+    const entries: DecryptedEntry[] = [];
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        entries.push(...result.value);
+      }
+    }
+    return entries;
+  } catch {
+    return [];
+  }
+}
+
+// ── Team entry blob decryption helper ───────────────────────────
+
+async function fetchAndDecryptTeamBlob(
+  teamId: string,
+  entryId: string,
+): Promise<{ blob: Record<string, unknown>; overview: Record<string, unknown>; entryType: string } | null> {
+  const res = await swFetch(extApiPath.teamPasswordById(teamId, entryId));
+  if (!res.ok) return null;
+
+  const data = (await res.json()) as {
+    id: string;
+    entryType: string;
+    encryptedBlob: string;
+    blobIv: string;
+    blobAuthTag: string;
+    encryptedOverview: string;
+    overviewIv: string;
+    overviewAuthTag: string;
+    aadVersion?: number;
+    teamKeyVersion: number;
+    itemKeyVersion?: number;
+    encryptedItemKey?: string;
+    itemKeyIv?: string;
+    itemKeyAuthTag?: string;
+  };
+
+  const itemKeyVersion = data.itemKeyVersion ?? 0;
+  let decryptionKey: CryptoKey | null;
+
+  if (itemKeyVersion >= 1) {
+    if (!data.encryptedItemKey || !data.itemKeyIv || !data.itemKeyAuthTag) return null;
+    const teamEncKey = await getTeamEncryptionKey(teamId, data.teamKeyVersion);
+    if (!teamEncKey) return null;
+    const itemKeyWrapAAD = buildItemKeyWrapAAD(teamId, data.id, data.teamKeyVersion);
+    const itemKeyBytes = await unwrapItemKey(
+      { ciphertext: data.encryptedItemKey, iv: data.itemKeyIv, authTag: data.itemKeyAuthTag },
+      teamEncKey,
+      itemKeyWrapAAD,
+    );
+    decryptionKey = await deriveItemEncryptionKey(itemKeyBytes);
+    itemKeyBytes.fill(0);
+  } else {
+    decryptionKey = await getTeamEncryptionKey(teamId, data.teamKeyVersion);
+  }
+
+  if (!decryptionKey) return null;
+
+  const blobAAD = buildTeamEntryAAD(teamId, data.id, "blob", itemKeyVersion);
+  const blobPlain = await decryptData(
+    { ciphertext: data.encryptedBlob, iv: data.blobIv, authTag: data.blobAuthTag },
+    decryptionKey,
+    blobAAD,
+  );
+
+  const overviewAAD = buildTeamEntryAAD(teamId, data.id, "overview", itemKeyVersion);
+  const overviewPlain = await decryptData(
+    { ciphertext: data.encryptedOverview, iv: data.overviewIv, authTag: data.overviewAuthTag },
+    decryptionKey,
+    overviewAAD,
+  );
+
+  return {
+    blob: JSON.parse(blobPlain) as Record<string, unknown>,
+    overview: JSON.parse(overviewPlain) as Record<string, unknown>,
+    entryType: data.entryType,
+  };
+}
+
 async function performAutofillForEntry(
   entryId: string,
   tabId: number,
   targetHint?: AutofillTargetHint,
+  teamId?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!encryptionKey || !currentUserId) {
     return { ok: false, error: "VAULT_LOCKED" };
   }
-  const res = await swFetch(extApiPath.passwordById(entryId));
-  if (!res.ok) {
-    const json = await res.json().catch(() => ({}));
-    return { ok: false, error: json.error || "FETCH_FAILED" };
-  }
-  const data = (await res.json()) as {
-    encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-    encryptedOverview: { ciphertext: string; iv: string; authTag: string };
-    aadVersion?: number;
-    id: string;
-    entryType: string;
-  };
 
-  const aad =
-    (data.aadVersion ?? 0) >= 1
-      ? buildPersonalEntryAAD(currentUserId, data.id)
-      : undefined;
-  const blobPlain = await decryptData(data.encryptedBlob, encryptionKey, aad);
-  const overviewPlain = await decryptData(
-    data.encryptedOverview,
-    encryptionKey,
-    aad,
-  );
+  let blobPlain: string;
+  let overviewPlain: string;
+  let entryType: string;
+
+  if (teamId) {
+    // Team entry — use team API + team crypto
+    const result = await fetchAndDecryptTeamBlob(teamId, entryId);
+    if (!result) return { ok: false, error: "FETCH_FAILED" };
+    blobPlain = JSON.stringify(result.blob);
+    overviewPlain = JSON.stringify(result.overview);
+    entryType = result.entryType;
+  } else {
+    // Personal entry
+    const res = await swFetch(extApiPath.passwordById(entryId));
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      return { ok: false, error: json.error || "FETCH_FAILED" };
+    }
+    const data = (await res.json()) as {
+      encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+      encryptedOverview: { ciphertext: string; iv: string; authTag: string };
+      aadVersion?: number;
+      id: string;
+      entryType: string;
+    };
+
+    const aad =
+      (data.aadVersion ?? 0) >= 1
+        ? buildPersonalEntryAAD(currentUserId, data.id)
+        : undefined;
+    blobPlain = await decryptData(data.encryptedBlob, encryptionKey, aad);
+    overviewPlain = await decryptData(
+      data.encryptedOverview,
+      encryptionKey,
+      aad,
+    );
+    entryType = data.entryType;
+  }
 
   const blob = JSON.parse(blobPlain) as {
     password?: string | null;
@@ -733,7 +1098,7 @@ async function performAutofillForEntry(
   const overview = JSON.parse(overviewPlain) as { username?: string | null };
 
   // ── Credit Card autofill path ──
-  if (data.entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
+  if (entryType === EXT_ENTRY_TYPE.CREDIT_CARD) {
     const cardNumber = blob.cardNumber ?? "";
     if (!cardNumber) {
       return { ok: false, error: "NO_CARD_NUMBER" };
@@ -759,7 +1124,7 @@ async function performAutofillForEntry(
   }
 
   // ── Identity autofill path ──
-  if (data.entryType === EXT_ENTRY_TYPE.IDENTITY) {
+  if (entryType === EXT_ENTRY_TYPE.IDENTITY) {
     try {
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -1167,6 +1532,27 @@ async function handleMessage(
         tenantAutoLockMinutes = typeof data.vaultAutoLockMinutes === "number"
           ? data.vaultAutoLockMinutes
           : null;
+
+        // Unwrap ECDH private key for team key derivation (if available)
+        if (data.encryptedEcdhPrivateKey && data.ecdhPrivateKeyIv && data.ecdhPrivateKeyAuthTag) {
+          try {
+            const secretKeyForEcdh = hexDecode(currentVaultSecretKeyHex!);
+            const ecdhWrappingKey = await deriveEcdhWrappingKey(secretKeyForEcdh);
+            secretKeyForEcdh.fill(0);
+            const ecdhEnc = {
+              ciphertext: data.encryptedEcdhPrivateKey,
+              iv: data.ecdhPrivateKeyIv,
+              authTag: data.ecdhPrivateKeyAuthTag,
+            };
+            ecdhPrivateKeyBytes = await unwrapEcdhPrivateKey(ecdhEnc, ecdhWrappingKey);
+            ecdhEncryptedData = ecdhEnc;
+          } catch {
+            // ECDH key not available — team features silently unavailable
+            ecdhPrivateKeyBytes = null;
+            ecdhEncryptedData = null;
+          }
+        }
+
         persistState();
         const effectiveLock = await getEffectiveAutoLockMinutes();
         if (effectiveLock > 0) {
@@ -1205,19 +1591,21 @@ async function handleMessage(
       }
 
       try {
-        const res = await swFetch(EXT_API_PATH.PASSWORDS);
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          sendResponse({
-            type: "FETCH_PASSWORDS",
-            entries: null,
-            error: json.error || "FETCH_FAILED",
-          });
-          return;
-        }
+        // Fetch personal and team entries in parallel
+        const [personalResult, teamResult] = await Promise.allSettled([
+          (async () => {
+            const res = await swFetch(EXT_API_PATH.PASSWORDS);
+            if (!res.ok) return [];
+            const raw = (await res.json()) as RawEntry[];
+            return decryptOverviews(raw);
+          })(),
+          fetchAllTeamEntries(),
+        ]);
 
-        const raw = (await res.json()) as RawEntry[];
-        const entries = await decryptOverviews(raw);
+        const personal = personalResult.status === "fulfilled" ? personalResult.value : [];
+        const team = teamResult.status === "fulfilled" ? teamResult.value : [];
+        const entries = [...personal, ...team];
+
         // Update cache so inline suggestions stay in sync with popup.
         cachedEntries = entries;
         cacheTimestamp = Date.now();
@@ -1243,38 +1631,50 @@ async function handleMessage(
       }
 
       try {
-        const res = await swFetch(extApiPath.passwordById(message.entryId));
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          sendResponse({
-            type: "COPY_PASSWORD",
-            password: null,
-            error: json.error || "FETCH_FAILED",
-          });
-          return;
-        }
-
-        const data = (await res.json()) as {
-          encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-          aadVersion?: number;
-          id: string;
-        };
-
-        const aad =
-          (data.aadVersion ?? 0) >= 1
-            ? buildPersonalEntryAAD(currentUserId, data.id)
-            : undefined;
-        const plaintext = await decryptData(
-          data.encryptedBlob,
-          encryptionKey,
-          aad
-        );
         let password: string | null = null;
-        try {
-          const blob = JSON.parse(plaintext) as { password?: string | null };
-          password = blob.password ?? null;
-        } catch {
-          password = null;
+
+        if (message.teamId) {
+          // Team entry
+          const result = await fetchAndDecryptTeamBlob(message.teamId, message.entryId);
+          if (!result) {
+            sendResponse({ type: "COPY_PASSWORD", password: null, error: "FETCH_FAILED" });
+            return;
+          }
+          password = (result.blob.password as string) ?? null;
+        } else {
+          // Personal entry
+          const res = await swFetch(extApiPath.passwordById(message.entryId));
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            sendResponse({
+              type: "COPY_PASSWORD",
+              password: null,
+              error: json.error || "FETCH_FAILED",
+            });
+            return;
+          }
+
+          const data = (await res.json()) as {
+            encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+            aadVersion?: number;
+            id: string;
+          };
+
+          const aad =
+            (data.aadVersion ?? 0) >= 1
+              ? buildPersonalEntryAAD(currentUserId, data.id)
+              : undefined;
+          const plaintext = await decryptData(
+            data.encryptedBlob,
+            encryptionKey,
+            aad
+          );
+          try {
+            const blob = JSON.parse(plaintext) as { password?: string | null };
+            password = blob.password ?? null;
+          } catch {
+            password = null;
+          }
         }
 
         if (!password) {
@@ -1308,40 +1708,53 @@ async function handleMessage(
       }
 
       try {
-        const res = await swFetch(extApiPath.passwordById(message.entryId));
-        if (!res.ok) {
-          const json = await res.json().catch(() => ({}));
-          sendResponse({
-            type: "COPY_TOTP",
-            code: null,
-            error: json.error || "FETCH_FAILED",
-          });
-          return;
-        }
-
-        const data = (await res.json()) as {
-          encryptedBlob: { ciphertext: string; iv: string; authTag: string };
-          aadVersion?: number;
-          id: string;
-        };
-
-        const aad =
-          (data.aadVersion ?? 0) >= 1
-            ? buildPersonalEntryAAD(currentUserId, data.id)
-            : undefined;
-        const plaintext = await decryptData(
-          data.encryptedBlob,
-          encryptionKey,
-          aad,
-        );
         let totp: { secret: string; algorithm?: string; digits?: number; period?: number } | null = null;
-        try {
-          const blob = JSON.parse(plaintext) as {
-            totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+
+        if (message.teamId) {
+          // Team entry
+          const result = await fetchAndDecryptTeamBlob(message.teamId, message.entryId);
+          if (!result) {
+            sendResponse({ type: "COPY_TOTP", code: null, error: "FETCH_FAILED" });
+            return;
+          }
+          const blobTotp = result.blob.totp as { secret: string; algorithm?: string; digits?: number; period?: number } | undefined;
+          totp = blobTotp ?? null;
+        } else {
+          // Personal entry
+          const res = await swFetch(extApiPath.passwordById(message.entryId));
+          if (!res.ok) {
+            const json = await res.json().catch(() => ({}));
+            sendResponse({
+              type: "COPY_TOTP",
+              code: null,
+              error: json.error || "FETCH_FAILED",
+            });
+            return;
+          }
+
+          const data = (await res.json()) as {
+            encryptedBlob: { ciphertext: string; iv: string; authTag: string };
+            aadVersion?: number;
+            id: string;
           };
-          totp = blob.totp ?? null;
-        } catch {
-          totp = null;
+
+          const aad =
+            (data.aadVersion ?? 0) >= 1
+              ? buildPersonalEntryAAD(currentUserId, data.id)
+              : undefined;
+          const plaintext = await decryptData(
+            data.encryptedBlob,
+            encryptionKey,
+            aad,
+          );
+          try {
+            const blob = JSON.parse(plaintext) as {
+              totp?: { secret: string; algorithm?: string; digits?: number; period?: number };
+            };
+            totp = blob.totp ?? null;
+          } catch {
+            totp = null;
+          }
         }
 
         if (!totp?.secret) {
@@ -1380,6 +1793,8 @@ async function handleMessage(
         const result = await performAutofillForEntry(
           message.entryId,
           message.tabId,
+          undefined,
+          message.teamId,
         );
         sendResponse({
           type: "AUTOFILL",
@@ -1401,6 +1816,8 @@ async function handleMessage(
         const result = await performAutofillForEntry(
           message.entryId,
           message.tabId,
+          undefined,
+          message.teamId,
         );
         sendResponse({
           type: "AUTOFILL_CREDIT_CARD",
@@ -1422,6 +1839,8 @@ async function handleMessage(
         const result = await performAutofillForEntry(
           message.entryId,
           message.tabId,
+          undefined,
+          message.teamId,
         );
         sendResponse({
           type: "AUTOFILL_IDENTITY",
@@ -1528,6 +1947,7 @@ async function handleMessage(
           message.entryId,
           tabId,
           message.targetHint,
+          message.teamId,
         );
         sendResponse({
           type: "AUTOFILL_FROM_CONTENT",

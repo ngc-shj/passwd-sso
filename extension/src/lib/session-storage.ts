@@ -10,6 +10,8 @@ export interface SessionState {
   expiresAt: number; // ms timestamp
   userId?: string;
   vaultSecretKey?: string;
+  /** Encrypted ECDH private key (hex) for team key derivation — re-unwrapped on SW restart */
+  ecdhEncrypted?: { ciphertext: string; iv: string; authTag: string };
 }
 
 export async function persistSession(state: SessionState): Promise<void> {
@@ -34,6 +36,18 @@ export async function loadSession(): Promise<SessionState | null> {
   // vaultSecretKey is optional (hex string)
   if (raw.vaultSecretKey !== undefined && typeof raw.vaultSecretKey !== "string") {
     return null;
+  }
+  // ecdhEncrypted is optional (encrypted ECDH private key)
+  if (raw.ecdhEncrypted !== undefined) {
+    if (
+      typeof raw.ecdhEncrypted !== "object" ||
+      raw.ecdhEncrypted === null ||
+      typeof raw.ecdhEncrypted.ciphertext !== "string" ||
+      typeof raw.ecdhEncrypted.iv !== "string" ||
+      typeof raw.ecdhEncrypted.authTag !== "string"
+    ) {
+      return null;
+    }
   }
   return raw as SessionState;
 }

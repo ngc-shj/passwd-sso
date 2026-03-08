@@ -21,7 +21,7 @@ export interface ContextMenuDeps {
   extractHost: (url: string) => string | null;
   isConnected: () => boolean;
   isVaultUnlocked: () => boolean;
-  performAutofill: (entryId: string, tabId: number) => Promise<void>;
+  performAutofill: (entryId: string, tabId: number, teamId?: string) => Promise<void>;
 }
 
 let deps: ContextMenuDeps | null = null;
@@ -132,7 +132,7 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
             ? `${entry.title} (${entry.username})`
             : entry.title;
           chrome.contextMenus.create({
-            id: `${ITEM_PREFIX}${entry.id}`,
+            id: `${ITEM_PREFIX}${encodeMenuEntryId(entry.id, entry.teamId)}`,
             parentId: PARENT_ID,
             title: label,
             contexts: ["editable"],
@@ -153,7 +153,7 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
         for (const entry of ccEntries.slice(0, MAX_ITEMS)) {
           const label = entry.title || t("contextMenu.creditCard");
           chrome.contextMenus.create({
-            id: `${CC_ITEM_PREFIX}${entry.id}`,
+            id: `${CC_ITEM_PREFIX}${encodeMenuEntryId(entry.id, entry.teamId)}`,
             parentId: PARENT_ID,
             title: `💳 ${label}`,
             contexts: ["editable"],
@@ -174,7 +174,7 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
         for (const entry of idEntries.slice(0, MAX_ITEMS)) {
           const label = entry.title || t("contextMenu.identity");
           chrome.contextMenus.create({
-            id: `${ID_ITEM_PREFIX}${entry.id}`,
+            id: `${ID_ITEM_PREFIX}${encodeMenuEntryId(entry.id, entry.teamId)}`,
             parentId: PARENT_ID,
             title: `👤 ${label}`,
             contexts: ["editable"],
@@ -231,24 +231,39 @@ export function handleContextMenuClick(
     return;
   }
 
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-  if (menuId.startsWith(ITEM_PREFIX)) {
-    const entryId = menuId.slice(ITEM_PREFIX.length);
-    if (entryId && UUID_RE.test(entryId)) {
-      deps.performAutofill(entryId, tab.id).catch(() => {});
-    }
-  } else if (menuId.startsWith(CC_ITEM_PREFIX)) {
-    const entryId = menuId.slice(CC_ITEM_PREFIX.length);
-    if (entryId && UUID_RE.test(entryId)) {
-      deps.performAutofill(entryId, tab.id).catch(() => {});
-    }
-  } else if (menuId.startsWith(ID_ITEM_PREFIX)) {
-    const entryId = menuId.slice(ID_ITEM_PREFIX.length);
-    if (entryId && UUID_RE.test(entryId)) {
-      deps.performAutofill(entryId, tab.id).catch(() => {});
+  const prefixes = [ITEM_PREFIX, CC_ITEM_PREFIX, ID_ITEM_PREFIX] as const;
+  for (const prefix of prefixes) {
+    if (menuId.startsWith(prefix)) {
+      const { entryId, teamId } = parseMenuEntryId(menuId.slice(prefix.length));
+      if (entryId) {
+        deps.performAutofill(entryId, tab.id, teamId).catch(() => {});
+      }
+      return;
     }
   }
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Encode entryId + optional teamId into a menu item ID suffix. */
+function encodeMenuEntryId(entryId: string, teamId?: string): string {
+  return teamId ? `${teamId}:${entryId}` : entryId;
+}
+
+/** Parse entryId + optional teamId from a menu item ID suffix. */
+function parseMenuEntryId(suffix: string): { entryId: string | null; teamId?: string } {
+  const colonIdx = suffix.indexOf(":");
+  if (colonIdx > 0) {
+    const teamId = suffix.slice(0, colonIdx);
+    const entryId = suffix.slice(colonIdx + 1);
+    if (UUID_RE.test(teamId) && UUID_RE.test(entryId)) {
+      return { entryId, teamId };
+    }
+  }
+  if (UUID_RE.test(suffix)) {
+    return { entryId: suffix };
+  }
+  return { entryId: null };
 }
 
 /** Force menu rebuild (e.g., after vault unlock/lock). */

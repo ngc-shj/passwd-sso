@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { authOrToken } from "@/lib/auth-or-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createTeamE2EPasswordSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
-import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 
@@ -16,15 +17,16 @@ const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 // GET /api/teams/[teamId]/passwords — List team passwords (encrypted overviews, optionally blobs)
 export async function GET(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
+  if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -53,7 +55,7 @@ export async function GET(req: NextRequest, { params }: Params) {
           ? { isArchived: true }
           : trashOnly ? {} : { isArchived: false }),
         ...(favoritesOnly
-          ? { favorites: { some: { userId: session.user.id } } }
+          ? { favorites: { some: { userId } } }
           : {}),
         ...(tagId ? { tags: { some: { id: tagId } } } : {}),
         ...(folderId ? { teamFolderId: folderId } : {}),
@@ -64,7 +66,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         createdBy: { select: { id: true, name: true, email: true, image: true } },
         updatedBy: { select: { id: true, name: true, email: true } },
         favorites: {
-          where: { userId: session.user.id },
+          where: { userId },
           select: { id: true },
         },
       },

@@ -8,22 +8,23 @@ export type ExtensionMessage =
   | { type: "UNLOCK_VAULT"; passphrase: string }
   | { type: "LOCK_VAULT" }
   | { type: "FETCH_PASSWORDS" }
-  | { type: "COPY_PASSWORD"; entryId: string }
-  | { type: "AUTOFILL"; entryId: string; tabId: number }
+  | { type: "COPY_PASSWORD"; entryId: string; teamId?: string }
+  | { type: "AUTOFILL"; entryId: string; tabId: number; teamId?: string }
   | { type: "GET_MATCHES_FOR_URL"; url: string; topUrl?: string }
-  | { type: "COPY_TOTP"; entryId: string }
+  | { type: "COPY_TOTP"; entryId: string; teamId?: string }
   | {
       type: "AUTOFILL_FROM_CONTENT";
       entryId: string;
       targetHint?: AutofillTargetHint;
+      teamId?: string;
     }
   | { type: "LOGIN_DETECTED"; url: string; username: string; password: string }
   | { type: "SAVE_LOGIN"; url: string; title: string; username: string; password: string }
   | { type: "UPDATE_LOGIN"; entryId: string; password: string }
   | { type: "DISMISS_SAVE_PROMPT" }
   | { type: "CHECK_PENDING_SAVE" }
-  | { type: "AUTOFILL_CREDIT_CARD"; entryId: string; tabId: number }
-  | { type: "AUTOFILL_IDENTITY"; entryId: string; tabId: number };
+  | { type: "AUTOFILL_CREDIT_CARD"; entryId: string; tabId: number; teamId?: string }
+  | { type: "AUTOFILL_IDENTITY"; entryId: string; tabId: number; teamId?: string };
 
 export interface DecryptedEntry {
   id: string;
@@ -31,6 +32,8 @@ export interface DecryptedEntry {
   username: string;
   urlHost: string;
   entryType: string;
+  teamId?: string;
+  teamName?: string;
 }
 
 export type ExtensionResponse =

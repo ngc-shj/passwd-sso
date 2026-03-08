@@ -140,6 +140,27 @@ describe("context-menu", () => {
       expect(noMatchCall).toBeTruthy();
     });
 
+    it("encodes teamId in menu item IDs for team entries", async () => {
+      const teamId = "c0000000-0000-0000-0000-000000000001";
+      const teamEntries: DecryptedEntry[] = [
+        { id: "te1", title: "Team GitHub", username: "team-alice", urlHost: "github.com", entryType: "LOGIN", teamId, teamName: "My Team" },
+      ];
+
+      deps = createDeps({
+        getCachedEntries: vi.fn().mockResolvedValue(teamEntries),
+      });
+      initContextMenu(deps);
+
+      updateContextMenuForTab(1, "https://github.com");
+      await new Promise((r) => setTimeout(r, 300));
+
+      const createCalls = chromeMock.contextMenus.create.mock.calls;
+      const teamEntryCall = createCalls.find(
+        (c: unknown[]) => (c[0] as { id: string }).id === `psso-login-${teamId}:te1`,
+      );
+      expect(teamEntryCall).toBeTruthy();
+    });
+
     it("limits displayed entries to 5", async () => {
       const manyEntries: DecryptedEntry[] = Array.from({ length: 8 }, (_, i) => ({
         id: `e-${i}`,
@@ -215,7 +236,49 @@ describe("context-menu", () => {
         { id: 1 } as chrome.tabs.Tab,
       );
 
-      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 1);
+      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 1, undefined);
+    });
+
+    it("calls performAutofill with teamId for team entry clicks", () => {
+      const teamUuid = "b0000000-0000-0000-0000-000000000001";
+      const entryUuid = "a0000000-0000-0000-0000-000000000002";
+      handleContextMenuClick(
+        { menuItemId: `psso-login-${teamUuid}:${entryUuid}` } as chrome.contextMenus.OnClickData,
+        { id: 1 } as chrome.tabs.Tab,
+      );
+
+      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 1, teamUuid);
+    });
+
+    it("calls performAutofill with teamId for CC entry clicks", () => {
+      const teamUuid = "b0000000-0000-0000-0000-000000000001";
+      const entryUuid = "a0000000-0000-0000-0000-000000000003";
+      handleContextMenuClick(
+        { menuItemId: `psso-cc-${teamUuid}:${entryUuid}` } as chrome.contextMenus.OnClickData,
+        { id: 2 } as chrome.tabs.Tab,
+      );
+
+      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 2, teamUuid);
+    });
+
+    it("calls performAutofill with teamId for ID entry clicks", () => {
+      const teamUuid = "b0000000-0000-0000-0000-000000000001";
+      const entryUuid = "a0000000-0000-0000-0000-000000000004";
+      handleContextMenuClick(
+        { menuItemId: `psso-id-${teamUuid}:${entryUuid}` } as chrome.contextMenus.OnClickData,
+        { id: 3 } as chrome.tabs.Tab,
+      );
+
+      expect(deps.performAutofill).toHaveBeenCalledWith(entryUuid, 3, teamUuid);
+    });
+
+    it("rejects malformed teamId:entryId format", () => {
+      handleContextMenuClick(
+        { menuItemId: "psso-login-not-a-uuid:also-not-uuid" } as chrome.contextMenus.OnClickData,
+        { id: 1 } as chrome.tabs.Tab,
+      );
+
+      expect(deps.performAutofill).not.toHaveBeenCalled();
     });
 
     it("opens popup for psso-open-popup click", () => {

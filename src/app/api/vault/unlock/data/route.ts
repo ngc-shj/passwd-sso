@@ -33,8 +33,6 @@ async function handleGET(req: NextRequest) {
   }
   const userId = authResult.userId;
 
-  const isExtensionToken = authResult.type === "token";
-
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
       where: { id: userId },
@@ -51,13 +49,11 @@ async function handleGET(req: NextRequest) {
         kdfParallelism: true,
         passphraseVerifierHmac: true,
         tenant: { select: { vaultAutoLockMinutes: true } },
-        // ECDH fields for team E2E (excluded for extension tokens)
-        ...(!isExtensionToken && {
-          ecdhPublicKey: true,
-          encryptedEcdhPrivateKey: true,
-          ecdhPrivateKeyIv: true,
-          ecdhPrivateKeyAuthTag: true,
-        }),
+        // ECDH fields for team E2E
+        ecdhPublicKey: true,
+        encryptedEcdhPrivateKey: true,
+        ecdhPrivateKeyIv: true,
+        ecdhPrivateKeyAuthTag: true,
       },
     }),
   );
@@ -85,8 +81,8 @@ async function handleGET(req: NextRequest) {
     }),
   );
 
-  // Build ECDH fields only for session-based auth (not extension tokens)
-  const ecdhFields = !isExtensionToken && "ecdhPublicKey" in user
+  // ECDH fields for team E2E (available for both session and extension tokens)
+  const ecdhFields = "ecdhPublicKey" in user
     ? {
         ecdhPublicKey: user.ecdhPublicKey,
         encryptedEcdhPrivateKey: user.encryptedEcdhPrivateKey,
