@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
+const { mockAuth, mockAuthOrToken, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
   const loggerInfo = vi.fn();
   class _TenantAuthError extends Error {
     status: number;
@@ -14,6 +14,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, m
   }
   return {
     mockAuth: vi.fn(),
+    mockAuthOrToken: vi.fn(),
     mockPrismaTeamMember: { findMany: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
     mockWithUserTenantRls: vi.fn(),
@@ -26,6 +27,7 @@ const { mockAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, m
   };
 });
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
@@ -53,16 +55,18 @@ import { TEAM_ROLE } from "@/lib/constants";
 const now = new Date("2025-01-01T00:00:00Z");
 
 describe("GET /api/teams", () => {
+  const makeReq = () => createRequest("GET", "http://localhost/api/teams");
+
   beforeEach(() => {
     vi.resetAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
     mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: () => unknown) => fn());
     mockResolveUserTenantIdFromClient.mockResolvedValue("tenant-1");
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
-    const res = await GET();
+    mockAuthOrToken.mockResolvedValue(null);
+    const res = await GET(makeReq());
     expect(res.status).toBe(401);
   });
 
@@ -94,7 +98,7 @@ describe("GET /api/teams", () => {
       },
     ]);
 
-    const res = await GET();
+    const res = await GET(makeReq());
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toHaveLength(2);
@@ -123,7 +127,7 @@ describe("GET /api/teams", () => {
       },
     ]);
 
-    const res = await GET();
+    const res = await GET(makeReq());
     const json = await res.json();
     expect(json[0].isCrossTenant).toBe(true);
     expect(json[0].tenantName).toBe("External Org");
@@ -145,7 +149,7 @@ describe("GET /api/teams", () => {
       },
     ]);
 
-    await GET();
+    await GET(makeReq());
     expect(mockLoggerInfo).toHaveBeenCalledWith(
       { userId: "test-user-id", crossTenantTeamIds: ["team-ext"] },
       "Cross-tenant team memberships detected",
@@ -168,22 +172,63 @@ describe("GET /api/teams", () => {
       },
     ]);
 
-    await GET();
+    await GET(makeReq());
     expect(mockLoggerInfo).not.toHaveBeenCalled();
   });
 
   it("returns empty array when user has no teams", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([]);
-    const res = await GET();
+    const res = await GET(makeReq());
     const json = await res.json();
     expect(json).toEqual([]);
   });
 
   it("uses withBypassRls (not user tenant RLS) for cross-tenant membership query", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([]);
-    await GET();
+    await GET(makeReq());
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
     expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+  });
+
+  it("accepts extension Bearer token via authOrToken", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "token",
+      userId: "ext-user-id",
+      scopes: ["passwords:read"],
+    });
+    mockPrismaTeamMember.findMany.mockResolvedValue([
+      {
+        role: TEAM_ROLE.MEMBER,
+        team: {
+          id: "team-1",
+          name: "My Team",
+          slug: "my-team",
+          description: null,
+          createdAt: now,
+          _count: { members: 2 },
+          tenant: { id: "tenant-1", name: "Acme Corp" },
+        },
+      },
+    ]);
+
+    const req = createRequest("GET", "http://localhost/api/teams", {
+      headers: { Authorization: "Bearer ext-token-value" },
+    });
+    const res = await GET(req);
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json).toHaveLength(1);
+    expect(json[0].id).toBe("team-1");
+    expect(mockAuthOrToken).toHaveBeenCalledWith(req, "passwords:read");
+  });
+
+  it("returns 401 when extension token lacks required scope", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    const req = createRequest("GET", "http://localhost/api/teams", {
+      headers: { Authorization: "Bearer ext-token-no-scope" },
+    });
+    const res = await GET(req);
+    expect(res.status).toBe(401);
   });
 });
 

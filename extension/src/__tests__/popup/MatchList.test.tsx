@@ -42,7 +42,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     expect(await screen.findByText("Example")).toBeInTheDocument();
     expect(screen.getByText("alice")).toBeInTheDocument();
@@ -56,31 +56,8 @@ describe("MatchList", () => {
       error: "FETCH_FAILED",
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
     expect(await screen.findByText(/failed to load entries/i)).toBeInTheDocument();
-  });
-
-  it("locks vault on button click", async () => {
-    const onLock = vi.fn();
-    mockSendMessage
-      .mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [] })
-      .mockResolvedValueOnce({ type: "LOCK_VAULT", ok: true });
-
-    render(<MatchList tabUrl="https://example.com/login" onLock={onLock} />);
-
-    const lockButton = await screen.findByRole("button", { name: /lock/i });
-    fireEvent.click(lockButton);
-
-    await waitFor(() => {
-      expect(onLock).toHaveBeenCalled();
-    });
-  });
-
-  it("does not show disconnect button in list header", async () => {
-    mockSendMessage.mockResolvedValueOnce({ type: "FETCH_PASSWORDS", entries: [] });
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
-    await screen.findByRole("button", { name: /lock/i });
-    expect(screen.queryByRole("button", { name: /disconnect/i })).toBeNull();
   });
 
   it("copies password on button click", async () => {
@@ -102,7 +79,7 @@ describe("MatchList", () => {
         password: "secret",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
@@ -133,7 +110,7 @@ describe("MatchList", () => {
         error: "NO_PASSWORD",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
@@ -165,7 +142,7 @@ describe("MatchList", () => {
       new Error("denied")
     );
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const copyButton = await screen.findByRole("button", { name: "Copy" });
     fireEvent.click(copyButton);
@@ -187,7 +164,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="edge://extensions" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="edge://extensions" />);
     expect(await screen.findByText(/no matches for this page/i)).toBeInTheDocument();
   });
 
@@ -205,7 +182,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    render(<MatchList tabUrl={null} />);
     expect(await screen.findByText("Example")).toBeInTheDocument();
     expect(screen.queryByText(/matches for/i)).toBeNull();
   });
@@ -224,7 +201,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    render(<MatchList tabUrl={null} />);
     await screen.findByText("Note");
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
@@ -247,7 +224,7 @@ describe("MatchList", () => {
       })
       .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const fillButton = await screen.findByRole("button", { name: "Fill" });
     fireEvent.click(fillButton);
@@ -273,7 +250,7 @@ describe("MatchList", () => {
       })
       .mockResolvedValueOnce({ type: "AUTOFILL", ok: false, error: "AUTOFILL_FAILED" });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const fillButton = await screen.findByRole("button", { name: "Fill" });
     fireEvent.click(fillButton);
@@ -300,7 +277,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const fillButton = await screen.findByRole("button", { name: "Fill" });
     fireEvent.click(fillButton);
@@ -329,7 +306,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    render(<MatchList tabUrl={null} />);
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "git" } });
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
@@ -350,7 +327,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    render(<MatchList tabUrl={null} />);
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "nope" } });
     expect(await screen.findByText(/no results for/i)).toBeInTheDocument();
@@ -370,7 +347,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
     expect(await screen.findByRole("button", { name: "TOTP" })).toBeInTheDocument();
   });
 
@@ -388,7 +365,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} onLock={vi.fn()} />);
+    render(<MatchList tabUrl={null} />);
     await screen.findByText("Note");
     expect(screen.queryByRole("button", { name: "TOTP" })).toBeNull();
   });
@@ -412,7 +389,7 @@ describe("MatchList", () => {
         code: "123456",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const totpButton = await screen.findByRole("button", { name: "TOTP" });
     fireEvent.click(totpButton);
@@ -443,7 +420,7 @@ describe("MatchList", () => {
         error: "NO_TOTP",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const totpButton = await screen.findByRole("button", { name: "TOTP" });
     fireEvent.click(totpButton);
@@ -473,7 +450,7 @@ describe("MatchList", () => {
         code: "654321",
       });
 
-    render(<MatchList tabUrl="https://example.com/login" onLock={vi.fn()} />);
+    render(<MatchList tabUrl="https://example.com/login" />);
 
     const totpButton = await screen.findByRole("button", { name: "TOTP" });
     fireEvent.click(totpButton);
@@ -488,5 +465,179 @@ describe("MatchList", () => {
     expect(clearCall).toBeDefined();
 
     setTimeoutSpy.mockRestore();
+  });
+
+  it("shows team badge for entries with teamName", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Team Entry",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+          teamId: "team-1",
+          teamName: "Engineering",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} />);
+    expect(await screen.findByText("Team Entry")).toBeInTheDocument();
+    expect(screen.getByText("Engineering")).toBeInTheDocument();
+  });
+
+  it("does not show team badge for personal entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Personal Entry",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} />);
+    expect(await screen.findByText("Personal Entry")).toBeInTheDocument();
+    // No team badge present
+    const badges = document.querySelectorAll(".text-purple-700");
+    expect(badges).toHaveLength(0);
+  });
+
+  it("passes teamId in COPY_PASSWORD message for team entries", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Team Entry",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            teamId: "team-1",
+            teamName: "Engineering",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_PASSWORD",
+        password: "secret",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" />);
+
+    const copyButton = await screen.findByRole("button", { name: "Copy" });
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: "COPY_PASSWORD",
+        entryId: "pw-1",
+        teamId: "team-1",
+      });
+    });
+  });
+
+  it("passes teamId in AUTOFILL message for team entries", async () => {
+    const closeSpy = vi.spyOn(window, "close").mockImplementation(() => {});
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Team Entry",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            teamId: "team-1",
+            teamName: "Engineering",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ type: "AUTOFILL", ok: true });
+
+    render(<MatchList tabUrl="https://example.com/login" />);
+
+    const fillButton = await screen.findByRole("button", { name: "Fill" });
+    fireEvent.click(fillButton);
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: "AUTOFILL",
+        entryId: "pw-1",
+        tabId: 1,
+        teamId: "team-1",
+      });
+    });
+    closeSpy.mockRestore();
+  });
+
+  it("passes teamId in COPY_TOTP message for team entries", async () => {
+    mockSendMessage
+      .mockResolvedValueOnce({
+        type: "FETCH_PASSWORDS",
+        entries: [
+          {
+            id: "pw-1",
+            title: "Team Entry",
+            username: "alice",
+            urlHost: "example.com",
+            entryType: EXT_ENTRY_TYPE.LOGIN,
+            teamId: "team-1",
+            teamName: "Engineering",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        type: "COPY_TOTP",
+        code: "123456",
+      });
+
+    render(<MatchList tabUrl="https://example.com/login" />);
+
+    const totpButton = await screen.findByRole("button", { name: "TOTP" });
+    fireEvent.click(totpButton);
+
+    await waitFor(() => {
+      expect(mockSendMessage).toHaveBeenCalledWith({
+        type: "COPY_TOTP",
+        entryId: "pw-1",
+        teamId: "team-1",
+      });
+    });
+  });
+
+  it("uses unique keys for team entries with same id as personal entries", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "pw-1",
+          title: "Personal",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "pw-1",
+          title: "Team Copy",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+          teamId: "team-1",
+          teamName: "Engineering",
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} />);
+    expect(await screen.findByText("Personal")).toBeInTheDocument();
+    expect(screen.getByText("Team Copy")).toBeInTheDocument();
   });
 });

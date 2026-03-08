@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { authOrToken } from "@/lib/auth-or-token";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -10,15 +11,16 @@ type Params = { params: Promise<{ teamId: string }> };
 // GET /api/teams/[teamId]/member-key — Get own TeamMemberKey
 // Query: ?keyVersion=N (optional, defaults to latest)
 export async function GET(req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
+  if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await requireTeamMember(userId, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -29,7 +31,7 @@ export async function GET(req: NextRequest, { params }: Params) {
   // Check if key has been distributed to this member
   const membership = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findFirst({
-      where: { teamId: teamId, userId: session.user.id, deactivatedAt: null },
+      where: { teamId: teamId, userId: userId, deactivatedAt: null },
       select: { keyDistributed: true },
     }),
   );
@@ -58,7 +60,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         where: {
           teamId_userId_keyVersion: {
             teamId: teamId,
-            userId: session.user.id,
+            userId: userId,
             keyVersion,
           },
         },
@@ -68,7 +70,7 @@ export async function GET(req: NextRequest, { params }: Params) {
     // Get the latest key version
     memberKey = await withTeamTenantRls(teamId, async () =>
       prisma.teamMemberKey.findFirst({
-        where: { teamId: teamId, userId: session.user.id },
+        where: { teamId: teamId, userId: userId },
         orderBy: { keyVersion: "desc" },
       }),
     );

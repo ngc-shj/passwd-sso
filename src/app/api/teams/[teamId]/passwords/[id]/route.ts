@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { authOrToken } from "@/lib/auth-or-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
@@ -10,23 +11,24 @@ import {
   TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // GET /api/teams/[teamId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
-export async function GET(_req: NextRequest, { params }: Params) {
-  const session = await auth();
-  if (!session?.user?.id) {
+export async function GET(req: NextRequest, { params }: Params) {
+  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
+  if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
+  const userId = authResult.userId;
 
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return NextResponse.json({ error: e.message }, { status: e.status });
@@ -42,7 +44,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         createdBy: { select: { id: true, name: true, email: true, image: true } },
         updatedBy: { select: { id: true, name: true, email: true } },
         favorites: {
-          where: { userId: session.user.id },
+          where: { userId },
           select: { id: true },
         },
       },
