@@ -27,5 +27,15 @@
   "initiatedBy": "開始者",
   "expiresAt": "有効期限",
   "searchMembers": "メンバーを検索...",
-  "noMatchingMembers": "検索に一致するメンバーがいません。"
+  "noMatchingMembers": "検索に一致するメンバーがいません。",
+  "sessionPolicyTitle": "セッションポリシー",
+  "sessionPolicyDescription": "テナント全体の同時セッション数制限を設定します。",
+  "maxConcurrentSessions": "最大同時セッション数",
+  "maxConcurrentSessionsHelp": "ユーザーあたりの同時ログインセッション数の上限です。上限を超えると、最も古いセッションが自動的に終了されます。空欄の場合は無制限です。",
+  "unlimited": "無制限",
+  "sessionPolicySave": "保存",
+  "sessionPolicySaved": "セッションポリシーを更新しました。",
+  "sessionPolicySaveFailed": "セッションポリシーの更新に失敗しました。",
+  "sessionPolicyValidationMin": "1以上で入力してください。",
+  "sessionPolicyValidationMax": "100以下で入力してください。"
 }

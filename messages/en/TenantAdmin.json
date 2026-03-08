@@ -27,5 +27,15 @@
   "initiatedBy": "Initiated by",
   "expiresAt": "Expires",
   "searchMembers": "Search members...",
-  "noMatchingMembers": "No members match your search."
+  "noMatchingMembers": "No members match your search.",
+  "sessionPolicyTitle": "Session Policy",
+  "sessionPolicyDescription": "Configure concurrent session limits for this tenant.",
+  "maxConcurrentSessions": "Max Concurrent Sessions",
+  "maxConcurrentSessionsHelp": "Maximum number of simultaneous sessions per user. When a user exceeds this limit, the oldest session is automatically terminated. Leave empty for unlimited.",
+  "unlimited": "Unlimited",
+  "sessionPolicySave": "Save",
+  "sessionPolicySaved": "Session policy updated.",
+  "sessionPolicySaveFailed": "Failed to update session policy.",
+  "sessionPolicyValidationMin": "Must be at least 1.",
+  "sessionPolicyValidationMax": "Must be 100 or less."
 }

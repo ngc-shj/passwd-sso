@@ -159,6 +159,15 @@ export function createCustomAdapter(): Adapter {
       session: { sessionToken: string; userId: string; expires: Date },
     ): Promise<AdapterSession> {
       const meta = sessionMetaStorage.getStore();
+      // Collect eviction info to fire audit/notification outside the transaction
+      // (logAudit/createNotification use withBypassRls internally, which conflicts
+      // with the parent's AsyncLocalStorage-based RLS context if called inside)
+      let evictionInfo: {
+        tenantId: string;
+        maxSessions: number;
+        evicted: { id: string; ipAddress: string | null; userAgent: string | null }[];
+      } | null = null;
+
       const created = await withBypassRls(prisma, async () => {
         const tenantId = await resolveTenantIdForUser(session.userId);
 
@@ -189,33 +198,7 @@ export function createCustomAdapter(): Adapter {
                 where: { id: { in: toEvict.map((s) => s.id) } },
               });
 
-              // Fire-and-forget: audit + notify for each evicted session
-              for (const evicted of toEvict) {
-                logAudit({
-                  scope: AUDIT_SCOPE.PERSONAL,
-                  action: AUDIT_ACTION.SESSION_EVICTED,
-                  userId: session.userId,
-                  targetType: AUDIT_TARGET_TYPE.SESSION,
-                  targetId: evicted.id,
-                  metadata: {
-                    reason: "concurrent_session_limit",
-                    maxConcurrentSessions: maxSessions,
-                    newSessionIp: meta?.ip ?? null,
-                    newSessionUa: meta?.userAgent ?? null,
-                  },
-                  ip: meta?.ip ?? null,
-                  userAgent: meta?.userAgent ?? null,
-                });
-              }
-
-              createNotification({
-                userId: session.userId,
-                tenantId,
-                type: "SESSION_EVICTED",
-                title: "Session terminated",
-                body: `${toEvict.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
-                metadata: { evictedCount: toEvict.length },
-              });
+              evictionInfo = { tenantId, maxSessions, evicted: toEvict };
             }
           }
 
@@ -244,6 +227,38 @@ export function createCustomAdapter(): Adapter {
         acceptLanguage: meta?.acceptLanguage ?? null,
         currentSessionToken: session.sessionToken,
       });
+
+      // Fire audit + notification outside the RLS transaction context
+      if (evictionInfo) {
+        const { tenantId, maxSessions, evicted } = evictionInfo;
+        for (const ev of evicted) {
+          logAudit({
+            scope: AUDIT_SCOPE.PERSONAL,
+            action: AUDIT_ACTION.SESSION_EVICTED,
+            userId: session.userId,
+            tenantId,
+            targetType: AUDIT_TARGET_TYPE.SESSION,
+            targetId: ev.id,
+            metadata: {
+              reason: "concurrent_session_limit",
+              maxConcurrentSessions: maxSessions,
+              newSessionIp: meta?.ip ?? null,
+              newSessionUa: meta?.userAgent ?? null,
+            },
+            ip: meta?.ip ?? null,
+            userAgent: meta?.userAgent ?? null,
+          });
+        }
+
+        createNotification({
+          userId: session.userId,
+          tenantId,
+          type: "SESSION_EVICTED",
+          title: "Session terminated",
+          body: `${evicted.length} session(s) terminated due to concurrent session limit (max: ${maxSessions}).`,
+          metadata: { evictedCount: evicted.length },
+        });
+      }
 
       return {
         sessionToken: created.sessionToken,
