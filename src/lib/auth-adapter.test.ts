@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification } = vi.hoisted(() => ({
   mockPrismaSession: {
@@ -291,6 +291,35 @@ describe("createCustomAdapter", () => {
       );
     });
 
+    it("evicts multiple sessions when well over limit", async () => {
+      mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "new" });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: 2 });
+      mockTxSession.findMany.mockResolvedValue([
+        { id: "s1", ipAddress: "1.1.1.1", userAgent: "ua1" },
+        { id: "s2", ipAddress: "2.2.2.2", userAgent: "ua2" },
+        { id: "s3", ipAddress: "3.3.3.3", userAgent: "ua3" },
+      ]);
+      mockTxSession.deleteMany.mockResolvedValue({ count: 2 });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({
+        sessionToken: "tok-new",
+        userId: "u-1",
+        expires,
+      });
+
+      // Should evict s1 and s2 (oldest 2) to make room for new session
+      expect(mockTxSession.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ["s1", "s2"] } },
+      });
+    });
+
     it("does not evict when under concurrent limit", async () => {
       mockSessionMetaGetStore.mockReturnValue({ ip: "10.0.0.1", userAgent: "ok" });
       mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
@@ -361,6 +390,8 @@ describe("createCustomAdapter", () => {
   });
 
   describe("updateSession", () => {
+    afterEach(() => vi.useRealTimers());
+
     it("reads current session, checks idle, then updates lastActiveAt", async () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
@@ -403,8 +434,6 @@ describe("createCustomAdapter", () => {
         userId: "u-1",
         expires,
       });
-
-      vi.useRealTimers();
     });
 
     it("omits expires from data when not provided", async () => {
@@ -449,8 +478,6 @@ describe("createCustomAdapter", () => {
       });
       // Should NOT call update
       expect(mockPrismaSession.update).not.toHaveBeenCalled();
-
-      vi.useRealTimers();
     });
 
     it("returns null when session not found", async () => {
