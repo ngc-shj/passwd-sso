@@ -17,6 +17,12 @@ npm run generate:key     # Generate 256-bit hex master key
 
 Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.yml up`
 
+## Code Quality Rules
+
+- **No ad-hoc fixes**: Always use the proper component, import, or pattern. Never substitute with a quick workaround (e.g., replacing `<Card>` with `<div>` to avoid adding an import).
+- **No cutting corners**: Every change must be complete and correct. If a component needs an import, add the import. If a fix needs to be applied to multiple files, apply it to all of them.
+- **Build verification is mandatory**: Run `npx next build` after every change. A TypeScript or build error means the fix is incomplete — do not commit broken code.
+
 ## Mandatory Checks
 
 Before committing or reporting implementation complete, **always** run:
