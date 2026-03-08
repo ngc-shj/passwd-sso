@@ -13,9 +13,6 @@ import { Loader2 } from "lucide-react";
 
 export default function TenantSettingsPage() {
   const t = useTranslations("Dashboard");
-  const tTenant = useTranslations("TenantAdmin");
-  const tDs = useTranslations("DirectorySync");
-  const tScim = useTranslations("Team");
   const { isAdmin, loading } = useTenantRole();
 
   if (loading) {

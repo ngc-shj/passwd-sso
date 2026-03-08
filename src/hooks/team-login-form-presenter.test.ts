@@ -22,10 +22,6 @@ const DEFAULT_TEAM_POLICY: TeamPolicyClient = {
   allowSharing: true,
 };
 
-function noop() {
-  // intentionally empty
-}
-
 function buildPresenterArgs(overrides: {
   editData?: TeamEntryFormEditData | null;
   title?: string;

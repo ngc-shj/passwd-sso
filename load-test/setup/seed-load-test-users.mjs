@@ -24,7 +24,7 @@
  */
 
 import { randomBytes, createHash, createHmac, pbkdf2Sync, hkdfSync, createCipheriv } from "node:crypto";
-import { writeFileSync, chmodSync, unlinkSync, existsSync } from "node:fs";
+import { writeFileSync, writeSync, chmodSync, unlinkSync, existsSync, openSync, closeSync, constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
@@ -423,9 +423,19 @@ async function runSmokeTest(pool) {
   console.log("[2/4] Seeding 1 smoke test user...");
   const credentials = await seedUsers(pool, 1);
   if (!existsSync(AUTH_FILE)) {
-    // Write the single user for smoke
-    writeFileSync(AUTH_FILE, JSON.stringify(credentials, null, 2));
-    chmodSync(AUTH_FILE, 0o600);
+    // Atomic create: O_CREAT|O_EXCL fails if file already exists (avoids TOCTOU race)
+    let fd;
+    try {
+      fd = openSync(AUTH_FILE, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+      const data = JSON.stringify(credentials, null, 2);
+      const buf = Buffer.from(data, "utf8");
+      writeSync(fd, buf);
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      // Another process created it first — skip
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
   }
 
   // Step 3: API smoke check

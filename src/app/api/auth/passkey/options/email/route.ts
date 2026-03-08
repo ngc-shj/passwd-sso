@@ -29,7 +29,8 @@ function generateDummyCredentials(): Array<{
   credentialId: string;
   transports: string[];
 }> {
-  const count = 1 + (randomBytes(1)[0] % 3);
+  // Avoid modulo bias: map [0,255] to [1,3] uniformly
+  const count = 1 + Math.floor((randomBytes(1)[0] / 256) * 3);
   return Array.from({ length: count }, () => ({
     credentialId: randomBytes(32).toString("base64url"),
     transports: ["usb"] as string[],
