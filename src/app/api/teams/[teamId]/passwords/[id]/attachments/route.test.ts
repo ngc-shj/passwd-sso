@@ -141,9 +141,13 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: "team-1" });
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
+      teamId: "team-1",
+      tenantId: "t1",
+      itemKeyVersion: 1,
+      teamKeyVersion: 1,
+    });
     mockPrismaAttachment.count.mockResolvedValue(0);
-    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -344,7 +348,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("INVALID_AUTH_TAG_FORMAT");
   });
 
-  it("creates attachment with client-encrypted data", async () => {
+  it("creates attachment with client-encrypted data (encryptionMode=1)", async () => {
     mockPrismaAttachment.create.mockResolvedValue({
       id: "att-1",
       filename: "doc.pdf",
@@ -360,8 +364,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         iv: VALID_IV,
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
-        teamKeyVersion: "1",
         aadVersion: "1",
+        encryptionMode: "1",
       }),
       createParams("team-1", "pw-1"),
     );
@@ -372,7 +376,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
           iv: VALID_IV,
           authTag: VALID_AUTH_TAG,
           sizeBytes: 3,
-          keyVersion: 1,
+          encryptionMode: 1,
           aadVersion: 1,
           teamPasswordEntryId: "pw-1",
         }),
@@ -380,8 +384,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     );
   });
 
-  it("returns 409 when teamKeyVersion does not match (S-20)", async () => {
-    mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 2 });
+  it("returns 400 when encryptionMode is missing", async () => {
     const res = await POST(
       createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
         file: new Blob(["abc"]),
@@ -390,12 +393,53 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
         iv: VALID_IV,
         authTag: VALID_AUTH_TAG,
         sizeBytes: "3",
-        teamKeyVersion: "1",
       }),
       createParams("team-1", "pw-1"),
     );
     const json = await res.json();
-    expect(res.status).toBe(409);
-    expect(json.error).toBe("TEAM_KEY_VERSION_MISMATCH");
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("MISSING_REQUIRED_FIELDS");
+  });
+
+  it("returns 400 when encryptionMode=0", async () => {
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+        encryptionMode: "0",
+      }),
+      createParams("team-1", "pw-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 when entry has itemKeyVersion=0", async () => {
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
+      teamId: "team-1",
+      tenantId: "t1",
+      itemKeyVersion: 0,
+      teamKeyVersion: 1,
+    });
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+        encryptionMode: "1",
+      }),
+      createParams("team-1", "pw-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(400);
+    expect(json.error).toBe("ITEM_KEY_REQUIRED");
   });
 });

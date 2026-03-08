@@ -12,8 +12,11 @@ import {
   unwrapTeamKey,
   deriveTeamEncryptionKey,
   createTeamKeyEscrow,
+  unwrapItemKey,
+  deriveItemEncryptionKey,
   type TeamKeyWrapContext,
 } from "./crypto-team";
+import { buildItemKeyWrapAAD } from "./crypto-aad";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 
@@ -22,6 +25,11 @@ import { fetchApi } from "@/lib/url-helpers";
 interface CachedTeamKey {
   key: CryptoKey;
   keyVersion: number;
+  cachedAt: number;
+}
+
+interface CachedItemKey {
+  key: CryptoKey;
   cachedAt: number;
 }
 
@@ -35,6 +43,8 @@ export interface TeamVaultContextValue {
   getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
   /** Get the team encryption key with its version number. */
   getTeamKeyInfo: (teamId: string) => Promise<TeamKeyInfo | null>;
+  /** Get the per-entry ItemKey-derived encryption key for attachment operations. */
+  getItemEncryptionKey: (teamId: string, entryId: string) => Promise<CryptoKey>;
   /** Invalidate a cached team key (e.g. after key rotation). */
   invalidateTeamKey: (teamId: string) => void;
   /** Clear all cached team keys (e.g. on vault lock). */
@@ -128,13 +138,16 @@ export function TeamVaultProvider({
   vaultUnlocked,
 }: TeamVaultProviderProps) {
   const cacheRef = useRef<Map<string, CachedTeamKey>>(new Map());
+  const itemKeyCacheRef = useRef<Map<string, Map<string, CachedItemKey>>>(new Map());
 
   const clearAll = useCallback(() => {
     cacheRef.current.clear();
+    itemKeyCacheRef.current.clear();
   }, []);
 
   const invalidateTeamKey = useCallback((teamId: string) => {
     cacheRef.current.delete(teamId);
+    itemKeyCacheRef.current.delete(teamId);
   }, []);
 
   const getTeamEncryptionKey = useCallback(
@@ -248,6 +261,69 @@ export function TeamVaultProvider({
       const cached = cacheRef.current.get(teamId);
       if (!cached) return null;
       return { key, keyVersion: cached.keyVersion };
+    },
+    [getTeamEncryptionKey]
+  );
+
+  const getItemEncryptionKey = useCallback(
+    async (teamId: string, entryId: string): Promise<CryptoKey> => {
+      // Check cache
+      const teamCache = itemKeyCacheRef.current.get(teamId);
+      const cached = teamCache?.get(entryId);
+      if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+        return cached.key;
+      }
+
+      // Fetch entry to get ItemKey metadata
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, entryId));
+      if (!res.ok) {
+        throw new Error(`Failed to fetch entry ItemKey data (status=${res.status})`);
+      }
+      const raw = await res.json();
+
+      const itemKeyVersion = typeof raw.itemKeyVersion === "number" ? raw.itemKeyVersion : 0;
+      if (
+        itemKeyVersion < 1 ||
+        typeof raw.encryptedItemKey !== "string" ||
+        typeof raw.itemKeyIv !== "string" ||
+        typeof raw.itemKeyAuthTag !== "string" ||
+        typeof raw.teamKeyVersion !== "number"
+      ) {
+        throw new Error("Entry does not have ItemKey (itemKeyVersion < 1). Cannot encrypt attachments.");
+      }
+
+      // Get TeamKey to unwrap ItemKey
+      const teamKey = await getTeamEncryptionKey(teamId);
+      if (!teamKey) {
+        throw new Error("Failed to obtain team encryption key for ItemKey unwrap");
+      }
+
+      // Build AAD and unwrap
+      const ikAad = buildItemKeyWrapAAD(teamId, entryId, raw.teamKeyVersion);
+      const rawItemKey = await unwrapItemKey(
+        {
+          ciphertext: raw.encryptedItemKey,
+          iv: raw.itemKeyIv,
+          authTag: raw.itemKeyAuthTag,
+        },
+        teamKey,
+        ikAad,
+      );
+
+      // Derive encryption key from ItemKey
+      const encryptionKey = await deriveItemEncryptionKey(rawItemKey);
+      rawItemKey.fill(0);
+
+      // Cache
+      if (!itemKeyCacheRef.current.has(teamId)) {
+        itemKeyCacheRef.current.set(teamId, new Map());
+      }
+      itemKeyCacheRef.current.get(teamId)!.set(entryId, {
+        key: encryptionKey,
+        cachedAt: Date.now(),
+      });
+
+      return encryptionKey;
     },
     [getTeamEncryptionKey]
   );
@@ -408,6 +484,7 @@ export function TeamVaultProvider({
   const value: TeamVaultContextValue = {
     getTeamEncryptionKey,
     getTeamKeyInfo,
+    getItemEncryptionKey,
     invalidateTeamKey,
     clearAll,
     distributePendingKeys,

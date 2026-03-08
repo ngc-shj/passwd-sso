@@ -85,5 +85,6 @@
   "apiKeyNotFound": "API キーが見つかりません。",
   "apiKeyAlreadyRevoked": "API キーは既に失効済みです。",
   "apiKeyInvalid": "無効な API キーです。",
-  "apiKeyScopeInsufficient": "API キーに必要なスコープがありません。"
+  "apiKeyScopeInsufficient": "API キーに必要なスコープがありません。",
+  "itemKeyRequired": "このエントリにはItemKey暗号化が必要です。先にエントリを更新してください。"
 }

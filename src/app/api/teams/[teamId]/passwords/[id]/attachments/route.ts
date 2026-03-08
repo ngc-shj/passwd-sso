@@ -95,12 +95,20 @@ export async function POST(
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true, tenantId: true },
+      select: { teamId: true, tenantId: true, itemKeyVersion: true, teamKeyVersion: true },
     }),
   );
 
   if (!entry || entry.teamId !== teamId) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  }
+
+  // Require ItemKey (itemKeyVersion >= 1) for attachment upload
+  if ((entry.itemKeyVersion ?? 0) < 1) {
+    return NextResponse.json(
+      { error: API_ERROR.ITEM_KEY_REQUIRED },
+      { status: 400 }
+    );
   }
 
   // Check attachment count limit
@@ -143,7 +151,6 @@ export async function POST(
   const filename = formData.get("filename") as string | null;
   const contentType = formData.get("contentType") as string | null;
   const sizeBytes = formData.get("sizeBytes") as string | null;
-  const teamKeyVersionStr = formData.get("teamKeyVersion") as string | null;
   const aadVersionStr = formData.get("aadVersion") as string | null;
   const encryptionModeStr = formData.get("encryptionMode") as string | null;
 
@@ -207,28 +214,35 @@ export async function POST(
   }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
-  const teamKeyVersion = teamKeyVersionStr ? parseInt(teamKeyVersionStr, 10) : 1;
-  const encryptionMode = encryptionModeStr ? parseInt(encryptionModeStr, 10) : 0;
 
-  // Validate encryptionMode: 0 = TeamKey direct, 1 = ItemKey
-  if (encryptionMode !== 0 && encryptionMode !== 1) {
+  // encryptionMode is required and must be 1 (ItemKey)
+  if (!encryptionModeStr) {
+    return NextResponse.json(
+      { error: API_ERROR.MISSING_REQUIRED_FIELDS },
+      { status: 400 }
+    );
+  }
+  const encryptionMode = parseInt(encryptionModeStr, 10);
+  if (encryptionMode !== 1) {
     return NextResponse.json(
       { error: API_ERROR.VALIDATION_ERROR },
       { status: 400 }
     );
   }
 
-  // Validate teamKeyVersion matches current team key version (S-20/F-23)
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { teamKeyVersion: true },
-    }),
-  );
-  if (!team || teamKeyVersion !== team.teamKeyVersion) {
+  // Validate aadVersion (must be 1)
+  if (aadVersion !== 1) {
     return NextResponse.json(
-      { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
-      { status: 409 }
+      { error: API_ERROR.VALIDATION_ERROR },
+      { status: 400 }
+    );
+  }
+
+  // Validate client-provided attachmentId format (UUID v4)
+  if (clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR },
+      { status: 400 }
     );
   }
 
@@ -250,7 +264,7 @@ export async function POST(
           iv,
           authTag,
           aadVersion,
-          keyVersion: teamKeyVersion,
+          keyVersion: entry.teamKeyVersion,
           encryptionMode,
           tenantId: entry.tenantId,
           teamPasswordEntryId: id,

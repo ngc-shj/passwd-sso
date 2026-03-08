@@ -9,7 +9,6 @@ const {
   mockAttachmentFindMany,
   mockAttachmentCount,
   mockAttachmentCreate,
-  mockTeamFindUnique,
   mockPutObject,
   mockDeleteObject,
   mockWithTeamTenantRls,
@@ -20,7 +19,6 @@ const {
   mockAttachmentFindMany: vi.fn(),
   mockAttachmentCount: vi.fn(),
   mockAttachmentCreate: vi.fn(),
-  mockTeamFindUnique: vi.fn(),
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
@@ -45,7 +43,6 @@ vi.mock("@/lib/prisma", () => ({
       count: mockAttachmentCount,
       create: mockAttachmentCreate,
     },
-    team: { findUnique: mockTeamFindUnique },
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -99,10 +96,11 @@ function validFormFields(): Record<string, string | Blob> {
     iv: "a".repeat(24),
     authTag: "b".repeat(32),
     sizeBytes: "5",
+    encryptionMode: "1",
   };
 }
 
-const TEAM_ENTRY = { teamId: "o1" };
+const TEAM_ENTRY = { teamId: "o1", itemKeyVersion: 1, teamKeyVersion: 1, tenantId: "t1" };
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -319,12 +317,11 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(json.error).toBe("INVALID_FILENAME");
   });
 
-  it("uploads client-encrypted attachment successfully", async () => {
+  it("uploads client-encrypted attachment successfully with encryptionMode=1", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
-    mockTeamFindUnique.mockResolvedValue({ teamKeyVersion: 1 });
     mockPutObject.mockResolvedValue(Buffer.from("stored"));
     const created = {
       id: "a1",
@@ -345,15 +342,29 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
           iv: "a".repeat(24),
           authTag: "b".repeat(32),
           sizeBytes: 5,
+          encryptionMode: 1,
         }),
       }),
     );
   });
 
+  it("rejects encryptionMode=0", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = { ...validFormFields(), encryptionMode: "0" };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
   it("rejects invalid encryptionMode", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    mockEntryFindUnique.mockResolvedValue({ teamId: "o1", tenantId: "t1" });
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
     mockAttachmentCount.mockResolvedValue(0);
     const fields = { ...validFormFields(), encryptionMode: "2" };
     const req = createFormDataRequest(fields);
@@ -361,5 +372,88 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects missing encryptionMode", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = validFormFields();
+    delete fields.encryptionMode;
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("MISSING_REQUIRED_FIELDS");
+  });
+
+  it("rejects upload when entry has itemKeyVersion=0", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue({ ...TEAM_ENTRY, itemKeyVersion: 0 });
+    const req = createFormDataRequest(validFormFields());
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("ITEM_KEY_REQUIRED");
+  });
+
+  it("rejects invalid client-provided attachmentId (non-UUID)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = { ...validFormFields(), id: "not-a-uuid" };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("accepts valid UUID v4 as client-provided attachmentId", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    mockPutObject.mockResolvedValue(Buffer.from("stored"));
+    mockAttachmentCreate.mockResolvedValue({
+      id: "550e8400-e29b-41d4-a716-446655440000",
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 5,
+      createdAt: new Date(),
+    });
+    const fields = { ...validFormFields(), id: "550e8400-e29b-41d4-a716-446655440000" };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status } = await parseResponse(res);
+    expect(status).toBe(201);
+  });
+
+  it("rejects invalid aadVersion", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    const fields = { ...validFormFields(), aadVersion: "2" };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("rejects upload when entry has no itemKeyVersion field", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    const entryWithoutItemKey = { teamId: "o1", teamKeyVersion: 1, tenantId: "t1" };
+    mockEntryFindUnique.mockResolvedValue(entryWithoutItemKey);
+    const req = createFormDataRequest(validFormFields());
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(json.error).toBe("ITEM_KEY_REQUIRED");
   });
 });

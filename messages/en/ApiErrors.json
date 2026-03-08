@@ -85,5 +85,6 @@
   "apiKeyNotFound": "API key not found.",
   "apiKeyAlreadyRevoked": "API key has already been revoked.",
   "apiKeyInvalid": "Invalid API key.",
-  "apiKeyScopeInsufficient": "API key does not have the required scope."
+  "apiKeyScopeInsufficient": "API key does not have the required scope.",
+  "itemKeyRequired": "This entry requires ItemKey encryption. Please update the entry first."
 }
