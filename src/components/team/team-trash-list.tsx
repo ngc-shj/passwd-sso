@@ -232,7 +232,20 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     }
   };
 
-  if (loading || sortedFiltered.length === 0) return null;
+  if (loading) return null;
+
+  if (sortedFiltered.length === 0) {
+    if (entries.length === 0) return null;
+    return (
+      <div className="mt-6">
+        <Card className="rounded-xl border bg-card/80 p-10">
+          <div className="flex flex-col items-center justify-center text-center">
+            <p className="text-muted-foreground">{tl("noMatch")}</p>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-6">

@@ -356,6 +356,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
           {isTrash ? (
             <TrashList
               refreshKey={refreshKey}
+              searchQuery={searchQuery}
               selectionMode={selectionMode}
               onSelectedCountChange={handleSelectedCountChange}
               selectAllRef={trashListRef}
