@@ -79,4 +79,24 @@ Initial review of all commits on branch including post-manual-test bug fixes
 - **File**: src/__tests__/api/sessions/sessions-list.test.ts
 
 ## Resolution Status
-[Pending]
+
+### F1 [Major] RESOLVED — Used updateMany with keyVersion optimistic lock (personal + team)
+### S1 [Major] RESOLVED — Added isolationLevel: "Serializable" to $transaction
+### F4 [Minor] RESOLVED — PATCH now returns prisma.tenant.update() result
+### S2 [Minor] RESOLVED — Added 1MB size limit to encryptedBlob
+### S3 [Minor] RESOLVED — Wrapped req.json() in try-catch
+### S4 [Minor] RESOLVED — Added tenantAutoLockMinutes = null in clearVault()
+### S5 [Minor] RESOLVED — Added tenantId to logAudit call
+### T2 [Major] RESOLVED — Added validation tests for idle timeout and auto-lock
+### T3 [Major] RESOLVED — Added PATCH ownership check test (403)
+### T4 [Major] RESOLVED — Added multiple eviction test (limit=2, existing=3)
+### T5 [Major] RESOLVED — Added blobAuthTag format validation test
+### T6 [Major] RESOLVED — Added empty body and malformed JSON body tests
+### T7 [Minor] RESOLVED — Moved vi.useRealTimers to afterEach
+
+### Deferred (Minor, out of scope)
+### F2 [Minor] DEFERRED — Sentinel gated by REDIS_URL: design constraint, low risk
+### F3 [Minor] DEFERRED — updateSession extra query: performance optimization for future
+### S6 [Minor] DEFERRED — Sentinel master password: document in redis-ha.md
+### T1 [Minor] DEFERRED — Redis Sentinel test: infrastructure layer, hard to unit test
+### T8 [Minor] DEFERRED — Test duplication: refactoring task for future
