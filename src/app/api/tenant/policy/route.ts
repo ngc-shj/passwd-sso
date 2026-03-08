@@ -31,12 +31,14 @@ async function handleGET(_req: NextRequest) {
   const user = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { tenant: { select: { maxConcurrentSessions: true } } },
+      select: { tenant: { select: { maxConcurrentSessions: true, sessionIdleTimeoutMinutes: true, vaultAutoLockMinutes: true } } },
     }),
   );
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,
+    sessionIdleTimeoutMinutes: user?.tenant?.sessionIdleTimeoutMinutes ?? null,
+    vaultAutoLockMinutes: user?.tenant?.vaultAutoLockMinutes ?? null,
   });
 }
 
@@ -62,9 +64,9 @@ async function handlePATCH(req: NextRequest) {
   }
 
   const body = await req.json();
-  const { maxConcurrentSessions } = body;
+  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes } = body;
 
-  // Validate: null (unlimited) or positive integer
+  // Validate maxConcurrentSessions: null (unlimited) or positive integer 1-100
   if (maxConcurrentSessions !== null && maxConcurrentSessions !== undefined) {
     if (
       typeof maxConcurrentSessions !== "number" ||
@@ -76,10 +78,45 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
+  // Validate vaultAutoLockMinutes: null (default 15min) or positive integer 1-1440 (24h)
+  if (vaultAutoLockMinutes !== null && vaultAutoLockMinutes !== undefined) {
+    if (
+      typeof vaultAutoLockMinutes !== "number" ||
+      !Number.isInteger(vaultAutoLockMinutes) ||
+      vaultAutoLockMinutes < 1 ||
+      vaultAutoLockMinutes > 1440
+    ) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    }
+  }
+
+  // Validate sessionIdleTimeoutMinutes: null (disabled) or positive integer 1-1440 (24h)
+  if (sessionIdleTimeoutMinutes !== null && sessionIdleTimeoutMinutes !== undefined) {
+    if (
+      typeof sessionIdleTimeoutMinutes !== "number" ||
+      !Number.isInteger(sessionIdleTimeoutMinutes) ||
+      sessionIdleTimeoutMinutes < 1 ||
+      sessionIdleTimeoutMinutes > 1440
+    ) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    }
+  }
+
+  const updateData: Record<string, unknown> = {};
+  if (maxConcurrentSessions !== undefined) {
+    updateData.maxConcurrentSessions = maxConcurrentSessions ?? null;
+  }
+  if (sessionIdleTimeoutMinutes !== undefined) {
+    updateData.sessionIdleTimeoutMinutes = sessionIdleTimeoutMinutes ?? null;
+  }
+  if (vaultAutoLockMinutes !== undefined) {
+    updateData.vaultAutoLockMinutes = vaultAutoLockMinutes ?? null;
+  }
+
   await withBypassRls(prisma, async () =>
     prisma.tenant.update({
       where: { id: membership.tenantId },
-      data: { maxConcurrentSessions: maxConcurrentSessions ?? null },
+      data: updateData,
     }),
   );
 
@@ -88,13 +125,19 @@ async function handlePATCH(req: NextRequest) {
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.POLICY_UPDATE,
     userId: session.user.id,
-    metadata: { maxConcurrentSessions: maxConcurrentSessions ?? null },
+    metadata: {
+      maxConcurrentSessions: maxConcurrentSessions ?? null,
+      sessionIdleTimeoutMinutes: sessionIdleTimeoutMinutes ?? null,
+      vaultAutoLockMinutes: vaultAutoLockMinutes ?? null,
+    },
     ip: meta.ip,
     userAgent: meta.userAgent,
   });
 
   return NextResponse.json({
     maxConcurrentSessions: maxConcurrentSessions ?? null,
+    sessionIdleTimeoutMinutes: sessionIdleTimeoutMinutes ?? null,
+    vaultAutoLockMinutes: vaultAutoLockMinutes ?? null,
   });
 }
 

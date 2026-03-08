@@ -126,6 +126,7 @@ describe("GET /api/vault/unlock/data", () => {
       encryptedEcdhPrivateKey: "ecdh-priv-enc",
       ecdhPrivateKeyIv: "ecdh-iv",
       ecdhPrivateKeyAuthTag: "ecdh-tag",
+      tenant: { vaultAutoLockMinutes: 10 },
     });
     mockPrismaVaultKey.findUnique.mockResolvedValue({
       verificationCiphertext: "v-cipher",
@@ -157,6 +158,7 @@ describe("GET /api/vault/unlock/data", () => {
       encryptedEcdhPrivateKey: "ecdh-priv-enc",
       ecdhPrivateKeyIv: "ecdh-iv",
       ecdhPrivateKeyAuthTag: "ecdh-tag",
+      vaultAutoLockMinutes: 10,
     });
   });
 

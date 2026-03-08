@@ -50,6 +50,7 @@ async function handleGET(req: NextRequest) {
         kdfMemory: true,
         kdfParallelism: true,
         passphraseVerifierHmac: true,
+        tenant: { select: { vaultAutoLockMinutes: true } },
         // ECDH fields for team E2E (excluded for extension tokens)
         ...(!isExtensionToken && {
           ecdhPublicKey: true,
@@ -114,6 +115,7 @@ async function handleGET(req: NextRequest) {
         }
       : null,
     ...ecdhFields,
+    vaultAutoLockMinutes: user.tenant?.vaultAutoLockMinutes ?? null,
   });
 }
 

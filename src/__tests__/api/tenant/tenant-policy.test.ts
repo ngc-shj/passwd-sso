@@ -78,7 +78,7 @@ describe("GET /api/tenant/policy", () => {
   it("returns maxConcurrentSessions from tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockUserFindUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: 5 } });
+    mockUserFindUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: 5, sessionIdleTimeoutMinutes: null, vaultAutoLockMinutes: null } });
 
     const req = createRequest("GET", "http://localhost/api/tenant/policy");
     const res = await GET(req);
@@ -91,7 +91,7 @@ describe("GET /api/tenant/policy", () => {
   it("returns null when no limit set", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockUserFindUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: null } });
+    mockUserFindUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: null, sessionIdleTimeoutMinutes: null, vaultAutoLockMinutes: null } });
 
     const req = createRequest("GET", "http://localhost/api/tenant/policy");
     const res = await GET(req);
@@ -168,7 +168,7 @@ describe("PATCH /api/tenant/policy", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "POLICY_UPDATE",
-        metadata: { maxConcurrentSessions: 3 },
+        metadata: expect.objectContaining({ maxConcurrentSessions: 3 }),
       }),
     );
   });

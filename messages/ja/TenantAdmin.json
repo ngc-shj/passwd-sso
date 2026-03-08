@@ -29,7 +29,7 @@
   "searchMembers": "メンバーを検索...",
   "noMatchingMembers": "検索に一致するメンバーがいません。",
   "sessionPolicyTitle": "セッションポリシー",
-  "sessionPolicyDescription": "テナント全体の同時セッション数制限を設定します。",
+  "sessionPolicyDescription": "テナント全体のセッションセキュリティポリシーを設定します。",
   "maxConcurrentSessions": "最大同時セッション数",
   "maxConcurrentSessionsHelp": "ユーザーあたりの同時ログインセッション数の上限です。上限を超えると、最も古いセッションが自動的に終了されます。空欄の場合は無制限です。",
   "unlimited": "無制限",
@@ -37,5 +37,15 @@
   "sessionPolicySaved": "セッションポリシーを更新しました。",
   "sessionPolicySaveFailed": "セッションポリシーの更新に失敗しました。",
   "sessionPolicyValidationMin": "1以上で入力してください。",
-  "sessionPolicyValidationMax": "100以下で入力してください。"
+  "sessionPolicyValidationMax": "100以下で入力してください。",
+  "idleTimeoutEnabled": "セッションアイドルタイムアウト",
+  "idleTimeoutMinutes": "タイムアウト（分）",
+  "idleTimeoutHelp": "指定した時間操作がないユーザーを自動的にサインアウトします。最大1440分（24時間）。無効の場合、アイドルタイムアウトは適用されません。",
+  "idleTimeoutValidationMin": "1分以上で入力してください。",
+  "idleTimeoutValidationMax": "1440分（24時間）以下で入力してください。",
+  "vaultAutoLockEnabled": "保管庫自動ロック",
+  "vaultAutoLockMinutes": "タイムアウト（分）",
+  "vaultAutoLockHelp": "指定した時間操作がない場合、保管庫を自動的にロックしマスターパスフレーズの再入力を要求します。未設定の場合はデフォルト15分。最大1440分（24時間）。",
+  "vaultAutoLockValidationMin": "1分以上で入力してください。",
+  "vaultAutoLockValidationMax": "1440分（24時間）以下で入力してください。"
 }

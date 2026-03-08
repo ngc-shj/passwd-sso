@@ -56,12 +56,23 @@ let tokenExpiresAt: number | null = null;
 let encryptionKey: CryptoKey | null = null;
 let currentUserId: string | null = null;
 let currentVaultSecretKeyHex: string | null = null;
+// Tenant policy auto-lock override (null = use local setting)
+let tenantAutoLockMinutes: number | null = null;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 const CLIPBOARD_CLEAR_DELAY_MS = 30_000; // 30 seconds
 
 let lastClipboardCopyTime = 0;
+
+/** Resolve effective auto-lock minutes: tenant policy > local setting */
+async function getEffectiveAutoLockMinutes(): Promise<number> {
+  if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) {
+    return tenantAutoLockMinutes;
+  }
+  const { autoLockMinutes } = await getSettings();
+  return autoLockMinutes;
+}
 
 // ── Pending save prompts (login detection → post-navigation banner) ──
 
@@ -200,9 +211,9 @@ async function hydrateFromSession(): Promise<void> {
 
   // Restore vault auto-lock alarm if vault is unlocked
   if (encryptionKey) {
-    const { autoLockMinutes } = await getSettings();
-    if (autoLockMinutes > 0) {
-      chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: autoLockMinutes });
+    const effectiveLock = await getEffectiveAutoLockMinutes();
+    if (effectiveLock > 0) {
+      chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
     }
   }
 
@@ -438,6 +449,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (!changes.autoLockMinutes) return;
   if (!encryptionKey) return;
+  // Tenant policy takes precedence — ignore local setting changes
+  if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) return;
 
   const newValue = changes.autoLockMinutes.newValue;
   if (typeof newValue !== "number" || !Number.isFinite(newValue)) return;
@@ -1149,11 +1162,15 @@ async function handleMessage(
 
         encryptionKey = encKey;
         currentUserId = data.userId || null;
+        // Store tenant policy auto-lock override from server
+        tenantAutoLockMinutes = typeof data.vaultAutoLockMinutes === "number"
+          ? data.vaultAutoLockMinutes
+          : null;
         persistState();
-        const { autoLockMinutes } = await getSettings();
-        if (autoLockMinutes > 0) {
+        const effectiveLock = await getEffectiveAutoLockMinutes();
+        if (effectiveLock > 0) {
           chrome.alarms.create(ALARM_VAULT_LOCK, {
-            delayInMinutes: autoLockMinutes,
+            delayInMinutes: effectiveLock,
           });
         }
 

@@ -100,8 +100,8 @@ const VaultContext = createContext<VaultContextValue | null>(null);
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-const HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
+const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
 const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
 const SKIP_BEFOREUNLOAD_ONCE_KEY = "psso:skip-beforeunload-once";
@@ -165,6 +165,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
   const lastActivityRef = useRef(Date.now());
   const hiddenAtRef = useRef<number | null>(null);
+  const autoLockMsRef = useRef(DEFAULT_INACTIVITY_TIMEOUT_MS);
+  const hiddenLockMsRef = useRef(DEFAULT_HIDDEN_TIMEOUT_MS);
   // ECDH key pair for team E2E encryption
   const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
   const ecdhPublicKeyJwkRef = useRef<string | null>(null);
@@ -188,6 +190,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
         const data = await res.json();
         setHasRecoveryKey(!!data.hasRecoveryKey);
+        // Apply tenant-configured vault auto-lock timeout
+        if (data.vaultAutoLockMinutes != null && data.vaultAutoLockMinutes > 0) {
+          autoLockMsRef.current = data.vaultAutoLockMinutes * 60_000;
+          hiddenLockMsRef.current = Math.min(data.vaultAutoLockMinutes * 60_000, DEFAULT_HIDDEN_TIMEOUT_MS);
+        }
         setVaultStatus((prev) => {
           // SETUP_REQUIRED always wins (vault was reset while unlocked)
           if (data.setupRequired) return VAULT_STATUS.SETUP_REQUIRED;
@@ -244,7 +251,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // When tab is hidden, only check hidden timeout (not inactivity).
       // The user may be active in other tabs — that's not "inactivity".
       if (document.hidden) {
-        if (hiddenAtRef.current && now - hiddenAtRef.current > HIDDEN_TIMEOUT_MS) {
+        if (hiddenAtRef.current && now - hiddenAtRef.current > hiddenLockMsRef.current) {
           lock();
         }
         return;
@@ -252,7 +259,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // Tab is visible — check inactivity timeout
       const sinceActivity = now - lastActivityRef.current;
-      if (sinceActivity > INACTIVITY_TIMEOUT_MS) {
+      if (sinceActivity > autoLockMsRef.current) {
         lock();
       }
     };
