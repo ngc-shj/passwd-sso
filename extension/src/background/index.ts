@@ -766,8 +766,9 @@ async function getTeamEncryptionKey(
   if (!ecdhPrivateKeyBytes || !currentUserId) return null;
 
   // Check cache first when keyVersion is known (avoids redundant network request)
+  // Include userId in cache key to prevent cross-user cache reuse
   if (keyVersion != null) {
-    const earlyKey = `${teamId}:${keyVersion}`;
+    const earlyKey = `${currentUserId}:${teamId}:${keyVersion}`;
     const earlyCached = teamKeyCache.get(earlyKey);
     if (earlyCached && Date.now() - earlyCached.cachedAt < TEAM_KEY_CACHE_TTL_MS) {
       return earlyCached.key;
@@ -789,7 +790,7 @@ async function getTeamEncryptionKey(
     wrapVersion: number;
   };
 
-  const cacheKey = `${teamId}:${memberKey.keyVersion}`;
+  const cacheKey = `${currentUserId}:${teamId}:${memberKey.keyVersion}`;
 
   // Check cache
   const cached = teamKeyCache.get(cacheKey);
@@ -857,7 +858,9 @@ async function decryptTeamOverviews(
     const itemKeyVersion = item.itemKeyVersion ?? 0;
     let decryptionKey: CryptoKey | null;
 
-    if (itemKeyVersion >= 1 && item.encryptedItemKey && item.itemKeyIv && item.itemKeyAuthTag) {
+    if (itemKeyVersion >= 1) {
+      // ItemKey required but missing — skip entry
+      if (!item.encryptedItemKey || !item.itemKeyIv || !item.itemKeyAuthTag) return null;
       const teamEncKey = await getTeamEncryptionKey(teamId, item.teamKeyVersion);
       if (!teamEncKey) return null;
       const itemKeyWrapAAD = buildItemKeyWrapAAD(teamId, item.id, item.teamKeyVersion);
@@ -981,7 +984,8 @@ async function fetchAndDecryptTeamBlob(
   const itemKeyVersion = data.itemKeyVersion ?? 0;
   let decryptionKey: CryptoKey | null;
 
-  if (itemKeyVersion >= 1 && data.encryptedItemKey && data.itemKeyIv && data.itemKeyAuthTag) {
+  if (itemKeyVersion >= 1) {
+    if (!data.encryptedItemKey || !data.itemKeyIv || !data.itemKeyAuthTag) return null;
     const teamEncKey = await getTeamEncryptionKey(teamId, data.teamKeyVersion);
     if (!teamEncKey) return null;
     const itemKeyWrapAAD = buildItemKeyWrapAAD(teamId, data.id, data.teamKeyVersion);

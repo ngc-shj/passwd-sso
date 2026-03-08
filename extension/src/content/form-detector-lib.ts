@@ -296,7 +296,7 @@ function showForInput(
     entries,
     vaultLocked,
     disconnected,
-    onSelect: (entryId) => {
+    onSelect: (entryId, teamId) => {
       if (isContextValid()) {
         // Suppress dropdown re-opening from focus events triggered by autofill
         autofillSuppressUntil = Date.now() + 1500;
@@ -307,7 +307,7 @@ function showForInput(
           autocomplete: input.autocomplete || undefined,
         };
         chrome.runtime.sendMessage(
-          { type: "AUTOFILL_FROM_CONTENT", entryId, targetHint },
+          { type: "AUTOFILL_FROM_CONTENT", entryId, targetHint, ...(teamId ? { teamId } : {}) },
           (response?: { ok?: boolean; error?: string }) => {
             if (!isContextValid()) return;
             if (chrome.runtime.lastError) {

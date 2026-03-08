@@ -139,6 +139,6 @@ describe("handleDropdownKeydown", () => {
       new KeyboardEvent("keydown", { key: "Enter", cancelable: true }),
     );
     expect(handled).toBe(true);
-    expect(opts.onSelect).toHaveBeenCalledWith("1");
+    expect(opts.onSelect).toHaveBeenCalledWith("1", undefined);
   });
 });

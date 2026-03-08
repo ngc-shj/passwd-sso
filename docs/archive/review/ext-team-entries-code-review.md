@@ -154,3 +154,32 @@ Initial review
 #### R2-F9 [Minor] suggestion-dropdown.ts type error — RESOLVED
 - Action: Fixed `currentOnSelect` type to include `teamId` parameter
 - Modified file: extension/src/content/ui/suggestion-dropdown.ts
+
+---
+
+## Round 3 Review (2026-03-08)
+
+### Summary
+Additional security hardening and UI/UX improvements.
+
+### Round 3 Findings
+
+#### R3-S1 [Major] Team key cache key missing userId — cross-user cache reuse risk — RESOLVED
+- **File**: extension/src/background/index.ts (2 locations)
+- **Problem**: Cache key was `${teamId}:${keyVersion}`, allowing a different user to hit the same cached team key if they share a browser profile.
+- **Impact**: Cross-user key reuse could decrypt data with wrong user's key.
+- **Action**: Changed cache key to `${currentUserId}:${teamId}:${keyVersion}` in both the early cache check and the main cache population.
+
+#### R3-S6 [Minor] ItemKey validation incomplete — RESOLVED
+- **File**: extension/src/background/index.ts (2 locations: decryptSingleEntry, fetchAndDecryptTeamBlob)
+- **Problem**: When `itemKeyVersion >= 1` but `encryptedItemKey` is missing, the code fell through to use the team key directly, bypassing per-item encryption.
+- **Action**: Added explicit `return null` guard when `itemKeyVersion >= 1` but required ItemKey fields are missing. Entry is safely skipped.
+
+#### R3-UI [Minor] Popup button/header UI redesign — RESOLVED
+- **Files**: extension/src/popup/components/MatchList.tsx, extension/src/popup/App.tsx, extension/src/__tests__/popup/MatchList.test.tsx
+- **Problem**: Fill/TOTP/Copy buttons took too much width as text buttons; header lacked consolidated actions.
+- **Action**: Changed to icon-only buttons (pen, clock, clipboard SVGs); moved lock/disconnect to header as icon buttons; reduced padding/spacing throughout.
+
+### Verification
+- Tests: 436/436 passed
+- Production build: Succeeded
