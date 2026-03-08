@@ -111,3 +111,46 @@ Initial review
 ### F11 [Minor] clearVault test weakness — SKIP (indirect testing acceptable)
 
 ### F12 [Minor] fetchMock dead code — N/A (test file referenced doesn't exist)
+
+---
+
+## Round 2 Review (2026-03-08)
+
+### Agents
+- Functionality: 2 Major, 2 Minor
+- Security: No findings
+- Testing: 1 Major, 3 Minor
+
+### Round 2 Findings
+
+#### R2-F1 [Major] ecdhEncrypted type validation missing in loadSession — RESOLVED
+- Action: Added validation for `ciphertext`, `iv`, `authTag` fields in `loadSession`
+- Modified file: extension/src/lib/session-storage.ts
+
+#### R2-F2 [Major] getTeamEncryptionKey fetches before cache check — RESOLVED
+- Action: Added early cache lookup when `keyVersion` argument is provided
+- Modified file: extension/src/background/index.ts
+
+#### R2-F3 [Major] Context menu teamId tests missing — RESOLVED
+- Action: Added 5 test cases for teamId encoding/parsing in context-menu.test.ts
+- Modified file: extension/src/__tests__/context-menu.test.ts
+
+#### R2-F4 [Minor] Non-null assertion in ECDH restore — RESOLVED
+- Action: Added `currentVaultSecretKeyHex` null check to guard
+- Modified file: extension/src/background/index.ts
+
+#### R2-F5 [Minor] currentVaultSecretKeyHex zero-clear comment — SKIP
+- Decision: JS strings are immutable; GC handles cleanup. Comment not needed for well-understood JS limitation.
+
+#### R2-F6 [Minor] Cache invalidation retry test — SKIP
+- Decision: Private module variable; covered by existing `decryptSingleEntry` extraction.
+
+#### R2-F7 [Minor] ECDH SW restart test — SKIP
+- Decision: Requires deep mocking of background module lifecycle; covered by session-storage unit tests.
+
+#### R2-F8 [Minor] Context menu mockEntries missing teamId — RESOLVED
+- Action: Added team entry test case in updateContextMenuForTab tests
+
+#### R2-F9 [Minor] suggestion-dropdown.ts type error — RESOLVED
+- Action: Fixed `currentOnSelect` type to include `teamId` parameter
+- Modified file: extension/src/content/ui/suggestion-dropdown.ts
