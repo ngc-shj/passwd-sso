@@ -29,7 +29,7 @@ function generateDummyCredentials(): Array<{
   credentialId: string;
   transports: string[];
 }> {
-  // Avoid modulo bias: map [0,255] to [1,3] uniformly
+  // Reduce modulo bias (negligible for dummy credential count 1-3)
   const count = 1 + Math.floor((randomBytes(1)[0] / 256) * 3);
   return Array.from({ length: count }, () => ({
     credentialId: randomBytes(32).toString("base64url"),

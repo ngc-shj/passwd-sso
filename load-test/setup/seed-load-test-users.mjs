@@ -24,7 +24,7 @@
  */
 
 import { randomBytes, createHash, createHmac, pbkdf2Sync, hkdfSync, createCipheriv } from "node:crypto";
-import { writeFileSync, writeSync, chmodSync, unlinkSync, existsSync, openSync, closeSync, constants as fsConstants } from "node:fs";
+import { writeFileSync, writeSync, unlinkSync, existsSync, openSync, closeSync, constants as fsConstants } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import pg from "pg";
@@ -422,8 +422,8 @@ async function runSmokeTest(pool) {
   // Step 2: Seed 1 user
   console.log("[2/4] Seeding 1 smoke test user...");
   const credentials = await seedUsers(pool, 1);
-  if (!existsSync(AUTH_FILE)) {
-    // Atomic create: O_CREAT|O_EXCL fails if file already exists (avoids TOCTOU race)
+  // Atomic create: O_CREAT|O_EXCL fails if file already exists (avoids TOCTOU race)
+  {
     let fd;
     try {
       fd = openSync(AUTH_FILE, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
@@ -514,9 +514,8 @@ async function main() {
     // Seed
     const credentials = await seedUsers(pool, userCount);
 
-    // Write auth file
-    writeFileSync(AUTH_FILE, JSON.stringify(credentials, null, 2));
-    chmodSync(AUTH_FILE, 0o600);
+    // Write auth file atomically with restricted permissions
+    writeFileSync(AUTH_FILE, JSON.stringify(credentials, null, 2), { mode: 0o600 });
     console.log(`Wrote ${credentials.length} credentials to ${AUTH_FILE} (chmod 600)`);
 
     // Post-seed smoke check
