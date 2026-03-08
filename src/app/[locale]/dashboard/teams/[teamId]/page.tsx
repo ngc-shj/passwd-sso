@@ -95,7 +95,7 @@ export default function TeamDashboardPage({
   const t = useTranslations("Team");
   const tDash = useTranslations("Dashboard");
   const tl = useTranslations("PasswordList");
-  const { getTeamEncryptionKey } = useTeamVault();
+  const { getTeamEncryptionKey, getEntryDecryptionKey } = useTeamVault();
   const [team, setTeam] = useState<TeamInfo | null>(null);
   const [passwords, setPasswords] = useState<TeamPasswordEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -183,14 +183,23 @@ export default function TeamDashboardPage({
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const aad = buildTeamEntryAAD(teamId, entry.id as string, "overview");
+            const entryId = entry.id as string;
+            const itemKeyVersion = (entry.itemKeyVersion as number) ?? 0;
+            const decryptKey = await getEntryDecryptionKey(teamId, entryId, {
+              itemKeyVersion,
+              encryptedItemKey: entry.encryptedItemKey as string | undefined,
+              itemKeyIv: entry.itemKeyIv as string | undefined,
+              itemKeyAuthTag: entry.itemKeyAuthTag as string | undefined,
+              teamKeyVersion: (entry.teamKeyVersion as number) ?? 1,
+            });
+            const aad = buildTeamEntryAAD(teamId, entryId, "overview", itemKeyVersion);
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
                 iv: entry.overviewIv as string,
                 authTag: entry.overviewAuthTag as string,
               },
-              teamKey,
+              decryptKey,
               aad,
             );
             const overview = JSON.parse(json);
@@ -262,7 +271,7 @@ export default function TeamDashboardPage({
     } finally {
       setLoading(false);
     }
-  }, [teamId, activeTagId, activeFolderId, activeEntryType, isTeamFavorites, getTeamEncryptionKey]);
+  }, [teamId, activeTagId, activeFolderId, activeEntryType, isTeamFavorites, getTeamEncryptionKey, getEntryDecryptionKey]);
 
   useEffect(() => {
     setLoadError(false);
@@ -394,21 +403,27 @@ export default function TeamDashboardPage({
 
   const decryptFullBlob = useCallback(
     async (id: string, raw: Record<string, unknown>) => {
-      const teamKey = await getTeamEncryptionKey(teamId);
-      if (!teamKey) throw new Error("No team key");
-      const aad = buildTeamEntryAAD(teamId, id, "blob");
+      const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;
+      const decryptKey = await getEntryDecryptionKey(teamId, id, {
+        itemKeyVersion,
+        encryptedItemKey: raw.encryptedItemKey as string | undefined,
+        itemKeyIv: raw.itemKeyIv as string | undefined,
+        itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+        teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
+      });
+      const aad = buildTeamEntryAAD(teamId, id, "blob", itemKeyVersion);
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,
           iv: raw.blobIv as string,
           authTag: raw.blobAuthTag as string,
         },
-        teamKey,
+        decryptKey,
         aad,
       );
       return JSON.parse(json) as Record<string, unknown>;
     },
-    [teamId, getTeamEncryptionKey],
+    [teamId, getEntryDecryptionKey],
   );
 
   const handleEdit = async (id: string) => {

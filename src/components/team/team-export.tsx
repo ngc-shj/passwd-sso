@@ -31,7 +31,7 @@ interface TeamExportPanelContentProps {
 
 function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContentProps) {
   const t = useTranslations("Export");
-  const { getTeamEncryptionKey } = useTeamVault();
+  const { getEntryDecryptionKey } = useTeamVault();
   const [exporting, setExporting] = useState(false);
   const [passwordProtect, setPasswordProtect] = useState(true);
   const [exportPassword, setExportPassword] = useState("");
@@ -77,10 +77,6 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
       const list: { id: string; entryType: string }[] = await listRes.json();
       const folders: FolderItem[] = foldersRes.ok ? await foldersRes.json() : [];
 
-      // Get team encryption key for decryption
-      const teamKey = await getTeamEncryptionKey(scopedTeamId);
-      if (!teamKey) throw new Error("No team key");
-
       // Fetch full details for each entry and decrypt
       const entries: ExportEntry[] = [];
       let skippedCount = 0;
@@ -93,15 +89,23 @@ function TeamExportPanelContent({ teamId: scopedTeamId }: TeamExportPanelContent
           }
           const raw = await res.json();
 
-          // Decrypt the blob
-          const aad = buildTeamEntryAAD(scopedTeamId, raw.id, "blob");
+          // Decrypt the blob with correct key (ItemKey-derived for v>=1, TeamKey for v0)
+          const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;
+          const decryptKey = await getEntryDecryptionKey(scopedTeamId, raw.id, {
+            itemKeyVersion,
+            encryptedItemKey: raw.encryptedItemKey,
+            itemKeyIv: raw.itemKeyIv,
+            itemKeyAuthTag: raw.itemKeyAuthTag,
+            teamKeyVersion: raw.teamKeyVersion ?? 1,
+          });
+          const aad = buildTeamEntryAAD(scopedTeamId, raw.id, "blob", itemKeyVersion);
           const json = await decryptData(
             {
               ciphertext: raw.encryptedBlob,
               iv: raw.blobIv,
               authTag: raw.blobAuthTag,
             },
-            teamKey,
+            decryptKey,
             aad,
           );
           const data = JSON.parse(json);

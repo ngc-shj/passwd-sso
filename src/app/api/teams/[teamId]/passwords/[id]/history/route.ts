@@ -55,6 +55,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       },
       aadVersion: h.aadVersion,
       teamKeyVersion: h.teamKeyVersion,
+      itemKeyVersion: h.itemKeyVersion,
       changedAt: h.changedAt,
       changedBy: h.changedBy,
     })),

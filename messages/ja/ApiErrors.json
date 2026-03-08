@@ -86,5 +86,6 @@
   "apiKeyAlreadyRevoked": "API キーは既に失効済みです。",
   "apiKeyInvalid": "無効な API キーです。",
   "apiKeyScopeInsufficient": "API キーに必要なスコープがありません。",
-  "itemKeyRequired": "このエントリにはItemKey暗号化が必要です。先にエントリを更新してください。"
+  "itemKeyRequired": "このエントリにはItemKey暗号化が必要です。先にエントリを更新してください。",
+  "itemKeyVersionDowngrade": "エントリの暗号化バージョンをダウングレードすることはできません。"
 }

@@ -66,6 +66,10 @@ export async function GET(_req: NextRequest, { params }: Params) {
     blobAuthTag: history.blobAuthTag,
     aadVersion: history.aadVersion,
     teamKeyVersion: history.teamKeyVersion,
+    itemKeyVersion: history.itemKeyVersion,
+    encryptedItemKey: history.encryptedItemKey,
+    itemKeyIv: history.itemKeyIv,
+    itemKeyAuthTag: history.itemKeyAuthTag,
   });
 }
 

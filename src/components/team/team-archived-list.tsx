@@ -76,7 +76,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   ) {
   const t = useTranslations("Team");
   const tl = useTranslations("PasswordList");
-  const { getTeamEncryptionKey } = useTeamVault();
+  const { getEntryDecryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamArchivedEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -99,16 +99,23 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
         data.map(async (entry: Record<string, unknown>) => {
           try {
             const entryTeamId = entry.teamId as string;
-            const teamKey = await getTeamEncryptionKey(entryTeamId);
-            if (!teamKey) throw new Error("No team key");
-            const aad = buildTeamEntryAAD(entryTeamId, entry.id as string, "overview");
+            const entryId = entry.id as string;
+            const itemKeyVersion = (entry.itemKeyVersion as number) ?? 0;
+            const decryptKey = await getEntryDecryptionKey(entryTeamId, entryId, {
+              itemKeyVersion,
+              encryptedItemKey: entry.encryptedItemKey as string | undefined,
+              itemKeyIv: entry.itemKeyIv as string | undefined,
+              itemKeyAuthTag: entry.itemKeyAuthTag as string | undefined,
+              teamKeyVersion: (entry.teamKeyVersion as number) ?? 1,
+            });
+            const aad = buildTeamEntryAAD(entryTeamId, entryId, "overview", itemKeyVersion);
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
                 iv: entry.overviewIv as string,
                 authTag: entry.overviewAuthTag as string,
               },
-              teamKey,
+              decryptKey,
               aad,
             );
             const overview = JSON.parse(json);
@@ -168,7 +175,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     } finally {
       setLoading(false);
     }
-  }, [getTeamEncryptionKey]);
+  }, [getEntryDecryptionKey]);
 
   useEffect(() => {
     fetchArchived();
@@ -273,21 +280,27 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
 
   const decryptFullBlob = useCallback(
     async (entryTeamId: string, id: string, raw: Record<string, unknown>) => {
-      const teamKey = await getTeamEncryptionKey(entryTeamId);
-      if (!teamKey) throw new Error("No team key");
-      const aad = buildTeamEntryAAD(entryTeamId, id, "blob");
+      const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;
+      const decryptKey = await getEntryDecryptionKey(entryTeamId, id, {
+        itemKeyVersion,
+        encryptedItemKey: raw.encryptedItemKey as string | undefined,
+        itemKeyIv: raw.itemKeyIv as string | undefined,
+        itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
+        teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
+      });
+      const aad = buildTeamEntryAAD(entryTeamId, id, "blob", itemKeyVersion);
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,
           iv: raw.blobIv as string,
           authTag: raw.blobAuthTag as string,
         },
-        teamKey,
+        decryptKey,
         aad,
       );
       return JSON.parse(json) as Record<string, unknown>;
     },
-    [getTeamEncryptionKey],
+    [getEntryDecryptionKey],
   );
 
   const handleEdit = async (id: string) => {

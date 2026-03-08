@@ -33,21 +33,33 @@ vi.mock("@/lib/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
     getTeamEncryptionKey: vi.fn(),
+    getEntryDecryptionKey: vi.fn().mockResolvedValue({} as CryptoKey),
     invalidateTeamKey: vi.fn(),
     clearAll: vi.fn(),
     distributePendingKeys: vi.fn(),
   }),
 }));
 
+vi.mock("@/lib/crypto-team", () => ({
+  generateItemKey: () => new Uint8Array(32),
+  wrapItemKey: async () => ({ ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-at" }),
+  deriveItemEncryptionKey: async () => ({} as CryptoKey),
+}));
+
+vi.mock("@/lib/crypto-aad", () => ({
+  buildItemKeyWrapAAD: vi.fn().mockReturnValue("ik-aad"),
+  buildTeamEntryAAD: vi.fn().mockReturnValue("team-aad"),
+}));
+
 // Mock save entry helper to skip encryption (this is a UI test, not a crypto test)
 vi.mock("@/lib/team-entry-save", () => ({
   saveTeamEntry: vi.fn(async (params: Record<string, unknown>) => {
     const teamId = params.teamId as string;
-    const initialId = params.initialId as string | undefined;
+    const entryId = params.entryId as string | undefined;
     const mode = params.mode as string;
     const endpoint = mode === "create"
       ? `/api/teams/${teamId}/passwords`
-      : `/api/teams/${teamId}/passwords/${initialId}`;
+      : `/api/teams/${teamId}/passwords/${entryId}`;
     return fetch(endpoint, {
       method: mode === "create" ? "POST" : "PUT",
       headers: { "Content-Type": "application/json" },

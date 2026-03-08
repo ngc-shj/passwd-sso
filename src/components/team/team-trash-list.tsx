@@ -74,7 +74,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const t = useTranslations("Trash");
   const tTeam = useTranslations("Team");
   const tl = useTranslations("PasswordList");
-  const { getTeamEncryptionKey } = useTeamVault();
+  const { getEntryDecryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -93,16 +93,23 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
         data.map(async (entry: Record<string, unknown>) => {
           try {
             const entryTeamId = entry.teamId as string;
-            const teamKey = await getTeamEncryptionKey(entryTeamId);
-            if (!teamKey) throw new Error("No team key");
-            const aad = buildTeamEntryAAD(entryTeamId, entry.id as string, "overview");
+            const entryId = entry.id as string;
+            const itemKeyVersion = (entry.itemKeyVersion as number) ?? 0;
+            const decryptKey = await getEntryDecryptionKey(entryTeamId, entryId, {
+              itemKeyVersion,
+              encryptedItemKey: entry.encryptedItemKey as string | undefined,
+              itemKeyIv: entry.itemKeyIv as string | undefined,
+              itemKeyAuthTag: entry.itemKeyAuthTag as string | undefined,
+              teamKeyVersion: (entry.teamKeyVersion as number) ?? 1,
+            });
+            const aad = buildTeamEntryAAD(entryTeamId, entryId, "overview", itemKeyVersion);
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
                 iv: entry.overviewIv as string,
                 authTag: entry.overviewAuthTag as string,
               },
-              teamKey,
+              decryptKey,
               aad,
             );
             const overview = JSON.parse(json);
@@ -146,7 +153,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     } finally {
       setLoading(false);
     }
-  }, [getTeamEncryptionKey]);
+  }, [getEntryDecryptionKey]);
 
   useEffect(() => {
     fetchTrash();

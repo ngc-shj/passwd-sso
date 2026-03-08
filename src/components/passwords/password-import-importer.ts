@@ -1,5 +1,15 @@
 import { encryptData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import {
+  buildPersonalEntryAAD,
+  buildTeamEntryAAD,
+  buildItemKeyWrapAAD,
+  AAD_VERSION,
+} from "@/lib/crypto-aad";
+import {
+  generateItemKey,
+  wrapItemKey,
+  deriveItemEncryptionKey,
+} from "@/lib/crypto-team";
 import {
   buildPersonalImportBlobs,
   resolveEntryTagIds,
@@ -80,10 +90,25 @@ export async function runImportEntries({
       if (isTeamImport) {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();
-        const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob");
-        const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview");
-        const encryptedBlob = await encryptData(fullBlob, teamEncryptionKey!, blobAad);
-        const encryptedOverview = await encryptData(overviewBlob, teamEncryptionKey!, overviewAad);
+        const tkv = teamKeyVersion ?? 1;
+
+        // Generate per-entry ItemKey
+        const rawItemKey = generateItemKey();
+        let itemEncKey: CryptoKey;
+        let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
+        try {
+          const ikAad = buildItemKeyWrapAAD(teamId!, entryId, tkv);
+          const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey!, ikAad);
+          itemEncKey = await deriveItemEncryptionKey(rawItemKey);
+          encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
+        } finally {
+          rawItemKey.fill(0);
+        }
+
+        const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob", 1);
+        const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview", 1);
+        const encryptedBlob = await encryptData(fullBlob, itemEncKey, blobAad);
+        const encryptedOverview = await encryptData(overviewBlob, itemEncKey, overviewAad);
 
         res = await fetchApi(passwordsPath, {
           method: "POST",
@@ -94,7 +119,9 @@ export async function runImportEntries({
             encryptedOverview,
             entryType: entry.entryType,
             aadVersion: AAD_VERSION,
-            teamKeyVersion: teamKeyVersion ?? 1,
+            teamKeyVersion: tkv,
+            itemKeyVersion: 1,
+            encryptedItemKey,
             tagIds,
             ...(entry.requireReprompt ? { requireReprompt: true } : {}),
             ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),

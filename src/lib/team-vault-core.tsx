@@ -38,6 +38,14 @@ export interface TeamKeyInfo {
   keyVersion: number;
 }
 
+export interface EntryItemKeyData {
+  itemKeyVersion?: number;
+  encryptedItemKey?: string;
+  itemKeyIv?: string;
+  itemKeyAuthTag?: string;
+  teamKeyVersion: number;
+}
+
 export interface TeamVaultContextValue {
   /** Get the team encryption key, fetching and unwrapping if not cached. */
   getTeamEncryptionKey: (teamId: string) => Promise<CryptoKey | null>;
@@ -45,6 +53,8 @@ export interface TeamVaultContextValue {
   getTeamKeyInfo: (teamId: string) => Promise<TeamKeyInfo | null>;
   /** Get the per-entry ItemKey-derived encryption key for attachment operations. */
   getItemEncryptionKey: (teamId: string, entryId: string) => Promise<CryptoKey>;
+  /** Get the correct decryption key for an entry (ItemKey-derived if v>=1, TeamKey if v0). */
+  getEntryDecryptionKey: (teamId: string, entryId: string, entry: EntryItemKeyData) => Promise<CryptoKey>;
   /** Invalidate a cached team key (e.g. after key rotation). */
   invalidateTeamKey: (teamId: string) => void;
   /** Clear all cached team keys (e.g. on vault lock). */
@@ -328,6 +338,70 @@ export function TeamVaultProvider({
     [getTeamEncryptionKey]
   );
 
+  const getEntryDecryptionKey = useCallback(
+    async (teamId: string, entryId: string, entry: EntryItemKeyData): Promise<CryptoKey> => {
+      const itemKeyVersion = entry.itemKeyVersion ?? 0;
+
+      // v0: use TeamKey directly
+      if (itemKeyVersion < 1) {
+        const teamKey = await getTeamEncryptionKey(teamId);
+        if (!teamKey) {
+          throw new Error("Failed to obtain team encryption key");
+        }
+        return teamKey;
+      }
+
+      // v>=1: check cache first
+      const teamCache = itemKeyCacheRef.current.get(teamId);
+      const cached = teamCache?.get(entryId);
+      if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) {
+        return cached.key;
+      }
+
+      // Validate required fields
+      if (
+        typeof entry.encryptedItemKey !== "string" ||
+        typeof entry.itemKeyIv !== "string" ||
+        typeof entry.itemKeyAuthTag !== "string"
+      ) {
+        throw new Error("Entry has itemKeyVersion >= 1 but missing ItemKey encryption data");
+      }
+
+      // Unwrap ItemKey with TeamKey
+      const teamKey = await getTeamEncryptionKey(teamId);
+      if (!teamKey) {
+        throw new Error("Failed to obtain team encryption key for ItemKey unwrap");
+      }
+
+      const ikAad = buildItemKeyWrapAAD(teamId, entryId, entry.teamKeyVersion);
+      const rawItemKey = await unwrapItemKey(
+        {
+          ciphertext: entry.encryptedItemKey,
+          iv: entry.itemKeyIv,
+          authTag: entry.itemKeyAuthTag,
+        },
+        teamKey,
+        ikAad,
+      );
+
+      // Derive encryption key and zero-clear raw bytes
+      const encryptionKey = await deriveItemEncryptionKey(rawItemKey);
+      rawItemKey.fill(0);
+
+      // Cache
+      if (!itemKeyCacheRef.current.has(teamId)) {
+        itemKeyCacheRef.current.set(teamId, new Map());
+      }
+      itemKeyCacheRef.current.get(teamId)!.set(entryId, {
+        key: encryptionKey,
+        cachedAt: Date.now(),
+      });
+
+      return encryptionKey;
+    },
+    [getTeamEncryptionKey]
+  );
+
   const distributePendingKeys = useCallback(async () => {
     const ecdhPrivateKeyBytes = getEcdhPrivateKeyBytes();
     const userId = getUserId();
@@ -485,6 +559,7 @@ export function TeamVaultProvider({
     getTeamEncryptionKey,
     getTeamKeyInfo,
     getItemEncryptionKey,
+    getEntryDecryptionKey,
     invalidateTeamKey,
     clearAll,
     distributePendingKeys,
