@@ -37,7 +37,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntry: { findUnique: mockEntryFindUnique },
     teamPasswordEntryHistory: {
       findUnique: mockHistoryFindUnique,
-      update: mockHistoryUpdate,
+      updateMany: mockHistoryUpdate,
     },
   },
 }));
@@ -229,7 +229,7 @@ describe("PATCH /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
     mockRequireTeamMember.mockResolvedValue({});
     mockEntryFindUnique.mockResolvedValue({ teamId: "t1" });
     mockHistoryFindUnique.mockResolvedValue(HISTORY_ENTRY);
-    mockHistoryUpdate.mockResolvedValue({});
+    mockHistoryUpdate.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makePatchRequest({
@@ -247,7 +247,7 @@ describe("PATCH /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
 
     expect(mockHistoryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "h1" },
+        where: { id: "h1", teamKeyVersion: 1 },
         data: expect.objectContaining({
           encryptedBlob: "new-cipher",
           teamKeyVersion: 2,
@@ -271,7 +271,7 @@ describe("PATCH /api/teams/[teamId]/passwords/[id]/history/[historyId]", () => {
     mockRequireTeamMember.mockResolvedValue({});
     mockEntryFindUnique.mockResolvedValue({ teamId: "t1" });
     mockHistoryFindUnique.mockResolvedValue({ ...HISTORY_ENTRY, itemKeyVersion: 1 });
-    mockHistoryUpdate.mockResolvedValue({});
+    mockHistoryUpdate.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makePatchRequest({

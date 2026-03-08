@@ -171,6 +171,7 @@ export function createCustomAdapter(): Adapter {
       const created = await withBypassRls(prisma, async () => {
         const tenantId = await resolveTenantIdForUser(session.userId);
 
+        // Serializable prevents TOCTOU in concurrent session counting
         return prisma.$transaction(async (tx) => {
           // Check tenant's concurrent session limit
           const tenant = await tx.tenant.findUnique({
@@ -180,7 +181,7 @@ export function createCustomAdapter(): Adapter {
 
           const maxSessions = tenant?.maxConcurrentSessions;
           if (maxSessions != null && maxSessions > 0) {
-            // Lock and count active sessions (ORDER BY id for consistent lock ordering)
+            // Count active sessions (ORDER BY id for consistent lock ordering)
             const activeSessions = await tx.session.findMany({
               where: {
                 userId: session.userId,
@@ -217,7 +218,7 @@ export function createCustomAdapter(): Adapter {
               expires: true,
             },
           });
-        });
+        }, { isolationLevel: "Serializable" });
       });
 
       // Fire-and-forget: check for new device and notify user

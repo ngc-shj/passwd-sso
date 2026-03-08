@@ -63,7 +63,12 @@ async function handlePATCH(req: NextRequest) {
     throw e;
   }
 
-  const body = await req.json();
+  let body: Record<string, unknown>;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+  }
   const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes } = body;
 
   // Validate maxConcurrentSessions: null (unlimited) or positive integer 1-100
@@ -113,10 +118,15 @@ async function handlePATCH(req: NextRequest) {
     updateData.vaultAutoLockMinutes = vaultAutoLockMinutes ?? null;
   }
 
-  await withBypassRls(prisma, async () =>
+  const updated = await withBypassRls(prisma, async () =>
     prisma.tenant.update({
       where: { id: membership.tenantId },
       data: updateData,
+      select: {
+        maxConcurrentSessions: true,
+        sessionIdleTimeoutMinutes: true,
+        vaultAutoLockMinutes: true,
+      },
     }),
   );
 
@@ -125,19 +135,20 @@ async function handlePATCH(req: NextRequest) {
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.POLICY_UPDATE,
     userId: session.user.id,
+    tenantId: membership.tenantId,
     metadata: {
-      maxConcurrentSessions: maxConcurrentSessions ?? null,
-      sessionIdleTimeoutMinutes: sessionIdleTimeoutMinutes ?? null,
-      vaultAutoLockMinutes: vaultAutoLockMinutes ?? null,
+      maxConcurrentSessions: updated.maxConcurrentSessions,
+      sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
+      vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
     },
     ip: meta.ip,
     userAgent: meta.userAgent,
   });
 
   return NextResponse.json({
-    maxConcurrentSessions: maxConcurrentSessions ?? null,
-    sessionIdleTimeoutMinutes: sessionIdleTimeoutMinutes ?? null,
-    vaultAutoLockMinutes: vaultAutoLockMinutes ?? null,
+    maxConcurrentSessions: updated.maxConcurrentSessions,
+    sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
+    vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
   });
 }
 

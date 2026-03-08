@@ -138,6 +138,7 @@ function clearVault(): void {
   encryptionKey = null;
   currentUserId = null;
   currentVaultSecretKeyHex = null;
+  tenantAutoLockMinutes = null;
   invalidateCache();
   invalidateContextMenu();
   pendingSavePrompts.clear();

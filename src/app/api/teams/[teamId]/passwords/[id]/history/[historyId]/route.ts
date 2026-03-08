@@ -105,7 +105,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   // Validate blob format
-  if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0) {
+  if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0 || encryptedBlob.length > 1_000_000) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
   if (typeof blobIv !== "string" || !isValidHex(blobIv, 12)) {
@@ -180,12 +180,20 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (itemKeyIv != null) updateData.itemKeyIv = itemKeyIv;
   if (itemKeyAuthTag != null) updateData.itemKeyAuthTag = itemKeyAuthTag;
 
-  await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntryHistory.update({
-      where: { id: historyId },
+  // Atomic update with optimistic locking on teamKeyVersion to prevent TOCTOU
+  const result = await withTeamTenantRls(teamId, async () =>
+    prisma.teamPasswordEntryHistory.updateMany({
+      where: { id: historyId, teamKeyVersion: history.teamKeyVersion },
       data: updateData,
     }),
   );
+
+  if (result.count === 0) {
+    return NextResponse.json(
+      { error: "BLOB_HASH_MISMATCH" },
+      { status: 409 },
+    );
+  }
 
   const meta = extractRequestMeta(req);
   logAudit({

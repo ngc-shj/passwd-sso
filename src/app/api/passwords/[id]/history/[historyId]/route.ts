@@ -92,7 +92,7 @@ export async function PATCH(
   }
 
   // Validate blob format
-  if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0) {
+  if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0 || encryptedBlob.length > 1_000_000) {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
   if (typeof blobIv !== "string" || !isValidHex(blobIv, 12)) {
@@ -150,10 +150,10 @@ export async function PATCH(
     );
   }
 
-  // Update the history entry with re-encrypted data
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntryHistory.update({
-      where: { id: historyId },
+  // Atomic update with optimistic locking on keyVersion to prevent TOCTOU
+  const result = await withUserTenantRls(session.user.id, async () =>
+    prisma.passwordEntryHistory.updateMany({
+      where: { id: historyId, keyVersion: history.keyVersion },
       data: {
         encryptedBlob,
         blobIv,
@@ -162,6 +162,13 @@ export async function PATCH(
       },
     }),
   );
+
+  if (result.count === 0) {
+    return NextResponse.json(
+      { error: "BLOB_HASH_MISMATCH" },
+      { status: 409 },
+    );
+  }
 
   const meta = extractRequestMeta(req);
   logAudit({

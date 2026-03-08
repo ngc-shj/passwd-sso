@@ -147,7 +147,11 @@ describe("PATCH /api/tenant/policy", () => {
   it("successfully updates maxConcurrentSessions", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockTenantUpdate.mockResolvedValue({});
+    mockTenantUpdate.mockResolvedValue({
+      maxConcurrentSessions: 3,
+      sessionIdleTimeoutMinutes: null,
+      vaultAutoLockMinutes: null,
+    });
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       body: { maxConcurrentSessions: 3 },
@@ -168,6 +172,7 @@ describe("PATCH /api/tenant/policy", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "POLICY_UPDATE",
+        tenantId: "tenant1",
         metadata: expect.objectContaining({ maxConcurrentSessions: 3 }),
       }),
     );
@@ -176,7 +181,11 @@ describe("PATCH /api/tenant/policy", () => {
   it("accepts null to remove limit", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockTenantUpdate.mockResolvedValue({});
+    mockTenantUpdate.mockResolvedValue({
+      maxConcurrentSessions: null,
+      sessionIdleTimeoutMinutes: null,
+      vaultAutoLockMinutes: null,
+    });
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       body: { maxConcurrentSessions: null },
@@ -186,5 +195,100 @@ describe("PATCH /api/tenant/policy", () => {
 
     expect(status).toBe(200);
     expect(json.maxConcurrentSessions).toBeNull();
+  });
+
+  it("returns 400 for sessionIdleTimeoutMinutes = 0", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { sessionIdleTimeoutMinutes: 0 },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 for sessionIdleTimeoutMinutes > 1440", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { sessionIdleTimeoutMinutes: 1441 },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 for vaultAutoLockMinutes = 0", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: 0 },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 for vaultAutoLockMinutes > 1440", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: 1441 },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("successfully updates all three policy fields", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantUpdate.mockResolvedValue({
+      maxConcurrentSessions: 5,
+      sessionIdleTimeoutMinutes: 30,
+      vaultAutoLockMinutes: 10,
+    });
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { maxConcurrentSessions: 5, sessionIdleTimeoutMinutes: 30, vaultAutoLockMinutes: 10 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json).toEqual({
+      maxConcurrentSessions: 5,
+      sessionIdleTimeoutMinutes: 30,
+      vaultAutoLockMinutes: 10,
+    });
+  });
+
+  it("returns 400 for malformed JSON body", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      headers: { "Content-Type": "application/json" },
+    });
+    // Override json() to throw parse error
+    (req as unknown as { json: () => Promise<unknown> }).json = async () => {
+      throw new SyntaxError("Unexpected end of JSON input");
+    };
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("handles empty body without error", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantUpdate.mockResolvedValue({
+      maxConcurrentSessions: 5,
+      sessionIdleTimeoutMinutes: null,
+      vaultAutoLockMinutes: null,
+    });
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: {},
+    });
+    const res = await PATCH(req);
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
   });
 });

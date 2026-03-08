@@ -22,7 +22,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntry: { findUnique: mockEntryFindUnique },
     passwordEntryHistory: {
       findUnique: mockHistoryFindUnique,
-      update: mockHistoryUpdate,
+      updateMany: mockHistoryUpdate,
     },
   },
 }));
@@ -150,6 +150,40 @@ describe("PATCH /api/passwords/[id]/history/[historyId]", () => {
     expect(status).toBe(404);
   });
 
+  it("returns 403 when entry belongs to another user", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: "other-user" });
+    const res = await PATCH(
+      makePatchRequest({
+        encryptedBlob: "new-cipher",
+        blobIv: VALID_IV,
+        blobAuthTag: VALID_AUTH_TAG,
+        keyVersion: 2,
+        oldBlobHash: OLD_BLOB_HASH,
+      }),
+      createParams({ id: "p1", historyId: "h1" }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(403);
+  });
+
+  it("returns 400 for invalid authTag format", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
+    const res = await PATCH(
+      makePatchRequest({
+        encryptedBlob: "new-cipher",
+        blobIv: VALID_IV,
+        blobAuthTag: "short",
+        keyVersion: 2,
+        oldBlobHash: OLD_BLOB_HASH,
+      }),
+      createParams({ id: "p1", historyId: "h1" }),
+    );
+    const { status } = await parseResponse(res);
+    expect(status).toBe(400);
+  });
+
   it("returns 400 for invalid IV format", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
@@ -211,7 +245,7 @@ describe("PATCH /api/passwords/[id]/history/[historyId]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
     mockHistoryFindUnique.mockResolvedValue(HISTORY_ENTRY);
-    mockHistoryUpdate.mockResolvedValue({});
+    mockHistoryUpdate.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makePatchRequest({
@@ -229,7 +263,7 @@ describe("PATCH /api/passwords/[id]/history/[historyId]", () => {
 
     expect(mockHistoryUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "h1" },
+        where: { id: "h1", keyVersion: 1 },
         data: expect.objectContaining({
           encryptedBlob: "new-cipher",
           keyVersion: 2,
