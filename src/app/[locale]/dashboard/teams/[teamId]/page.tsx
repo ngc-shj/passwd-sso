@@ -779,7 +779,9 @@ export default function TeamDashboardPage({
           <Card className="rounded-xl border bg-card/80 p-10">
             <div className="flex flex-col items-center justify-center text-center">
               <KeyRound className="mb-4 h-12 w-12 text-muted-foreground" />
-              <p className="text-muted-foreground">{t("noPasswords")}</p>
+              <p className="text-muted-foreground">
+                {searchQuery ? tl("noMatch") : t("noPasswords")}
+              </p>
               {!searchQuery && canCreate && (
                 <p className="mt-1 text-sm text-muted-foreground">
                   {t("noPasswordsDesc")}
