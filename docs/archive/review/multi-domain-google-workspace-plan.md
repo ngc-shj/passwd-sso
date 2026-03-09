@@ -2,16 +2,16 @@
 
 ## Objective
 
-Support multiple Google Workspace domains in `GOOGLE_WORKSPACE_DOMAIN` via comma-separated values, consistent with the existing `AUTH_TENANT_CLAIM_KEYS` pattern.
+Support multiple Google Workspace domains in `GOOGLE_WORKSPACE_DOMAINS` via comma-separated values, consistent with the existing `AUTH_TENANT_CLAIM_KEYS` pattern.
 
 ## Requirements
 
 ### Functional
 
-1. `GOOGLE_WORKSPACE_DOMAIN=example.com,acme.co.jp` allows sign-in from both domains
-2. Single domain (`GOOGLE_WORKSPACE_DOMAIN=example.com`) continues to work unchanged
+1. `GOOGLE_WORKSPACE_DOMAINS=example.com,example.co.jp` allows sign-in from both domains
+2. Single domain (`GOOGLE_WORKSPACE_DOMAINS=example.com`) continues to work unchanged
 3. Empty string (`""`) or unset: allows any Google account (current behavior preserved). Both are semantically equivalent — "no restriction".
-4. Whitespace around domains is trimmed (`" example.com , acme.co.jp "` → `["example.com", "acme.co.jp"]`)
+4. Whitespace around domains is trimmed (`" example.com , example.co.jp "` → `["example.com", "example.co.jp"]`)
 5. Domain comparison is case-insensitive: both env values and `hd` claims are lowercased before comparison
 6. Google OAuth `hd` hint parameter logic:
    - No domains configured → `undefined` (omit, current behavior)
@@ -32,7 +32,7 @@ Support multiple Google Workspace domains in `GOOGLE_WORKSPACE_DOMAIN` via comma
 
 Create a `parseAllowedGoogleDomains()` function in `src/lib/google-domain.ts`:
 
-- Reads `process.env.GOOGLE_WORKSPACE_DOMAIN`
+- Reads `process.env.GOOGLE_WORKSPACE_DOMAINS`
 - Splits by comma, trims, filters empty strings, lowercases each entry
 - Returns `string[]` (empty array = allow all)
 
@@ -72,7 +72,7 @@ const allowedGoogleDomains = parseAllowedGoogleDomains();
 1. Unit tests for `parseAllowedGoogleDomains()`:
    - Empty/undefined → `[]`
    - Single domain → `["example.com"]`
-   - Multiple domains → `["example.com", "acme.co.jp"]`
+   - Multiple domains → `["example.com", "example.co.jp"]`
    - Whitespace trimming
    - Trailing comma handling (`"example.com,"` → `["example.com"]`)
    - Case normalization (`"Example.COM"` → `["example.com"]`)
