@@ -1,30 +1,53 @@
 # Code Review: fix-share-dialog-field-preview
+
 Date: 2026-03-09
-Review round: 1
+Review rounds: 2
 
-## Changes from Previous Round
-Initial review
+## Round 1: share-dialog.tsx fix
 
-## Functionality Findings
+### Round 1 Changes
+
+Filter out `undefined`/`null` fields from share dialog preview and create payload.
+
+### Round 1 Functionality
+
 No findings.
 
-The fix correctly filters out `undefined`/`null` keys in both the preview and create paths.
-Strict `!== undefined && !== null` preserves legitimate falsy values (`""`, `0`, `false`).
-`filteredKeys` at line 222 does not need the same filter since its input is derived from the already-clean `allKeys`.
+### Round 1 Security
 
-## Security Findings
 No findings.
 
-- TOTP exclusion maintained in both paths
-- `applySharePermissions` dual-layer defense (client + server) intact
-- Fail-closed design for unrecognized permissions preserved
-- AES-256-GCM encryption with proper key zeroing unchanged
+### Round 1 Testing
 
-## Testing Findings
+No findings. (Pre-existing gap: no test file for share-dialog.tsx)
+
+## Round 2: getScimBaseUrl + AUTH_URL + reverse proxy docs
+
+### Round 2 Changes
+
+- `getScimBaseUrl` reads `NEXT_PUBLIC_BASE_PATH` instead of relying on AUTH_URL path
+- Leading slash normalization for `NEXT_PUBLIC_BASE_PATH`
+- Docs: AUTH_URL origin-only, Apache/nginx reverse proxy examples
+
+### Round 2 Functionality
+
 No findings.
 
-Note: No existing test file for `share-dialog.tsx`. Adding unit tests for `fieldPreview` logic
-would be valuable for regression prevention, but this is a pre-existing gap.
+### Round 2 Security
+
+No findings (Critical/Major).
+
+Minor (dismissed):
+
+1. Path injection via NEXT_PUBLIC_BASE_PATH — env var, not user input. Low risk.
+2. NEXT_PUBLIC_ prefix exposure — intentional, required for client routing.
+
+### Round 2 Testing
+
+No findings. 8 test cases cover all branches including leading slash normalization.
 
 ## Resolution Status
-All agents returned "No findings" — no action required.
+
+All agents returned "No findings" across both rounds — no action required.
+Local LLM pre-screening found 1 valid issue (missing leading slash) which was fixed
+before expert review.

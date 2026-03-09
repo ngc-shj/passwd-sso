@@ -67,75 +67,74 @@ describe("scimListResponse", () => {
 });
 
 describe("getScimBaseUrl", () => {
+  const originalAppUrl = process.env.APP_URL;
   const originalNextAuthUrl = process.env.NEXTAUTH_URL;
   const originalAuthUrl = process.env.AUTH_URL;
   const originalBasePath = process.env.NEXT_PUBLIC_BASE_PATH;
 
-  afterEach(() => {
-    if (originalNextAuthUrl !== undefined) {
-      process.env.NEXTAUTH_URL = originalNextAuthUrl;
-    } else {
-      delete process.env.NEXTAUTH_URL;
-    }
-    if (originalAuthUrl !== undefined) {
-      process.env.AUTH_URL = originalAuthUrl;
-    } else {
-      delete process.env.AUTH_URL;
-    }
-    if (originalBasePath !== undefined) {
-      process.env.NEXT_PUBLIC_BASE_PATH = originalBasePath;
-    } else {
-      delete process.env.NEXT_PUBLIC_BASE_PATH;
-    }
-  });
-
-  it("uses NEXTAUTH_URL from env", () => {
-    delete process.env.AUTH_URL;
-    delete process.env.NEXT_PUBLIC_BASE_PATH;
-    process.env.NEXTAUTH_URL = "https://example.com";
-    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
-  });
-
-  it("strips trailing slash from NEXTAUTH_URL", () => {
-    delete process.env.AUTH_URL;
-    delete process.env.NEXT_PUBLIC_BASE_PATH;
-    process.env.NEXTAUTH_URL = "https://example.com/";
-    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
-  });
-
-  it("falls back to localhost when NEXTAUTH_URL is not set", () => {
+  function clearEnv() {
+    delete process.env.APP_URL;
     delete process.env.AUTH_URL;
     delete process.env.NEXTAUTH_URL;
     delete process.env.NEXT_PUBLIC_BASE_PATH;
-    expect(getScimBaseUrl()).toBe("http://localhost:3000/api/scim/v2");
+  }
+
+  afterEach(() => {
+    clearEnv();
+    if (originalAppUrl !== undefined) process.env.APP_URL = originalAppUrl;
+    if (originalNextAuthUrl !== undefined) process.env.NEXTAUTH_URL = originalNextAuthUrl;
+    if (originalAuthUrl !== undefined) process.env.AUTH_URL = originalAuthUrl;
+    if (originalBasePath !== undefined) process.env.NEXT_PUBLIC_BASE_PATH = originalBasePath;
+  });
+
+  it("prefers APP_URL over AUTH_URL and NEXTAUTH_URL", () => {
+    clearEnv();
+    process.env.APP_URL = "https://app.example.com";
+    process.env.AUTH_URL = "https://auth.example.com";
+    process.env.NEXTAUTH_URL = "https://nextauth.example.com";
+    expect(getScimBaseUrl()).toBe("https://app.example.com/api/scim/v2");
   });
 
   it("prefers AUTH_URL over NEXTAUTH_URL", () => {
-    delete process.env.NEXT_PUBLIC_BASE_PATH;
+    clearEnv();
     process.env.AUTH_URL = "https://auth.example.com";
     process.env.NEXTAUTH_URL = "https://nextauth.example.com";
     expect(getScimBaseUrl()).toBe("https://auth.example.com/api/scim/v2");
   });
 
+  it("uses NEXTAUTH_URL as fallback", () => {
+    clearEnv();
+    process.env.NEXTAUTH_URL = "https://example.com";
+    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
+  });
+
+  it("falls back to localhost when no URL env is set", () => {
+    clearEnv();
+    expect(getScimBaseUrl()).toBe("http://localhost:3000/api/scim/v2");
+  });
+
+  it("strips trailing slash from origin", () => {
+    clearEnv();
+    process.env.AUTH_URL = "https://example.com/";
+    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
+  });
+
   it("includes NEXT_PUBLIC_BASE_PATH in URL", () => {
+    clearEnv();
     process.env.AUTH_URL = "https://example.com";
     process.env.NEXT_PUBLIC_BASE_PATH = "/passwd-sso";
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
   });
 
   it("strips trailing slash from NEXT_PUBLIC_BASE_PATH", () => {
+    clearEnv();
     process.env.AUTH_URL = "https://example.com";
     process.env.NEXT_PUBLIC_BASE_PATH = "/passwd-sso/";
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
   });
 
-  it("works without basePath when AUTH_URL is origin-only", () => {
-    process.env.AUTH_URL = "https://example.com";
-    delete process.env.NEXT_PUBLIC_BASE_PATH;
-    expect(getScimBaseUrl()).toBe("https://example.com/api/scim/v2");
-  });
-
   it("prepends leading slash when NEXT_PUBLIC_BASE_PATH lacks one", () => {
+    clearEnv();
     process.env.AUTH_URL = "https://example.com";
     process.env.NEXT_PUBLIC_BASE_PATH = "passwd-sso";
     expect(getScimBaseUrl()).toBe("https://example.com/passwd-sso/api/scim/v2");
