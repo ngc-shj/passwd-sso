@@ -267,11 +267,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         }
       }
 
-      let userId = params.user?.id ?? null;
-      if (!userId && params.user?.email) {
+      // Always verify user exists in DB — Auth.js may provide a pre-generated
+      // id before the user row is actually inserted (new OAuth sign-in).
+      let userId: string | null = null;
+      const lookupEmail = params.user?.email;
+      if (lookupEmail) {
         const existing = await withBypassRls(prisma, async () =>
           prisma.user.findUnique({
-            where: { email: params.user.email! },
+            where: { email: lookupEmail },
             select: { id: true },
           }),
         );
