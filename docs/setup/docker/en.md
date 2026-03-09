@@ -223,9 +223,10 @@ In production, do NOT place `docker-compose.override.yml` (keeps DB/Jackson port
 To deploy at a sub-path (e.g., `https://example.com/passwd-sso`):
 
 1. Set `NEXT_PUBLIC_BASE_PATH=/passwd-sso` **before** building the image
-2. Set `AUTH_URL=https://example.com/passwd-sso` (include the basePath).
-   This must be the **externally reachable** URL (the origin browsers use), not `http://localhost:3000`.
-   Auth.js uses this value to generate callback and redirect URLs.
+2. Set `AUTH_URL=https://example.com` (**origin only**, no path).
+   Auth.js combines this with its internal `basePath` (`/passwd-sso/api/auth`) to build
+   callback and redirect URLs. Including the basePath in `AUTH_URL` causes an
+   `env-url-basepath-mismatch` warning and incorrect URL generation.
 3. Update OAuth redirect URIs to include the basePath (e.g., `https://example.com/passwd-sso/api/auth/callback/google`)
 4. Configure your reverse proxy to forward `/<basePath>/*` to the Next.js app (see examples below)
 

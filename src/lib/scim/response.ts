@@ -4,11 +4,14 @@ const SCIM_CONTENT_TYPE = "application/scim+json";
 
 /**
  * Build the SCIM base URL from the environment.
- * Prefers AUTH_URL (which includes basePath) over legacy NEXTAUTH_URL.
+ * AUTH_URL should be the origin only (no path). NEXT_PUBLIC_BASE_PATH
+ * provides the sub-path prefix when deployed behind a reverse proxy.
  */
 export function getScimBaseUrl(): string {
   const base = process.env.AUTH_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/api/scim/v2`;
+  let basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+  if (basePath && !basePath.startsWith("/")) basePath = `/${basePath}`;
+  return `${base.replace(/\/$/, "")}${basePath}/api/scim/v2`;
 }
 
 /**
