@@ -208,7 +208,7 @@ Client(on valid):
 
 - Auth.js database sessions are used (no JWT session storage in browser localStorage).
 - Keep reasonable session lifetime and revocation procedures.
-- Restrict SSO domains/providers where possible (`GOOGLE_WORKSPACE_DOMAIN`, IdP controls).
+- Restrict SSO domains/providers where possible (`GOOGLE_WORKSPACE_DOMAINS`, IdP controls).
 - Passkey sign-in: challenge is single-use (Redis GETDEL, 5-minute TTL), rate-limited per IP.
 - Email-based passkey options: returns dummy `allowCredentials` for unknown emails (user enumeration prevention).
 - SSO-tenant users are excluded from passkey sign-in (must use IdP flow).

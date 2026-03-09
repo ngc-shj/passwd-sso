@@ -4,7 +4,7 @@
 
 An internal password management web application.
 Access is restricted via SSO authentication with SAML 2.0 IdPs (HENNGE, Okta, Azure AD, etc.) and Google (OIDC). Password data is encrypted **client-side** with AES-256-GCM and only ciphertext is stored in PostgreSQL (E2E model).
-Google supports both Workspace and personal accounts (`GOOGLE_WORKSPACE_DOMAIN` can be left empty to allow any domain).
+Google supports both Workspace and personal accounts (`GOOGLE_WORKSPACE_DOMAINS` can be left empty to allow any domain).
 Any SAML 2.0 compliant IdP can be used via the SAML Jackson bridge.
 
 ## Tech Stack
@@ -88,7 +88,7 @@ Edit `.env.local` and set the following values:
 | `AUTH_SECRET` | NextAuth session signing key | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID | From Google Cloud Console |
 | `AUTH_GOOGLE_SECRET` | Google OAuth Client Secret | From Google Cloud Console |
-| `GOOGLE_WORKSPACE_DOMAIN` | Allowed domain | e.g., `example.com` |
+| `GOOGLE_WORKSPACE_DOMAINS` | Allowed domain(s), comma-separated | e.g., `example.com,example.co.jp` |
 | `JACKSON_URL` | SAML Jackson URL | `http://localhost:5225` for dev |
 | `AUTH_JACKSON_ID` | Jackson OIDC Client ID | From Jackson admin panel |
 | `AUTH_JACKSON_SECRET` | Jackson OIDC Client Secret | From Jackson admin panel |

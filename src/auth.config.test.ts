@@ -47,3 +47,124 @@ describe("auth.config basePath handling", () => {
     expect(config.pages?.signIn).toBe("/passwd-sso/auth/signin");
   });
 });
+
+describe("auth.config Google domain validation", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  async function getSignIn() {
+    const config = (await import("@/auth.config")).default;
+    return config.callbacks!.signIn! as (params: {
+      account: { provider: string } | null;
+      profile: Record<string, unknown>;
+    }) => Promise<boolean>;
+  }
+
+  it("allows any Google account when GOOGLE_WORKSPACE_DOMAINS is unset", async () => {
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: { hd: "random.com" },
+      }),
+    ).toBe(true);
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: {},
+      }),
+    ).toBe(true);
+  });
+
+  it("allows matching domain for single domain config", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: { hd: "example.com" },
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects non-matching domain for single domain config", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: { hd: "other.com" },
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects personal Gmail (no hd) when domain is configured", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: {},
+      }),
+    ).toBe(false);
+  });
+
+  it("allows matching domain from multi-domain config", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com,example.co.jp");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: { hd: "example.co.jp" },
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects non-matching domain from multi-domain config", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com,example.co.jp");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: { hd: "other.com" },
+      }),
+    ).toBe(false);
+  });
+
+  it("performs case-insensitive domain comparison", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "Example.COM");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "google" },
+        profile: { hd: "example.com" },
+      }),
+    ).toBe(true);
+  });
+
+  it("allows non-Google providers regardless of domain config", async () => {
+    vi.stubEnv("GOOGLE_WORKSPACE_DOMAINS", "example.com");
+    const signIn = await getSignIn();
+
+    expect(
+      await signIn({
+        account: { provider: "saml-jackson" },
+        profile: {},
+      }),
+    ).toBe(true);
+  });
+});
