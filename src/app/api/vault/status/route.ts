@@ -5,6 +5,7 @@ import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { authOrToken } from "@/lib/auth-or-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,11 @@ async function handleGET(request: NextRequest) {
   }
   if (result.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 403 });
+  }
+
+  if (result.type !== "session") {
+    const denied = await enforceAccessRestriction(request, result.userId, result.type === "api_key" ? result.tenantId : undefined);
+    if (denied) return denied;
   }
 
   const user = await withUserTenantRls(result.userId, async () =>

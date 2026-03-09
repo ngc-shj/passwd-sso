@@ -8,6 +8,7 @@ import { authOrToken } from "@/lib/auth-or-token";
 import { withRequestLog } from "@/lib/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 async function handleGET(
@@ -25,6 +26,11 @@ async function handleGET(
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
   const userId = authResult.userId;
+
+  if (authResult.type !== "session") {
+    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
+    if (denied) return denied;
+  }
 
   const { id } = await params;
 
@@ -85,6 +91,11 @@ async function handlePUT(
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
   const userId = authResult.userId;
+
+  if (authResult.type !== "session") {
+    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
+    if (denied) return denied;
+  }
 
   const { id } = await params;
 

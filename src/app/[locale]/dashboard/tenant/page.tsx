@@ -9,6 +9,7 @@ import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
 import { DirectorySyncCard } from "@/components/settings/directory-sync-card";
 import { TenantSessionPolicyCard } from "@/components/settings/tenant-session-policy-card";
+import { TenantAccessRestrictionCard } from "@/components/settings/tenant-access-restriction-card";
 import { Loader2 } from "lucide-react";
 
 export default function TenantSettingsPage() {
@@ -64,6 +65,7 @@ export default function TenantSettingsPage() {
           </TabsContent>
           <TabsContent value="security" className="mt-0 space-y-4">
             <TenantSessionPolicyCard />
+            <TenantAccessRestrictionCard />
           </TabsContent>
           <TabsContent value="scim" className="mt-0 space-y-4">
             <ScimProvisioningCard />

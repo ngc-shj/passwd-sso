@@ -1,8 +1,20 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
 
-vi.mock("next-intl/middleware", () => ({
-  default: () => () => new Response(null, { status: 200 }),
+const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
+  mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
+  mockResolveUserTenantId: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("next-intl/middleware", async () => {
+  const { NextResponse: NR } = await import("next/server");
+  return { default: () => () => new NR(null, { status: 200 }) };
+});
+vi.mock("@/lib/access-restriction", () => ({
+  checkAccessRestrictionWithAudit: mockCheckAccessWithAudit,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  resolveUserTenantId: mockResolveUserTenantId,
 }));
 
 import { proxy, _applySecurityHeaders } from "../proxy";
@@ -370,5 +382,78 @@ describe("proxy — applySecurityHeaders basePath", () => {
     expect(response.headers.get("Permissions-Policy")).toBe(
       "camera=(), microphone=(), geolocation=(), payment=()",
     );
+  });
+});
+
+describe("proxy — access restriction", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Session returns valid user with ID
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ user: { id: "u1" } }), { status: 200 }),
+    );
+    // Default: no tenant → access restriction skipped
+    mockResolveUserTenantId.mockResolvedValue(null);
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+  });
+
+  it("returns 403 for session-authenticated API route when access denied", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "GET",
+      headers: { Cookie: "authjs.session-token=sess-acl-deny" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("ACCESS_DENIED");
+  });
+
+  it("allows session-authenticated API route when access is allowed", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "GET",
+      headers: { Cookie: "authjs.session-token=sess-acl-allow" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(200);
+  });
+
+  it("skips access restriction when tenant is null", async () => {
+    mockResolveUserTenantId.mockResolvedValue(null);
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/passwords`, {
+      method: "GET",
+      headers: { Cookie: "authjs.session-token=sess-acl-notenant" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(200);
+    expect(mockCheckAccessWithAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for dashboard route when access denied", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
+
+    const req = new NextRequest(`${APP_ORIGIN}/ja/dashboard`, {
+      method: "GET",
+      headers: { Cookie: "authjs.session-token=sess-acl-dash" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(403);
   });
 });

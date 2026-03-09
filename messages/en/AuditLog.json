@@ -137,6 +137,7 @@
   "DIRECTORY_SYNC_CONFIG_DELETE": "Directory sync config deleted",
   "DIRECTORY_SYNC_RUN": "Directory sync executed",
   "DIRECTORY_SYNC_STALE_RESET": "Directory sync stale reset",
+  "ACCESS_DENIED": "Access denied by network policy",
   "yes": "yes",
   "no": "no",
   "included": "included",

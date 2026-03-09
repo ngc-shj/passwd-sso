@@ -325,7 +325,8 @@ describe("extractRequestMeta", () => {
 
     const result = extractRequestMeta(req);
 
-    expect(result.ip).toBe("203.0.113.1");
+    // rightmost-untrusted: "203.0.113.1, 10.0.0.1" → "10.0.0.1" is rightmost untrusted
+    expect(result.ip).toBe("10.0.0.1");
     expect(result.userAgent).toBe("Mozilla/5.0");
   });
 

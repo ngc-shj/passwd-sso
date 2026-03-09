@@ -14,6 +14,7 @@ import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [
   TEAM_ROLE.ADMIN,
@@ -77,6 +78,9 @@ export async function GET(req: NextRequest) {
   }
   const { tenantId } = result.data;
 
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
+
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
@@ -133,6 +137,9 @@ export async function POST(req: NextRequest) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { tenantId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");

@@ -22,6 +22,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 // GET /api/scim/v2/Users — List/filter users in the tenant
 export async function GET(req: NextRequest) {
@@ -30,6 +31,9 @@ export async function GET(req: NextRequest) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { tenantId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -126,6 +130,9 @@ export async function POST(req: NextRequest) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { tenantId, auditUserId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");

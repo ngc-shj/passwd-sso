@@ -6,6 +6,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
@@ -23,6 +24,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const { userId, tenantId, apiKeyId } = authResult.data;
+
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
   if (!rl.allowed) {
