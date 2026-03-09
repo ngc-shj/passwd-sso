@@ -83,7 +83,7 @@ Edit `.env.local` and set the following values:
 | Variable | Description | How to Generate |
 |----------|-------------|-----------------|
 | `DATABASE_URL` | PostgreSQL connection string | Use default for development |
-| `AUTH_URL` | Application public URL (include basePath if set) | `http://localhost:3000` for dev |
+| `AUTH_URL` | Application origin (e.g., `https://example.com`) — do NOT include path | `http://localhost:3000` for dev |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy deployment | e.g., `/passwd-sso` |
 | `AUTH_SECRET` | NextAuth session signing key | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID | From Google Cloud Console |
