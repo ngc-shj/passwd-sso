@@ -208,7 +208,7 @@ Client(valid時):
 
 - Auth.js の DB セッションを利用（ブラウザ localStorage に JWT セッションを置かない）。
 - セッション有効期間と失効手順を運用で明確化する。
-- `GOOGLE_WORKSPACE_DOMAIN` や IdP 側ポリシーでサインイン対象を制限する。
+- `GOOGLE_WORKSPACE_DOMAINS` や IdP 側ポリシーでサインイン対象を制限する。
 - パスキーサインイン: challenge は使い捨て（Redis GETDEL、5分 TTL）、IP 単位レート制限あり。
 - メールベースのパスキーオプション: 未登録メールにはダミー `allowCredentials` を返す（ユーザー列挙防止）。
 - SSOテナントユーザーはパスキーサインイン対象外（IdP フローを使用）。

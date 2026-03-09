@@ -76,4 +76,4 @@ passwd-sso uses a **zero-knowledge** architecture:
 - Do **not** expose PostgreSQL (port 5432) or SAML Jackson (port 5225) to the public internet
 - Use strong, unique values for `AUTH_SECRET` and database credentials
 - Keep Docker images up to date
-- Restrict Google sign-in to your Workspace domain via `GOOGLE_WORKSPACE_DOMAIN`
+- Restrict Google sign-in to your Workspace domain via `GOOGLE_WORKSPACE_DOMAINS`

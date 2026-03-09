@@ -2,6 +2,7 @@ import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
 import { API_PATH } from "@/lib/constants";
+import { parseAllowedGoogleDomains } from "@/lib/google-domain";
 import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
@@ -13,6 +14,7 @@ const magicLinkEmailLimiter = createRateLimiter({
   max: 3,
 });
 
+const allowedGoogleDomains = parseAllowedGoogleDomains();
 const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 
 const useSecureCookies = isHttps;
@@ -32,8 +34,12 @@ export default {
             allowDangerousEmailAccountLinking: true,
             authorization: {
               params: {
-                // Restrict to specific domain (optional, omit for personal accounts)
-                hd: process.env.GOOGLE_WORKSPACE_DOMAIN,
+                // Restrict to specific domain (optional, omit for personal accounts).
+                // Multiple domains: omit hd to show account chooser (Google only accepts single value).
+                hd:
+                  allowedGoogleDomains.length === 1
+                    ? allowedGoogleDomains[0]
+                    : undefined,
                 prompt: "consent",
                 access_type: "offline",
                 response_type: "code",
@@ -153,12 +159,11 @@ export default {
       return true;
     },
 
-    // Validate domain claim if GOOGLE_WORKSPACE_DOMAIN is set
+    // Validate domain claim against allowed Google Workspace domains
     async signIn({ account, profile }) {
-      if (account?.provider === "google") {
-        const hd = (profile as { hd?: string })?.hd;
-        const requiredDomain = process.env.GOOGLE_WORKSPACE_DOMAIN;
-        if (requiredDomain && hd !== requiredDomain) {
+      if (account?.provider === "google" && allowedGoogleDomains.length > 0) {
+        const hd = (profile as { hd?: string })?.hd?.toLowerCase();
+        if (!hd || !allowedGoogleDomains.includes(hd)) {
           return false;
         }
       }

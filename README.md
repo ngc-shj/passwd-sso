@@ -171,7 +171,7 @@ Edit `.env.local` — key variables:
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
-| `GOOGLE_WORKSPACE_DOMAIN` | (Optional) Restrict to a Google Workspace domain |
+| `GOOGLE_WORKSPACE_DOMAINS` | (Optional) Restrict to Google Workspace domain(s), comma-separated |
 | `AUTH_TENANT_CLAIM_KEYS` | (Optional) IdP claim keys for tenant resolution (e.g. `tenant_id,organization`) |
 | `JACKSON_URL` | SAML Jackson URL (default: `http://localhost:5225`) |
 | `AUTH_JACKSON_ID` | Jackson OIDC client ID |

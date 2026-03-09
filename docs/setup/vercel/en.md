@@ -34,7 +34,7 @@ Set these in Vercel Project Settings → Environment Variables:
 - SSO:
   - `AUTH_GOOGLE_ID`
   - `AUTH_GOOGLE_SECRET`
-  - `GOOGLE_WORKSPACE_DOMAIN` (optional)
+  - `GOOGLE_WORKSPACE_DOMAINS` (optional)
   - `JACKSON_URL`
   - `AUTH_JACKSON_ID`
   - `AUTH_JACKSON_SECRET`
