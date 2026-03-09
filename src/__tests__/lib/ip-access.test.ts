@@ -105,14 +105,20 @@ describe("isIpAllowed", () => {
 });
 
 describe("isTailscaleIp", () => {
-  it("detects Tailscale CGNAT range", () => {
+  it("detects Tailscale IPv4 CGNAT range", () => {
     expect(isTailscaleIp("100.64.0.1")).toBe(true);
     expect(isTailscaleIp("100.127.255.254")).toBe(true);
+  });
+
+  it("detects Tailscale IPv6 ULA range", () => {
+    expect(isTailscaleIp("fd7a:115c:a1e0::1")).toBe(true);
+    expect(isTailscaleIp("fd7a:115c:a1e0:ab12:4843:cd96:6258:b240")).toBe(true);
   });
 
   it("rejects non-Tailscale IPs", () => {
     expect(isTailscaleIp("192.168.1.1")).toBe(false);
     expect(isTailscaleIp("100.128.0.1")).toBe(false);
+    expect(isTailscaleIp("fd7a:115c:a1e1::1")).toBe(false);
   });
 });
 

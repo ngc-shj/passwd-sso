@@ -297,13 +297,16 @@ function formatCidr(parsed: ParsedCidr): string {
 
 // ─── Tailscale IP detection ──────────────────────────────────
 
-const TAILSCALE_CIDR = "100.64.0.0/10";
+const TAILSCALE_IPV4_CIDR = "100.64.0.0/10";
+const TAILSCALE_IPV6_CIDR = "fd7a:115c:a1e0::/48";
 
 /**
- * Check if an IP address is in the Tailscale CGNAT range (100.64.0.0/10).
+ * Check if an IP address is in a Tailscale range.
+ * Tailscale assigns both IPv4 (100.64.0.0/10 CGNAT) and IPv6 (fd7a:115c:a1e0::/48 ULA).
  */
 export function isTailscaleIp(ip: string): boolean {
-  return isIpInCidr(normalizeIp(ip), TAILSCALE_CIDR);
+  const normalized = normalizeIp(ip);
+  return isIpInCidr(normalized, TAILSCALE_IPV4_CIDR) || isIpInCidr(normalized, TAILSCALE_IPV6_CIDR);
 }
 
 const IPV4_REGEX = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
