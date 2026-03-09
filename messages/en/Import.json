@@ -1,8 +1,8 @@
 {
   "title": "Import Passwords",
-  "description": "Import passwords from a CSV or JSON file exported from another password manager.",
-  "supportedFormats": "Supported formats: Bitwarden (CSV/JSON), 1Password, Chrome",
-  "selectFile": "Select a CSV or JSON file to import",
+  "description": "Import passwords from a CSV, JSON, or XML file exported from another password manager.",
+  "supportedFormats": "Supported formats: Bitwarden (CSV/JSON), 1Password, Chrome, KeePassXC (CSV/XML)",
+  "selectFile": "Select a CSV, JSON, or XML file to import",
   "detectedFormat": "Detected format",
   "unknownFormat": "Format could not be auto-detected. Results may vary.",
   "colTitle": "Title",

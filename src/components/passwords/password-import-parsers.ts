@@ -95,6 +95,10 @@ export function detectFormat(headers: string[]): CsvFormat {
   if (lower.includes("login_password") && lower.includes("login_username")) {
     return "bitwarden";
   }
+  // KeePassXC CSV always exports: Group, Title, Username, Password, URL, Notes
+  if (lower.includes("group") && lower.includes("title") && lower.includes("username") && lower.includes("password") && lower.includes("url") && lower.includes("notes")) {
+    return "keepassxc";
+  }
   if (lower.includes("title") && lower.includes("password") && lower.includes("username")) {
     return "onepassword";
   }
@@ -269,6 +273,28 @@ export function parseCsv(text: string): { entries: ParsedEntry[]; format: CsvFor
           ...softwareLicenseDefaults,
           ...sshKeyDefaults,
           ...extraDefaults(),
+        };
+        break;
+      case "keepassxc":
+        entry = {
+          entryType: ENTRY_TYPE.LOGIN,
+          title: row["title"] ?? "",
+          username: row["username"] ?? "",
+          password: row["password"] ?? "",
+          content: "",
+          url: row["url"] ?? "",
+          notes: row["notes"] ?? "",
+          ...cardDefaults,
+          ...identityDefaults,
+          ...passkeyDefaults,
+          ...bankAccountDefaults,
+          ...softwareLicenseDefaults,
+          ...sshKeyDefaults,
+          ...extraDefaults(),
+          // KeePassXC CSV uses "/" as group separator; group names containing literal "/" are ambiguous.
+          // Use the XML importer for unambiguous group hierarchy.
+          ...(row["group"] ? { folderPath: row["group"].replace(/\//g, " / ") } : {}),
+          ...(row["totp"] ? { totp: { secret: row["totp"] } } : {}),
         };
         break;
       case "onepassword":
@@ -619,10 +645,125 @@ export function parseJson(text: string): { entries: ParsedEntry[]; format: CsvFo
   }
 }
 
+// ─── KeePassXC XML Parser ──────────────────────────────────
+
+function xmlText(parent: Element, tag: string): string {
+  return parent.querySelector(tag)?.textContent ?? "";
+}
+
+function parseKeePassXcEntry(entryEl: Element, folderPath: string): ParsedEntry | null {
+  const fields: Record<string, string> = {};
+  for (const strEl of entryEl.querySelectorAll(":scope > String")) {
+    const key = xmlText(strEl, "Key");
+    const value = xmlText(strEl, "Value");
+    if (key) fields[key] = value;
+  }
+
+  const title = fields["Title"] ?? "";
+  const password = fields["Password"] ?? "";
+  if (!title || !password) return null;
+
+  // KeePassXC stores TOTP under different keys depending on version:
+  // "TOTP Seed" (base32 secret), "otp" (otpauth:// URI), or "TOTP" (CSV-style)
+  const totpRaw = fields["otp"] || fields["TOTP Seed"] || fields["TOTP"] || "";
+
+  return {
+    entryType: ENTRY_TYPE.LOGIN,
+    title,
+    username: fields["UserName"] ?? "",
+    password,
+    content: "",
+    url: fields["URL"] ?? "",
+    notes: fields["Notes"] ?? "",
+    cardholderName: "", cardNumber: "", brand: "",
+    expiryMonth: "", expiryYear: "", cvv: "",
+    fullName: "", address: "", phone: "", email: "",
+    dateOfBirth: "", nationality: "", idNumber: "",
+    issueDate: "", expiryDate: "",
+    relyingPartyId: "", relyingPartyName: "",
+    credentialId: "", creationDate: "", deviceInfo: "",
+    bankName: "", accountType: "", accountHolderName: "",
+    accountNumber: "", routingNumber: "", swiftBic: "",
+    iban: "", branchName: "",
+    softwareName: "", licenseKey: "", version: "",
+    licensee: "", purchaseDate: "", expirationDate: "",
+    privateKey: "", publicKey: "", keyType: "",
+    keySize: "", fingerprint: "", sshPassphrase: "", sshComment: "",
+    tags: [],
+    customFields: [],
+    totp: totpRaw ? { secret: totpRaw } : null,
+    generatorSettings: null,
+    passwordHistory: [],
+    requireReprompt: false,
+    travelSafe: true,
+    folderPath,
+    isFavorite: false,
+    expiresAt: null,
+  };
+}
+
+function parseKeePassXcGroup(
+  groupEl: Element,
+  parentPath: string,
+  entries: ParsedEntry[],
+  recycleBinUuid: string,
+) {
+  const groupName = xmlText(groupEl, ":scope > Name");
+  const currentPath = parentPath ? `${parentPath} / ${groupName}` : groupName;
+
+  // Skip the Recycle Bin: match by UUID (locale-independent) or by known names as fallback
+  const groupUuid = xmlText(groupEl, ":scope > UUID");
+  if (recycleBinUuid && groupUuid === recycleBinUuid) return;
+  if (groupName === "Recycle Bin" || groupName === "ごみ箱") return;
+
+  for (const entryEl of groupEl.querySelectorAll(":scope > Entry")) {
+    const entry = parseKeePassXcEntry(entryEl, currentPath);
+    if (entry) entries.push(entry);
+  }
+
+  for (const childGroup of groupEl.querySelectorAll(":scope > Group")) {
+    parseKeePassXcGroup(childGroup, currentPath, entries, recycleBinUuid);
+  }
+}
+
+export function parseKeePassXcXml(text: string): { entries: ParsedEntry[]; format: CsvFormat } {
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(text, "text/xml");
+
+    // Check for parse errors
+    const parseError = doc.querySelector("parsererror");
+    if (parseError) return { entries: [], format: "unknown" };
+
+    // KeePassXC XML has <KeePassFile><Root><Group>...
+    const rootGroup = doc.querySelector("KeePassFile > Root > Group");
+    if (!rootGroup) return { entries: [], format: "unknown" };
+
+    // Read Recycle Bin UUID from Meta section (locale-independent detection)
+    const recycleBinUuid = doc.querySelector("KeePassFile > Meta > RecycleBinUUID")?.textContent ?? "";
+
+    const entries: ParsedEntry[] = [];
+    // Process entries directly in root group
+    for (const entryEl of rootGroup.querySelectorAll(":scope > Entry")) {
+      const entry = parseKeePassXcEntry(entryEl, "");
+      if (entry) entries.push(entry);
+    }
+    // Process child groups of Root (skip the root group name itself)
+    for (const childGroup of rootGroup.querySelectorAll(":scope > Group")) {
+      parseKeePassXcGroup(childGroup, "", entries, recycleBinUuid);
+    }
+
+    return { entries, format: "keepassxc" };
+  } catch {
+    return { entries: [], format: "unknown" };
+  }
+}
+
 export const formatLabels: Record<CsvFormat, string> = {
   bitwarden: "Bitwarden",
   onepassword: "1Password",
   chrome: "Chrome",
+  keepassxc: "KeePassXC",
   "passwd-sso": "passwd-sso",
   unknown: "CSV",
 };

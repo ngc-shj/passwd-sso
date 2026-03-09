@@ -70,4 +70,4 @@ export interface ParsedEntry {
   expiresAt: string | null;
 }
 
-export type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "passwd-sso" | "unknown";
+export type CsvFormat = "bitwarden" | "onepassword" | "chrome" | "keepassxc" | "passwd-sso" | "unknown";

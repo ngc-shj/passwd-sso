@@ -139,7 +139,7 @@ export function ImportFileSelectStep({
         <input
           ref={fileRef}
           type="file"
-          accept=".csv,.json"
+          accept=".csv,.json,.xml"
           className="hidden"
           onChange={onFileChange}
         />
@@ -253,7 +253,7 @@ export function buildImportAuditPayload(
     successCount,
     failedCount,
     filename: sourceFilename || undefined,
-    format: sourceFilename.toLowerCase().endsWith(".json") ? "json" : "csv",
+    format: sourceFilename.toLowerCase().endsWith(".json") ? "json" : sourceFilename.toLowerCase().endsWith(".xml") ? "xml" : "csv",
     encrypted: encryptedInput,
   };
 }
