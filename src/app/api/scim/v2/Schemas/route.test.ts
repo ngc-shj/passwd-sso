@@ -18,6 +18,9 @@ vi.mock("@/lib/scim/rate-limit", () => ({
 vi.mock("@/lib/tenant-rls", () => ({
   withTenantRls: mockWithTenantRls,
 }));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
+}));
 
 import { GET } from "./route";
 

@@ -1,6 +1,6 @@
 # Code Review: tenant-access-restriction
-Date: 2026-03-10T01:00:00+09:00
-Review round: 2
+Date: 2026-03-10T02:15:00+09:00
+Review round: 3
 
 ## Changes from Previous Round
 Initial review
@@ -145,3 +145,35 @@ Initial review
 - Action: Fixed — now returns 409 SELF_LOCKOUT when clientIp is null and restrictions are being set
 - Modified file: src/app/api/tenant/policy/route.ts
 - Test added: src/__tests__/api/tenant/tenant-policy.test.ts (409 when clientIp null)
+
+## Round 3 Findings
+
+### R3-F1 [Minor] parseIpv4 accepts empty octets (e.g., "1..2.3")
+- File: src/lib/ip-access.ts:49
+- Problem: `Number("")` returns `0`, so `"1..2.3"` parsed as `[1,0,2,3]`
+- Action: Added `if (part.length === 0) return null;` guard
+- Modified file: src/lib/ip-access.ts
+
+### R3-F2 [Minor] Client-side IPv6 CIDR regex too loose
+- File: src/components/settings/tenant-access-restriction-card.tsx:35
+- Problem: `CIDR_V6_REGEX` matched pure hex strings without colons (e.g., `abcdef/64`)
+- Action: Changed regex to require at least one colon: `/^[0-9a-fA-F:]*:[0-9a-fA-F:]*\/\d{1,3}$/`
+- Modified file: src/components/settings/tenant-access-restriction-card.tsx
+
+### R3-F3 [Minor] XFF all-trusted fallback returns empty string
+- File: src/lib/ip-access.ts:282-283
+- Problem: When XFF contains empty segments (e.g., `, 10.0.0.1`), `ips[0]` could be `""`
+- Action: Changed to `ips.find((ip) => ip.length > 0)` to skip empty entries
+- Modified file: src/lib/ip-access.ts
+
+### R3-S1 [Minor] SCIM metadata endpoints missing access restriction
+- File: src/app/api/scim/v2/{Schemas,ResourceTypes,ServiceProviderConfig}/route.ts
+- Problem: These 3 SCIM metadata routes had no `enforceAccessRestriction` call
+- Action: Added `enforceAccessRestriction` to all 3 routes + mocks in corresponding test files
+- Modified files: 3 route files + 3 test files
+
+### R3-S2 [Minor] tailscaleTailnet lacks character validation
+- File: src/app/api/tenant/policy/route.ts:162-166
+- Problem: No restriction on characters in `tailscaleTailnet` — could contain control chars or injection payloads
+- Action: Added DNS hostname pattern validation (`/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/`)
+- Modified file: src/app/api/tenant/policy/route.ts

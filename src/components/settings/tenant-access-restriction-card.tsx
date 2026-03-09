@@ -32,7 +32,7 @@ import { fetchApi } from "@/lib/url-helpers";
 
 const MAX_CIDRS = 50;
 const CIDR_REGEX = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
-const CIDR_V6_REGEX = /^[0-9a-fA-F:]+\/\d{1,3}$/;
+const CIDR_V6_REGEX = /^[0-9a-fA-F:]*:[0-9a-fA-F:]*\/\d{1,3}$/;
 
 function isValidCidrFormat(cidr: string): boolean {
   return CIDR_REGEX.test(cidr) || CIDR_V6_REGEX.test(cidr);

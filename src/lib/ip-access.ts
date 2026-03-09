@@ -47,6 +47,7 @@ function parseIpv4(ip: string): number[] | null {
   if (parts.length !== 4) return null;
   const octets: number[] = [];
   for (const part of parts) {
+    if (part.length === 0) return null;
     const n = Number(part);
     if (!Number.isInteger(n) || n < 0 || n > 255) return null;
     // Reject leading zeros (e.g., "01", "001")
@@ -279,8 +280,9 @@ export function extractClientIp(request: NextRequest): string | null {
     }
   }
 
-  // All IPs in XFF are trusted proxies — use the leftmost
-  return ips[0] || socketIp || null;
+  // All IPs in XFF are trusted proxies — use the leftmost non-empty
+  const leftmost = ips.find((ip) => ip.length > 0);
+  return leftmost || socketIp || null;
 }
 
 function formatCidr(parsed: ParsedCidr): string {

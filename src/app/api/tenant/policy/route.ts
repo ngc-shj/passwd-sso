@@ -163,6 +163,10 @@ async function handlePATCH(req: NextRequest) {
     if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > 255) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
     }
+    // DNS hostname characters only: alphanumeric, hyphens, dots
+    if (tailscaleTailnet.length > 0 && !/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(tailscaleTailnet)) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)" }, { status: 400 });
+    }
   }
 
   // Self-lockout detection: check if the requester's IP would be allowed under the new policy

@@ -5,6 +5,7 @@ import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { prisma } from "@/lib/prisma";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 // GET /api/scim/v2/Schemas
 export async function GET(req: NextRequest) {
@@ -17,6 +18,9 @@ export async function GET(req: NextRequest) {
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   return withTenantRls(prisma, tenantId, async () =>
     scimResponse([
