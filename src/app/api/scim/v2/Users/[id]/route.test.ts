@@ -47,6 +47,9 @@ vi.mock("@/lib/tenant-rls", () => ({ withTenantRls: mockWithTenantRls }));
 vi.mock("@/lib/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLogger,
 }));

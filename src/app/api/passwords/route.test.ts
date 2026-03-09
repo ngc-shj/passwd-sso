@@ -49,6 +49,9 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
+}));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
   const child = { info: noop, warn: noop, error: noop };

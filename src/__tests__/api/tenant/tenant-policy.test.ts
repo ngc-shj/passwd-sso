@@ -4,15 +4,20 @@ import { createRequest, parseResponse } from "../../helpers/request-builder";
 
 const {
   mockAuth, mockRequireTenantPermission, mockUserFindUnique, mockTenantUpdate,
-  mockWithBypassRls, mockLogAudit, mockRateLimiterCheck,
+  mockTenantFindUnique, mockWithBypassRls, mockLogAudit, mockRateLimiterCheck,
+  mockInvalidateCache, mockWouldIpBeAllowed, mockExtractClientIp,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockTenantUpdate: vi.fn(),
+  mockTenantFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockInvalidateCache: vi.fn(),
+  mockWouldIpBeAllowed: vi.fn().mockReturnValue(true),
+  mockExtractClientIp: vi.fn().mockReturnValue("192.168.1.100"),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -32,7 +37,7 @@ vi.mock("@/lib/tenant-auth", () => {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockUserFindUnique },
-    tenant: { update: mockTenantUpdate },
+    tenant: { update: mockTenantUpdate, findUnique: mockTenantFindUnique },
   },
 }));
 vi.mock("@/lib/tenant-rls", () => ({
@@ -51,9 +56,26 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/constants/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
+vi.mock("@/lib/ip-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/ip-access")>("@/lib/ip-access");
+  return { ...actual, extractClientIp: mockExtractClientIp };
+});
+vi.mock("@/lib/access-restriction", () => ({
+  invalidateTenantPolicyCache: mockInvalidateCache,
+  wouldIpBeAllowed: mockWouldIpBeAllowed,
+}));
 
 import { GET, PATCH } from "@/app/api/tenant/policy/route";
 import { TenantAuthError } from "@/lib/tenant-auth";
+
+const FULL_POLICY_RESPONSE = {
+  maxConcurrentSessions: null,
+  sessionIdleTimeoutMinutes: null,
+  vaultAutoLockMinutes: null,
+  allowedCidrs: [],
+  tailscaleEnabled: false,
+  tailscaleTailnet: null,
+};
 
 describe("GET /api/tenant/policy", () => {
   beforeEach(() => vi.clearAllMocks());
@@ -75,10 +97,19 @@ describe("GET /api/tenant/policy", () => {
     expect(status).toBe(403);
   });
 
-  it("returns maxConcurrentSessions from tenant", async () => {
+  it("returns full policy including access restriction fields", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockUserFindUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: 5, sessionIdleTimeoutMinutes: null, vaultAutoLockMinutes: null } });
+    mockUserFindUnique.mockResolvedValue({
+      tenant: {
+        maxConcurrentSessions: 5,
+        sessionIdleTimeoutMinutes: null,
+        vaultAutoLockMinutes: null,
+        allowedCidrs: ["10.0.0.0/8"],
+        tailscaleEnabled: true,
+        tailscaleTailnet: "my-tailnet",
+      },
+    });
 
     const req = createRequest("GET", "http://localhost/api/tenant/policy");
     const res = await GET(req);
@@ -86,24 +117,33 @@ describe("GET /api/tenant/policy", () => {
 
     expect(status).toBe(200);
     expect(json.maxConcurrentSessions).toBe(5);
+    expect(json.allowedCidrs).toEqual(["10.0.0.0/8"]);
+    expect(json.tailscaleEnabled).toBe(true);
+    expect(json.tailscaleTailnet).toBe("my-tailnet");
   });
 
-  it("returns null when no limit set", async () => {
+  it("returns defaults when no tenant data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockUserFindUnique.mockResolvedValue({ tenant: { maxConcurrentSessions: null, sessionIdleTimeoutMinutes: null, vaultAutoLockMinutes: null } });
+    mockUserFindUnique.mockResolvedValue({ tenant: null });
 
     const req = createRequest("GET", "http://localhost/api/tenant/policy");
     const res = await GET(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
-    expect(json.maxConcurrentSessions).toBeNull();
+    expect(json.allowedCidrs).toEqual([]);
+    expect(json.tailscaleEnabled).toBe(false);
+    expect(json.tailscaleTailnet).toBeNull();
   });
 });
 
 describe("PATCH /api/tenant/policy", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  function mockUpdateReturn(overrides: Record<string, unknown> = {}) {
+    mockTenantUpdate.mockResolvedValue({ ...FULL_POLICY_RESPONSE, ...overrides });
+  }
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
@@ -147,11 +187,7 @@ describe("PATCH /api/tenant/policy", () => {
   it("successfully updates maxConcurrentSessions", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockTenantUpdate.mockResolvedValue({
-      maxConcurrentSessions: 3,
-      sessionIdleTimeoutMinutes: null,
-      vaultAutoLockMinutes: null,
-    });
+    mockUpdateReturn({ maxConcurrentSessions: 3 });
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       body: { maxConcurrentSessions: 3 },
@@ -178,14 +214,22 @@ describe("PATCH /api/tenant/policy", () => {
     );
   });
 
+  it("invalidates policy cache after update", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockUpdateReturn();
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { maxConcurrentSessions: null },
+    });
+    await PATCH(req);
+    expect(mockInvalidateCache).toHaveBeenCalledWith("tenant1");
+  });
+
   it("accepts null to remove limit", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockTenantUpdate.mockResolvedValue({
-      maxConcurrentSessions: null,
-      sessionIdleTimeoutMinutes: null,
-      vaultAutoLockMinutes: null,
-    });
+    mockUpdateReturn({ maxConcurrentSessions: null });
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       body: { maxConcurrentSessions: null },
@@ -237,17 +281,27 @@ describe("PATCH /api/tenant/policy", () => {
     expect((await parseResponse(res)).status).toBe(400);
   });
 
-  it("successfully updates all three policy fields", async () => {
+  it("successfully updates all policy fields including access restriction", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
     mockTenantUpdate.mockResolvedValue({
       maxConcurrentSessions: 5,
       sessionIdleTimeoutMinutes: 30,
       vaultAutoLockMinutes: 10,
+      allowedCidrs: ["10.0.0.0/8"],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
     });
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
-      body: { maxConcurrentSessions: 5, sessionIdleTimeoutMinutes: 30, vaultAutoLockMinutes: 10 },
+      body: {
+        maxConcurrentSessions: 5,
+        sessionIdleTimeoutMinutes: 30,
+        vaultAutoLockMinutes: 10,
+        allowedCidrs: ["10.0.0.0/8"],
+        tailscaleEnabled: true,
+        tailscaleTailnet: "my-tailnet",
+      },
     });
     const res = await PATCH(req);
     const { status, json } = await parseResponse(res);
@@ -257,7 +311,61 @@ describe("PATCH /api/tenant/policy", () => {
       maxConcurrentSessions: 5,
       sessionIdleTimeoutMinutes: 30,
       vaultAutoLockMinutes: 10,
+      allowedCidrs: ["10.0.0.0/8"],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
     });
+  });
+
+  it("returns 400 for non-array allowedCidrs", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { allowedCidrs: "10.0.0.0/8" },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 for invalid CIDR in allowedCidrs", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { allowedCidrs: ["not-a-cidr"] },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 for too many CIDRs", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const cidrs = Array.from({ length: 51 }, (_, i) => `10.${i}.0.0/24`);
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { allowedCidrs: cidrs },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 for non-boolean tailscaleEnabled", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { tailscaleEnabled: "yes" },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
+  });
+
+  it("returns 400 when tailscaleEnabled=true but tailscaleTailnet is empty", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { tailscaleEnabled: true, tailscaleTailnet: "" },
+    });
+    const res = await PATCH(req);
+    expect((await parseResponse(res)).status).toBe(400);
   });
 
   it("returns 400 for malformed JSON body", async () => {
@@ -267,7 +375,6 @@ describe("PATCH /api/tenant/policy", () => {
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       headers: { "Content-Type": "application/json" },
     });
-    // Override json() to throw parse error
     (req as unknown as { json: () => Promise<unknown> }).json = async () => {
       throw new SyntaxError("Unexpected end of JSON input");
     };
@@ -278,11 +385,7 @@ describe("PATCH /api/tenant/policy", () => {
   it("handles empty body without error", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
-    mockTenantUpdate.mockResolvedValue({
-      maxConcurrentSessions: 5,
-      sessionIdleTimeoutMinutes: null,
-      vaultAutoLockMinutes: null,
-    });
+    mockUpdateReturn({ maxConcurrentSessions: 5 });
 
     const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
       body: {},
@@ -290,5 +393,66 @@ describe("PATCH /api/tenant/policy", () => {
     const res = await PATCH(req);
     const { status } = await parseResponse(res);
     expect(status).toBe(200);
+  });
+
+  it("returns 409 when self-lockout detected", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+    });
+    mockWouldIpBeAllowed.mockReturnValueOnce(false);
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { allowedCidrs: ["10.0.0.0/8"] },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(409);
+    expect(json.error).toBe("SELF_LOCKOUT");
+  });
+
+  it("returns 409 when clientIp is null and restrictions are being set", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+    });
+    mockExtractClientIp.mockReturnValueOnce(null);
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { allowedCidrs: ["10.0.0.0/8"] },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(409);
+    expect(json.error).toBe("SELF_LOCKOUT");
+    expect(json.message).toContain("could not be determined");
+  });
+
+  it("allows save with confirmLockout when self-lockout detected", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantUpdate.mockResolvedValue({
+      ...FULL_POLICY_RESPONSE,
+      allowedCidrs: ["10.0.0.0/8"],
+    });
+    // wouldIpBeAllowed is not called when confirmLockout is true
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { allowedCidrs: ["10.0.0.0/8"], confirmLockout: true },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.allowedCidrs).toEqual(["10.0.0.0/8"]);
+    expect(mockWouldIpBeAllowed).not.toHaveBeenCalled();
   });
 });
