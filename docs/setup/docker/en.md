@@ -238,6 +238,9 @@ Requires `mod_proxy`, `mod_proxy_http`, and `mod_proxy_wstunnel`:
 
 ```apache
 # WebSocket (required for Next.js HMR in dev mode)
+# The scheme (ws / wss) must match the backend:
+#   Apache terminates TLS, backend is plain HTTP → ws:// + http://
+#   Backend also serves TLS                      → wss:// + https://
 ProxyPass /passwd-sso/_next/webpack-hmr ws://localhost:3000/passwd-sso/_next/webpack-hmr
 ProxyPassReverse /passwd-sso/_next/webpack-hmr ws://localhost:3000/passwd-sso/_next/webpack-hmr
 
@@ -249,6 +252,10 @@ ProxyPassReverse /passwd-sso http://localhost:3000/passwd-sso
 > **Note:** The WebSocket rules must appear before the general `ProxyPass` rule.
 > Without `mod_proxy_wstunnel`, the HMR connection drops and the browser shows
 > a reload confirmation dialog approximately every 60 seconds.
+>
+> The `ProxyPass` scheme refers to the **backend** connection (Apache → Next.js), not the client-facing side.
+> When Apache terminates TLS and forwards to a plain HTTP backend, use `ws://` and `http://` as shown above.
+> If the backend itself serves HTTPS (e.g., Node.js with `--experimental-https`), change to `wss://` and `https://`.
 
 #### nginx
 
