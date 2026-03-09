@@ -133,6 +133,13 @@ describe("isValidIpAddress", () => {
     expect(isValidIpAddress("10.0.0")).toBe(false);
   });
 
+  it("rejects IPv4 with empty octets", () => {
+    expect(isValidIpAddress("192.168..1")).toBe(false);
+    expect(isValidIpAddress("1.2.3.")).toBe(false);
+    expect(isValidIpAddress(".1.2.3")).toBe(false);
+    expect(isIpInCidr("192.168..1", "192.168.0.0/16")).toBe(false);
+  });
+
   it("validates IPv6", () => {
     expect(isValidIpAddress("::1")).toBe(true);
     expect(isValidIpAddress("2001:db8::1")).toBe(true);

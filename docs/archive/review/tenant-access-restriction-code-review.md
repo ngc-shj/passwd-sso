@@ -1,6 +1,6 @@
 # Code Review: tenant-access-restriction
-Date: 2026-03-10T02:15:00+09:00
-Review round: 3
+Date: 2026-03-10T02:35:00+09:00
+Review round: 4
 
 ## Changes from Previous Round
 Initial review
@@ -177,3 +177,21 @@ Initial review
 - Problem: No restriction on characters in `tailscaleTailnet` — could contain control chars or injection payloads
 - Action: Added DNS hostname pattern validation (`/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/`)
 - Modified file: src/app/api/tenant/policy/route.ts
+
+## Round 4 Findings
+
+Functionality expert: No findings
+Security expert: No findings
+Testing expert: 3 Minor findings (test coverage gaps for Round 3 fixes)
+
+### R4-T1 [Minor] parseIpv4 empty octet guard untested
+- Action: Added test for `"192.168..1"`, `"1.2.3."`, `".1.2.3"` and CIDR match rejection
+- Modified file: src/__tests__/lib/ip-access.test.ts
+
+### R4-T2 [Minor] SCIM metadata enforceAccessRestriction deny path untested
+- Action: Added 403 deny tests to all 3 SCIM metadata route tests; refactored mocks to use `vi.hoisted()` pattern
+- Modified files: src/app/api/scim/v2/{Schemas,ResourceTypes,ServiceProviderConfig}/route.test.ts
+
+### R4-T3 [Minor] tailscaleTailnet DNS hostname validation untested
+- Action: Added tests for invalid DNS characters (`"-leading"`, `"trailing-"`, `"has space"`, `"has/slash"`, `"under_score"`) and valid hostname acceptance
+- Modified file: src/__tests__/api/tenant/tenant-policy.test.ts

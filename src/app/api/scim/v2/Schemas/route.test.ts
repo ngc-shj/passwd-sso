@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-const { mockValidateScimToken, mockCheckScimRateLimit } = vi.hoisted(() => ({
+const { mockValidateScimToken, mockCheckScimRateLimit, mockEnforceAccessRestriction } = vi.hoisted(() => ({
   mockValidateScimToken: vi.fn(),
   mockCheckScimRateLimit: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 const { mockWithTenantRls } = vi.hoisted(() => ({
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
@@ -19,7 +20,7 @@ vi.mock("@/lib/tenant-rls", () => ({
   withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/access-restriction", () => ({
-  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 import { GET } from "./route";
@@ -45,6 +46,14 @@ describe("GET /api/scim/v2/Schemas", () => {
     expect(body).toHaveLength(2);
     expect(body[0].id).toBe("urn:ietf:params:scim:schemas:core:2.0:User");
     expect(body[1].id).toBe("urn:ietf:params:scim:schemas:core:2.0:Group");
+  });
+
+  it("returns 403 when access restriction denies", async () => {
+    mockEnforceAccessRestriction.mockResolvedValueOnce(
+      NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+    );
+    const res = await GET(makeReq());
+    expect(res.status).toBe(403);
   });
 
   it("User schema includes userName, name, active, externalId attributes", async () => {

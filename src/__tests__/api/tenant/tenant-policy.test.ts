@@ -395,6 +395,33 @@ describe("PATCH /api/tenant/policy", () => {
     expect(status).toBe(200);
   });
 
+  it("returns 400 for tailscaleTailnet with invalid DNS characters", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+
+    for (const invalid of ["-leading", "trailing-", "has space", "has/slash", "under_score"]) {
+      const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+        body: { tailscaleTailnet: invalid },
+      });
+      const res = await PATCH(req);
+      const { status } = await parseResponse(res);
+      expect(status).toBe(400);
+    }
+  });
+
+  it("accepts valid DNS tailscaleTailnet", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockUpdateReturn({ tailscaleTailnet: "my-corp.example.ts.net" });
+
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { tailscaleTailnet: "my-corp.example.ts.net" },
+    });
+    const res = await PATCH(req);
+    const { status } = await parseResponse(res);
+    expect(status).toBe(200);
+  });
+
   it("returns 409 when self-lockout detected", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
