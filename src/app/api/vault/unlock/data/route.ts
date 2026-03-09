@@ -5,6 +5,7 @@ import { authOrToken } from "@/lib/auth-or-token";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,11 @@ async function handleGET(req: NextRequest) {
     );
   }
   const userId = authResult.userId;
+
+  if (authResult.type !== "session") {
+    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
+    if (denied) return denied;
+  }
 
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({

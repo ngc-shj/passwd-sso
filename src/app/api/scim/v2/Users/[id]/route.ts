@@ -13,6 +13,7 @@ import type { AuditAction } from "@prisma/client";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 
@@ -73,6 +74,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
   const { tenantId } = result.data;
 
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
+
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
@@ -100,6 +104,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { tenantId, auditUserId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -247,6 +254,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
   const { tenantId, auditUserId } = result.data;
 
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
+
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
@@ -365,6 +375,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { tenantId, auditUserId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");

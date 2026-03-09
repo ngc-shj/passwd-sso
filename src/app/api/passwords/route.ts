@@ -4,6 +4,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { authOrToken } from "@/lib/auth-or-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -21,6 +22,12 @@ async function handleGET(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
   const userId = authResult.userId;
+
+  // Access restriction for token-based auth
+  if (authResult.type !== "session") {
+    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
+    if (denied) return denied;
+  }
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
@@ -109,6 +116,12 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
   const userId = authResult.userId;
+
+  // Access restriction for token-based auth
+  if (authResult.type !== "session") {
+    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
+    if (denied) return denied;
+  }
 
   let body: unknown;
   try {

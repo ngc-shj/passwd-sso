@@ -42,6 +42,9 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
+}));
 
 import { POST } from "@/app/api/passwords/route";
 import { PUT } from "@/app/api/passwords/[id]/route";

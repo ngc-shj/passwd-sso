@@ -9,6 +9,7 @@
 import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { extractClientIp } from "@/lib/ip-access";
 import type { AuditAction, AuditScope } from "@prisma/client";
 import type { NextRequest } from "next/server";
 
@@ -148,10 +149,7 @@ export function extractRequestMeta(req: NextRequest): {
   userAgent: string | null;
   acceptLanguage: string | null;
 } {
-  const forwarded = req.headers.get("x-forwarded-for");
-  const ip = forwarded
-    ? forwarded.split(",")[0].trim()
-    : req.headers.get("x-real-ip") ?? null;
+  const ip = extractClientIp(req);
   const userAgent = req.headers.get("user-agent");
   const acceptLanguage = req.headers.get("accept-language");
   return { ip, userAgent, acceptLanguage };

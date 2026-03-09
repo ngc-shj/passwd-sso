@@ -6,6 +6,9 @@ import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";
 import { isHttps } from "./lib/url-helpers";
+import { extractClientIp } from "./lib/ip-access";
+import { checkAccessRestrictionWithAudit } from "./lib/access-restriction";
+import { resolveUserTenantId } from "./lib/tenant-context";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -16,7 +19,14 @@ type ProxyOptions = {
 
 const SESSION_CACHE_TTL_MS = 30_000;
 const SESSION_CACHE_MAX = 500;
-const sessionCache = new Map<string, { expiresAt: number; valid: boolean }>();
+
+interface SessionInfo {
+  valid: boolean;
+  userId?: string;
+  tenantId?: string;
+}
+
+const sessionCache = new Map<string, { expiresAt: number } & SessionInfo>();
 
 export async function proxy(request: NextRequest, options: ProxyOptions) {
   const { pathname } = request.nextUrl;
@@ -47,14 +57,32 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 
   // Auth check for protected routes
   if (pathWithoutLocale.startsWith("/dashboard")) {
-    const hasSession = await hasValidSession(request);
-    if (!hasSession) {
+    const session = await getSessionInfo(request);
+    if (!session.valid) {
       const signInUrl = request.nextUrl.clone();
       signInUrl.pathname = `/${locale}/auth/signin`;
       signInUrl.searchParams.set("callbackUrl", `${basePath}${request.nextUrl.pathname}${request.nextUrl.search}`);
       const redirectResponse = NextResponse.redirect(signInUrl);
       clearAuthSessionCookies(redirectResponse, basePath);
       return applySecurityHeaders(redirectResponse, options, basePath);
+    }
+
+    // Access restriction check for dashboard routes
+    if (session.tenantId) {
+      const clientIp = extractClientIp(request);
+      const accessResult = await checkAccessRestrictionWithAudit(
+        session.tenantId,
+        clientIp,
+        session.userId ?? null,
+        request,
+      );
+      if (!accessResult.allowed) {
+        return applySecurityHeaders(
+          new NextResponse("Forbidden", { status: 403 }),
+          options,
+          basePath,
+        );
+      }
     }
   }
 
@@ -128,26 +156,43 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
     pathname.startsWith(API_PATH.WEBAUTHN)
   ) {
-    const hasSession = await hasValidSession(request);
-    if (!hasSession) {
+    const session = await getSessionInfo(request);
+    if (!session.valid) {
       return applyCorsHeaders(
         request,
         NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }),
       );
+    }
+
+    // Access restriction check for session-authenticated API routes
+    if (session.tenantId) {
+      const clientIp = extractClientIp(request);
+      const accessResult = await checkAccessRestrictionWithAudit(
+        session.tenantId,
+        clientIp,
+        session.userId ?? null,
+        request,
+      );
+      if (!accessResult.allowed) {
+        return applyCorsHeaders(
+          request,
+          NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+        );
+      }
     }
   }
 
   return applyCorsHeaders(request, NextResponse.next());
 }
 
-async function hasValidSession(request: NextRequest): Promise<boolean> {
+async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
   const cookie = request.headers.get("cookie");
-  if (!cookie) return false;
+  if (!cookie) return { valid: false };
 
   const cacheKey = await hashCookie(cookie);
   const cached = sessionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.valid;
+    return { valid: cached.valid, userId: cached.userId, tenantId: cached.tenantId };
   }
   if (cached) sessionCache.delete(cacheKey);
 
@@ -160,25 +205,38 @@ async function hasValidSession(request: NextRequest): Promise<boolean> {
       headers: { cookie },
     });
     if (!res.ok) {
-      setSessionCache(cacheKey, false);
-      return false;
+      setSessionCache(cacheKey, { valid: false });
+      return { valid: false };
     }
     const data = await res.json();
     const valid = !!data?.user;
-    setSessionCache(cacheKey, valid);
-    return valid;
+    const userId = data?.user?.id ?? undefined;
+
+    // Resolve tenant ID for access restriction checks
+    let tenantId: string | undefined;
+    if (valid && userId) {
+      try {
+        tenantId = (await resolveUserTenantId(userId)) ?? undefined;
+      } catch {
+        // Non-critical: tenant resolution failure should not block session validation
+      }
+    }
+
+    const info: SessionInfo = { valid, userId, tenantId };
+    setSessionCache(cacheKey, info);
+    return info;
   } catch {
-    return false;
+    return { valid: false };
   }
 }
 
-function setSessionCache(key: string, valid: boolean) {
+function setSessionCache(key: string, info: SessionInfo) {
   if (sessionCache.size >= SESSION_CACHE_MAX) {
     sessionCache.clear();
   }
   sessionCache.set(key, {
     expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
-    valid,
+    ...info,
   });
 }
 
