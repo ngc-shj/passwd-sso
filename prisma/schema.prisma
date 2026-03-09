@@ -384,6 +384,9 @@ model Tenant {
   maxConcurrentSessions    Int?     @map("max_concurrent_sessions")
   sessionIdleTimeoutMinutes Int?     @map("session_idle_timeout_minutes")
   vaultAutoLockMinutes      Int?     @map("vault_auto_lock_minutes")
+  allowedCidrs              String[] @default([]) @map("allowed_cidrs")
+  tailscaleEnabled          Boolean  @default(false) @map("tailscale_enabled")
+  tailscaleTailnet          String?  @map("tailscale_tailnet") @db.VarChar(255)
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
@@ -777,6 +780,7 @@ enum AuditAction {
   DIRECTORY_SYNC_STALE_RESET
   SESSION_EVICTED
   ENTRY_HISTORY_REENCRYPT
+  ACCESS_DENIED
 }
 
 enum AuditScope {

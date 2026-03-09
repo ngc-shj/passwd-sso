@@ -9,6 +9,10 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { isValidCidr, extractClientIp } from "@/lib/ip-access";
+import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
+
+const MAX_CIDRS = 50;
 
 const policyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -31,7 +35,14 @@ async function handleGET(_req: NextRequest) {
   const user = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },
-      select: { tenant: { select: { maxConcurrentSessions: true, sessionIdleTimeoutMinutes: true, vaultAutoLockMinutes: true } } },
+      select: { tenant: { select: {
+        maxConcurrentSessions: true,
+        sessionIdleTimeoutMinutes: true,
+        vaultAutoLockMinutes: true,
+        allowedCidrs: true,
+        tailscaleEnabled: true,
+        tailscaleTailnet: true,
+      } } },
     }),
   );
 
@@ -39,6 +50,9 @@ async function handleGET(_req: NextRequest) {
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,
     sessionIdleTimeoutMinutes: user?.tenant?.sessionIdleTimeoutMinutes ?? null,
     vaultAutoLockMinutes: user?.tenant?.vaultAutoLockMinutes ?? null,
+    allowedCidrs: user?.tenant?.allowedCidrs ?? [],
+    tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
+    tailscaleTailnet: user?.tenant?.tailscaleTailnet ?? null,
   });
 }
 
@@ -69,7 +83,7 @@ async function handlePATCH(req: NextRequest) {
   } catch {
     return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
   }
-  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes } = body;
+  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, confirmLockout } = body;
 
   // Validate maxConcurrentSessions: null (unlimited) or positive integer 1-100
   if (maxConcurrentSessions !== null && maxConcurrentSessions !== undefined) {
@@ -107,6 +121,79 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
+  // Validate allowedCidrs: null/[] or array of valid CIDR strings, max 50
+  if (allowedCidrs !== null && allowedCidrs !== undefined) {
+    if (!Array.isArray(allowedCidrs)) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    }
+    if (allowedCidrs.length > MAX_CIDRS) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: `Maximum ${MAX_CIDRS} CIDRs allowed` }, { status: 400 });
+    }
+    for (const cidr of allowedCidrs) {
+      if (typeof cidr !== "string" || !isValidCidr(cidr)) {
+        const truncated = typeof cidr === "string" ? cidr.slice(0, 45) : String(cidr).slice(0, 45);
+        return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: `Invalid CIDR: ${truncated}` }, { status: 400 });
+      }
+    }
+  }
+
+  // Validate tailscaleEnabled: boolean
+  if (tailscaleEnabled !== undefined && typeof tailscaleEnabled !== "boolean") {
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+  }
+
+  // Validate tailscaleTailnet: required when tailscaleEnabled is true
+  if (tailscaleEnabled === true) {
+    if (tailscaleTailnet === undefined) {
+      // Not in request — check if DB already has a value
+      const existing = await withBypassRls(prisma, async () =>
+        prisma.tenant.findUnique({
+          where: { id: membership.tenantId },
+          select: { tailscaleTailnet: true },
+        }),
+      );
+      if (!existing?.tailscaleTailnet) {
+        return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet is required when tailscaleEnabled is true" }, { status: 400 });
+      }
+    } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet is required when tailscaleEnabled is true" }, { status: 400 });
+    }
+  }
+  if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {
+    if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > 255) {
+      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    }
+  }
+
+  // Self-lockout detection: check if the requester's IP would be allowed under the new policy
+  const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
+  const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
+  if ((newAllowedCidrs !== undefined || newTailscaleEnabled !== undefined) && !confirmLockout) {
+    // Build hypothetical policy
+    const currentTenant = await withBypassRls(prisma, async () =>
+      prisma.tenant.findUnique({
+        where: { id: membership.tenantId },
+        select: { allowedCidrs: true, tailscaleEnabled: true, tailscaleTailnet: true },
+      }),
+    );
+    const hypothetical = {
+      allowedCidrs: newAllowedCidrs ?? currentTenant?.allowedCidrs ?? [],
+      tailscaleEnabled: newTailscaleEnabled ?? currentTenant?.tailscaleEnabled ?? false,
+      tailscaleTailnet: (tailscaleTailnet !== undefined ? tailscaleTailnet : currentTenant?.tailscaleTailnet) ?? null,
+    };
+    const clientIp = extractClientIp(req);
+    const hasRestrictions = hypothetical.allowedCidrs.length > 0 || hypothetical.tailscaleEnabled;
+    if (hasRestrictions && (!clientIp || !wouldIpBeAllowed(clientIp, hypothetical))) {
+      const message = clientIp
+        ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
+        : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";
+      return NextResponse.json(
+        { error: "SELF_LOCKOUT", message },
+        { status: 409 },
+      );
+    }
+  }
+
   const updateData: Record<string, unknown> = {};
   if (maxConcurrentSessions !== undefined) {
     updateData.maxConcurrentSessions = maxConcurrentSessions ?? null;
@@ -117,6 +204,15 @@ async function handlePATCH(req: NextRequest) {
   if (vaultAutoLockMinutes !== undefined) {
     updateData.vaultAutoLockMinutes = vaultAutoLockMinutes ?? null;
   }
+  if (allowedCidrs !== undefined) {
+    updateData.allowedCidrs = allowedCidrs ?? [];
+  }
+  if (tailscaleEnabled !== undefined) {
+    updateData.tailscaleEnabled = tailscaleEnabled;
+  }
+  if (tailscaleTailnet !== undefined) {
+    updateData.tailscaleTailnet = tailscaleTailnet ?? null;
+  }
 
   const updated = await withBypassRls(prisma, async () =>
     prisma.tenant.update({
@@ -126,9 +222,15 @@ async function handlePATCH(req: NextRequest) {
         maxConcurrentSessions: true,
         sessionIdleTimeoutMinutes: true,
         vaultAutoLockMinutes: true,
+        allowedCidrs: true,
+        tailscaleEnabled: true,
+        tailscaleTailnet: true,
       },
     }),
   );
+
+  // Bust the tenant policy cache so access restriction picks up new values immediately
+  invalidateTenantPolicyCache(membership.tenantId);
 
   const meta = extractRequestMeta(req);
   logAudit({
@@ -140,6 +242,9 @@ async function handlePATCH(req: NextRequest) {
       maxConcurrentSessions: updated.maxConcurrentSessions,
       sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
       vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
+      allowedCidrs: updated.allowedCidrs,
+      tailscaleEnabled: updated.tailscaleEnabled,
+      tailscaleTailnet: updated.tailscaleTailnet,
     },
     ip: meta.ip,
     userAgent: meta.userAgent,
@@ -149,6 +254,9 @@ async function handlePATCH(req: NextRequest) {
     maxConcurrentSessions: updated.maxConcurrentSessions,
     sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
     vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
+    allowedCidrs: updated.allowedCidrs,
+    tailscaleEnabled: updated.tailscaleEnabled,
+    tailscaleTailnet: updated.tailscaleTailnet,
   });
 }
 

@@ -9,6 +9,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import type { EntryType } from "@prisma/client";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
@@ -33,6 +34,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const { userId, tenantId, apiKeyId } = authResult.data;
+
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
   if (!rl.allowed) {
@@ -119,6 +123,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   const { userId, tenantId, apiKeyId } = authResult.data;
+
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
   if (!rl.allowed) {

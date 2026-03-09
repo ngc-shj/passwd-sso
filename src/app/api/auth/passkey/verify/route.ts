@@ -8,6 +8,7 @@ import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
 import { createCustomAdapter } from "@/lib/auth-adapter";
 import { sessionMetaStorage } from "@/lib/session-meta";
 import { logAudit } from "@/lib/audit";
+import { extractClientIp } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -34,8 +35,7 @@ async function handlePOST(req: NextRequest) {
   if (originError) return originError;
 
   // Rate limit by IP
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = extractClientIp(req) ?? "unknown";
   const rl = await rateLimiter.check(`webauthn:signin-verify:${ip}`);
   if (!rl.allowed) {
     return NextResponse.json(
@@ -104,7 +104,7 @@ async function handlePOST(req: NextRequest) {
 
   // Run createSession inside sessionMetaStorage so IP/UA are captured
   const meta = {
-    ip: req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
+    ip: extractClientIp(req),
     userAgent: req.headers.get("user-agent") ?? null,
     acceptLanguage: req.headers.get("accept-language") ?? null,
   };

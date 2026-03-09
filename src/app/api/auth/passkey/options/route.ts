@@ -4,6 +4,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { assertOrigin } from "@/lib/csrf";
+import { extractClientIp } from "@/lib/ip-access";
 import { generateDiscoverableAuthOpts, derivePrfSalt } from "@/lib/webauthn-server";
 import { randomBytes } from "node:crypto";
 
@@ -21,8 +22,7 @@ async function handlePOST(req: NextRequest) {
   if (originError) return originError;
 
   // Rate limit by IP
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const ip = extractClientIp(req) ?? "unknown";
   const rl = await rateLimiter.check(`webauthn:signin-opts:${ip}`);
   if (!rl.allowed) {
     return NextResponse.json(

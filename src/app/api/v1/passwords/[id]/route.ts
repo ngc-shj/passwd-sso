@@ -9,6 +9,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
@@ -55,6 +56,10 @@ async function handleGET(
   const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_READ);
   if (!auth.ok) return auth.error;
   const { userId, tenantId } = auth.data;
+
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
+
   const { id } = await params;
 
   const entry = await withTenantRls(prisma, tenantId, async () =>
@@ -102,6 +107,10 @@ async function handlePUT(
   const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!auth.ok) return auth.error;
   const { userId, tenantId } = auth.data;
+
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
+
   const { id } = await params;
 
   const existing = await withTenantRls(prisma, tenantId, async () =>
@@ -243,6 +252,10 @@ async function handleDELETE(
   const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!auth.ok) return auth.error;
   const { userId, tenantId } = auth.data;
+
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
+
   const { id } = await params;
 
   const { searchParams } = new URL(req.url);

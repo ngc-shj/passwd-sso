@@ -137,6 +137,7 @@
   "DIRECTORY_SYNC_CONFIG_DELETE": "ディレクトリ同期設定を削除",
   "DIRECTORY_SYNC_RUN": "ディレクトリ同期を実行",
   "DIRECTORY_SYNC_STALE_RESET": "ディレクトリ同期のスタックをリセット",
+  "ACCESS_DENIED": "ネットワークポリシーによりアクセス拒否",
   "yes": "あり",
   "no": "なし",
   "included": "含む",

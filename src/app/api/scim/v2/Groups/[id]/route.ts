@@ -11,6 +11,7 @@ import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -108,6 +109,9 @@ export async function GET(req: NextRequest, { params }: Params) {
   }
   const { tenantId } = result.data;
 
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
+
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
@@ -131,6 +135,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return scimError(401, API_ERROR[result.error]);
   }
   const { tenantId, auditUserId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
@@ -267,6 +274,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
   const { tenantId, auditUserId } = result.data;
 
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
+
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
   }
@@ -391,6 +401,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
   }
 
   const { tenantId } = result.data;
+
+  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
     return scimError(429, "Too many requests");
