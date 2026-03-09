@@ -1,6 +1,19 @@
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
 /**
+ * Resolve the canonical app origin from environment.
+ * Priority: APP_URL > AUTH_URL.
+ *
+ * Returns the raw env value (may contain trailing slash or path).
+ * Callers that need only the origin should use `new URL(url).origin`.
+ *
+ * Server-side only — reads process.env at call time for testability.
+ */
+export function getAppOrigin(): string | undefined {
+  return process.env.APP_URL || process.env.AUTH_URL || undefined;
+}
+
+/**
  * Whether the app is served over HTTPS.
  * Determined by the AUTH_URL scheme — not NODE_ENV, which can be
  * "production" even on http://localhost via `npm start`.
@@ -43,6 +56,6 @@ export function appUrl(path: string): string {
  * (e.g. email links). Uses APP_URL/AUTH_URL env vars instead of window.
  */
 export function serverAppUrl(path: string): string {
-  const origin = process.env.APP_URL || process.env.AUTH_URL || "";
+  const origin = getAppOrigin() ?? "";
   return `${origin}${BASE_PATH}${path}`;
 }

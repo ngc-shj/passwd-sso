@@ -68,6 +68,7 @@ function makeReq(options: { method?: string; body?: unknown } = {}) {
 describe("GET /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_URL = "http://localhost:3000";
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -121,6 +122,7 @@ describe("GET /api/scim/v2/Groups/[id]", () => {
 describe("PATCH /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_URL = "http://localhost:3000";
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
@@ -331,6 +333,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
 describe("PUT /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_URL = "http://localhost:3000";
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
@@ -498,6 +501,7 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
 describe("DELETE /api/scim/v2/Groups/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_URL = "http://localhost:3000";
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });

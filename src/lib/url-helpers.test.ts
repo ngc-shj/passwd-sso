@@ -179,6 +179,48 @@ describe("url-helpers (basePath=/passwd-sso)", () => {
   });
 });
 
+// ─── getAppOrigin ────────────────────────────────────────────
+
+describe("getAppOrigin", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("returns APP_URL when set", async () => {
+    vi.stubEnv("APP_URL", "https://app.example.com");
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
+    const { getAppOrigin } = await import("@/lib/url-helpers");
+    expect(getAppOrigin()).toBe("https://app.example.com");
+  });
+
+  it("falls back to AUTH_URL when APP_URL is not set", async () => {
+    delete process.env.APP_URL;
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
+    const { getAppOrigin } = await import("@/lib/url-helpers");
+    expect(getAppOrigin()).toBe("https://auth.example.com");
+  });
+
+  it("returns undefined when neither is set", async () => {
+    delete process.env.APP_URL;
+    delete process.env.AUTH_URL;
+    const { getAppOrigin } = await import("@/lib/url-helpers");
+    expect(getAppOrigin()).toBeUndefined();
+  });
+
+  it("falls back to AUTH_URL when APP_URL is empty string", async () => {
+    vi.stubEnv("APP_URL", "");
+    vi.stubEnv("AUTH_URL", "https://auth.example.com");
+    const { getAppOrigin } = await import("@/lib/url-helpers");
+    expect(getAppOrigin()).toBe("https://auth.example.com");
+  });
+});
+
 // ─── serverAppUrl ────────────────────────────────────────────
 
 describe("serverAppUrl", () => {

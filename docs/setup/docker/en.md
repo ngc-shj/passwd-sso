@@ -83,7 +83,7 @@ Edit `.env.local` and set the following values:
 | Variable | Description | How to Generate |
 |----------|-------------|-----------------|
 | `DATABASE_URL` | PostgreSQL connection string | Use default for development |
-| `AUTH_URL` | Application public URL (include basePath if set) | `http://localhost:3000` for dev |
+| `AUTH_URL` | Application origin (e.g., `https://example.com`) — do NOT include path | `http://localhost:3000` for dev |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy deployment | e.g., `/passwd-sso` |
 | `AUTH_SECRET` | NextAuth session signing key | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth Client ID | From Google Cloud Console |
@@ -223,11 +223,48 @@ In production, do NOT place `docker-compose.override.yml` (keeps DB/Jackson port
 To deploy at a sub-path (e.g., `https://example.com/passwd-sso`):
 
 1. Set `NEXT_PUBLIC_BASE_PATH=/passwd-sso` **before** building the image
-2. Set `AUTH_URL=https://example.com/passwd-sso` (include the basePath)
+2. Set `AUTH_URL=https://example.com` (**origin only**, no path).
+   Auth.js combines this with its internal `basePath` (`/passwd-sso/api/auth`) to build
+   callback and redirect URLs. Including the basePath in `AUTH_URL` causes an
+   `env-url-basepath-mismatch` warning and incorrect URL generation.
 3. Update OAuth redirect URIs to include the basePath (e.g., `https://example.com/passwd-sso/api/auth/callback/google`)
-4. Configure your reverse proxy to forward `/<basePath>/*` to the Next.js app
+4. Configure your reverse proxy to forward `/<basePath>/*` to the Next.js app (see examples below)
 
 `NEXT_PUBLIC_BASE_PATH` is a build-time variable. Changing it requires a rebuild.
+
+#### Apache
+
+Requires `mod_proxy`, `mod_proxy_http`, and `mod_proxy_wstunnel`:
+
+```apache
+# WebSocket (required for Next.js HMR in dev mode)
+ProxyPass /passwd-sso/_next/webpack-hmr ws://localhost:3000/passwd-sso/_next/webpack-hmr
+ProxyPassReverse /passwd-sso/_next/webpack-hmr ws://localhost:3000/passwd-sso/_next/webpack-hmr
+
+# Application
+ProxyPass /passwd-sso http://localhost:3000/passwd-sso
+ProxyPassReverse /passwd-sso http://localhost:3000/passwd-sso
+```
+
+> **Note:** The WebSocket rules must appear before the general `ProxyPass` rule.
+> Without `mod_proxy_wstunnel`, the HMR connection drops and the browser shows
+> a reload confirmation dialog approximately every 60 seconds.
+
+#### nginx
+
+```nginx
+location /passwd-sso/ {
+    proxy_pass http://localhost:3000/passwd-sso/;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_read_timeout 86400s;  # keep WebSocket alive
+}
+```
 
 ### Manual Build
 

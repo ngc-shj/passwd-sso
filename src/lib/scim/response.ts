@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
+import { getAppOrigin } from "@/lib/url-helpers";
 
 const SCIM_CONTENT_TYPE = "application/scim+json";
 
 /**
  * Build the SCIM base URL from the environment.
- * Prefers AUTH_URL (which includes basePath) over legacy NEXTAUTH_URL.
+ * Uses getAppOrigin() (APP_URL > AUTH_URL) for the origin,
+ * and NEXT_PUBLIC_BASE_PATH for the sub-path prefix.
+ *
+ * Throws if no origin is configured — SCIM requires absolute URLs
+ * (RFC 7644 §3.1 meta.location). AUTH_URL is required in production
+ * (env.ts superRefine), so this only throws on misconfigured dev setups.
  */
 export function getScimBaseUrl(): string {
-  const base = process.env.AUTH_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
-  return `${base.replace(/\/$/, "")}/api/scim/v2`;
+  const base = getAppOrigin();
+  if (!base) {
+    throw new Error("getScimBaseUrl: APP_URL or AUTH_URL must be set for SCIM");
+  }
+  let basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+  if (basePath && !basePath.startsWith("/")) basePath = `/${basePath}`;
+  return `${base.replace(/\/$/, "")}${basePath}/api/scim/v2`;
 }
 
 /**

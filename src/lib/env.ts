@@ -57,6 +57,28 @@ const envSchema = z
     VERIFIER_PEPPER_KEY: hex64.optional(),
     REDIS_URL: nonEmpty.optional(),
 
+    // --- Application URL ---
+    // External URL for reverse proxy deployments (e.g. https://public.example.com).
+    // Takes priority over AUTH_URL for CORS, CSRF, SCIM, and server-side links.
+    // Optional — falls back to AUTH_URL when not set.
+    APP_URL: z
+      .string()
+      .transform((s) => s.trim())
+      .pipe(
+        z.string().refine(
+          (s) => {
+            try {
+              new URL(s);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { message: "Must be a valid URL" },
+        ),
+      )
+      .optional(),
+
     // --- Auth.js core ---
     AUTH_SECRET: z.string().optional(),
     AUTH_URL: z
