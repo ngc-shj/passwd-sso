@@ -19,6 +19,7 @@ const {
       count: vi.fn(),
     },
     user: {
+      findUnique: vi.fn(),
       update: vi.fn(),
       count: vi.fn(),
     },
@@ -387,6 +388,95 @@ describe("ensureTenantMembershipForSignIn", () => {
 
     expect(ok).toBe(false);
     expect(mockWithBypassRls).not.toHaveBeenCalled();
+  });
+});
+
+describe("signIn callback", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const signInCallback = (nextAuthInitArgs[0] as any).callbacks.signIn as (
+    params: {
+      user: { id?: string; email?: string };
+      account?: { provider: string } | null;
+      profile?: Record<string, unknown> | null;
+    },
+  ) => Promise<boolean>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockExtractTenantClaimValue.mockReturnValue(null);
+    mockSlugifyTenant.mockReturnValue(null);
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+  });
+
+  it("returns true for new user with pre-generated id not in DB", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "new@example.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    // Should have looked up by email
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: "new@example.com" },
+      select: { id: true },
+    });
+    // Should NOT have tried to upsert tenant membership
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+  });
+
+  it("uses DB id (not pre-generated id) for existing user", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "existing@example.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockPrisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: "existing@example.com" },
+      select: { id: true },
+    });
+  });
+
+  it("returns true when user has no email", async () => {
+    const result = await signInCallback({
+      user: { id: "some-id" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("calls ensureTenantMembershipForSignIn with DB id for existing user with tenant claim", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
+    mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
+    mockSlugifyTenant.mockReturnValue("tenant-acme");
+    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "cuid_acme_1" });
+    mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+    mockPrisma.tenantMember.upsert.mockResolvedValue({});
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "user@acme.com" },
+      account: { provider: "google" },
+      profile: { hd: "acme.com" },
+    });
+
+    expect(result).toBe(true);
+    // Tenant member upsert should use real DB id, not pre-generated id
+    expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ userId: "real-db-id" }),
+      }),
+    );
   });
 });
 
