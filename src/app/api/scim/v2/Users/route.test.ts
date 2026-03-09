@@ -63,6 +63,7 @@ function makeReq(options: { searchParams?: Record<string, string>; body?: unknow
 describe("GET /api/scim/v2/Users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_URL = "http://localhost:3000";
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });
@@ -181,6 +182,7 @@ describe("GET /api/scim/v2/Users", () => {
 describe("POST /api/scim/v2/Users", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    process.env.AUTH_URL = "http://localhost:3000";
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
   });

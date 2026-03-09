@@ -212,7 +212,9 @@ export function ShareDialog({
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { totp, ...safeData } = decryptedData as Record<string, unknown>;
-    const allKeys = Object.keys(safeData).filter((k) => !INTERNAL_FIELDS.has(k));
+    const allKeys = Object.keys(safeData).filter(
+      (k) => !INTERNAL_FIELDS.has(k) && safeData[k] !== undefined && safeData[k] !== null,
+    );
 
     const permissions =
       permission === SHARE_PERMISSION.VIEW_ALL ? [] : [permission];
@@ -251,9 +253,13 @@ export function ShareDialog({
         expiresIn,
       };
 
-      // Strip TOTP before sharing (F-21)
+      // Strip TOTP and undefined/null fields before sharing (F-21)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { totp, ...safeData } = (decryptedData ?? {}) as Record<string, unknown>;
+      const { totp, ...rawData } = (decryptedData ?? {}) as Record<string, unknown>;
+      const safeData: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(rawData)) {
+        if (v !== undefined && v !== null) safeData[k] = v;
+      }
 
       const permissions =
         permission === SHARE_PERMISSION.VIEW_ALL ? [] : [permission];

@@ -12,17 +12,17 @@
 
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { getAppOrigin } from "@/lib/url-helpers";
 
 /**
- * Resolve the canonical app origin from environment.
- * Matches the same priority as csrf.ts assertOrigin().
+ * Resolve the canonical app origin for CORS comparison.
  *
  * APP_URL/AUTH_URL unset → null → no CORS headers (deny-equivalent for browsers).
  * CORS is a browser constraint only. Non-browser client defense is handled
  * by auth (session/Bearer) + assertOrigin().
  */
-function getAppOrigin(): string | null {
-  const url = process.env.APP_URL || process.env.AUTH_URL;
+function resolveOrigin(): string | null {
+  const url = getAppOrigin();
   if (!url) return null;
   try {
     return new URL(url).origin;
@@ -43,7 +43,7 @@ function corsHeaders(request: NextRequest): Record<string, string> {
   const origin = request.headers.get("origin");
   if (!origin) return {};
 
-  const appOrigin = getAppOrigin();
+  const appOrigin = resolveOrigin();
   if (!appOrigin) return {};
 
   if (origin === appOrigin) {

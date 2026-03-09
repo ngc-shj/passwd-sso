@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
+import { getAppOrigin } from "@/lib/url-helpers";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -26,7 +27,9 @@ export async function POST(req: NextRequest) {
   const originError = assertOrigin(req);
   if (originError) return originError;
 
-  const appUrl = process.env.APP_URL || process.env.AUTH_URL;
+  // Intentionally stricter than assertOrigin (which skips when unset for dev
+  // convenience): admin vault reset must never run without a configured origin.
+  const appUrl = getAppOrigin();
   if (!appUrl) {
     return NextResponse.json(
       { error: API_ERROR.INVALID_ORIGIN },
