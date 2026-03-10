@@ -10,7 +10,7 @@ const bodySchema = z.object({
   successCount: z.number().int().min(0),
   failedCount: z.number().int().min(0),
   filename: z.string().trim().min(1).max(255).optional(),
-  format: z.enum(["csv", "json"]).optional(),
+  format: z.enum(["csv", "json", "xml"]).optional(),
   encrypted: z.boolean().optional(),
 });
 
