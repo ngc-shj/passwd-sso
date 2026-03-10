@@ -35,6 +35,23 @@ const DEFAULT_POLICY: PolicyData = {
   allowSharing: true,
 };
 
+/** Validate policy fields. Returns a map of field name → error key (i18n). */
+export function validatePolicy(
+  policy: Pick<PolicyData, "minPasswordLength" | "maxSessionDurationMinutes">,
+): Record<string, string> {
+  const errs: Record<string, string> = {};
+  if (policy.minPasswordLength < 0 || policy.minPasswordLength > 128) {
+    errs.minPasswordLength = "minPasswordLengthRange";
+  }
+  if (
+    policy.maxSessionDurationMinutes !== null &&
+    (policy.maxSessionDurationMinutes < 5 || policy.maxSessionDurationMinutes > 43200)
+  ) {
+    errs.maxSessionDurationMinutes = "maxSessionDurationRange";
+  }
+  return errs;
+}
+
 interface TeamPolicySettingsProps {
   teamId: string;
 }
@@ -64,7 +81,21 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
     fetchPolicy();
   }, [fetchPolicy]);
 
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const validate = (): boolean => {
+    const rawErrs = validatePolicy(policy);
+    const translated: Record<string, string> = {};
+    for (const [key, msgKey] of Object.entries(rawErrs)) {
+      translated[key] = t(msgKey);
+    }
+    setFieldErrors(translated);
+    return Object.keys(rawErrs).length === 0;
+  };
+
   const handleSave = async () => {
+    if (!validate()) return;
+
     setSaving(true);
     try {
       const res = await fetchApi(`/api/teams/${teamId}/policy`, {
@@ -74,7 +105,10 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
       });
       if (res.ok) {
         setPolicy(await res.json());
+        setFieldErrors({});
         toast.success(t("saveSuccess"));
+      } else if (res.status === 400) {
+        toast.error(t("validationError"));
       } else {
         toast.error(t("saveError"));
       }
@@ -112,14 +146,21 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               min={0}
               max={128}
               value={policy.minPasswordLength}
-              onChange={(e) =>
+              onChange={(e) => {
                 setPolicy((p) => ({
                   ...p,
                   minPasswordLength: parseInt(e.target.value, 10) || 0,
-                }))
-              }
+                }));
+                setFieldErrors((prev) => {
+                  const { minPasswordLength: _, ...rest } = prev;
+                  return rest;
+                });
+              }}
               className="max-w-[200px]"
             />
+            {fieldErrors.minPasswordLength && (
+              <p className="text-sm text-destructive">{fieldErrors.minPasswordLength}</p>
+            )}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -152,17 +193,24 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               min={5}
               max={43200}
               value={policy.maxSessionDurationMinutes ?? ""}
-              onChange={(e) =>
+              onChange={(e) => {
                 setPolicy((p) => ({
                   ...p,
                   maxSessionDurationMinutes: e.target.value
                     ? parseInt(e.target.value, 10)
                     : null,
-                }))
-              }
+                }));
+                setFieldErrors((prev) => {
+                  const { maxSessionDurationMinutes: _, ...rest } = prev;
+                  return rest;
+                });
+              }}
               placeholder={t("maxSessionDurationHelp")}
               className="max-w-[200px]"
             />
+            {fieldErrors.maxSessionDurationMinutes && (
+              <p className="text-sm text-destructive">{fieldErrors.maxSessionDurationMinutes}</p>
+            )}
           </div>
 
           <SwitchField

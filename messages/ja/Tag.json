@@ -8,5 +8,6 @@
   "noParent": "なし（ルートレベル）",
   "pathSeparator": " / ",
   "maxDepthError": "ネストの最大深度を超えました",
-  "cycleError": "循環参照は作成できません"
+  "cycleError": "循環参照は作成できません",
+  "nameTooLong": "タグ名は50文字以内で入力してください"
 }

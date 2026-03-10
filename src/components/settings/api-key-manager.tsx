@@ -129,6 +129,8 @@ export function ApiKeyManager() {
         const err = await res.json().catch(() => ({}));
         if (err.error === "API_KEY_LIMIT_EXCEEDED") {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
+        } else if (res.status === 400) {
+          toast.error(t("validationError"));
         } else {
           toast.error(t("createError"));
         }

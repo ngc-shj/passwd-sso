@@ -8,5 +8,6 @@
   "noParent": "None (root level)",
   "pathSeparator": " / ",
   "maxDepthError": "Maximum nesting depth exceeded",
-  "cycleError": "Cannot create circular reference"
+  "cycleError": "Cannot create circular reference",
+  "nameTooLong": "Tag name must be 50 characters or less"
 }

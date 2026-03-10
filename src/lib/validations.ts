@@ -118,7 +118,7 @@ export const generatePassphraseSchema = z.object({
 
 // ─── Team Schemas ──────────────────────────────────────────
 
-const slugRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
+export const slugRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 
 export const createTeamSchema = z.object({
   name: z.string().min(1).max(100).trim(),

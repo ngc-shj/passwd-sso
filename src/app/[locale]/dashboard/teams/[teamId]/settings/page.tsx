@@ -152,6 +152,7 @@ export default function TeamSettingsPage({
   const isAdmin = team?.role === TEAM_ROLE.ADMIN || isOwner;
 
   const handleUpdateTeam = async () => {
+    if (!name.trim()) return;
     setSaving(true);
     try {
       const res = await fetchApi(apiPath.teamById(teamId), {
@@ -159,6 +160,11 @@ export default function TeamSettingsPage({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), description: description.trim() }),
       });
+      if (res.status === 400) {
+        toast.error(t("validationError"));
+        setSaving(false);
+        return;
+      }
       if (!res.ok) throw new Error("Failed");
       toast.success(t("updated"));
       window.dispatchEvent(new CustomEvent("team-data-changed"));

@@ -92,6 +92,10 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
 
   const createAndAddTag = async () => {
     if (!inputValue.trim() || creating) return;
+    if (inputValue.trim().length > 50) {
+      toast.error(t("nameTooLong"));
+      return;
+    }
     setCreating(true);
     try {
       const res = await fetchApi(apiPath.teamTags(teamId), {

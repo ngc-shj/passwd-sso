@@ -7,6 +7,9 @@ import {
   createShareLinkSchema,
   teamMemberKeySchema,
   generatePasswordSchema,
+  slugRegex,
+  createTeamSchema,
+  createTagSchema,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -415,5 +418,97 @@ describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", (
       encryptedItemKey: encField,
     });
     expect(result.success).toBe(false);
+  });
+});
+
+// ─── slugRegex ──────────────────────────────────────────────
+
+describe("slugRegex", () => {
+  it.each(["ab", "my-team", "team123", "a1"])("accepts valid slug %s", (slug) => {
+    expect(slugRegex.test(slug)).toBe(true);
+  });
+
+  it.each(["a", "-ab", "ab-", "AB", "my team", ""])(
+    "rejects invalid slug %s",
+    (slug) => {
+      expect(slugRegex.test(slug)).toBe(false);
+    },
+  );
+});
+
+// ─── createTeamSchema ───────────────────────────────────────
+
+describe("createTeamSchema", () => {
+  const valid = { name: "My Team", slug: "my-team" };
+
+  it("accepts valid input", () => {
+    expect(createTeamSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("accepts 2-char slug", () => {
+    expect(createTeamSchema.safeParse({ ...valid, slug: "ab" }).success).toBe(true);
+  });
+
+  it("rejects 1-char slug", () => {
+    expect(createTeamSchema.safeParse({ ...valid, slug: "a" }).success).toBe(false);
+  });
+
+  it("rejects slug starting with hyphen", () => {
+    expect(createTeamSchema.safeParse({ ...valid, slug: "-ab" }).success).toBe(false);
+  });
+
+  it("rejects slug ending with hyphen", () => {
+    expect(createTeamSchema.safeParse({ ...valid, slug: "ab-" }).success).toBe(false);
+  });
+
+  it("rejects uppercase slug", () => {
+    expect(createTeamSchema.safeParse({ ...valid, slug: "AB" }).success).toBe(false);
+  });
+
+  it("rejects 51-char slug", () => {
+    expect(
+      createTeamSchema.safeParse({ ...valid, slug: "a".repeat(51) }).success,
+    ).toBe(false);
+  });
+
+  it("accepts 50-char slug", () => {
+    const slug = "a".repeat(49) + "b";
+    expect(createTeamSchema.safeParse({ ...valid, slug }).success).toBe(true);
+  });
+
+  it("rejects empty name", () => {
+    expect(createTeamSchema.safeParse({ ...valid, name: "" }).success).toBe(false);
+  });
+});
+
+// ─── createTagSchema ────────────────────────────────────────
+
+describe("createTagSchema", () => {
+  it("accepts valid tag name", () => {
+    expect(createTagSchema.safeParse({ name: "work" }).success).toBe(true);
+  });
+
+  it("rejects empty tag name", () => {
+    expect(createTagSchema.safeParse({ name: "" }).success).toBe(false);
+  });
+
+  it("accepts 50-char tag name", () => {
+    expect(createTagSchema.safeParse({ name: "a".repeat(50) }).success).toBe(true);
+  });
+
+  it("rejects 51-char tag name", () => {
+    expect(createTagSchema.safeParse({ name: "a".repeat(51) }).success).toBe(false);
+  });
+
+  it("accepts valid hex color", () => {
+    expect(createTagSchema.safeParse({ name: "t", color: "#4f46e5" }).success).toBe(true);
+  });
+
+  it("rejects invalid color", () => {
+    expect(createTagSchema.safeParse({ name: "t", color: "red" }).success).toBe(false);
+  });
+
+  it("accepts empty string color (clears color)", () => {
+    expect(createTagSchema.safeParse({ name: "t", color: "" }).success).toBe(true);
   });
 });

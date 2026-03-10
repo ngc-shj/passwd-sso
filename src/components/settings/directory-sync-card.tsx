@@ -185,6 +185,8 @@ export function DirectorySyncCard() {
           toast.success(t("configUpdated"));
           setDialogOpen(false);
           fetchConfigs();
+        } else if (res.status === 400) {
+          toast.error(t("validationError"));
         } else {
           toast.error(t("syncFailed"));
         }
@@ -205,13 +207,12 @@ export function DirectorySyncCard() {
           toast.success(t("configCreated"));
           setDialogOpen(false);
           fetchConfigs();
+        } else if (res.status === 409) {
+          toast.error(t("syncConflict"));
+        } else if (res.status === 400) {
+          toast.error(t("validationError"));
         } else {
-          const data = await res.json().catch(() => ({}));
-          if (res.status === 409) {
-            toast.error(t("syncConflict"));
-          } else {
-            toast.error(data?.details ? JSON.stringify(data.details) : t("syncFailed"));
-          }
+          toast.error(t("syncFailed"));
         }
       }
     } catch {
