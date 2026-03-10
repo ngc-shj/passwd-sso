@@ -79,6 +79,9 @@ vi.mock("@/lib/constants", () => ({
 vi.mock("@/lib/validations", () => ({
   SEND_MAX_FILE_SIZE: 10 * 1024 * 1024,
   SEND_MAX_TEXT_LENGTH: 50_000,
+  SEND_NAME_MAX_LENGTH: 200,
+  MAX_VIEWS_MIN: 1,
+  MAX_VIEWS_MAX: 100,
 }));
 
 import { SendDialog } from "./send-dialog";

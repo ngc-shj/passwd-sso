@@ -40,6 +40,7 @@ import {
 } from "@/lib/constants/share-permission";
 import { formatDateTime } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
 
 interface ShareLink {
   id: string;
@@ -289,7 +290,7 @@ export function ShareDialog({
       }
       if (maxViews) {
         const mv = parseInt(maxViews, 10);
-        if (mv >= 1 && mv <= 100) body.maxViews = mv;
+        if (mv >= MAX_VIEWS_MIN && mv <= MAX_VIEWS_MAX) body.maxViews = mv;
       }
 
       const res = await fetchApi(API_PATH.SHARE_LINKS, {
@@ -454,16 +455,16 @@ export function ShareDialog({
               <Label className="text-xs">{t("maxViewsLabel")}</Label>
               <Input
                 type="number"
-                min={1}
-                max={100}
+                min={MAX_VIEWS_MIN}
+                max={MAX_VIEWS_MAX}
                 placeholder={t("maxViewsPlaceholder")}
                 value={maxViews}
                 onChange={(e) => {
                   const raw = e.target.value;
                   if (!raw) { setMaxViews(""); return; }
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setMaxViews(""); return; }
-                  setMaxViews(String(Math.min(n, 100)));
+                  if (Number.isNaN(n) || n < MAX_VIEWS_MIN) { setMaxViews(""); return; }
+                  setMaxViews(String(Math.min(n, MAX_VIEWS_MAX)));
                 }}
               />
             </div>

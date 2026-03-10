@@ -43,6 +43,7 @@ import {
 import { FolderSync, Loader2, Play, Plus, ScrollText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
+import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { formatDateTime, formatRelativeTime } from "@/lib/format-datetime";
 
@@ -603,7 +604,7 @@ export function DirectorySyncCard() {
                 value={formDisplayName}
                 onChange={(e) => setFormDisplayName(e.target.value)}
                 placeholder={t("displayNamePlaceholder")}
-                maxLength={100}
+                maxLength={NAME_MAX_LENGTH}
               />
             </div>
             <div className="flex items-center gap-3">

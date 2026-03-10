@@ -21,7 +21,7 @@ import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
-import { slugRegex } from "@/lib/validations";
+import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH } from "@/lib/validations";
 
 interface TeamCreateDialogProps {
   trigger: React.ReactNode;
@@ -61,8 +61,8 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
 
   const validateSlug = (value: string): string | null => {
     const trimmed = value.trim();
-    if (trimmed.length < 2) return t("slugTooShort");
-    if (trimmed.length > 50) return t("slugTooLong");
+    if (trimmed.length < SLUG_MIN_LENGTH) return t("slugTooShort");
+    if (trimmed.length > SLUG_MAX_LENGTH) return t("slugTooLong");
     if (!slugRegex.test(trimmed)) return t("slugInvalidFormat");
     return null;
   };

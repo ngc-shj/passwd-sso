@@ -10,6 +10,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  POLICY_MIN_PW_LENGTH_MIN,
+  POLICY_MIN_PW_LENGTH_MAX,
+  POLICY_SESSION_DURATION_MIN,
+  POLICY_SESSION_DURATION_MAX,
+} from "@/lib/validations";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -41,11 +47,11 @@ export function validatePolicy(
 ): Record<string, string> {
   const errs: Record<string, string> = {};
   const pwLen = policy.minPasswordLength;
-  if (Number.isNaN(pwLen) || pwLen < 0 || pwLen > 128) {
+  if (Number.isNaN(pwLen) || pwLen < POLICY_MIN_PW_LENGTH_MIN || pwLen > POLICY_MIN_PW_LENGTH_MAX) {
     errs.minPasswordLength = "minPasswordLengthRange";
   }
   const dur = policy.maxSessionDurationMinutes;
-  if (dur !== null && (Number.isNaN(dur) || dur < 5 || dur > 43200)) {
+  if (dur !== null && (Number.isNaN(dur) || dur < POLICY_SESSION_DURATION_MIN || dur > POLICY_SESSION_DURATION_MAX)) {
     errs.maxSessionDurationMinutes = "maxSessionDurationRange";
   }
   return errs;
@@ -142,12 +148,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <Label>{t("minPasswordLength")}</Label>
             <Input
               type="number"
-              min={0}
-              max={128}
+              min={POLICY_MIN_PW_LENGTH_MIN}
+              max={POLICY_MIN_PW_LENGTH_MAX}
               value={policy.minPasswordLength}
               onChange={(e) => {
                 const parsed = parseInt(e.target.value, 10);
-                const value = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(128, parsed));
+                const value = Number.isNaN(parsed) ? 0 : Math.max(POLICY_MIN_PW_LENGTH_MIN, Math.min(POLICY_MIN_PW_LENGTH_MAX, parsed));
                 setPolicy((p) => ({ ...p, minPasswordLength: value }));
                 setFieldErrors((prev) => {
                   const { minPasswordLength: _, ...rest } = prev;
@@ -188,18 +194,18 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <Label>{t("maxSessionDurationMinutes")}</Label>
             <Input
               type="number"
-              min={5}
-              max={43200}
+              min={POLICY_SESSION_DURATION_MIN}
+              max={POLICY_SESSION_DURATION_MAX}
               value={policy.maxSessionDurationMinutes ?? ""}
               onChange={(e) => {
                 if (!e.target.value) {
                   setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
                 } else {
                   const parsed = parseInt(e.target.value, 10);
-                  if (Number.isNaN(parsed) || parsed < 5) {
+                  if (Number.isNaN(parsed) || parsed < POLICY_SESSION_DURATION_MIN) {
                     setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
                   } else {
-                    const value = Math.min(43200, parsed);
+                    const value = Math.min(POLICY_SESSION_DURATION_MAX, parsed);
                     setPolicy((p) => ({ ...p, maxSessionDurationMinutes: value }));
                   }
                 }

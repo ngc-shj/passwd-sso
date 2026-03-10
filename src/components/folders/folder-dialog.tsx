@@ -20,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { FolderItem } from "./folder-tree";
+import { NAME_MAX_LENGTH } from "@/lib/validations";
 
 interface FolderDialogProps {
   open: boolean;
@@ -109,7 +110,7 @@ export function FolderDialog({
               id="folder-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              maxLength={100}
+              maxLength={NAME_MAX_LENGTH}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.nativeEvent.isComposing && name.trim()) handleSubmit();

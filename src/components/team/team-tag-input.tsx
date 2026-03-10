@@ -13,6 +13,7 @@ import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { apiPath } from "@/lib/constants";
 import { buildTagPath } from "@/lib/tag-tree";
 import { fetchApi } from "@/lib/url-helpers";
+import { TAG_NAME_MAX_LENGTH } from "@/lib/validations";
 
 export interface TeamTagData {
   id: string;
@@ -92,7 +93,7 @@ export function TeamTagInput({ teamId, selectedTags, onChange }: TeamTagInputPro
 
   const createAndAddTag = async () => {
     if (!inputValue.trim() || creating) return;
-    if (inputValue.trim().length > 50) {
+    if (inputValue.trim().length > TAG_NAME_MAX_LENGTH) {
       toast.error(t("nameTooLong"));
       return;
     }

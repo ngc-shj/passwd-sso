@@ -3,17 +3,39 @@ import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
 import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES, SHARE_PERMISSION_VALUES } from "@/lib/constants";
 import { API_KEY_SCOPES, MAX_API_KEY_EXPIRY_DAYS } from "@/lib/constants/api-key";
 
+// ─── Validation Constants (single source of truth) ──────────
+// Used by both Zod schemas (server) and UI components (client).
+
+export const PASSWORD_LENGTH_MIN = 8;
+export const PASSWORD_LENGTH_MAX = 128;
+export const PASSPHRASE_WORD_COUNT_MIN = 3;
+export const PASSPHRASE_WORD_COUNT_MAX = 10;
+export const CHARS_FIELD_MAX = 128;
+export const NAME_MAX_LENGTH = 100;
+export const TAG_NAME_MAX_LENGTH = 50;
+export const SLUG_MIN_LENGTH = 2;
+export const SLUG_MAX_LENGTH = 50;
+export const DESCRIPTION_MAX_LENGTH = 500;
+export const POLICY_MIN_PW_LENGTH_MIN = 0;
+export const POLICY_MIN_PW_LENGTH_MAX = 128;
+export const POLICY_SESSION_DURATION_MIN = 5;
+export const POLICY_SESSION_DURATION_MAX = 43200;
+export const MAX_VIEWS_MIN = 1;
+export const MAX_VIEWS_MAX = 100;
+export const SEND_NAME_MAX_LENGTH = 200;
+export const PASSPHRASE_MIN_LENGTH = 10;
+
 const asciiPrintable = /^[\x20-\x7E]*$/;
 
 export const generatePasswordSchema = z.object({
-  length: z.number().int().min(8).max(128).default(16),
+  length: z.number().int().min(PASSWORD_LENGTH_MIN).max(PASSWORD_LENGTH_MAX).default(16),
   uppercase: z.boolean().default(true),
   lowercase: z.boolean().default(true),
   numbers: z.boolean().default(true),
-  symbols: z.string().max(128).regex(asciiPrintable).default(""),
+  symbols: z.string().max(CHARS_FIELD_MAX).regex(asciiPrintable).default(""),
   excludeAmbiguous: z.boolean().default(false),
-  includeChars: z.string().max(128).regex(asciiPrintable).default(""),
-  excludeChars: z.string().max(128).regex(asciiPrintable).default(""),
+  includeChars: z.string().max(CHARS_FIELD_MAX).regex(asciiPrintable).default(""),
+  excludeChars: z.string().max(CHARS_FIELD_MAX).regex(asciiPrintable).default(""),
 });
 
 // ─── Attachment Constants ────────────────────────────────────
@@ -74,13 +96,13 @@ export const updateE2EPasswordSchema = z.object({
 // ─── Folder Schemas ─────────────────────────────────────────
 
 export const createFolderSchema = z.object({
-  name: z.string().min(1).max(100).trim(),
+  name: z.string().min(1).max(NAME_MAX_LENGTH).trim(),
   parentId: z.string().cuid().optional().nullable(),
   sortOrder: z.number().int().min(0).optional(),
 });
 
 export const updateFolderSchema = z.object({
-  name: z.string().min(1).max(100).trim().optional(),
+  name: z.string().min(1).max(NAME_MAX_LENGTH).trim().optional(),
   parentId: z.string().cuid().optional().nullable(),
   sortOrder: z.number().int().min(0).optional(),
 });
@@ -88,7 +110,7 @@ export const updateFolderSchema = z.object({
 // ─── Tag Schemas ────────────────────────────────────────────
 
 export const createTagSchema = z.object({
-  name: z.string().min(1).max(50).trim(),
+  name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim(),
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -99,7 +121,7 @@ export const createTagSchema = z.object({
 });
 
 export const updateTagSchema = z.object({
-  name: z.string().min(1).max(50).trim().optional(),
+  name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim().optional(),
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -110,7 +132,7 @@ export const updateTagSchema = z.object({
 });
 
 export const generatePassphraseSchema = z.object({
-  wordCount: z.number().int().min(3).max(10).default(4),
+  wordCount: z.number().int().min(PASSPHRASE_WORD_COUNT_MIN).max(PASSPHRASE_WORD_COUNT_MAX).default(4),
   separator: z.string().max(5).default("-"),
   capitalize: z.boolean().default(true),
   includeNumber: z.boolean().default(false),
@@ -121,13 +143,13 @@ export const generatePassphraseSchema = z.object({
 export const slugRegex = /^[a-z0-9][a-z0-9-]*[a-z0-9]$/;
 
 export const createTeamSchema = z.object({
-  name: z.string().min(1).max(100).trim(),
+  name: z.string().min(1).max(NAME_MAX_LENGTH).trim(),
   slug: z
     .string()
-    .min(2)
-    .max(50)
+    .min(SLUG_MIN_LENGTH)
+    .max(SLUG_MAX_LENGTH)
     .regex(slugRegex, "Slug must be lowercase alphanumeric with hyphens"),
-  description: z.string().max(500).trim().optional(),
+  description: z.string().max(DESCRIPTION_MAX_LENGTH).trim().optional(),
 });
 
 /** Schema for E2E team creation — includes client-encrypted TeamMemberKey for owner */
@@ -204,17 +226,17 @@ export const updateTeamE2EPasswordSchema = z.object({
 );
 
 export const updateTeamSchema = z.object({
-  name: z.string().min(1).max(100).trim().optional(),
-  description: z.string().max(500).trim().optional().or(z.literal("")),
+  name: z.string().min(1).max(NAME_MAX_LENGTH).trim().optional(),
+  description: z.string().max(DESCRIPTION_MAX_LENGTH).trim().optional().or(z.literal("")),
 });
 
 export const upsertTeamPolicySchema = z.object({
-  minPasswordLength: z.number().int().min(0).max(128).default(0),
+  minPasswordLength: z.number().int().min(POLICY_MIN_PW_LENGTH_MIN).max(POLICY_MIN_PW_LENGTH_MAX).default(0),
   requireUppercase: z.boolean().default(false),
   requireLowercase: z.boolean().default(false),
   requireNumbers: z.boolean().default(false),
   requireSymbols: z.boolean().default(false),
-  maxSessionDurationMinutes: z.number().int().min(5).max(43200).nullable().default(null),
+  maxSessionDurationMinutes: z.number().int().min(POLICY_SESSION_DURATION_MIN).max(POLICY_SESSION_DURATION_MAX).nullable().default(null),
   requireRepromptForAll: z.boolean().default(false),
   allowExport: z.boolean().default(true),
   allowSharing: z.boolean().default(true),
@@ -230,7 +252,7 @@ export const updateMemberRoleSchema = z.object({
 });
 
 export const createTeamTagSchema = z.object({
-  name: z.string().min(1).max(50).trim(),
+  name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim(),
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -241,7 +263,7 @@ export const createTeamTagSchema = z.object({
 });
 
 export const updateTeamTagSchema = z.object({
-  name: z.string().min(1).max(50).trim().optional(),
+  name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim().optional(),
   color: z
     .string()
     .regex(/^#[0-9a-fA-F]{6}$/)
@@ -291,16 +313,16 @@ export function isValidSendFilename(name: string): boolean {
 }
 
 export const createSendTextSchema = z.object({
-  name: z.string().min(1).max(200).trim(),
+  name: z.string().min(1).max(SEND_NAME_MAX_LENGTH).trim(),
   text: z.string().min(1).max(SEND_MAX_TEXT_LENGTH),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
-  maxViews: z.number().int().min(1).max(100).optional(),
+  maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
 });
 
 export const createSendFileMetaSchema = z.object({
-  name: z.string().min(1).max(200).trim(),
+  name: z.string().min(1).max(SEND_NAME_MAX_LENGTH).trim(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
-  maxViews: z.coerce.number().int().min(1).max(100).optional(),
+  maxViews: z.coerce.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
 });
 
 // ─── Share Link Schemas ───────────────────────────────────
@@ -374,7 +396,7 @@ export const createShareLinkSchema = z.object({
   encryptedShareData: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
-  maxViews: z.number().int().min(1).max(100).optional(),
+  maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
   permissions: z.array(z.enum(SHARE_PERMISSION_VALUES)).optional(),
 }).refine(
   (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),
@@ -442,7 +464,7 @@ export const revokeEmergencyGrantSchema = z.object({
 // ─── API Key ──────────────────────────────────────────────
 
 export const apiKeyCreateSchema = z.object({
-  name: z.string().min(1).max(100),
+  name: z.string().min(1).max(NAME_MAX_LENGTH),
   scope: z.array(z.enum(API_KEY_SCOPES)).min(1),
   expiresAt: z.coerce.date().refine(
     (d) => {
