@@ -92,19 +92,6 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Handle CORS preflight for API routes only.
-  // handleApiAuth() is already scoped to /api/* by the caller (proxy()).
-  // If a future route needs OPTIONS for business logic, add an exclusion here.
-  if (request.method === "OPTIONS") {
-    return handlePreflight(request);
-  }
-
-  // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
-  // Route handlers handle all auth via validateApiKeyOnly().
-  if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
-    return NextResponse.next();
-  }
-
   // Routes that accept extension token (Bearer) as alternative auth.
   // Let the route handler validate the token instead of checking session.
   // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
@@ -116,9 +103,6 @@ async function handleApiAuth(request: NextRequest) {
     API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
     API_PATH.API_KEYS,  // API key management — validated by route handler via authOrToken
   ];
-  const hasBearer = request.headers
-    .get("authorization")
-    ?.startsWith("Bearer ");
   const isBearerBypassRoute = (route: string) => {
     // Extension token endpoints should be exact only.
     if (
@@ -130,9 +114,28 @@ async function handleApiAuth(request: NextRequest) {
     // Password/vault routes allow child paths.
     return pathname === route || pathname.startsWith(route + "/");
   };
+  const isBearerRoute = extensionTokenRoutes.some(isBearerBypassRoute);
 
-  if (hasBearer && extensionTokenRoutes.some(isBearerBypassRoute)) {
-    return applyCorsHeaders(request, NextResponse.next());
+  // Handle CORS preflight for API routes.
+  // For extension Bearer routes, allow chrome-extension:// origins so that
+  // Service Worker fetch (which triggers preflight due to Authorization header)
+  // can proceed.
+  if (request.method === "OPTIONS") {
+    return handlePreflight(request, { allowExtension: isBearerRoute });
+  }
+
+  // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
+  // Route handlers handle all auth via validateApiKeyOnly().
+  if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
+    return NextResponse.next();
+  }
+
+  const hasBearer = request.headers
+    .get("authorization")
+    ?.startsWith("Bearer ");
+
+  if (hasBearer && isBearerRoute) {
+    return applyCorsHeaders(request, NextResponse.next(), { allowExtension: true });
   }
 
   // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
