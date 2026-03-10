@@ -263,13 +263,13 @@ describe("login-save", () => {
     it("returns error when swFetch throws network error", async () => {
       const deps = createDeps({
         getEncryptionKey: vi.fn().mockReturnValue(testKey),
-        swFetch: vi.fn().mockRejectedValue(new Error("NetworkError")),
+        swFetch: vi.fn().mockRejectedValue(new Error("Failed to fetch")),
       });
       initLoginSave(deps);
 
       const result = await handleSaveLogin("https://example.com", "example.com", "alice", "pw");
       expect(result.ok).toBe(false);
-      expect(result.error).toBe("NetworkError");
+      expect(result.error).toBe("NETWORK_ERROR");
     });
 
     it("handles non-JSON error response from server", async () => {

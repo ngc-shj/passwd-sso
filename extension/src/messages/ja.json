@@ -94,6 +94,7 @@
     "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
     "autoLockInvalid": "自動ロックは 0 以上にしてください",
     "noTotpConfigured": "この項目に TOTP が設定されていません",
-    "invalidTotp": "この項目の TOTP 設定が不正です"
+    "invalidTotp": "この項目の TOTP 設定が不正です",
+    "networkError": "サーバーに接続できません。自己署名証明書を使用している場合は、ブラウザでサーバーURLを開いて証明書を受け入れてください。"
   }
 }
