@@ -147,10 +147,11 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               max={128}
               value={policy.minPasswordLength}
               onChange={(e) => {
-                setPolicy((p) => ({
-                  ...p,
-                  minPasswordLength: parseInt(e.target.value, 10) || 0,
-                }));
+                const parsed = parseInt(e.target.value, 10);
+                const value = Number.isNaN(parsed) ? 0 : parsed;
+                setPolicy((p) => ({ ...p, minPasswordLength: value }));
+                // Strip leading zeros by forcing the input value
+                e.target.value = String(value);
                 setFieldErrors((prev) => {
                   const { minPasswordLength: _, ...rest } = prev;
                   return rest;
@@ -194,12 +195,14 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               max={43200}
               value={policy.maxSessionDurationMinutes ?? ""}
               onChange={(e) => {
-                setPolicy((p) => ({
-                  ...p,
-                  maxSessionDurationMinutes: e.target.value
-                    ? parseInt(e.target.value, 10)
-                    : null,
-                }));
+                if (!e.target.value) {
+                  setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
+                } else {
+                  const parsed = parseInt(e.target.value, 10);
+                  const value = Number.isNaN(parsed) ? null : parsed;
+                  setPolicy((p) => ({ ...p, maxSessionDurationMinutes: value }));
+                  if (value !== null) e.target.value = String(value);
+                }
                 setFieldErrors((prev) => {
                   const { maxSessionDurationMinutes: _, ...rest } = prev;
                   return rest;
