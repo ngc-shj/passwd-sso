@@ -108,6 +108,23 @@ describe("findOrCreateSsoTenant", () => {
     expect(mockPrisma.tenant.create).not.toHaveBeenCalled();
   });
 
+  it("returns null on double P2002 collision", async () => {
+    const { Prisma } = await import("@prisma/client");
+    const p2002 = new Prisma.PrismaClientKnownRequestError("unique", {
+      code: "P2002",
+      clientVersion: "7.0.0",
+    });
+    mockPrisma.tenant.findUnique.mockResolvedValue(null);
+    mockPrisma.tenant.create
+      .mockRejectedValueOnce(p2002)
+      .mockRejectedValueOnce(p2002);
+
+    const result = await findOrCreateSsoTenant("acme.com");
+
+    expect(result).toBeNull();
+    expect(mockPrisma.tenant.create).toHaveBeenCalledTimes(2);
+  });
+
   it("throws non-P2002 errors", async () => {
     mockPrisma.tenant.findUnique.mockResolvedValue(null);
     mockPrisma.tenant.create.mockRejectedValueOnce(new Error("DB down"));

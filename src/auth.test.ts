@@ -67,6 +67,15 @@ const {
     attachment: {
       updateMany: vi.fn(),
     },
+    notification: {
+      updateMany: vi.fn(),
+    },
+    apiKey: {
+      updateMany: vi.fn(),
+    },
+    webAuthnCredential: {
+      updateMany: vi.fn(),
+    },
     team: {
       count: vi.fn(),
     },
@@ -479,6 +488,8 @@ describe("signIn callback", () => {
 
     expect(result).toBe(true);
     expect(mockTenantClaimStore.tenantClaim).toBe("acme.com");
+    // ensureTenantMembershipForSignIn should NOT be called for new users
+    expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
   });
 
   it("does not store tenant claim when no claim is extracted", async () => {

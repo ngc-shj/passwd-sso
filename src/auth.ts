@@ -122,6 +122,18 @@ export async function ensureTenantMembershipForSignIn(
             where: { createdById: userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
+          await tx.notification.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.apiKey.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.webAuthnCredential.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
 
           // Create membership in new tenant and remove old
           await tx.tenantMember.upsert({
