@@ -3,6 +3,7 @@ import { handlers } from "@/auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { extractRequestMeta } from "@/lib/audit";
 import { sessionMetaStorage } from "@/lib/session-meta";
+import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 
 export const runtime = "nodejs";
 
@@ -42,7 +43,11 @@ function withAuthBasePath<H extends RouteHandler>(handler: H): H {
 function withSessionMeta<H extends RouteHandler>(handler: H): H {
   const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
     const meta = extractRequestMeta(request);
-    return sessionMetaStorage.run(meta, () => handler(request, ...rest));
+    return sessionMetaStorage.run(meta, () =>
+      tenantClaimStorage.run({ tenantClaim: null }, () =>
+        handler(request, ...rest),
+      ),
+    );
   };
   return wrapped as unknown as H;
 }

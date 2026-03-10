@@ -5,6 +5,8 @@ const {
   mockWithBypassRls,
   mockExtractTenantClaimValue,
   mockSlugifyTenant,
+  mockTenantClaimStore,
+  mockTenantClaimGetStore,
 } = vi.hoisted(() => {
   const mockPrisma = {
     tenant: {
@@ -76,6 +78,8 @@ const {
     mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
     mockExtractTenantClaimValue: vi.fn(),
     mockSlugifyTenant: vi.fn(),
+    mockTenantClaimStore: { tenantClaim: null as string | null },
+    mockTenantClaimGetStore: vi.fn(),
   };
 });
 
@@ -111,6 +115,10 @@ vi.mock("@/lib/tenant-rls", () => ({
 vi.mock("@/lib/tenant-claim", () => ({
   extractTenantClaimValue: mockExtractTenantClaimValue,
   slugifyTenant: mockSlugifyTenant,
+}));
+
+vi.mock("@/lib/tenant-claim-storage", () => ({
+  tenantClaimStorage: { getStore: mockTenantClaimGetStore },
 }));
 
 vi.mock("./auth.config", () => ({
@@ -387,7 +395,8 @@ describe("ensureTenantMembershipForSignIn", () => {
     const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
 
     expect(ok).toBe(false);
-    expect(mockWithBypassRls).not.toHaveBeenCalled();
+    // withBypassRls is called but findOrCreateSsoTenant returns null
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -403,6 +412,8 @@ describe("signIn callback", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockTenantClaimStore.tenantClaim = null;
+    mockTenantClaimGetStore.mockReturnValue(mockTenantClaimStore);
     mockExtractTenantClaimValue.mockReturnValue(null);
     mockSlugifyTenant.mockReturnValue(null);
     mockPrisma.user.findUnique.mockResolvedValue(null);
@@ -454,6 +465,50 @@ describe("signIn callback", () => {
 
     expect(result).toBe(true);
     expect(mockPrisma.user.findUnique).not.toHaveBeenCalled();
+  });
+
+  it("stores tenant claim in tenantClaimStorage for new user", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockExtractTenantClaimValue.mockReturnValue("acme.com");
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "new@acme.com" },
+      account: { provider: "google" },
+      profile: { hd: "acme.com" },
+    });
+
+    expect(result).toBe(true);
+    expect(mockTenantClaimStore.tenantClaim).toBe("acme.com");
+  });
+
+  it("does not store tenant claim when no claim is extracted", async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockExtractTenantClaimValue.mockReturnValue(null);
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "new@example.com" },
+      account: { provider: "google" },
+      profile: {},
+    });
+
+    expect(result).toBe(true);
+    expect(mockTenantClaimStore.tenantClaim).toBeNull();
+  });
+
+  it("returns true without storing claim when tenantClaimStorage is not active", async () => {
+    mockTenantClaimGetStore.mockReturnValue(undefined);
+    mockPrisma.user.findUnique.mockResolvedValue(null);
+    mockExtractTenantClaimValue.mockReturnValue("acme.com");
+
+    const result = await signInCallback({
+      user: { id: "pre-gen-id", email: "new@acme.com" },
+      account: { provider: "google" },
+      profile: { hd: "acme.com" },
+    });
+
+    expect(result).toBe(true);
+    // Store was undefined, so tenantClaim should remain null
+    expect(mockTenantClaimStore.tenantClaim).toBeNull();
   });
 
   it("calls ensureTenantMembershipForSignIn with DB id for existing user with tenant claim", async () => {
