@@ -5,6 +5,7 @@ export {
   parseCsvLine,
   parseCsv,
   parseJson,
+  parseKeePassXcXml,
   formatLabels,
 } from "@/components/passwords/password-import-parsers";
 export {

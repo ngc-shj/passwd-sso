@@ -34,6 +34,20 @@ describe("POST /api/audit-logs/import", () => {
     expect(res.status).toBe(400);
   });
 
+  it("accepts xml format", async () => {
+    const res = await POST(
+      createRequest("POST", URL, {
+        body: { requestedCount: 5, successCount: 5, failedCount: 0, format: "xml" },
+      })
+    );
+    expect(res.status).toBe(200);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ format: "xml" }),
+      })
+    );
+  });
+
   it("logs import summary metadata", async () => {
     const res = await POST(
       createRequest("POST", URL, {

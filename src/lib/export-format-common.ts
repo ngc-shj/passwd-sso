@@ -1,5 +1,5 @@
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { EntryTypeValue } from "@/lib/constants";
+import type { EntryTypeValue, ExportFormat } from "@/lib/constants";
 import type {
   EntryCustomFieldPortable,
   EntryPasswordHistory,
@@ -70,7 +70,7 @@ export interface ExportEntry {
 }
 
 export type ExportProfile = "compatible" | "passwd-sso";
-export type ExportFormat = "csv" | "json";
+export type { ExportFormat } from "@/lib/constants";
 
 export function escapeCsvValue(val: string | null): string {
   if (!val) return "";
