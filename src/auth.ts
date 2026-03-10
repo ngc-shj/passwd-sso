@@ -4,10 +4,10 @@ import { createCustomAdapter } from "@/lib/auth-adapter";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { Prisma } from "@prisma/client";
-import { extractTenantClaimValue, slugifyTenant } from "@/lib/tenant-claim";
+import { extractTenantClaimValue } from "@/lib/tenant-claim";
+import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
+import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { randomBytes } from "node:crypto";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import authConfig from "./auth.config";
 
@@ -39,58 +39,8 @@ export async function ensureTenantMembershipForSignIn(
     return true;
   }
 
-  const tenantSlug = slugifyTenant(tenantClaim);
-  if (!tenantSlug) {
-    return false;
-  }
-
   const tenant = await withBypassRls(prisma, async () => {
-    let found = await prisma.tenant.findUnique({
-      where: { externalId: tenantClaim },
-      select: { id: true },
-    });
-
-    if (!found) {
-      try {
-        found = await prisma.tenant.create({
-          data: {
-            externalId: tenantClaim,
-            name: tenantClaim,
-            slug: tenantSlug,
-          },
-          select: { id: true },
-        });
-      } catch (e) {
-        if (
-          e instanceof Prisma.PrismaClientKnownRequestError &&
-          e.code === "P2002"
-        ) {
-          found = await prisma.tenant.findUnique({
-            where: { externalId: tenantClaim },
-            select: { id: true },
-          });
-          // P2002 on slug (not externalId) — retry with unique suffix
-          if (!found) {
-            try {
-              const suffix = randomBytes(4).toString("hex");
-              found = await prisma.tenant.create({
-                data: {
-                  externalId: tenantClaim,
-                  name: tenantClaim,
-                  slug: `${tenantSlug.slice(0, 41)}-${suffix}`,
-                },
-                select: { id: true },
-              });
-            } catch {
-              // Extremely unlikely double collision — treat as sign-in failure
-              found = null;
-            }
-          }
-        } else {
-          throw e;
-        }
-      }
-    }
+    const found = await findOrCreateSsoTenant(tenantClaim);
 
     if (!found) return null;
 
@@ -170,6 +120,18 @@ export async function ensureTenantMembershipForSignIn(
           });
           await tx.attachment.updateMany({
             where: { createdById: userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.notification.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.apiKey.updateMany({
+            where: { userId, tenantId: existingTenantId },
+            data: { tenantId: found.id },
+          });
+          await tx.webAuthnCredential.updateMany({
+            where: { userId, tenantId: existingTenantId },
             data: { tenantId: found.id },
           });
 
@@ -282,8 +244,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       // First-ever sign-in can reach this callback before user row is persisted.
-      // Allow auth flow to continue so createUser can provision bootstrap data.
-      if (!userId) return true;
+      // Store the tenant claim so createUser can place the user directly
+      // into the SSO tenant instead of creating a bootstrap tenant.
+      if (!userId) {
+        const claim = extractTenantClaimValue(
+          params.account,
+          (params.profile ?? null) as Record<string, unknown> | null,
+        );
+        const store = tenantClaimStorage.getStore();
+        if (store && claim) {
+          store.tenantClaim = claim;
+        }
+        return true;
+      }
 
       const ok = await ensureTenantMembershipForSignIn(
         userId,

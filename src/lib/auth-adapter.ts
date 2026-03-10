@@ -3,6 +3,8 @@ import type { Adapter, AdapterSession, AdapterUser, AdapterAccount } from "next-
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/session-meta";
+import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
+import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
@@ -75,16 +77,27 @@ export function createCustomAdapter(): Adapter {
     async createUser(
       user: Omit<AdapterUser, "id">,
     ): Promise<AdapterUser> {
-      const created = await withBypassRls(prisma, async () =>
-        prisma.$transaction(async (tx) => {
-          const tenant = await tx.tenant.create({
-            data: {
-              name: user.email ?? user.name ?? "User",
-              slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
-              isBootstrap: true,
-            },
-            select: { id: true },
-          });
+      // Read tenant claim stored by signIn callback (e.g. Google hd).
+      // If present, place user directly into the SSO tenant.
+      const pendingClaim = tenantClaimStorage.getStore()?.tenantClaim ?? null;
+
+      const created = await withBypassRls(prisma, async () => {
+        // Resolve SSO tenant inside withBypassRls (no nesting)
+        let ssoTenant: { id: string } | null = null;
+        if (pendingClaim) {
+          ssoTenant = await findOrCreateSsoTenant(pendingClaim);
+        }
+
+        return prisma.$transaction(async (tx) => {
+          const tenant = ssoTenant
+            ?? await tx.tenant.create({
+                data: {
+                  name: user.email ?? user.name ?? "User",
+                  slug: `bootstrap-${randomUUID().replace(/-/g, "").slice(0, 24)}`,
+                  isBootstrap: true,
+                },
+                select: { id: true },
+              });
 
           const createdUser = await tx.user.create({
             data: {
@@ -107,13 +120,13 @@ export function createCustomAdapter(): Adapter {
             data: {
               tenantId: tenant.id,
               userId: createdUser.id,
-              role: "OWNER",
+              role: ssoTenant ? "MEMBER" : "OWNER",
             },
           });
 
           return createdUser;
-        }),
-      );
+        });
+      });
       if (!created.email) {
         throw new Error("USER_EMAIL_MISSING");
       }
