@@ -9,6 +9,7 @@ import {
 import {
   parseCsv,
   parseJson,
+  parseKeePassXcXml,
   type CsvFormat,
   type ParsedEntry,
 } from "@/components/passwords/password-import-utils";
@@ -57,9 +58,15 @@ export function useImportFileFlow(): UseImportFileFlowResult {
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  const parseContent = (text: string, isJson: boolean) => {
-    if (isJson) {
+  const parseContent = (text: string, fileType: "json" | "xml" | "csv") => {
+    if (fileType === "json") {
       const result = parseJson(text);
+      setEntries(result.entries);
+      setFormat(result.format);
+      return;
+    }
+    if (fileType === "xml") {
+      const result = parseKeePassXcXml(text);
       setEntries(result.entries);
       setFormat(result.format);
       return;
@@ -71,11 +78,17 @@ export function useImportFileFlow(): UseImportFileFlowResult {
 
   const loadFile = (file: File) => {
     setSourceFilename(file.name);
+    const lowerName = file.name.toLowerCase();
     const reader = new FileReader();
     reader.onload = (ev) => {
       const text = ev.target?.result as string;
 
-      if (file.name.endsWith(".json")) {
+      if (lowerName.endsWith(".xml")) {
+        parseContent(text, "xml");
+        return;
+      }
+
+      if (lowerName.endsWith(".json")) {
         try {
           const parsed = JSON.parse(text);
           if (isEncryptedExport(parsed)) {
@@ -86,11 +99,11 @@ export function useImportFileFlow(): UseImportFileFlowResult {
         } catch {
           // Not valid JSON, fall through to regular parsing.
         }
-        parseContent(text, true);
+        parseContent(text, "json");
         return;
       }
 
-      parseContent(text, false);
+      parseContent(text, "csv");
     };
     reader.readAsText(file);
   };
@@ -104,7 +117,8 @@ export function useImportFileFlow(): UseImportFileFlowResult {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    if (file && (file.name.endsWith(".csv") || file.name.endsWith(".json"))) {
+    const lowerName = file?.name.toLowerCase() ?? "";
+    if (file && (lowerName.endsWith(".csv") || lowerName.endsWith(".json") || lowerName.endsWith(".xml"))) {
       loadFile(file);
     }
   };
@@ -119,7 +133,7 @@ export function useImportFileFlow(): UseImportFileFlowResult {
         encryptedFile,
         decryptPassword
       );
-      parseContent(plaintext, originalFormat === "json");
+      parseContent(plaintext, originalFormat === "json" ? "json" : "csv");
       setEncryptedFile(null);
       setDecryptPassword("");
     } catch {

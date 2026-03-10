@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
 import {
@@ -8,6 +9,7 @@ import {
   parseCsv,
   parseJson,
   formatLabels,
+  parseKeePassXcXml,
 } from "./password-import-parsers";
 import { formatExportCsv, type ExportEntry } from "@/lib/export-format-common";
 
@@ -106,6 +108,10 @@ describe("detectFormat", () => {
     expect(detectFormat(["title", "username", "password"])).toBe("onepassword");
   });
 
+  it("detects keepassxc format", () => {
+    expect(detectFormat(["Group", "Title", "Username", "Password", "URL", "Notes", "TOTP", "Icon", "Last Modified", "Created"])).toBe("keepassxc");
+  });
+
   it("detects chrome format", () => {
     expect(detectFormat(["name", "username", "password", "url"])).toBe("chrome");
   });
@@ -116,6 +122,10 @@ describe("detectFormat", () => {
 
   it("is case-insensitive", () => {
     expect(detectFormat(["NAME", "LOGIN_USERNAME", "LOGIN_PASSWORD"])).toBe("bitwarden");
+  });
+
+  it("is case-insensitive for keepassxc", () => {
+    expect(detectFormat(["group", "title", "username", "password", "url", "notes"])).toBe("keepassxc");
   });
 });
 
@@ -866,6 +876,255 @@ describe("parsePasswdSsoPayload — bank account / software license fields", () 
   });
 });
 
+// ─── KeePassXC CSV ──────────────────────────────────────────
+
+describe("parseCsv — KeePassXC", () => {
+  it("parses KeePassXC CSV format", () => {
+    const csv = [
+      '"Group","Title","Username","Password","URL","Notes","TOTP","Icon","Last Modified","Created"',
+      '"Internet","Gmail","user@gmail.com","pass123","https://gmail.com","my email","","0","2025-01-01T00:00:00Z","2024-01-01T00:00:00Z"',
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.format).toBe("keepassxc");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].title).toBe("Gmail");
+    expect(result.entries[0].username).toBe("user@gmail.com");
+    expect(result.entries[0].password).toBe("pass123");
+    expect(result.entries[0].url).toBe("https://gmail.com");
+    expect(result.entries[0].notes).toBe("my email");
+    expect(result.entries[0].entryType).toBe(ENTRY_TYPE.LOGIN);
+  });
+
+  it("maps Group column to folderPath with spaced separators", () => {
+    const csv = [
+      '"Group","Title","Username","Password","URL","Notes"',
+      '"Internet/Email","Gmail","user@gmail.com","pass123","https://gmail.com",""',
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries[0].folderPath).toBe("Internet / Email");
+  });
+
+  it("handles TOTP field", () => {
+    const csv = [
+      '"Group","Title","Username","Password","URL","Notes","TOTP"',
+      '"","Site","user","pass123","https://example.com","","otpauth://totp/test?secret=ABC"',
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries[0].totp).toEqual({ secret: "otpauth://totp/test?secret=ABC" });
+  });
+
+  it("sets folderPath to empty for empty Group", () => {
+    const csv = [
+      '"Group","Title","Username","Password","URL","Notes"',
+      '"","RootEntry","user","pass123","https://example.com",""',
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].folderPath).toBe("");
+  });
+
+  it("skips entries without password", () => {
+    const csv = [
+      '"Group","Title","Username","Password","URL","Notes"',
+      '"","NoPass","user","","https://example.com",""',
+    ].join("\n");
+
+    const result = parseCsv(csv);
+    expect(result.entries).toHaveLength(0);
+  });
+});
+
+// ─── KeePassXC XML ──────────────────────────────────────────
+
+describe("parseKeePassXcXml", () => {
+  it("parses a simple KeePassXC XML export", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <Group>
+        <Name>Internet</Name>
+        <Entry>
+          <String><Key>Title</Key><Value>Gmail</Value></String>
+          <String><Key>UserName</Key><Value>user@gmail.com</Value></String>
+          <String><Key>Password</Key><Value>pass123</Value></String>
+          <String><Key>URL</Key><Value>https://gmail.com</Value></String>
+          <String><Key>Notes</Key><Value>my email</Value></String>
+        </Entry>
+      </Group>
+    </Group>
+  </Root>
+</KeePassFile>`;
+
+    const result = parseKeePassXcXml(xml);
+    expect(result.format).toBe("keepassxc");
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].title).toBe("Gmail");
+    expect(result.entries[0].username).toBe("user@gmail.com");
+    expect(result.entries[0].password).toBe("pass123");
+    expect(result.entries[0].folderPath).toBe("Internet");
+  });
+
+  it("parses nested groups into folder path", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <Group>
+        <Name>Work</Name>
+        <Group>
+          <Name>Email</Name>
+          <Entry>
+            <String><Key>Title</Key><Value>Office</Value></String>
+            <String><Key>UserName</Key><Value>admin</Value></String>
+            <String><Key>Password</Key><Value>secret</Value></String>
+            <String><Key>URL</Key><Value>https://office.com</Value></String>
+            <String><Key>Notes</Key><Value></Value></String>
+          </Entry>
+        </Group>
+      </Group>
+    </Group>
+  </Root>
+</KeePassFile>`;
+
+    const result = parseKeePassXcXml(xml);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].folderPath).toBe("Work / Email");
+  });
+
+  it("skips Recycle Bin group by name", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <Group>
+        <Name>Recycle Bin</Name>
+        <Entry>
+          <String><Key>Title</Key><Value>Deleted</Value></String>
+          <String><Key>Password</Key><Value>x</Value></String>
+        </Entry>
+      </Group>
+      <Group>
+        <Name>Active</Name>
+        <Entry>
+          <String><Key>Title</Key><Value>Keep</Value></String>
+          <String><Key>UserName</Key><Value>user</Value></String>
+          <String><Key>Password</Key><Value>pass</Value></String>
+          <String><Key>URL</Key><Value></Value></String>
+          <String><Key>Notes</Key><Value></Value></String>
+        </Entry>
+      </Group>
+    </Group>
+  </Root>
+</KeePassFile>`;
+
+    const result = parseKeePassXcXml(xml);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].title).toBe("Keep");
+  });
+
+  it("skips Recycle Bin group by UUID from Meta", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Meta>
+    <RecycleBinUUID>AAAAAAAAAAAAAAAAAAAAAA==</RecycleBinUUID>
+  </Meta>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <Group>
+        <Name>Papierkorb</Name>
+        <UUID>AAAAAAAAAAAAAAAAAAAAAA==</UUID>
+        <Entry>
+          <String><Key>Title</Key><Value>Deleted</Value></String>
+          <String><Key>Password</Key><Value>x</Value></String>
+        </Entry>
+      </Group>
+      <Group>
+        <Name>Active</Name>
+        <Entry>
+          <String><Key>Title</Key><Value>Keep</Value></String>
+          <String><Key>UserName</Key><Value>user</Value></String>
+          <String><Key>Password</Key><Value>pass</Value></String>
+          <String><Key>URL</Key><Value></Value></String>
+          <String><Key>Notes</Key><Value></Value></String>
+        </Entry>
+      </Group>
+    </Group>
+  </Root>
+</KeePassFile>`;
+
+    const result = parseKeePassXcXml(xml);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].title).toBe("Keep");
+  });
+
+  it("handles TOTP Seed key in XML", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <Entry>
+        <String><Key>Title</Key><Value>Site</Value></String>
+        <String><Key>UserName</Key><Value>user</Value></String>
+        <String><Key>Password</Key><Value>pass</Value></String>
+        <String><Key>URL</Key><Value></Value></String>
+        <String><Key>Notes</Key><Value></Value></String>
+        <String><Key>TOTP Seed</Key><Value>JBSWY3DPEHPK3PXP</Value></String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>`;
+
+    const result = parseKeePassXcXml(xml);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].totp).toEqual({ secret: "JBSWY3DPEHPK3PXP" });
+  });
+
+  it("handles otp key (otpauth URI) in XML", () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<KeePassFile>
+  <Root>
+    <Group>
+      <Name>Root</Name>
+      <Entry>
+        <String><Key>Title</Key><Value>Site</Value></String>
+        <String><Key>UserName</Key><Value>user</Value></String>
+        <String><Key>Password</Key><Value>pass</Value></String>
+        <String><Key>URL</Key><Value></Value></String>
+        <String><Key>Notes</Key><Value></Value></String>
+        <String><Key>otp</Key><Value>otpauth://totp/test?secret=ABC</Value></String>
+      </Entry>
+    </Group>
+  </Root>
+</KeePassFile>`;
+
+    const result = parseKeePassXcXml(xml);
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0].totp).toEqual({ secret: "otpauth://totp/test?secret=ABC" });
+  });
+
+  it("returns empty for non-KeePass XML", () => {
+    const xml = `<?xml version="1.0"?><root><item>hello</item></root>`;
+    const result = parseKeePassXcXml(xml);
+    expect(result.entries).toEqual([]);
+    expect(result.format).toBe("unknown");
+  });
+
+  it("returns empty for invalid XML", () => {
+    const result = parseKeePassXcXml("not xml at all <>");
+    expect(result.entries).toEqual([]);
+  });
+});
+
 // ─── Edge cases ─────────────────────────────────────────────
 
 describe("parseCsvLine — edge cases", () => {
@@ -928,6 +1187,7 @@ describe("formatLabels", () => {
     expect(formatLabels.bitwarden).toBe("Bitwarden");
     expect(formatLabels.onepassword).toBe("1Password");
     expect(formatLabels.chrome).toBe("Chrome");
+    expect(formatLabels.keepassxc).toBe("KeePassXC");
     expect(formatLabels["passwd-sso"]).toBe("passwd-sso");
     expect(formatLabels.unknown).toBe("CSV");
   });
