@@ -76,7 +76,7 @@ for (const file of getSourceFiles()) {
   if (file.includes(".test.") || file.includes("__tests__")) continue;
 
   const content = readFileSync(file, "utf8");
-  if (!content.includes("withBypassRls")) continue;
+  if (!BYPASS_CALL_RE.test(content)) continue;
 
   const allowedModels = ALLOWED_USAGE.get(file);
 
