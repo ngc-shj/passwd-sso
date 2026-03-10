@@ -10,6 +10,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  POLICY_MIN_PW_LENGTH_MIN,
+  POLICY_MIN_PW_LENGTH_MAX,
+  POLICY_SESSION_DURATION_MIN,
+  POLICY_SESSION_DURATION_MAX,
+} from "@/lib/validations";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -34,6 +40,22 @@ const DEFAULT_POLICY: PolicyData = {
   allowExport: true,
   allowSharing: true,
 };
+
+/** Validate policy fields. Returns a map of field name → error key (i18n). */
+export function validatePolicy(
+  policy: Pick<PolicyData, "minPasswordLength" | "maxSessionDurationMinutes">,
+): Record<string, string> {
+  const errs: Record<string, string> = {};
+  const pwLen = policy.minPasswordLength;
+  if (Number.isNaN(pwLen) || pwLen < POLICY_MIN_PW_LENGTH_MIN || pwLen > POLICY_MIN_PW_LENGTH_MAX) {
+    errs.minPasswordLength = "minPasswordLengthRange";
+  }
+  const dur = policy.maxSessionDurationMinutes;
+  if (dur !== null && (Number.isNaN(dur) || dur < POLICY_SESSION_DURATION_MIN || dur > POLICY_SESSION_DURATION_MAX)) {
+    errs.maxSessionDurationMinutes = "maxSessionDurationRange";
+  }
+  return errs;
+}
 
 interface TeamPolicySettingsProps {
   teamId: string;
@@ -64,7 +86,21 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
     fetchPolicy();
   }, [fetchPolicy]);
 
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  const validate = (): boolean => {
+    const rawErrs = validatePolicy(policy);
+    const translated: Record<string, string> = {};
+    for (const [key, msgKey] of Object.entries(rawErrs)) {
+      translated[key] = t(msgKey);
+    }
+    setFieldErrors(translated);
+    return Object.keys(rawErrs).length === 0;
+  };
+
   const handleSave = async () => {
+    if (!validate()) return;
+
     setSaving(true);
     try {
       const res = await fetchApi(`/api/teams/${teamId}/policy`, {
@@ -74,7 +110,10 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
       });
       if (res.ok) {
         setPolicy(await res.json());
+        setFieldErrors({});
         toast.success(t("saveSuccess"));
+      } else if (res.status === 400) {
+        toast.error(t("validationError"));
       } else {
         toast.error(t("saveError"));
       }
@@ -109,17 +148,23 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <Label>{t("minPasswordLength")}</Label>
             <Input
               type="number"
-              min={0}
-              max={128}
+              min={POLICY_MIN_PW_LENGTH_MIN}
+              max={POLICY_MIN_PW_LENGTH_MAX}
               value={policy.minPasswordLength}
-              onChange={(e) =>
-                setPolicy((p) => ({
-                  ...p,
-                  minPasswordLength: parseInt(e.target.value, 10) || 0,
-                }))
-              }
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                const value = Number.isNaN(parsed) ? 0 : Math.max(POLICY_MIN_PW_LENGTH_MIN, Math.min(POLICY_MIN_PW_LENGTH_MAX, parsed));
+                setPolicy((p) => ({ ...p, minPasswordLength: value }));
+                setFieldErrors((prev) => {
+                  const { minPasswordLength: _, ...rest } = prev;
+                  return rest;
+                });
+              }}
               className="max-w-[200px]"
             />
+            {fieldErrors.minPasswordLength && (
+              <p className="text-sm text-destructive">{fieldErrors.minPasswordLength}</p>
+            )}
           </div>
 
           <div className="grid gap-3 md:grid-cols-2">
@@ -149,20 +194,32 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <Label>{t("maxSessionDurationMinutes")}</Label>
             <Input
               type="number"
-              min={5}
-              max={43200}
+              min={POLICY_SESSION_DURATION_MIN}
+              max={POLICY_SESSION_DURATION_MAX}
               value={policy.maxSessionDurationMinutes ?? ""}
-              onChange={(e) =>
-                setPolicy((p) => ({
-                  ...p,
-                  maxSessionDurationMinutes: e.target.value
-                    ? parseInt(e.target.value, 10)
-                    : null,
-                }))
-              }
+              onChange={(e) => {
+                if (!e.target.value) {
+                  setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
+                } else {
+                  const parsed = parseInt(e.target.value, 10);
+                  if (Number.isNaN(parsed) || parsed < POLICY_SESSION_DURATION_MIN) {
+                    setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
+                  } else {
+                    const value = Math.min(POLICY_SESSION_DURATION_MAX, parsed);
+                    setPolicy((p) => ({ ...p, maxSessionDurationMinutes: value }));
+                  }
+                }
+                setFieldErrors((prev) => {
+                  const { maxSessionDurationMinutes: _, ...rest } = prev;
+                  return rest;
+                });
+              }}
               placeholder={t("maxSessionDurationHelp")}
               className="max-w-[200px]"
             />
+            {fieldErrors.maxSessionDurationMinutes && (
+              <p className="text-sm text-destructive">{fieldErrors.maxSessionDurationMinutes}</p>
+            )}
           </div>
 
           <SwitchField

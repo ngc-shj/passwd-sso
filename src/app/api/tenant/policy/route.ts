@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
@@ -160,7 +161,7 @@ async function handlePATCH(req: NextRequest) {
     }
   }
   if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {
-    if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > 255) {
+    if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > TAILNET_NAME_MAX_LENGTH) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
     }
     // DNS hostname characters only: alphanumeric, hyphens, dots

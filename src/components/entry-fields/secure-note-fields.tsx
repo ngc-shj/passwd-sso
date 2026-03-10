@@ -3,6 +3,7 @@
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SecureNoteMarkdown } from "@/components/passwords/secure-note-markdown";
+import { SECURE_NOTE_MAX } from "@/lib/validations";
 
 interface SecureNoteFieldsProps {
   content: string;
@@ -43,7 +44,7 @@ export function SecureNoteFields({
             onChange={(e) => onContentChange(e.target.value)}
             placeholder={contentPlaceholder}
             rows={10}
-            maxLength={50000}
+            maxLength={SECURE_NOTE_MAX}
             className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm font-mono ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </TabsContent>

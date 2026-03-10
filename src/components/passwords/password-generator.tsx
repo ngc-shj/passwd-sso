@@ -23,6 +23,13 @@ import { API_PATH } from "@/lib/constants";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  PASSWORD_LENGTH_MIN,
+  PASSWORD_LENGTH_MAX,
+  PASSPHRASE_WORD_COUNT_MIN,
+  PASSPHRASE_WORD_COUNT_MAX,
+  CHARS_FIELD_MAX,
+} from "@/lib/validations";
 
 interface PasswordGeneratorProps {
   open: boolean;
@@ -362,23 +369,23 @@ export function PasswordGenerator({
               <Slider
                 value={[settings.length]}
                 onValueChange={([v]) => update({ length: v })}
-                min={8}
-                max={128}
+                min={PASSWORD_LENGTH_MIN}
+                max={PASSWORD_LENGTH_MAX}
                 step={1}
                 className="flex-1"
               />
               <Input
                 id="gen-length"
                 type="number"
-                min={8}
-                max={128}
+                min={PASSWORD_LENGTH_MIN}
+                max={PASSWORD_LENGTH_MAX}
                 value={settings.length}
                 onChange={(e) => {
                   const v = parseInt(e.target.value, 10);
                   if (!isNaN(v)) update({ length: v });
                 }}
                 onBlur={() => {
-                  update({ length: Math.min(128, Math.max(8, settings.length)) });
+                  update({ length: Math.min(PASSWORD_LENGTH_MAX, Math.max(PASSWORD_LENGTH_MIN, settings.length)) });
                 }}
                 className="h-7 w-18 text-xs text-center shrink-0"
               />
@@ -530,7 +537,7 @@ export function PasswordGenerator({
                   onChange={(e) => update({ includeChars: e.target.value })}
                   placeholder={t("includeCharsPlaceholder")}
                   className="h-7 text-xs font-mono flex-1"
-                  maxLength={128}
+                  maxLength={CHARS_FIELD_MAX}
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -544,7 +551,7 @@ export function PasswordGenerator({
                   onChange={(e) => update({ excludeChars: e.target.value })}
                   placeholder={t("excludeCharsPlaceholder")}
                   className="h-7 text-xs font-mono flex-1"
-                  maxLength={128}
+                  maxLength={CHARS_FIELD_MAX}
                 />
               </div>
             </div>
@@ -559,16 +566,16 @@ export function PasswordGenerator({
               <Slider
                 value={[settings.passphrase.wordCount]}
                 onValueChange={([v]) => updatePassphrase({ wordCount: v })}
-                min={3}
-                max={10}
+                min={PASSPHRASE_WORD_COUNT_MIN}
+                max={PASSPHRASE_WORD_COUNT_MAX}
                 step={1}
                 className="flex-1"
               />
               <Input
                 id="gen-words"
                 type="number"
-                min={3}
-                max={10}
+                min={PASSPHRASE_WORD_COUNT_MIN}
+                max={PASSPHRASE_WORD_COUNT_MAX}
                 value={settings.passphrase.wordCount}
                 onChange={(e) => {
                   const v = parseInt(e.target.value, 10);
@@ -576,7 +583,7 @@ export function PasswordGenerator({
                 }}
                 onBlur={() => {
                   updatePassphrase({
-                    wordCount: Math.min(10, Math.max(3, settings.passphrase.wordCount)),
+                    wordCount: Math.min(PASSPHRASE_WORD_COUNT_MAX, Math.max(PASSPHRASE_WORD_COUNT_MIN, settings.passphrase.wordCount)),
                   });
                 }}
                 className="h-7 w-18 text-xs text-center shrink-0"

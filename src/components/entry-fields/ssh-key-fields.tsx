@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertTriangle } from "lucide-react";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
+import { ENTRY_NOTES_MAX, ENTRY_SECRET_MAX, PUBLIC_KEY_MAX } from "@/lib/validations";
 
 interface SshKeyFieldsProps {
   privateKey: string;
@@ -95,6 +96,7 @@ export function SshKeyFields({
             }}
             placeholder={privateKeyPlaceholder}
             rows={4}
+            maxLength={ENTRY_NOTES_MAX}
             className="font-mono text-xs"
             readOnly={!showPrivateKey}
             onFocus={() => {
@@ -156,6 +158,7 @@ export function SshKeyFields({
           onChange={(e) => onPublicKeyChange(e.target.value)}
           placeholder={publicKeyPlaceholder}
           rows={2}
+          maxLength={PUBLIC_KEY_MAX}
           className="font-mono text-xs"
         />
       </div>
@@ -172,6 +175,7 @@ export function SshKeyFields({
                 value: passphrase,
                 onChange: (e) => onPassphraseChange(e.target.value),
                 placeholder: passphrasePlaceholder,
+                maxLength: ENTRY_SECRET_MAX,
                 autoComplete: "off",
               }}
             />
@@ -185,6 +189,7 @@ export function SshKeyFields({
               value={comment}
               onChange={(e) => onCommentChange(e.target.value)}
               placeholder={commentPlaceholder}
+              maxLength={ENTRY_SECRET_MAX}
               autoComplete="off"
             />
           </>

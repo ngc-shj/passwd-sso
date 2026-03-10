@@ -34,7 +34,7 @@ import {
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
-import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH } from "@/lib/validations";
+import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX, SEND_NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatFileSize } from "@/lib/format-file-size";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 
@@ -91,7 +91,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       };
       if (maxViews) {
         const mv = parseInt(maxViews, 10);
-        if (mv >= 1 && mv <= 100) body.maxViews = mv;
+        if (mv >= MAX_VIEWS_MIN && mv <= MAX_VIEWS_MAX) body.maxViews = mv;
       }
 
       const res = await fetchApi(API_PATH.SENDS, {
@@ -128,7 +128,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       formData.append("expiresIn", expiresIn);
       if (maxViews) {
         const mv = parseInt(maxViews, 10);
-        if (mv >= 1 && mv <= 100) formData.append("maxViews", String(mv));
+        if (mv >= MAX_VIEWS_MIN && mv <= MAX_VIEWS_MAX) formData.append("maxViews", String(mv));
       }
 
       const res = await fetchApi(API_PATH.SENDS_FILE, {
@@ -237,7 +237,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t("sendNamePlaceholder")}
-                  maxLength={200}
+                  maxLength={SEND_NAME_MAX_LENGTH}
                 />
               </div>
 
@@ -324,11 +324,17 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                 <Label className="text-xs">{t("maxViewsLabel")}</Label>
                 <Input
                   type="number"
-                  min={1}
-                  max={100}
+                  min={MAX_VIEWS_MIN}
+                  max={MAX_VIEWS_MAX}
                   placeholder={t("maxViewsPlaceholder")}
                   value={maxViews}
-                  onChange={(e) => setMaxViews(e.target.value)}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (!raw) { setMaxViews(""); return; }
+                    const n = parseInt(raw, 10);
+                    if (Number.isNaN(n) || n < MAX_VIEWS_MIN) { setMaxViews(""); return; }
+                    setMaxViews(String(Math.min(n, MAX_VIEWS_MAX)));
+                  }}
                 />
               </div>
             </div>

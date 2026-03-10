@@ -56,6 +56,7 @@
   "noConfigsHint": "Add a configuration to start syncing users from your identity provider.",
   "syncStarted": "Sync started successfully.",
   "syncFailed": "Sync failed. Check the logs for details.",
+  "validationError": "Invalid input.",
   "syncConflict": "A sync is already running. Please wait for it to complete.",
   "configCreated": "Configuration created successfully.",
   "configUpdated": "Configuration updated successfully.",

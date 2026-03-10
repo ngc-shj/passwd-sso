@@ -22,5 +22,8 @@
   "saving": "Saving...",
   "saveSuccess": "Security policy saved.",
   "saveError": "Failed to save security policy.",
-  "fetchError": "Failed to load security policy."
+  "fetchError": "Failed to load security policy.",
+  "validationError": "Invalid input.",
+  "minPasswordLengthRange": "Must be between 0 and 128",
+  "maxSessionDurationRange": "Must be between 5 and 43200"
 }

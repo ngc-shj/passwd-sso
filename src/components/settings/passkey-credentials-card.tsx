@@ -27,6 +27,7 @@ import { Fingerprint, KeyRound, Loader2, Monitor, Plus, ShieldCheck, ShieldOff, 
 import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDateTime } from "@/lib/format-datetime";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
@@ -323,7 +324,7 @@ export function PasskeyCredentialsCard() {
                 value={nickname}
                 onChange={(e) => setNickname(e.target.value)}
                 placeholder={t("nicknamePlaceholder")}
-                maxLength={100}
+                maxLength={NAME_MAX_LENGTH}
               />
             </div>
             <Button
@@ -377,7 +378,7 @@ export function PasskeyCredentialsCard() {
                         <Input
                           value={renameValue}
                           onChange={(e) => setRenameValue(e.target.value)}
-                          maxLength={100}
+                          maxLength={NAME_MAX_LENGTH}
                           className="h-7 text-sm"
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handleRename(cred.id);

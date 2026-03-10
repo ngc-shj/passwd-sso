@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
+import { ENTRY_NAME_MAX, ENTRY_SHORT_MAX, ENTRY_SECRET_MAX, NAME_MAX_LENGTH } from "@/lib/validations";
 
 interface IdentityFieldsProps {
   fullName: string;
@@ -107,6 +108,7 @@ export function IdentityFields({
           value={fullName}
           onChange={(e) => onFullNameChange(e.target.value)}
           placeholder={fullNamePlaceholder}
+          maxLength={ENTRY_NAME_MAX}
           autoComplete="off"
         />
       </div>
@@ -119,6 +121,7 @@ export function IdentityFields({
           onChange={(e) => onAddressChange(e.target.value)}
           placeholder={addressPlaceholder}
           rows={2}
+          maxLength={ENTRY_SECRET_MAX}
           autoComplete="off"
         />
       </div>
@@ -133,6 +136,7 @@ export function IdentityFields({
               value={phone}
               onChange={(e) => onPhoneChange(e.target.value)}
               placeholder={phonePlaceholder}
+              maxLength={ENTRY_SHORT_MAX}
               autoComplete="off"
             />
           </>
@@ -146,6 +150,7 @@ export function IdentityFields({
               value={email}
               onChange={(e) => onEmailChange(e.target.value)}
               placeholder={emailPlaceholder}
+              maxLength={ENTRY_NAME_MAX}
               autoComplete="off"
             />
           </>
@@ -172,6 +177,7 @@ export function IdentityFields({
               value={nationality}
               onChange={(e) => onNationalityChange(e.target.value)}
               placeholder={nationalityPlaceholder}
+              maxLength={NAME_MAX_LENGTH}
               autoComplete="off"
             />
           </>
@@ -189,6 +195,7 @@ export function IdentityFields({
             value: idNumber,
             onChange: (e) => onIdNumberChange(e.target.value),
             placeholder: idNumberPlaceholder,
+            maxLength: NAME_MAX_LENGTH,
             autoComplete: "off",
           }}
         />

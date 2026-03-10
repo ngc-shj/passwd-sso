@@ -43,6 +43,7 @@ import {
 import { FolderSync, Loader2, Play, Plus, ScrollText, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
+import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { formatDateTime, formatRelativeTime } from "@/lib/format-datetime";
 
@@ -185,6 +186,8 @@ export function DirectorySyncCard() {
           toast.success(t("configUpdated"));
           setDialogOpen(false);
           fetchConfigs();
+        } else if (res.status === 400) {
+          toast.error(t("validationError"));
         } else {
           toast.error(t("syncFailed"));
         }
@@ -205,13 +208,12 @@ export function DirectorySyncCard() {
           toast.success(t("configCreated"));
           setDialogOpen(false);
           fetchConfigs();
+        } else if (res.status === 409) {
+          toast.error(t("syncConflict"));
+        } else if (res.status === 400) {
+          toast.error(t("validationError"));
         } else {
-          const data = await res.json().catch(() => ({}));
-          if (res.status === 409) {
-            toast.error(t("syncConflict"));
-          } else {
-            toast.error(data?.details ? JSON.stringify(data.details) : t("syncFailed"));
-          }
+          toast.error(t("syncFailed"));
         }
       }
     } catch {
@@ -602,7 +604,7 @@ export function DirectorySyncCard() {
                 value={formDisplayName}
                 onChange={(e) => setFormDisplayName(e.target.value)}
                 placeholder={t("displayNamePlaceholder")}
-                maxLength={100}
+                maxLength={NAME_MAX_LENGTH}
               />
             </div>
             <div className="flex items-center gap-3">

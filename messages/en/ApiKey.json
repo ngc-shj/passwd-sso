@@ -12,6 +12,7 @@
   "expiry365": "365 days",
   "created": "API key created.",
   "createError": "Failed to create API key.",
+  "validationError": "Invalid input.",
   "tokenReady": "Your API key (shown only once):",
   "tokenOnce": "Copy this key now. You won't be able to see it again.",
   "noKeys": "No API keys yet.",

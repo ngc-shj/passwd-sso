@@ -21,6 +21,7 @@ import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
+import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH, NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 
 interface TeamCreateDialogProps {
   trigger: React.ReactNode;
@@ -58,8 +59,23 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
     setSlugError("");
   };
 
+  const validateSlug = (value: string): string | null => {
+    const trimmed = value.trim();
+    if (trimmed.length < SLUG_MIN_LENGTH) return t("slugTooShort");
+    if (trimmed.length > SLUG_MAX_LENGTH) return t("slugTooLong");
+    if (!slugRegex.test(trimmed)) return t("slugInvalidFormat");
+    return null;
+  };
+
   const handleSubmit = async () => {
     if (!name.trim() || !slug.trim() || !vaultReady) return;
+
+    const slugValidationError = validateSlug(slug);
+    if (slugValidationError) {
+      setSlugError(slugValidationError);
+      return;
+    }
+
     setSaving(true);
     setSlugError("");
 
@@ -84,7 +100,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
           1
         );
       } finally {
-      teamKey.fill(0);
+        teamKey.fill(0);
       }
 
       const res = await fetchApi(API_PATH.TEAMS, {
@@ -108,6 +124,17 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
 
       if (res.status === 409) {
         setSlugError(t("slugTaken"));
+        setSaving(false);
+        return;
+      }
+
+      if (res.status === 400) {
+        const data = await res.json().catch(() => null);
+        if (data?.details?.fieldErrors?.slug?.length) {
+          setSlugError(t("slugInvalidFormat"));
+        } else {
+          toast.error(t("validationError"));
+        }
         setSaving(false);
         return;
       }
@@ -153,6 +180,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 placeholder={t("teamNamePlaceholder")}
+                maxLength={NAME_MAX_LENGTH}
               />
             </div>
 
@@ -162,7 +190,10 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
                 id="team-slug"
                 value={slug}
                 onChange={(e) => {
-                  setSlug(e.target.value);
+                  const normalized = e.target.value
+                    .toLowerCase()
+                    .replace(/[^a-z0-9-]/g, "");
+                  setSlug(normalized);
                   setSlugError("");
                 }}
                 placeholder={t("slugPlaceholder")}
@@ -181,6 +212,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("descriptionPlaceholder")}
+              maxLength={DESCRIPTION_MAX_LENGTH}
               rows={3}
             />
           </div>

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/dialog";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { getStrength, STRENGTH_COLORS } from "./passphrase-strength";
+import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 
 interface ChangePassphraseDialogProps {
   open: boolean;
@@ -42,7 +43,7 @@ export function ChangePassphraseDialog({
 
   const isValid =
     currentPassphrase.length > 0 &&
-    newPassphrase.length >= 10 &&
+    newPassphrase.length >= PASSPHRASE_MIN_LENGTH &&
     newPassphrase === confirmPassphrase;
 
   const strength = getStrength(newPassphrase);
@@ -160,7 +161,7 @@ export function ChangePassphraseDialog({
                 </p>
               </div>
             )}
-            {newPassphrase && newPassphrase.length < 10 && (
+            {newPassphrase && newPassphrase.length < PASSPHRASE_MIN_LENGTH && (
               <p className="text-xs text-destructive">
                 {t("passphraseMinLength")}
               </p>

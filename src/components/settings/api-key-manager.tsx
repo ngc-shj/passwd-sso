@@ -29,6 +29,7 @@ import {
 import { ChevronDown, Loader2, Plus, Key } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
+import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDate } from "@/lib/format-datetime";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/api-key";
 
@@ -129,6 +130,8 @@ export function ApiKeyManager() {
         const err = await res.json().catch(() => ({}));
         if (err.error === "API_KEY_LIMIT_EXCEEDED") {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
+        } else if (res.status === 400) {
+          toast.error(t("validationError"));
         } else {
           toast.error(t("createError"));
         }
@@ -183,7 +186,7 @@ export function ApiKeyManager() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t("namePlaceholder")}
-            maxLength={100}
+            maxLength={NAME_MAX_LENGTH}
           />
         </div>
         <div className="space-y-2">

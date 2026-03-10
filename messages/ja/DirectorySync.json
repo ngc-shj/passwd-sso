@@ -56,6 +56,7 @@
   "noConfigsHint": "IDプロバイダーからユーザーの同期を開始するには設定を追加してください。",
   "syncStarted": "同期が正常に開始されました。",
   "syncFailed": "同期に失敗しました。詳細はログを確認してください。",
+  "validationError": "入力内容に誤りがあります。",
   "syncConflict": "同期はすでに実行中です。完了するまでお待ちください。",
   "configCreated": "設定が正常に作成されました。",
   "configUpdated": "設定が正常に更新されました。",

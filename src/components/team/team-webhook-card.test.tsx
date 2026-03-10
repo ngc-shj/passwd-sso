@@ -362,9 +362,9 @@ describe("TeamWebhookCard", () => {
         });
       }
       if (init.method === "POST") {
-        return Promise.resolve({ ok: false });
+        return Promise.resolve({ ok: false, status: 500 });
       }
-      return Promise.resolve({ ok: false });
+      return Promise.resolve({ ok: false, status: 500 });
     });
 
     await act(async () => {
@@ -398,6 +398,140 @@ describe("TeamWebhookCard", () => {
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("createFailed");
     });
+  });
+
+  it("shows inline error for http:// URL", async () => {
+    setupFetchWebhooks([]);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+    });
+
+    const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+    fireEvent.change(urlInput, { target: { value: "http://example.com/hook" } });
+
+    const checkboxes = screen.getAllByTestId("checkbox");
+    fireEvent.click(checkboxes[0]);
+
+    const createButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("addWebhook"));
+    await act(async () => {
+      fireEvent.click(createButtons[0]);
+    });
+
+    expect(screen.getByText("urlHttpsRequired")).toBeInTheDocument();
+    // Should NOT call the API
+    const postCalls = mockFetch.mock.calls.filter(
+      (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "POST",
+    );
+    expect(postCalls).toHaveLength(0);
+  });
+
+  it("shows inline error for malformed URL", async () => {
+    setupFetchWebhooks([]);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+    });
+
+    const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+    fireEvent.change(urlInput, { target: { value: "not-a-url" } });
+
+    const checkboxes = screen.getAllByTestId("checkbox");
+    fireEvent.click(checkboxes[0]);
+
+    const createButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("addWebhook"));
+    await act(async () => {
+      fireEvent.click(createButtons[0]);
+    });
+
+    expect(screen.getByText("urlInvalid")).toBeInTheDocument();
+  });
+
+  it("shows validation error toast on 400 response", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ webhooks: [] }),
+        });
+      }
+      if (init.method === "POST") {
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({ details: { fieldErrors: { url: ["invalid"] } } }),
+        });
+      }
+      return Promise.resolve({ ok: false, status: 500 });
+    });
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+    });
+
+    const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+    fireEvent.change(urlInput, { target: { value: "https://valid.example.com/hook" } });
+
+    const checkboxes = screen.getAllByTestId("checkbox");
+    fireEvent.click(checkboxes[0]);
+
+    const createButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("addWebhook"));
+    await act(async () => {
+      fireEvent.click(createButtons[0]);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("urlInvalid")).toBeInTheDocument();
+    });
+  });
+
+  it("clears URL error when user types", async () => {
+    setupFetchWebhooks([]);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+    });
+
+    const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+    fireEvent.change(urlInput, { target: { value: "not-a-url" } });
+
+    const checkboxes = screen.getAllByTestId("checkbox");
+    fireEvent.click(checkboxes[0]);
+
+    const createButtons = screen
+      .getAllByRole("button")
+      .filter((b) => b.textContent?.includes("addWebhook"));
+    await act(async () => {
+      fireEvent.click(createButtons[0]);
+    });
+
+    expect(screen.getByText("urlInvalid")).toBeInTheDocument();
+
+    // Now type a new value — error should clear
+    fireEvent.change(urlInput, { target: { value: "https://example.com" } });
+    expect(screen.queryByText("urlInvalid")).not.toBeInTheDocument();
   });
 
   it("excludes group:webhook from event groups", async () => {
