@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
+import { ENTRY_NAME_MAX, ENTRY_SHORT_MAX, SWIFT_BIC_MAX } from "@/lib/validations";
 
 interface BankAccountFieldsProps {
   bankName: string;
@@ -117,6 +118,7 @@ export function BankAccountFields({
           value={bankName}
           onChange={(e) => onBankNameChange(e.target.value)}
           placeholder={bankNamePlaceholder}
+          maxLength={ENTRY_NAME_MAX}
           autoComplete="off"
         />
       </div>
@@ -145,6 +147,7 @@ export function BankAccountFields({
               value={accountHolderName}
               onChange={(e) => onAccountHolderNameChange(e.target.value)}
               placeholder={accountHolderNamePlaceholder}
+              maxLength={ENTRY_NAME_MAX}
               autoComplete="off"
             />
           </>
@@ -161,6 +164,7 @@ export function BankAccountFields({
             value: accountNumber,
             onChange: (e) => onAccountNumberChange(e.target.value),
             placeholder: accountNumberPlaceholder,
+            maxLength: ENTRY_SHORT_MAX,
             autoComplete: "off",
           }}
         />
@@ -178,6 +182,7 @@ export function BankAccountFields({
                 value: routingNumber,
                 onChange: (e) => onRoutingNumberChange(e.target.value),
                 placeholder: routingNumberPlaceholder,
+                maxLength: ENTRY_SHORT_MAX,
                 autoComplete: "off",
               }}
             />
@@ -191,6 +196,7 @@ export function BankAccountFields({
               value={branchName}
               onChange={(e) => onBranchNameChange(e.target.value)}
               placeholder={branchNamePlaceholder}
+              maxLength={ENTRY_NAME_MAX}
               autoComplete="off"
             />
           </>
@@ -206,6 +212,7 @@ export function BankAccountFields({
               value={swiftBic}
               onChange={(e) => onSwiftBicChange(e.target.value)}
               placeholder={swiftBicPlaceholder}
+              maxLength={SWIFT_BIC_MAX}
               autoComplete="off"
             />
           </>
@@ -218,6 +225,7 @@ export function BankAccountFields({
               value={iban}
               onChange={(e) => onIbanChange(e.target.value)}
               placeholder={ibanPlaceholder}
+              maxLength={ENTRY_SHORT_MAX}
               autoComplete="off"
             />
           </>

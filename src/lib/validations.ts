@@ -24,6 +24,19 @@ export const MAX_VIEWS_MIN = 1;
 export const MAX_VIEWS_MAX = 100;
 export const SEND_NAME_MAX_LENGTH = 200;
 export const PASSPHRASE_MIN_LENGTH = 10;
+export const TAILNET_NAME_MAX_LENGTH = 63;
+export const SCIM_TOKEN_DESC_MAX_LENGTH = 255;
+
+// ─── Entry Field Lengths (shareDataSchema) ──────────────────
+export const ENTRY_NAME_MAX = 200;
+export const ENTRY_SHORT_MAX = 50;
+export const ENTRY_SECRET_MAX = 500;
+export const ENTRY_NOTES_MAX = 10000;
+export const ENTRY_URL_MAX = 2000;
+export const SECURE_NOTE_MAX = 50000;
+export const PUBLIC_KEY_MAX = 5000;
+export const CARD_NUMBER_MAX = 30;
+export const SWIFT_BIC_MAX = 20;
 
 const asciiPrintable = /^[\x20-\x7E]*$/;
 
@@ -328,65 +341,65 @@ export const createSendFileMetaSchema = z.object({
 // ─── Share Link Schemas ───────────────────────────────────
 
 const shareDataSchema = z.object({
-  title: z.string().min(1).max(200),
-  username: z.string().max(200).nullish(),
+  title: z.string().min(1).max(ENTRY_NAME_MAX),
+  username: z.string().max(ENTRY_NAME_MAX).nullish(),
   password: z.string().nullish(),
-  url: z.string().max(2000).nullish(),
-  notes: z.string().max(10000).nullish(),
+  url: z.string().max(ENTRY_URL_MAX).nullish(),
+  notes: z.string().max(ENTRY_NOTES_MAX).nullish(),
   customFields: z.array(z.object({
-    label: z.string().max(100),
-    value: z.string().max(10000),
+    label: z.string().max(NAME_MAX_LENGTH),
+    value: z.string().max(ENTRY_NOTES_MAX),
     type: z.enum(CUSTOM_FIELD_TYPE_VALUES),
   })).nullish(),
   // SECURE_NOTE
-  content: z.string().max(50000).nullish(),
+  content: z.string().max(SECURE_NOTE_MAX).nullish(),
   // CREDIT_CARD
-  cardholderName: z.string().max(200).nullish(),
-  cardNumber: z.string().max(30).nullish(),
-  brand: z.string().max(50).nullish(),
+  cardholderName: z.string().max(ENTRY_NAME_MAX).nullish(),
+  cardNumber: z.string().max(CARD_NUMBER_MAX).nullish(),
+  brand: z.string().max(ENTRY_SHORT_MAX).nullish(),
   expiryMonth: z.string().max(2).nullish(),
   expiryYear: z.string().max(4).nullish(),
   cvv: z.string().max(10).nullish(),
   // PASSKEY
-  relyingPartyId: z.string().max(200).nullish(),
-  relyingPartyName: z.string().max(200).nullish(),
-  credentialId: z.string().max(500).nullish(),
-  creationDate: z.string().max(50).nullish(),
-  deviceInfo: z.string().max(200).nullish(),
+  relyingPartyId: z.string().max(ENTRY_NAME_MAX).nullish(),
+  relyingPartyName: z.string().max(ENTRY_NAME_MAX).nullish(),
+  credentialId: z.string().max(ENTRY_SECRET_MAX).nullish(),
+  creationDate: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  deviceInfo: z.string().max(ENTRY_NAME_MAX).nullish(),
   // IDENTITY
-  fullName: z.string().max(200).nullish(),
-  address: z.string().max(500).nullish(),
-  phone: z.string().max(50).nullish(),
-  email: z.string().max(200).nullish(),
-  dateOfBirth: z.string().max(50).nullish(),
-  nationality: z.string().max(100).nullish(),
-  idNumber: z.string().max(100).nullish(),
-  issueDate: z.string().max(50).nullish(),
-  expiryDate: z.string().max(50).nullish(),
+  fullName: z.string().max(ENTRY_NAME_MAX).nullish(),
+  address: z.string().max(ENTRY_SECRET_MAX).nullish(),
+  phone: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  email: z.string().max(ENTRY_NAME_MAX).nullish(),
+  dateOfBirth: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  nationality: z.string().max(NAME_MAX_LENGTH).nullish(),
+  idNumber: z.string().max(NAME_MAX_LENGTH).nullish(),
+  issueDate: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  expiryDate: z.string().max(ENTRY_SHORT_MAX).nullish(),
   // BANK_ACCOUNT
-  bankName: z.string().max(200).nullish(),
-  accountType: z.string().max(50).nullish(),
-  accountHolderName: z.string().max(200).nullish(),
-  accountNumber: z.string().max(50).nullish(),
-  routingNumber: z.string().max(50).nullish(),
-  swiftBic: z.string().max(20).nullish(),
-  iban: z.string().max(50).nullish(),
-  branchName: z.string().max(200).nullish(),
+  bankName: z.string().max(ENTRY_NAME_MAX).nullish(),
+  accountType: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  accountHolderName: z.string().max(ENTRY_NAME_MAX).nullish(),
+  accountNumber: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  routingNumber: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  swiftBic: z.string().max(SWIFT_BIC_MAX).nullish(),
+  iban: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  branchName: z.string().max(ENTRY_NAME_MAX).nullish(),
   // SOFTWARE_LICENSE
-  softwareName: z.string().max(200).nullish(),
-  licenseKey: z.string().max(500).nullish(),
-  version: z.string().max(50).nullish(),
-  licensee: z.string().max(200).nullish(),
-  purchaseDate: z.string().max(50).nullish(),
-  expirationDate: z.string().max(50).nullish(),
+  softwareName: z.string().max(ENTRY_NAME_MAX).nullish(),
+  licenseKey: z.string().max(ENTRY_SECRET_MAX).nullish(),
+  version: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  licensee: z.string().max(ENTRY_NAME_MAX).nullish(),
+  purchaseDate: z.string().max(ENTRY_SHORT_MAX).nullish(),
+  expirationDate: z.string().max(ENTRY_SHORT_MAX).nullish(),
   // SSH_KEY
-  privateKey: z.string().max(10000).nullish(),
-  publicKey: z.string().max(5000).nullish(),
-  keyType: z.string().max(50).nullish(),
+  privateKey: z.string().max(ENTRY_NOTES_MAX).nullish(),
+  publicKey: z.string().max(PUBLIC_KEY_MAX).nullish(),
+  keyType: z.string().max(ENTRY_SHORT_MAX).nullish(),
   keySize: z.number().int().nullish(),
-  fingerprint: z.string().max(200).nullish(),
-  passphrase: z.string().max(500).nullish(),
-  comment: z.string().max(500).nullish(),
+  fingerprint: z.string().max(ENTRY_NAME_MAX).nullish(),
+  passphrase: z.string().max(ENTRY_SECRET_MAX).nullish(),
+  comment: z.string().max(ENTRY_SECRET_MAX).nullish(),
 });
 
 export const createShareLinkSchema = z.object({

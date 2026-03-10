@@ -43,6 +43,7 @@ import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
+import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 
 interface TeamInfo {
   id: string;
@@ -337,7 +338,7 @@ export default function TeamSettingsPage({
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>{t("teamName")}</Label>
-                      <Input value={name} onChange={(e) => setName(e.target.value)} />
+                      <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={NAME_MAX_LENGTH} />
                     </div>
                     <div className="space-y-2">
                       <Label>{t("slug")}</Label>
@@ -353,6 +354,7 @@ export default function TeamSettingsPage({
                     <Textarea
                       value={description}
                       onChange={(e) => setDescription(e.target.value)}
+                      maxLength={DESCRIPTION_MAX_LENGTH}
                       rows={3}
                     />
                   </div>

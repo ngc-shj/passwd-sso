@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 
 const MAX_CIDRS = 50;
 const CIDR_REGEX = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
@@ -201,6 +202,7 @@ export function TenantAccessRestrictionCard() {
                   setError(null);
                 }}
                 placeholder={t("tailscaleTailnetPlaceholder")}
+                maxLength={TAILNET_NAME_MAX_LENGTH}
               />
               <p className="text-xs text-muted-foreground">
                 {t("tailscaleTailnetHelp")}
