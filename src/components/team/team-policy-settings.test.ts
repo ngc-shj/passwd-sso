@@ -39,4 +39,14 @@ describe("validatePolicy", () => {
     const errs = validatePolicy({ minPasswordLength: -1, maxSessionDurationMinutes: 1 });
     expect(Object.keys(errs)).toHaveLength(2);
   });
+
+  it("rejects NaN minPasswordLength", () => {
+    const errs = validatePolicy({ minPasswordLength: NaN, maxSessionDurationMinutes: null });
+    expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
+  });
+
+  it("rejects NaN maxSessionDurationMinutes", () => {
+    const errs = validatePolicy({ minPasswordLength: 0, maxSessionDurationMinutes: NaN as unknown as number });
+    expect(errs.maxSessionDurationMinutes).toBe("maxSessionDurationRange");
+  });
 });

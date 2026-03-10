@@ -1,59 +1,54 @@
 # Code Review: client-side-validation
-Date: 2026-03-10T23:56:00+09:00
-Review round: 2 (all findings resolved)
+Date: 2026-03-11T00:20:00+09:00
+Review round: 3
 
 ## Changes from Previous Round
-Initial review
+Added leading-zero stripping and min/max clamping to all numeric inputs (team-policy-settings, send-dialog, share-dialog, tenant-session-policy-card).
 
 ## Functionality Findings
 
-### F1 [Major] team-create-dialog.tsx:103-104 — `finally` block indentation
-- **Problem**: `teamKey.fill(0)` inside `finally` block had incorrect indentation.
-- **Status**: RESOLVED — fixed indentation.
+### F1 [Minor] team-policy-settings.tsx:153,206 — `e.target.value` mutation in React controlled input
+- **Problem**: Mutating `e.target.value` is a no-op in a React controlled input (React overwrites from state on re-render).
+- **Status**: RESOLVED — removed `e.target.value = String(value)` lines.
 
-### F2 [Minor] directory-sync-card.tsx:188-190 — Update path missing 400 error handling
-- **Problem**: Create path had 400 handling, but Update path did not.
-- **Status**: RESOLVED — added `res.status === 400` branch to Update error handling.
+### F2 [Minor] team-policy-settings.tsx:201 — maxSessionDurationMinutes allows 1-4 but validation rejects < 5
+- **Problem**: onChange accepts `parsed >= 1` but `validatePolicy` rejects `< 5`, and HTML `min={5}`. User can type "3", see it accepted, then get error on save.
+- **Status**: RESOLVED — changed clamp lower bound from `< 1` to `< 5`.
+
+### F3 [Minor] api-key-manager.tsx:129-136 — 400 check ordering
+- **Problem**: Status 400 check placed after body parsing. Works correctly but ordering is semantically confusing.
+- **Status**: SKIPPED — no functional impact, style only.
 
 ## Security Findings
 
-### S1 [Minor] directory-sync-card.tsx:516-519, 701-703 — `lastSyncError` may leak internal details
-- **Problem**: Pre-existing issue. Server-side sync errors displayed in admin-only UI.
-- **Status**: SKIPPED — out of scope (pre-existing, admin-only, server-side fix needed).
+### S1 [Minor] team-webhook-card.tsx:102 — Client-side validateUrl doesn't block localhost/internal
+- **Problem**: Server blocks SSRF (localhost, IP literals, .local, .internal) but client doesn't. User can type `https://localhost/hook`, pass client validation, then get server 400.
+- **Status**: SKIPPED — server-side SSRF protection is authoritative. UX-only improvement, out of scope.
 
-### S2 [Minor] team-policy-settings.tsx:140 — Negative value settable via keyboard
-- **Problem**: Input allows negative values into state before submit-time validation.
-- **Status**: SKIPPED — submit-time validation catches it, no security impact.
+### S2 [Minor] team-policy-settings.tsx:43 — validatePolicy doesn't guard against NaN
+- **Problem**: `NaN < 0` and `NaN > 128` are both `false`, so NaN bypasses validation. onChange handler prevents NaN reaching state, but function is exported and could be called directly.
+- **Status**: RESOLVED — added `Number.isNaN()` guards to both fields in `validatePolicy`.
 
 ## Testing Findings
 
-### T1 [Critical] SLUG_REGEX duplicated in client and server
-- **Problem**: Same regex defined in `validations.ts` and `team-create-dialog.tsx`.
-- **Status**: RESOLVED — exported `slugRegex` from `validations.ts`, imported in dialog. Added slug regex tests.
+### T1 [Major] validatePolicy NaN input not tested
+- **Problem**: `validatePolicy({ minPasswordLength: NaN, ... })` returns `{}` (no errors) because NaN comparisons are false. Exported pure function should handle this edge case.
+- **Status**: RESOLVED — added `Number.isNaN()` guards to `validatePolicy` + 2 NaN test cases.
 
-### T2 [Critical] No test coverage for webhook URL validation
-- **Problem**: `validateUrl` and 400 handling had no tests.
-- **Status**: RESOLVED — added 5 test cases (HTTP URL, malformed URL, 400 response, error clearing, general failure).
+### T2 [Major] send-dialog, share-dialog, tenant-session-policy-card clamp logic has no tests
+- **Problem**: Numeric clamping logic in onChange handlers has no test coverage. No test files exist for these components.
+- **Status**: SKIPPED — inline `parseInt` → `Math.min` is trivial; no test file exists for these components. Extracting pure functions would be over-engineering. Server-side validation is authoritative.
 
-### T3 [Major] No test for slug validation
-- **Problem**: `createTeamSchema` had no tests.
-- **Status**: RESOLVED — added 9 test cases covering boundary values and edge cases.
+### T3 [Minor] team-webhook-card.test.tsx — No test for empty URL input
+- **Problem**: `validateUrl("")` returns `t("urlRequired")` but this path is not tested.
+- **Status**: SKIPPED — button is disabled when URL is empty (`!url.trim()`), so validateUrl is unreachable via UI. Correct behavior by design.
 
-### T4 [Major] No tests for tag name length validation
-- **Problem**: 50-char limit had no tests.
-- **Status**: RESOLVED — added 7 tag schema tests covering boundary values, color validation, and empty color string.
-
-### T5 [Major] No tests for policy numeric range validation
-- **Problem**: `validate()` had no test coverage.
-- **Status**: RESOLVED — extracted `validatePolicy` as pure exported function, created `team-policy-settings.test.ts` with 8 test cases.
-
-### T6 [Major] Existing webhook test mock missing `status` property
-- **Problem**: Mock `{ ok: false }` didn't set `status`.
-- **Status**: RESOLVED — added `status: 500` to existing mock.
+### T4 [Minor] validations.test.ts — slugRegex 2-char boundary could use clarifying comment
+- **Problem**: `slugRegex` with `[a-z0-9-]*` (0+) matches 2 chars. Test exists but could be more explicit.
+- **Status**: SKIPPED — existing test coverage is sufficient.
 
 ## Resolution Status
 
-All Critical and Major findings resolved. 2 Minor findings skipped (pre-existing/out-of-scope).
-Round 2: All three experts returned "No findings" (Critical/Major). Minor suggestion (color: "" test) applied.
-- Tests: 372 files, 4016 tests — ALL PASSED
+Round 3: F1, F2, S2, T1 resolved. F3, S1, T2, T3, T4 skipped (no functional/security impact).
+- Tests: 372 files, 4019 tests — ALL PASSED
 - Build: production build — SUCCEEDED

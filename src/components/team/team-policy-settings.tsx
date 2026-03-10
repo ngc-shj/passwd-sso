@@ -40,13 +40,12 @@ export function validatePolicy(
   policy: Pick<PolicyData, "minPasswordLength" | "maxSessionDurationMinutes">,
 ): Record<string, string> {
   const errs: Record<string, string> = {};
-  if (policy.minPasswordLength < 0 || policy.minPasswordLength > 128) {
+  const pwLen = policy.minPasswordLength;
+  if (Number.isNaN(pwLen) || pwLen < 0 || pwLen > 128) {
     errs.minPasswordLength = "minPasswordLengthRange";
   }
-  if (
-    policy.maxSessionDurationMinutes !== null &&
-    (policy.maxSessionDurationMinutes < 5 || policy.maxSessionDurationMinutes > 43200)
-  ) {
+  const dur = policy.maxSessionDurationMinutes;
+  if (dur !== null && (Number.isNaN(dur) || dur < 5 || dur > 43200)) {
     errs.maxSessionDurationMinutes = "maxSessionDurationRange";
   }
   return errs;
@@ -150,7 +149,6 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
                 const parsed = parseInt(e.target.value, 10);
                 const value = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(128, parsed));
                 setPolicy((p) => ({ ...p, minPasswordLength: value }));
-                e.target.value = String(value);
                 setFieldErrors((prev) => {
                   const { minPasswordLength: _, ...rest } = prev;
                   return rest;
@@ -198,12 +196,11 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
                   setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
                 } else {
                   const parsed = parseInt(e.target.value, 10);
-                  if (Number.isNaN(parsed) || parsed < 1) {
+                  if (Number.isNaN(parsed) || parsed < 5) {
                     setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
                   } else {
                     const value = Math.min(43200, parsed);
                     setPolicy((p) => ({ ...p, maxSessionDurationMinutes: value }));
-                    e.target.value = String(value);
                   }
                 }
                 setFieldErrors((prev) => {
