@@ -3,6 +3,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
+import { ENTRY_NAME_MAX, ENTRY_SHORT_MAX, ENTRY_SECRET_MAX } from "@/lib/validations";
 
 interface SoftwareLicenseFieldsProps {
   softwareName: string;
@@ -82,6 +83,7 @@ export function SoftwareLicenseFields({
           value={softwareName}
           onChange={(e) => onSoftwareNameChange(e.target.value)}
           placeholder={softwareNamePlaceholder}
+          maxLength={ENTRY_NAME_MAX}
           autoComplete="off"
         />
       </div>
@@ -96,6 +98,7 @@ export function SoftwareLicenseFields({
             value: licenseKey,
             onChange: (e) => onLicenseKeyChange(e.target.value),
             placeholder: licenseKeyPlaceholder,
+            maxLength: ENTRY_SECRET_MAX,
             autoComplete: "off",
           }}
         />
@@ -110,6 +113,7 @@ export function SoftwareLicenseFields({
               value={version}
               onChange={(e) => onVersionChange(e.target.value)}
               placeholder={versionPlaceholder}
+              maxLength={ENTRY_SHORT_MAX}
               autoComplete="off"
             />
           </>
@@ -122,6 +126,7 @@ export function SoftwareLicenseFields({
               value={licensee}
               onChange={(e) => onLicenseeChange(e.target.value)}
               placeholder={licenseePlaceholder}
+              maxLength={ENTRY_NAME_MAX}
               autoComplete="off"
             />
           </>

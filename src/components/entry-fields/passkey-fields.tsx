@@ -3,6 +3,7 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
+import { ENTRY_NAME_MAX, ENTRY_SECRET_MAX } from "@/lib/validations";
 
 interface PasskeyFieldsProps {
   relyingPartyId: string;
@@ -82,6 +83,7 @@ export function PasskeyFields({
           value={relyingPartyId}
           onChange={(e) => onRelyingPartyIdChange(e.target.value)}
           placeholder={relyingPartyIdPlaceholder}
+          maxLength={ENTRY_NAME_MAX}
           autoComplete="off"
         />
       </div>
@@ -93,6 +95,7 @@ export function PasskeyFields({
           value={relyingPartyName}
           onChange={(e) => onRelyingPartyNameChange(e.target.value)}
           placeholder={relyingPartyNamePlaceholder}
+          maxLength={ENTRY_NAME_MAX}
           autoComplete="off"
         />
       </div>
@@ -104,6 +107,7 @@ export function PasskeyFields({
           value={username}
           onChange={(e) => onUsernameChange(e.target.value)}
           placeholder={usernamePlaceholder}
+          maxLength={ENTRY_NAME_MAX}
           autoComplete="off"
         />
       </div>
@@ -118,6 +122,7 @@ export function PasskeyFields({
             value: credentialId,
             onChange: (e) => onCredentialIdChange(e.target.value),
             placeholder: credentialIdPlaceholder,
+            maxLength: ENTRY_SECRET_MAX,
             autoComplete: "off",
           }}
         />
@@ -143,6 +148,7 @@ export function PasskeyFields({
               value={deviceInfo}
               onChange={(e) => onDeviceInfoChange(e.target.value)}
               placeholder={deviceInfoPlaceholder}
+              maxLength={ENTRY_NAME_MAX}
               autoComplete="off"
             />
           </>
