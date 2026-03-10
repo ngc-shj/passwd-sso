@@ -4,12 +4,12 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, EXPORT_FORMAT_VALUES } from "@/lib/constants";
 
 const bodySchema = z.object({
   teamId: z.string().optional(),
   entryCount: z.number().int().min(0),
-  format: z.enum(["csv", "json"]),
+  format: z.enum(EXPORT_FORMAT_VALUES),
   filename: z.string().trim().min(1).max(255).optional(),
   encrypted: z.boolean().optional(),
   includeTeams: z.boolean().optional(),
