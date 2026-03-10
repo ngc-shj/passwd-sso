@@ -167,7 +167,9 @@ export function TenantSessionPolicyCard() {
                 const raw = e.target.value;
                 if (!raw) { setMaxSessions(""); } else {
                   const n = parseInt(raw, 10);
-                  setMaxSessions(Number.isNaN(n) ? "" : String(n));
+                  if (Number.isNaN(n) || n < 1) { setMaxSessions(""); } else {
+                    setMaxSessions(String(Math.min(n, 100)));
+                  }
                 }
                 setError(null);
               }}
@@ -208,7 +210,9 @@ export function TenantSessionPolicyCard() {
                 const raw = e.target.value;
                 if (!raw) { setIdleTimeoutMinutes(""); } else {
                   const n = parseInt(raw, 10);
-                  setIdleTimeoutMinutes(Number.isNaN(n) ? "" : String(n));
+                  if (Number.isNaN(n) || n < 1) { setIdleTimeoutMinutes(""); } else {
+                    setIdleTimeoutMinutes(String(Math.min(n, 1440)));
+                  }
                 }
                 setError(null);
               }}
@@ -249,7 +253,9 @@ export function TenantSessionPolicyCard() {
                 const raw = e.target.value;
                 if (!raw) { setVaultAutoLockMinutes(""); } else {
                   const n = parseInt(raw, 10);
-                  setVaultAutoLockMinutes(Number.isNaN(n) ? "" : String(n));
+                  if (Number.isNaN(n) || n < 1) { setVaultAutoLockMinutes(""); } else {
+                    setVaultAutoLockMinutes(String(Math.min(n, 1440)));
+                  }
                 }
                 setError(null);
               }}

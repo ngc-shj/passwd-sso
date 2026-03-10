@@ -332,7 +332,8 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                     const raw = e.target.value;
                     if (!raw) { setMaxViews(""); return; }
                     const n = parseInt(raw, 10);
-                    setMaxViews(Number.isNaN(n) ? "" : String(n));
+                    if (Number.isNaN(n) || n < 1) { setMaxViews(""); return; }
+                    setMaxViews(String(Math.min(n, 100)));
                   }}
                 />
               </div>
