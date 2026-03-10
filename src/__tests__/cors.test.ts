@@ -99,6 +99,8 @@ describe("cors", () => {
       });
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(CHROME_EXT);
       expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+      expect(res.headers.get("Access-Control-Allow-Methods")).toContain("PATCH");
+      expect(res.headers.get("Access-Control-Max-Age")).toBe("86400");
       expect(res.headers.get("Vary")).toBe("Origin");
     });
 
@@ -142,6 +144,20 @@ describe("cors", () => {
         makeRequest("OPTIONS", "moz-extension://------------------------------------"),
         { allowExtension: true },
       );
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("rejects malformed safari-web-extension origin", () => {
+      const res = handlePreflight(
+        makeRequest("OPTIONS", "safari-web-extension://not-a-valid-uuid"),
+        { allowExtension: true },
+      );
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("applyCorsHeaders rejects extension origin without allowExtension", () => {
+      const req = makeRequest("GET", CHROME_EXT);
+      const res = applyCorsHeaders(req, NextResponse.next());
       expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
     });
 
