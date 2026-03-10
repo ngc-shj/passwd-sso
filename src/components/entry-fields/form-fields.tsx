@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ENTRY_NOTES_MAX } from "@/lib/validations";
 
 interface VisibilityToggleInputProps {
   show: boolean;
@@ -78,6 +79,7 @@ export function NotesField({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         rows={rows}
+        maxLength={ENTRY_NOTES_MAX}
       />
     </div>
   );

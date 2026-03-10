@@ -10,11 +10,12 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
+import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 
 export const runtime = "nodejs";
 
 const createTokenSchema = z.object({
-  description: z.string().max(255).optional(),
+  description: z.string().max(SCIM_TOKEN_DESC_MAX_LENGTH).optional(),
   /** Expiry in days. null = never expires. Default = 365. */
   expiresInDays: z.number().int().min(1).max(3650).nullable().optional().default(365),
 });

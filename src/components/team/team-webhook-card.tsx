@@ -93,8 +93,29 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
     fetchWebhooks();
   }, [fetchWebhooks]);
 
+  const [urlError, setUrlError] = useState("");
+
+  const validateUrl = (value: string): string | null => {
+    const trimmed = value.trim();
+    if (!trimmed) return t("urlRequired");
+    try {
+      const parsed = new URL(trimmed);
+      if (parsed.protocol !== "https:") return t("urlHttpsRequired");
+    } catch {
+      return t("urlInvalid");
+    }
+    return null;
+  };
+
   const handleCreate = async () => {
+    const urlValidationError = validateUrl(url);
+    if (urlValidationError) {
+      setUrlError(urlValidationError);
+      return;
+    }
+
     setCreating(true);
+    setUrlError("");
     try {
       const res = await fetchApi(apiPath.teamWebhooks(teamId), {
         method: "POST",
@@ -104,6 +125,15 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
           events: Array.from(selectedEvents),
         }),
       });
+      if (res.status === 400) {
+        const data = await res.json().catch(() => null);
+        if (data?.details?.fieldErrors?.url?.length) {
+          setUrlError(t("urlInvalid"));
+        } else {
+          toast.error(t("validationError"));
+        }
+        return;
+      }
       if (!res.ok) {
         toast.error(t("createFailed"));
         return;
@@ -293,9 +323,15 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
               <Input
                 type="url"
                 value={url}
-                onChange={(e) => setUrl(e.target.value)}
+                onChange={(e) => {
+                  setUrl(e.target.value);
+                  setUrlError("");
+                }}
                 placeholder={t("urlPlaceholder")}
               />
+              {urlError && (
+                <p className="text-sm text-destructive">{urlError}</p>
+              )}
             </div>
 
             <div className="space-y-2">

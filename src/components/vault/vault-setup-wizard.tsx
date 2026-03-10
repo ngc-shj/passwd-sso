@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/card";
 import { Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { getStrength, STRENGTH_COLORS } from "./passphrase-strength";
+import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 
 export function VaultSetupWizard() {
   const t = useTranslations("Vault");
@@ -28,7 +29,7 @@ export function VaultSetupWizard() {
   const [error, setError] = useState("");
 
   const isValid =
-    passphrase.length >= 10 &&
+    passphrase.length >= PASSPHRASE_MIN_LENGTH &&
     passphrase === confirm;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -105,7 +106,7 @@ export function VaultSetupWizard() {
                   </p>
                 </div>
               )}
-              {passphrase && passphrase.length < 10 && (
+              {passphrase && passphrase.length < PASSPHRASE_MIN_LENGTH && (
                 <p className="text-xs text-destructive">
                   {t("passphraseMinLength")}
                 </p>

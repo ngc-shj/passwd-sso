@@ -30,6 +30,7 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 
 interface ScimToken {
   id: string;
@@ -162,7 +163,7 @@ export function ScimTokenManager({ locale }: Props) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder={t("scimTokenDescriptionPlaceholder")}
-            maxLength={255}
+            maxLength={SCIM_TOKEN_DESC_MAX_LENGTH}
           />
         </div>
         <div className="space-y-2">

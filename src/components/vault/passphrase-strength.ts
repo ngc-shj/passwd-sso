@@ -3,6 +3,8 @@
  * Returns level (0-4) and an i18n label key. Color is the caller's responsibility.
  */
 
+import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
+
 export interface PassphraseStrength {
   level: 0 | 1 | 2 | 3 | 4;
   labelKey: string;
@@ -12,7 +14,7 @@ export function getStrength(passphrase: string): PassphraseStrength {
   if (!passphrase) return { level: 0, labelKey: "" };
 
   let score = 0;
-  if (passphrase.length >= 10) score++;
+  if (passphrase.length >= PASSPHRASE_MIN_LENGTH) score++;
   if (passphrase.length >= 16) score++;
   if (/[a-z]/.test(passphrase) && /[A-Z]/.test(passphrase)) score++;
   if (/[0-9]/.test(passphrase) || /[^a-zA-Z0-9]/.test(passphrase)) score++;

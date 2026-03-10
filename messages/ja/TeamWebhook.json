@@ -18,5 +18,9 @@
   "failCount": "{count}回の失敗",
   "limitReached": "Webhook の上限に達しました",
   "createFailed": "Webhook の作成に失敗しました",
-  "deleteFailed": "Webhook の削除に失敗しました"
+  "deleteFailed": "Webhook の削除に失敗しました",
+  "urlRequired": "URL を入力してください",
+  "urlInvalid": "有効な URL を入力してください",
+  "urlHttpsRequired": "URL は HTTPS でなければなりません",
+  "validationError": "入力内容に誤りがあります"
 }

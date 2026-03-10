@@ -22,5 +22,8 @@
   "saving": "保存中...",
   "saveSuccess": "セキュリティポリシーを保存しました。",
   "saveError": "セキュリティポリシーの保存に失敗しました。",
-  "fetchError": "セキュリティポリシーの読み込みに失敗しました。"
+  "fetchError": "セキュリティポリシーの読み込みに失敗しました。",
+  "validationError": "入力内容に誤りがあります。",
+  "minPasswordLengthRange": "0〜128の範囲で入力してください",
+  "maxSessionDurationRange": "5〜43200の範囲で入力してください"
 }

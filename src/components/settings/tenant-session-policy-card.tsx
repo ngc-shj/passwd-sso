@@ -164,7 +164,13 @@ export function TenantSessionPolicyCard() {
               max={100}
               value={maxSessions}
               onChange={(e) => {
-                setMaxSessions(e.target.value);
+                const raw = e.target.value;
+                if (!raw) { setMaxSessions(""); } else {
+                  const n = parseInt(raw, 10);
+                  if (Number.isNaN(n) || n < 1) { setMaxSessions(""); } else {
+                    setMaxSessions(String(Math.min(n, 100)));
+                  }
+                }
                 setError(null);
               }}
               placeholder="3"
@@ -201,7 +207,13 @@ export function TenantSessionPolicyCard() {
               max={1440}
               value={idleTimeoutMinutes}
               onChange={(e) => {
-                setIdleTimeoutMinutes(e.target.value);
+                const raw = e.target.value;
+                if (!raw) { setIdleTimeoutMinutes(""); } else {
+                  const n = parseInt(raw, 10);
+                  if (Number.isNaN(n) || n < 1) { setIdleTimeoutMinutes(""); } else {
+                    setIdleTimeoutMinutes(String(Math.min(n, 1440)));
+                  }
+                }
                 setError(null);
               }}
               placeholder="30"
@@ -238,7 +250,13 @@ export function TenantSessionPolicyCard() {
               max={1440}
               value={vaultAutoLockMinutes}
               onChange={(e) => {
-                setVaultAutoLockMinutes(e.target.value);
+                const raw = e.target.value;
+                if (!raw) { setVaultAutoLockMinutes(""); } else {
+                  const n = parseInt(raw, 10);
+                  if (Number.isNaN(n) || n < 1) { setVaultAutoLockMinutes(""); } else {
+                    setVaultAutoLockMinutes(String(Math.min(n, 1440)));
+                  }
+                }
                 setError(null);
               }}
               placeholder="15"
