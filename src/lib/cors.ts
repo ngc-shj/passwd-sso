@@ -43,8 +43,8 @@ function resolveOrigin(): string | null {
  */
 function isExtensionOrigin(origin: string): boolean {
   return /^chrome-extension:\/\/[a-z]{32}$/.test(origin) ||
-    /^moz-extension:\/\/[0-9a-f-]{36}$/.test(origin) ||
-    /^safari-web-extension:\/\/[0-9A-F-]{36}$/.test(origin);
+    /^moz-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(origin) ||
+    /^safari-web-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(origin);
 }
 
 function corsHeaders(
