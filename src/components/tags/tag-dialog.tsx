@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { buildTagTree, flattenTagTree, type FlatTag } from "@/lib/tag-tree";
+import { TAG_NAME_MAX_LENGTH } from "@/lib/validations";
 
 export interface TagDialogTag {
   id: string;
@@ -117,7 +118,7 @@ export function TagDialog({ open, onOpenChange, editTag, allTags = [], onSubmit 
               id="tag-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              maxLength={50}
+              maxLength={TAG_NAME_MAX_LENGTH}
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.nativeEvent.isComposing && name.trim()) {

@@ -10,6 +10,9 @@ import {
   slugRegex,
   createTeamSchema,
   createTagSchema,
+  SLUG_MAX_LENGTH,
+  TAG_NAME_MAX_LENGTH,
+  CHARS_FIELD_MAX,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
 
@@ -314,8 +317,8 @@ describe("generatePasswordSchema", () => {
     expect(generatePasswordSchema.safeParse({ excludeChars: "abc\x00" }).success).toBe(false);
   });
 
-  it("rejects symbols longer than 128 characters", () => {
-    const longString = "!".repeat(129);
+  it("rejects symbols exceeding max length", () => {
+    const longString = "!".repeat(CHARS_FIELD_MAX + 1);
     expect(generatePasswordSchema.safeParse({ symbols: longString }).success).toBe(false);
   });
 
@@ -327,16 +330,16 @@ describe("generatePasswordSchema", () => {
     expect(generatePasswordSchema.safeParse({ excludeChars: "abc\u{1F600}" }).success).toBe(false);
   });
 
-  it("rejects includeChars longer than 128 characters", () => {
-    expect(generatePasswordSchema.safeParse({ includeChars: "a".repeat(129) }).success).toBe(false);
+  it("rejects includeChars exceeding max length", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "a".repeat(CHARS_FIELD_MAX + 1) }).success).toBe(false);
   });
 
-  it("accepts includeChars at exactly 128 characters", () => {
-    expect(generatePasswordSchema.safeParse({ includeChars: "a".repeat(128) }).success).toBe(true);
+  it("accepts includeChars at max length", () => {
+    expect(generatePasswordSchema.safeParse({ includeChars: "a".repeat(CHARS_FIELD_MAX) }).success).toBe(true);
   });
 
-  it("rejects excludeChars longer than 128 characters", () => {
-    expect(generatePasswordSchema.safeParse({ excludeChars: "a".repeat(129) }).success).toBe(false);
+  it("rejects excludeChars exceeding max length", () => {
+    expect(generatePasswordSchema.safeParse({ excludeChars: "a".repeat(CHARS_FIELD_MAX + 1) }).success).toBe(false);
   });
 
   it("rejects DEL character (0x7F) in includeChars", () => {
@@ -465,14 +468,14 @@ describe("createTeamSchema", () => {
     expect(createTeamSchema.safeParse({ ...valid, slug: "AB" }).success).toBe(false);
   });
 
-  it("rejects 51-char slug", () => {
+  it("rejects slug exceeding max length", () => {
     expect(
-      createTeamSchema.safeParse({ ...valid, slug: "a".repeat(51) }).success,
+      createTeamSchema.safeParse({ ...valid, slug: "a".repeat(SLUG_MAX_LENGTH + 1) }).success,
     ).toBe(false);
   });
 
-  it("accepts 50-char slug", () => {
-    const slug = "a".repeat(49) + "b";
+  it("accepts slug at max length", () => {
+    const slug = "a".repeat(SLUG_MAX_LENGTH - 1) + "b";
     expect(createTeamSchema.safeParse({ ...valid, slug }).success).toBe(true);
   });
 
@@ -492,12 +495,12 @@ describe("createTagSchema", () => {
     expect(createTagSchema.safeParse({ name: "" }).success).toBe(false);
   });
 
-  it("accepts 50-char tag name", () => {
-    expect(createTagSchema.safeParse({ name: "a".repeat(50) }).success).toBe(true);
+  it("accepts tag name at max length", () => {
+    expect(createTagSchema.safeParse({ name: "a".repeat(TAG_NAME_MAX_LENGTH) }).success).toBe(true);
   });
 
-  it("rejects 51-char tag name", () => {
-    expect(createTagSchema.safeParse({ name: "a".repeat(51) }).success).toBe(false);
+  it("rejects tag name exceeding max length", () => {
+    expect(createTagSchema.safeParse({ name: "a".repeat(TAG_NAME_MAX_LENGTH + 1) }).success).toBe(false);
   });
 
   it("accepts valid hex color", () => {

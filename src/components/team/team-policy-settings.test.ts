@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { validatePolicy } from "./team-policy-settings";
+import {
+  POLICY_MIN_PW_LENGTH_MIN,
+  POLICY_MIN_PW_LENGTH_MAX,
+  POLICY_SESSION_DURATION_MIN,
+  POLICY_SESSION_DURATION_MAX,
+} from "@/lib/validations";
 
 describe("validatePolicy", () => {
   it("returns no errors for valid policy", () => {
@@ -7,8 +13,8 @@ describe("validatePolicy", () => {
   });
 
   it("returns no errors for boundary values", () => {
-    expect(validatePolicy({ minPasswordLength: 0, maxSessionDurationMinutes: 5 })).toEqual({});
-    expect(validatePolicy({ minPasswordLength: 128, maxSessionDurationMinutes: 43200 })).toEqual({});
+    expect(validatePolicy({ minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MIN })).toEqual({});
+    expect(validatePolicy({ minPasswordLength: POLICY_MIN_PW_LENGTH_MAX, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MAX })).toEqual({});
   });
 
   it("returns no errors when maxSessionDurationMinutes is null", () => {
@@ -20,18 +26,18 @@ describe("validatePolicy", () => {
     expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
   });
 
-  it("rejects minPasswordLength over 128", () => {
-    const errs = validatePolicy({ minPasswordLength: 129, maxSessionDurationMinutes: null });
+  it("rejects minPasswordLength over max", () => {
+    const errs = validatePolicy({ minPasswordLength: POLICY_MIN_PW_LENGTH_MAX + 1, maxSessionDurationMinutes: null });
     expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
   });
 
-  it("rejects maxSessionDurationMinutes below 5", () => {
-    const errs = validatePolicy({ minPasswordLength: 0, maxSessionDurationMinutes: 4 });
+  it("rejects maxSessionDurationMinutes below min", () => {
+    const errs = validatePolicy({ minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MIN - 1 });
     expect(errs.maxSessionDurationMinutes).toBe("maxSessionDurationRange");
   });
 
-  it("rejects maxSessionDurationMinutes over 43200", () => {
-    const errs = validatePolicy({ minPasswordLength: 0, maxSessionDurationMinutes: 43201 });
+  it("rejects maxSessionDurationMinutes over max", () => {
+    const errs = validatePolicy({ minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MAX + 1 });
     expect(errs.maxSessionDurationMinutes).toBe("maxSessionDurationRange");
   });
 

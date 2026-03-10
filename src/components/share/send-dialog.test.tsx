@@ -69,20 +69,21 @@ vi.mock("@/lib/api-error-codes", () => ({
   apiErrorToI18nKey: (e: string) => e,
 }));
 
-vi.mock("@/lib/constants", () => ({
-  API_PATH: {
-    SENDS: "/api/sends",
-    SENDS_FILE: "/api/sends/file",
-  },
-}));
+vi.mock("@/lib/constants", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/constants")>();
+  return {
+    ...actual,
+    API_PATH: {
+      SENDS: "/api/sends",
+      SENDS_FILE: "/api/sends/file",
+    },
+  };
+});
 
-vi.mock("@/lib/validations", () => ({
-  SEND_MAX_FILE_SIZE: 10 * 1024 * 1024,
-  SEND_MAX_TEXT_LENGTH: 50_000,
-  SEND_NAME_MAX_LENGTH: 200,
-  MAX_VIEWS_MIN: 1,
-  MAX_VIEWS_MAX: 100,
-}));
+vi.mock("@/lib/validations", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/validations")>();
+  return { ...actual };
+});
 
 import { SendDialog } from "./send-dialog";
 

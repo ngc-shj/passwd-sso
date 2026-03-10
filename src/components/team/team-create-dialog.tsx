@@ -21,7 +21,7 @@ import { API_PATH } from "@/lib/constants";
 import { useVault } from "@/lib/vault-context";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
-import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH } from "@/lib/validations";
+import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH, NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 
 interface TeamCreateDialogProps {
   trigger: React.ReactNode;
@@ -180,6 +180,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 placeholder={t("teamNamePlaceholder")}
+                maxLength={NAME_MAX_LENGTH}
               />
             </div>
 
@@ -211,6 +212,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder={t("descriptionPlaceholder")}
+              maxLength={DESCRIPTION_MAX_LENGTH}
               rows={3}
             />
           </div>
