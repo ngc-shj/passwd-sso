@@ -3,14 +3,14 @@ import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, IMPORT_FORMAT_VALUES } from "@/lib/constants";
 
 const bodySchema = z.object({
   requestedCount: z.number().int().min(0),
   successCount: z.number().int().min(0),
   failedCount: z.number().int().min(0),
   filename: z.string().trim().min(1).max(255).optional(),
-  format: z.enum(["csv", "json", "xml"]).optional(),
+  format: z.enum(IMPORT_FORMAT_VALUES).optional(),
   encrypted: z.boolean().optional(),
 });
 

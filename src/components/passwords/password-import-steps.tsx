@@ -10,6 +10,7 @@ import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide
 import { formatLabels, type CsvFormat, type ParsedEntry } from "@/components/passwords/password-import-utils";
 import type { ImportTranslator } from "@/components/passwords/password-import-types";
 import { fetchApi } from "@/lib/url-helpers";
+import type { ImportFormat } from "@/lib/constants";
 
 function entryTypeLabel(t: ImportTranslator, entryType: string): string {
   if (entryType === ENTRY_TYPE.PASSKEY) return t("typePasskey");
@@ -253,7 +254,7 @@ export function buildImportAuditPayload(
     successCount,
     failedCount,
     filename: sourceFilename || undefined,
-    format: sourceFilename.toLowerCase().endsWith(".json") ? "json" : sourceFilename.toLowerCase().endsWith(".xml") ? "xml" : "csv",
+    format: (sourceFilename.toLowerCase().endsWith(".json") ? "json" : sourceFilename.toLowerCase().endsWith(".xml") ? "xml" : "csv") satisfies ImportFormat,
     encrypted: encryptedInput,
   };
 }
