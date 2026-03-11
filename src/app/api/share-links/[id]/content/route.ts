@@ -89,10 +89,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 410 });
     }
 
-    // Record access log
+    // Record access log (must await inside withBypassRls transaction)
     const accessIp = ip === "unknown" ? null : ip;
     const ua = req.headers.get("user-agent");
-    prisma.shareAccessLog
+    await prisma.shareAccessLog
       .create({
         data: {
           shareId: share.id,
