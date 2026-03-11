@@ -39,6 +39,7 @@ export async function GET(req: NextRequest) {
         userId: true,
         role: true,
         deactivatedAt: true,
+        scimManaged: true,
         user: {
           select: {
             id: true,
@@ -78,6 +79,7 @@ export async function GET(req: NextRequest) {
     image: m.user.image,
     role: m.role,
     deactivatedAt: m.deactivatedAt,
+    scimManaged: m.scimManaged,
     pendingResets: pendingMap.get(m.userId) ?? 0,
   }));
 

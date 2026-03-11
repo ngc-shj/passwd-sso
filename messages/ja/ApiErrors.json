@@ -37,6 +37,7 @@
   "ownerOnly": "この操作はオーナーのみ実行できます。",
   "cannotChangeOwnerRole": "オーナーのロールは変更できません。",
   "cannotChangeHigherRole": "自分と同等以上のメンバーのロールは変更できません。",
+  "cannotChangeOwnRole": "自分のロールは変更できません。",
   "cannotRemoveOwner": "オーナーは削除できません。",
   "cannotRemoveHigherRole": "自分と同等以上のメンバーは削除できません。",
   "keyNotDistributed": "暗号化キーがまだ配布されていません。管理者をお待ちください。",
