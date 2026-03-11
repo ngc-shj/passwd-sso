@@ -9,11 +9,19 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/components/ui/avatar";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Loader2, Search, Users } from "lucide-react";
+import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, apiPath } from "@/lib/constants";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { TenantVaultResetButton } from "./tenant-vault-reset-button";
 import { TenantResetHistoryDialog } from "./tenant-reset-history-dialog";
@@ -23,6 +31,7 @@ interface TenantMember {
   userId: string;
   role: string;
   deactivatedAt: string | null;
+  scimManaged: boolean;
   name: string | null;
   email: string | null;
   image: string | null;
@@ -63,6 +72,7 @@ const ROLE_LEVEL: Record<string, number> = {
 export function TenantMembersCard() {
   const t = useTranslations("TenantAdmin");
   const { role: myRole, isAdmin, loading: roleLoading } = useTenantRole();
+  const isOwner = myRole === "OWNER";
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -96,6 +106,28 @@ export function TenantMembersCard() {
       setLoading(false);
     }
   }, [isAdmin, fetchMembers]);
+
+  const handleChangeRole = useCallback(async (userId: string, newRole: string) => {
+    try {
+      const res = await fetchApi(apiPath.tenantMemberById(userId), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole }),
+      });
+      if (!res.ok) {
+        if (res.status === 409) {
+          toast.error(t("scimManagedRoleError"));
+        } else {
+          toast.error(t("roleChangeFailed"));
+        }
+        return;
+      }
+      toast.success(t("roleChanged"));
+      fetchMembers();
+    } catch {
+      toast.error(t("roleChangeFailed"));
+    }
+  }, [t, fetchMembers]);
 
   if (roleLoading || loading) {
     return (
@@ -151,6 +183,8 @@ export function TenantMembersCard() {
               const targetLevel = ROLE_LEVEL[m.role] ?? 0;
               const canReset =
                 !isSelf && !isDeactivated && myLevel > targetLevel;
+              const canChangeRole =
+                isOwner && !isSelf && !isDeactivated && m.role !== "OWNER" && !m.scimManaged;
 
               return (
                 <div
@@ -171,9 +205,11 @@ export function TenantMembersCard() {
                         <span className="text-sm font-medium truncate">
                           {m.name ?? m.email ?? "—"}
                         </span>
-                        <Badge variant={ROLE_VARIANT[m.role] ?? "outline"}>
-                          {t(ROLE_LABEL[m.role] ?? "roleMember")}
-                        </Badge>
+                        {!canChangeRole && (
+                          <Badge variant={ROLE_VARIANT[m.role] ?? "outline"}>
+                            {t(ROLE_LABEL[m.role] ?? "roleMember")}
+                          </Badge>
+                        )}
                         {isDeactivated && (
                           <Badge variant="outline" className="text-muted-foreground">
                             {t("deactivated")}
@@ -189,6 +225,17 @@ export function TenantMembersCard() {
                   </div>
 
                   <div className="flex items-center gap-1">
+                    {canChangeRole && (
+                      <Select value={m.role} onValueChange={(v) => handleChangeRole(m.userId, v)}>
+                        <SelectTrigger className="w-28 h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="ADMIN">{t("roleAdmin")}</SelectItem>
+                          <SelectItem value="MEMBER">{t("roleMember")}</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
                     <TenantResetHistoryDialog
                       userId={m.userId}
                       memberName={m.name ?? m.email ?? "—"}

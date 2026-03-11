@@ -65,5 +65,12 @@
   "accessRestrictionSaved": "アクセス制限を更新しました。",
   "accessRestrictionSaveFailed": "アクセス制限の更新に失敗しました。",
   "selfLockoutWarning": "現在のIPアドレスがこのポリシーによりブロックされます。続行しますか？",
-  "selfLockoutConfirm": "それでも保存"
+  "selfLockoutConfirm": "それでも保存",
+  "roleChanged": "ロールを変更しました。",
+  "roleChangeFailed": "ロールの変更に失敗しました。",
+  "scimManagedRoleError": "SCIMで管理されているメンバーのロールは変更できません。",
+  "transferOwnership": "オーナー権限の移譲",
+  "transferOwnershipDesc": "オーナー権限を別のメンバーに移譲します。あなたのロールは管理者に変更されます。",
+  "transferOwnershipConfirm": "移譲する",
+  "transferOwnershipSuccess": "オーナー権限を移譲しました。"
 }

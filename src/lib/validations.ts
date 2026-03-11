@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
-import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES, SHARE_PERMISSION_VALUES } from "@/lib/constants";
+import { TEAM_INVITE_ROLE_VALUES, TEAM_ROLE, TEAM_ROLE_VALUES, TENANT_ROLE_VALUES, ENTRY_TYPE, ENTRY_TYPE_VALUES, CUSTOM_FIELD_TYPE_VALUES, SHARE_PERMISSION_VALUES } from "@/lib/constants";
 import { API_KEY_SCOPES, MAX_API_KEY_EXPIRY_DAYS } from "@/lib/constants/api-key";
 
 // ─── Validation Constants (single source of truth) ──────────
@@ -264,6 +264,10 @@ export const updateMemberRoleSchema = z.object({
   role: z.enum(TEAM_ROLE_VALUES),
 });
 
+export const updateTenantMemberRoleSchema = z.object({
+  role: z.enum(TENANT_ROLE_VALUES),
+});
+
 export const createTeamTagSchema = z.object({
   name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim(),
   color: z
@@ -507,6 +511,7 @@ export type UpdateTeamE2EPasswordInput = z.infer<typeof updateTeamE2EPasswordSch
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
+export type UpdateTenantMemberRoleInput = z.infer<typeof updateTenantMemberRoleSchema>;
 export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
 export type CreateSendTextInput = z.infer<typeof createSendTextSchema>;
 export type CreateSendFileMetaInput = z.infer<typeof createSendFileMetaSchema>;

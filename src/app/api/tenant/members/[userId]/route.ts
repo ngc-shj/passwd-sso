@@ -1,0 +1,189 @@
+import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/auth";
+import { prisma } from "@/lib/prisma";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { updateTenantMemberRoleSchema } from "@/lib/validations";
+import {
+  requireTenantPermission,
+  TenantAuthError,
+} from "@/lib/tenant-auth";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withTenantRls } from "@/lib/tenant-rls";
+
+export const runtime = "nodejs";
+
+type Params = { params: Promise<{ userId: string }> };
+
+// PUT /api/tenant/members/[userId] — Change tenant member role
+export async function PUT(req: NextRequest, { params }: Params) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+  }
+
+  const { userId } = await params;
+
+  // Permission gate
+  let actor;
+  try {
+    actor = await requireTenantPermission(
+      session.user.id,
+      TENANT_PERMISSION.MEMBER_MANAGE,
+    );
+  } catch (e) {
+    if (e instanceof TenantAuthError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+
+  // Only OWNER can change roles
+  if (actor.role !== TENANT_ROLE.OWNER) {
+    return NextResponse.json(
+      { error: API_ERROR.OWNER_ONLY },
+      { status: 403 },
+    );
+  }
+
+  // Cannot change own role — must be before ownership transfer
+  if (userId === session.user.id) {
+    return NextResponse.json(
+      { error: API_ERROR.CANNOT_CHANGE_OWN_ROLE },
+      { status: 400 },
+    );
+  }
+
+  // Validate request body
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+  }
+
+  const parsed = updateTenantMemberRoleSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  // Look up target with explicit tenantId filter (defense-in-depth)
+  const target = await withTenantRls(prisma, actor.tenantId, async () =>
+    prisma.tenantMember.findFirst({
+      where: {
+        userId,
+        tenantId: actor.tenantId,
+        deactivatedAt: null,
+      },
+    }),
+  );
+
+  if (!target) {
+    return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
+  }
+
+  // SCIM guard
+  if (target.scimManaged) {
+    return NextResponse.json(
+      { error: API_ERROR.SCIM_MANAGED_MEMBER },
+      { status: 409 },
+    );
+  }
+
+  // Ownership transfer
+  if (parsed.data.role === TENANT_ROLE.OWNER) {
+    const updated = await withTenantRls(prisma, actor.tenantId, async () => {
+      // Re-verify actor is still OWNER inside RLS scope
+      const currentActor = await prisma.tenantMember.findFirst({
+        where: { userId: session.user!.id, tenantId: actor.tenantId, role: TENANT_ROLE.OWNER },
+      });
+      if (!currentActor) {
+        return null;
+      }
+
+      // Demote actor first (avoid transient dual-OWNER)
+      await prisma.tenantMember.update({
+        where: { id: currentActor.id },
+        data: { role: TENANT_ROLE.ADMIN },
+      });
+
+      // Promote target to OWNER
+      return prisma.tenantMember.update({
+        where: { id: target.id },
+        data: { role: TENANT_ROLE.OWNER },
+        include: {
+          user: { select: { id: true, name: true, email: true, image: true } },
+        },
+      });
+    });
+
+    if (!updated) {
+      return NextResponse.json(
+        { error: API_ERROR.OWNER_ONLY },
+        { status: 403 },
+      );
+    }
+
+    logAudit({
+      scope: AUDIT_SCOPE.TENANT,
+      action: AUDIT_ACTION.TENANT_ROLE_UPDATE,
+      userId: session.user.id,
+      tenantId: actor.tenantId,
+      targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
+      targetId: target.id,
+      metadata: { newRole: TENANT_ROLE.OWNER, previousRole: target.role, transfer: true },
+      ...extractRequestMeta(req),
+    });
+
+    return NextResponse.json({
+      id: updated.id,
+      userId: updated.userId,
+      role: updated.role,
+      name: updated.user.name,
+      email: updated.user.email,
+      image: updated.user.image,
+    });
+  }
+
+  // Cannot change OWNER role (non-transfer)
+  if (target.role === TENANT_ROLE.OWNER) {
+    return NextResponse.json(
+      { error: API_ERROR.CANNOT_CHANGE_OWNER_ROLE },
+      { status: 403 },
+    );
+  }
+
+  // Update role
+  const updated = await withTenantRls(prisma, actor.tenantId, async () =>
+    prisma.tenantMember.update({
+      where: { id: target.id },
+      data: { role: parsed.data.role },
+      include: {
+        user: { select: { id: true, name: true, email: true, image: true } },
+      },
+    }),
+  );
+
+  logAudit({
+    scope: AUDIT_SCOPE.TENANT,
+    action: AUDIT_ACTION.TENANT_ROLE_UPDATE,
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+    targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
+    targetId: target.id,
+    metadata: { newRole: parsed.data.role, previousRole: target.role },
+    ...extractRequestMeta(req),
+  });
+
+  return NextResponse.json({
+    id: updated.id,
+    userId: updated.userId,
+    role: updated.role,
+    name: updated.user.name,
+    email: updated.user.email,
+    image: updated.user.image,
+  });
+}

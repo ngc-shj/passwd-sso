@@ -140,6 +140,8 @@ export const apiPath = {
   tenantScimTokens: () => API_PATH.TENANT_SCIM_TOKENS,
   tenantScimTokenById: (tokenId: string) =>
     `${API_PATH.TENANT_SCIM_TOKENS}/${tokenId}`,
+  tenantMemberById: (userId: string) =>
+    `${API_PATH.TENANT_MEMBERS}/${userId}`,
   tenantMemberResetVault: (userId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
   tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
