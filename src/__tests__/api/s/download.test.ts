@@ -19,6 +19,9 @@ vi.mock("@/lib/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
   decryptShareBinary: mockDecryptShareBinary,
 }));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),
+}));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));

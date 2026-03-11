@@ -8,6 +8,7 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { Clock, Eye, MessageSquare, Paperclip, Download, AlertTriangle } from "lucide-react";
 import { formatDateTime } from "@/lib/format-datetime";
 import { formatFileSize } from "@/lib/format-file-size";
+import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
 interface ShareSendViewProps {
   sendType: "TEXT" | "FILE";
@@ -41,14 +42,14 @@ export function ShareSendView({
   const handleDownload = useCallback(async () => {
     if (!accessToken) {
       // Non-protected share: direct download
-      window.location.href = `/s/${token}/download`;
+      window.location.href = withBasePath(`/s/${token}/download`);
       return;
     }
 
     // Protected share: fetch with Authorization header
     setDownloadError(false);
     try {
-      const res = await fetch(`/s/${token}/download`, {
+      const res = await fetchApi(`/s/${token}/download`, {
         headers: { Authorization: `Bearer ${accessToken}` },
       });
       if (!res.ok) {
@@ -138,7 +139,7 @@ export function ShareSendView({
                   </Button>
                 ) : (
                   <Button asChild className="w-full">
-                    <a href={`/s/${token}/download`}>
+                    <a href={withBasePath(`/s/${token}/download`)}>
                       <Download className="mr-2 h-4 w-4" />
                       {t("sendDownload")}
                     </a>
