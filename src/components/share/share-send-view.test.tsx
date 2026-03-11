@@ -32,6 +32,11 @@ vi.mock("@/lib/format-datetime", () => ({
   formatDateTime: (iso: string) => iso,
 }));
 
+vi.mock("@/lib/url-helpers", () => ({
+  fetchApi: vi.fn(),
+  withBasePath: (path: string) => path,
+}));
+
 import { ShareSendView } from "./share-send-view";
 
 describe("ShareSendView", () => {
