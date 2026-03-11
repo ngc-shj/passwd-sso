@@ -136,5 +136,11 @@
   "cancel": "キャンセル",
   "externalTenant": "外部テナント",
   "searchMembers": "メンバーを検索...",
-  "noMatchingMembers": "検索に一致するメンバーがいません。"
+  "noMatchingMembers": "検索に一致するメンバーがいません。",
+  "addFromTenant": "テナントから追加",
+  "searchTenantMembers": "テナントメンバーを検索...",
+  "addButton": "追加",
+  "memberAdded": "メンバーを追加しました",
+  "addMemberFailed": "メンバーの追加に失敗しました",
+  "noTenantMembersFound": "該当するメンバーが見つかりません"
 }

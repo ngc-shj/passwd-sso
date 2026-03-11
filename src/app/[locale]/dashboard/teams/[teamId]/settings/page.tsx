@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useRef, useCallback, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
@@ -74,6 +74,13 @@ interface Invitation {
   invitedBy: { name: string | null };
 }
 
+interface TenantMemberResult {
+  userId: string;
+  name: string | null;
+  email: string | null;
+  image: string | null;
+}
+
 export default function TeamSettingsPage({
   params,
 }: {
@@ -103,6 +110,14 @@ export default function TeamSettingsPage({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberSearch, setMemberSearch] = useState("");
   const filteredMembers = filterMembers(members, memberSearch);
+
+  // Add from tenant
+  const [addSearch, setAddSearch] = useState("");
+  const [addRole, setAddRole] = useState<string>(TEAM_ROLE.MEMBER);
+  const [adding, setAdding] = useState<string | null>(null);
+  const [searchResults, setSearchResults] = useState<TenantMemberResult[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     fetchApi(API_PATH.AUTH_SESSION)
@@ -201,7 +216,7 @@ export default function TeamSettingsPage({
       if (res.status === 409) {
         const data = await res.json();
         toast.error(
-          data.error === "User is already a member"
+          data.error === "ALREADY_A_MEMBER"
             ? t("alreadyMember")
             : t("alreadyInvited")
         );
@@ -277,6 +292,72 @@ export default function TeamSettingsPage({
       toast.error(t("networkError"));
     }
   };
+
+  // Debounced tenant member search
+  useEffect(() => {
+    if (!addSearch.trim()) {
+      setSearchResults([]);
+      setSearchLoading(false);
+      return;
+    }
+    setSearchLoading(true);
+    const timer = setTimeout(() => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      fetchApi(
+        `${apiPath.teamMembersSearch(teamId)}?q=${encodeURIComponent(addSearch.trim())}`,
+        { signal: controller.signal },
+      )
+        .then((r) => r.json())
+        .then((d) => {
+          if (!controller.signal.aborted) {
+            setSearchResults(Array.isArray(d) ? d : []);
+            setSearchLoading(false);
+          }
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) {
+            setSearchResults([]);
+            setSearchLoading(false);
+          }
+        });
+    }, 300);
+    return () => {
+      clearTimeout(timer);
+      abortRef.current?.abort();
+    };
+  }, [addSearch, teamId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleAddMember = useCallback(async (userId: string) => {
+    setAdding(userId);
+    try {
+      const res = await fetchApi(apiPath.teamMembers(teamId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, role: addRole }),
+      });
+      if (res.status === 409) {
+        const data = await res.json();
+        toast.error(
+          data.error === "SCIM_MANAGED_MEMBER"
+            ? t("addMemberFailed")
+            : t("alreadyMember"),
+        );
+        setAdding(null);
+        return;
+      }
+      if (!res.ok) throw new Error("Failed");
+      toast.success(t("memberAdded"));
+      setAddSearch("");
+      setSearchResults([]);
+      fetchAll();
+    } catch {
+      toast.error(t("addMemberFailed"));
+    } finally {
+      setAdding(null);
+    }
+  }, [teamId, addRole, t]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!team) {
     if (loadError) {
@@ -574,6 +655,85 @@ export default function TeamSettingsPage({
 
             {isAdmin && (
               <>
+                <Card className="rounded-xl border bg-card/80 p-4">
+                  <section className="space-y-4">
+                    <h2 className="flex items-center gap-2 text-lg font-semibold">
+                      <UserPlus className="h-5 w-5 text-muted-foreground" />
+                      {t("addFromTenant")}
+                    </h2>
+                    <div className="flex flex-col gap-3 md:flex-row md:items-end">
+                      <div className="flex-1 space-y-2">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            placeholder={t("searchTenantMembers")}
+                            value={addSearch}
+                            onChange={(e) => setAddSearch(e.target.value)}
+                            className="pl-9"
+                          />
+                        </div>
+                      </div>
+                      <div className="space-y-2 md:w-32">
+                        <Select value={addRole} onValueChange={setAddRole}>
+                          <SelectTrigger className="w-full">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={TEAM_ROLE.ADMIN}>{t("roleAdmin")}</SelectItem>
+                            <SelectItem value={TEAM_ROLE.MEMBER}>{t("roleMember")}</SelectItem>
+                            <SelectItem value={TEAM_ROLE.VIEWER}>{t("roleViewer")}</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {addSearch.trim() && (
+                      <div className="max-h-64 space-y-2 overflow-y-auto">
+                        {searchLoading ? (
+                          <div className="flex justify-center py-4">
+                            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                          </div>
+                        ) : searchResults.length === 0 ? (
+                          <p className="py-4 text-center text-sm text-muted-foreground">
+                            {t("noTenantMembersFound")}
+                          </p>
+                        ) : (
+                          searchResults.map((u) => (
+                            <div
+                              key={u.userId}
+                              className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
+                            >
+                              <Avatar className="h-8 w-8">
+                                <AvatarImage src={u.image ?? undefined} />
+                                <AvatarFallback>
+                                  {(u.name ?? u.email ?? "?").charAt(0).toUpperCase()}
+                                </AvatarFallback>
+                              </Avatar>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{u.name ?? u.email}</p>
+                                {u.name && u.email && (
+                                  <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+                                )}
+                              </div>
+                              <Button
+                                size="sm"
+                                onClick={() => handleAddMember(u.userId)}
+                                disabled={adding === u.userId}
+                              >
+                                {adding === u.userId ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <UserPlus className="h-4 w-4 mr-1" />
+                                )}
+                                {t("addButton")}
+                              </Button>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </section>
+                </Card>
+
                 <Card className="rounded-xl border bg-card/80 p-4">
                   <section className="space-y-4">
                     <h2 className="flex items-center gap-2 text-lg font-semibold">

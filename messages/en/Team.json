@@ -136,5 +136,11 @@
   "cancel": "Cancel",
   "externalTenant": "External tenant",
   "searchMembers": "Search members...",
-  "noMatchingMembers": "No members match your search."
+  "noMatchingMembers": "No members match your search.",
+  "addFromTenant": "Add from Tenant",
+  "searchTenantMembers": "Search tenant members...",
+  "addButton": "Add",
+  "memberAdded": "Member added",
+  "addMemberFailed": "Failed to add member",
+  "noTenantMembersFound": "No matching members found"
 }
