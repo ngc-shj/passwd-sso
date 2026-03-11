@@ -209,6 +209,31 @@ export function decryptShareBinary(encrypted: ServerEncryptedBinary, masterKeyVe
   return decryptServerBinary(encrypted, masterKey);
 }
 
+// ─── Access Password (for password-protected shares) ────────────
+
+/** Generate a 32-byte random access password as base64url (43 chars). */
+export function generateAccessPassword(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/**
+ * Hash an access password for storage.
+ * Pre-hashes with SHA-256 to produce 64-char hex required by hmacVerifier.
+ */
+export function hashAccessPassword(password: string): string {
+  const digest = createHash("sha256").update(password).digest("hex");
+  return hmacVerifier(digest);
+}
+
+/** Verify an access password against stored hash. Timing-safe. */
+export function verifyAccessPassword(
+  password: string,
+  storedHash: string
+): boolean {
+  const digest = createHash("sha256").update(password).digest("hex");
+  return verifyPassphraseVerifier(digest, storedHash);
+}
+
 // ─── Passphrase Verifier (HMAC pepper) ──────────────────────────
 
 const VERIFIER_HEX_RE = /^[0-9a-f]{64}$/;
