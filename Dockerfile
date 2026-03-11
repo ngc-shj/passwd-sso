@@ -37,11 +37,23 @@ COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 
 # Install prisma CLI + all deps for migrate deploy
 # Patch npm-bundled tar to >=7.5.11 (CVE-2026-31802)
-RUN npm install prisma --no-save --ignore-scripts && \
-    cd /usr/local/lib/node_modules/npm/node_modules/tar && \
-    npm pack tar@7.5.11 --quiet 2>/dev/null && \
-    tar xzf tar-7.5.11.tgz --strip-components=1 && \
-    rm -f tar-7.5.11.tgz
+RUN TAR_VER=7.5.11 && \
+    npm install prisma --no-save --ignore-scripts && \
+    TAR_DIR=/usr/local/lib/node_modules/npm/node_modules/tar && \
+    if [ -d "$TAR_DIR" ]; then \
+      CURRENT=$(node -p "require('${TAR_DIR}/package.json').version") && \
+      if [ "$(printf '%s\n' "$TAR_VER" "$CURRENT" | sort -V | head -n1)" != "$TAR_VER" ]; then \
+        cd "$TAR_DIR" && \
+        npm pack "tar@${TAR_VER}" --quiet && \
+        tar xzf "tar-${TAR_VER}.tgz" --strip-components=1 && \
+        rm -f "tar-${TAR_VER}.tgz" && \
+        node -e "const v=require('./package.json').version;if(v!=='${TAR_VER}'){console.error('tar patch failed: got '+v);process.exit(1)}"; \
+      else \
+        echo "tar ${CURRENT} already >= ${TAR_VER}, skipping patch"; \
+      fi; \
+    else \
+      echo "WARNING: tar directory not found at ${TAR_DIR}, skipping patch" >&2; \
+    fi
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
 COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
