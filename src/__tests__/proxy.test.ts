@@ -209,6 +209,24 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("allows /api/share-links/verify-access without session (public endpoint)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/share-links/verify-access"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("allows /api/share-links/[id]/content without session (public endpoint)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/share-links/abc123/content"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it("allows /api/auth/passkey/options without session (unauthenticated endpoint)", async () => {
     const res = await proxy(
       createApiRequest("/api/auth/passkey/options"),

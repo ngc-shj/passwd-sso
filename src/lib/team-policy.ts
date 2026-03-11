@@ -11,6 +11,7 @@ export interface TeamPolicyData {
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
+  requireSharePassword: boolean;
 }
 
 const DEFAULT_POLICY: TeamPolicyData = {
@@ -23,6 +24,7 @@ const DEFAULT_POLICY: TeamPolicyData = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
 };
 
 /**
@@ -45,6 +47,7 @@ export async function getTeamPolicy(teamId: string): Promise<TeamPolicyData> {
     requireRepromptForAll: policy.requireRepromptForAll,
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,
+    requireSharePassword: policy.requireSharePassword,
   };
 }
 
@@ -67,6 +70,22 @@ export async function assertPolicyAllowsSharing(
   const policy = await getTeamPolicy(teamId);
   if (!policy.allowSharing) {
     throw new PolicyViolationError("Sharing is disabled by team policy");
+  }
+}
+
+/**
+ * Assert that the share includes a password when the team policy requires it.
+ * Throws if the policy requires a share password but none was requested.
+ */
+export async function assertPolicySharePassword(
+  teamId: string,
+  requirePassword: boolean | undefined,
+): Promise<void> {
+  const policy = await getTeamPolicy(teamId);
+  if (policy.requireSharePassword && !requirePassword) {
+    throw new PolicyViolationError(
+      "Share password is required by team policy",
+    );
   }
 }
 

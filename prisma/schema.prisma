@@ -665,6 +665,9 @@ model PasswordShare {
   // Share permissions (e.g., ["HIDE_PASSWORD"], empty = VIEW_ALL)
   permissions String[] @default([])
 
+  // Optional access password protection (HMAC-peppered SHA-256 hash)
+  accessPasswordHash String? @map("access_password_hash") @db.VarChar(128)
+
   createdBy         User               @relation(fields: [createdById], references: [id], onDelete: Cascade)
   tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   passwordEntry     PasswordEntry?     @relation("personalShares", fields: [passwordEntryId], references: [id], onDelete: SetNull)
@@ -723,6 +726,8 @@ enum AuditAction {
   SHARE_REVOKE
   SEND_CREATE
   SEND_REVOKE
+  SHARE_ACCESS_VERIFY_SUCCESS
+  SHARE_ACCESS_VERIFY_FAILED
   EMERGENCY_GRANT_CREATE
   EMERGENCY_GRANT_ACCEPT
   EMERGENCY_GRANT_REJECT
@@ -1066,6 +1071,7 @@ model TeamPolicy {
   requireRepromptForAll     Boolean @default(false) @map("require_reprompt_for_all")
   allowExport               Boolean @default(true) @map("allow_export")
   allowSharing              Boolean @default(true) @map("allow_sharing")
+  requireSharePassword      Boolean @default(false) @map("require_share_password")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

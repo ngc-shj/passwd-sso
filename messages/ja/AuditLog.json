@@ -37,6 +37,8 @@
   "TEAM_ROLE_UPDATE": "ロール変更",
   "SHARE_CREATE": "共有リンク作成",
   "SHARE_REVOKE": "共有リンク取り消し",
+  "SHARE_ACCESS_VERIFY_SUCCESS": "共有パスワード認証成功",
+  "SHARE_ACCESS_VERIFY_FAILED": "共有パスワード認証失敗",
   "SEND_CREATE": "Send作成",
   "SEND_REVOKE": "Send取り消し",
   "EMERGENCY_GRANT_CREATE": "緊急アクセス権限の作成",

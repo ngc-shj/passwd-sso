@@ -13,6 +13,7 @@ export interface TeamPolicyClient {
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
+  requireSharePassword: boolean;
 }
 
 const DEFAULT_POLICY: TeamPolicyClient = {
@@ -24,6 +25,7 @@ const DEFAULT_POLICY: TeamPolicyClient = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
 };
 
 export function useTeamPolicy(open: boolean, teamId: string) {

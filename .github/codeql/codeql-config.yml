@@ -1,0 +1,14 @@
+name: "Custom CodeQL config"
+
+# Paths to exclude from analysis
+paths-ignore:
+  # Docs and review artifacts
+  - docs/archive/**
+
+# Query filters to suppress specific false positives
+query-filters:
+  # hashAccessPassword / verifyAccessPassword use SHA-256 on a server-generated
+  # 256-bit random token (randomBytes(32)), not a user-chosen password.
+  # A slow KDF is unnecessary for high-entropy secrets.
+  - exclude:
+      id: js/insufficient-password-hash

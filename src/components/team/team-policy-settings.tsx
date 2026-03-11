@@ -27,6 +27,7 @@ interface PolicyData {
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
+  requireSharePassword: boolean;
 }
 
 const DEFAULT_POLICY: PolicyData = {
@@ -39,6 +40,7 @@ const DEFAULT_POLICY: PolicyData = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
 };
 
 /** Validate policy fields. Returns a map of field name → error key (i18n). */
@@ -236,11 +238,36 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             onChange={(v) => setPolicy((p) => ({ ...p, allowExport: v }))}
           />
 
-          <SwitchField
-            label={t("allowSharing")}
-            checked={policy.allowSharing}
-            onChange={(v) => setPolicy((p) => ({ ...p, allowSharing: v }))}
-          />
+          <div className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="cursor-pointer">{t("allowSharing")}</Label>
+              <Switch
+                checked={policy.allowSharing}
+                onCheckedChange={(v) =>
+                  setPolicy((p) => ({
+                    ...p,
+                    allowSharing: v,
+                    ...(v ? {} : { requireSharePassword: false }),
+                  }))
+                }
+              />
+            </div>
+            {policy.allowSharing && (
+              <div className="ml-4 border-l-2 border-muted pl-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="cursor-pointer text-sm">
+                    {t("requireSharePassword")}
+                  </Label>
+                  <Switch
+                    checked={policy.requireSharePassword}
+                    onCheckedChange={(v) =>
+                      setPolicy((p) => ({ ...p, requireSharePassword: v }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex justify-end pt-1">

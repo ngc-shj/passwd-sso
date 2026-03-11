@@ -1,10 +1,12 @@
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { hashToken, decryptShareData } from "@/lib/crypto-server";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
 import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
+import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -33,132 +35,150 @@ export default async function SharePage({ params }: Props) {
 
   const tokenHash = hashToken(token);
 
-  const share = await prisma.passwordShare.findUnique({
-    where: { tokenHash },
-    select: {
-      id: true,
-      tenantId: true,
-      shareType: true,
-      entryType: true,
-      encryptedData: true,
-      dataIv: true,
-      dataAuthTag: true,
-      sendName: true,
-      sendFilename: true,
-      sendSizeBytes: true,
-      masterKeyVersion: true,
-      expiresAt: true,
-      maxViews: true,
-      viewCount: true,
-      revokedAt: true,
-    },
-  });
-
-  if (!share) {
-    return <ShareError reason="notFound" />;
-  }
-
-  if (share.revokedAt) {
-    return <ShareError reason="revoked" />;
-  }
-
-  if (share.expiresAt < new Date()) {
-    return <ShareError reason="expired" />;
-  }
-
-  // Atomically check maxViews and increment viewCount in a single query
-  // to prevent race conditions between concurrent requests
-  const updated: number = await prisma.$executeRaw`
-    UPDATE "password_shares"
-    SET "view_count" = "view_count" + 1
-    WHERE "id" = ${share.id}
-      AND ("max_views" IS NULL OR "view_count" < "max_views")`;
-
-  if (updated === 0) {
-    return <ShareError reason="maxViews" />;
-  }
-
-  // Record access log (async nonblocking)
-  const ip = rateLimitIp === "unknown" ? null : rateLimitIp;
-  const ua = headersList.get("user-agent");
-  prisma.shareAccessLog
-    .create({
-      data: {
-        shareId: share.id,
-        tenantId: share.tenantId,
-        ip,
-        userAgent: ua?.slice(0, 512) ?? null,
+  // All DB access must bypass RLS (unauthenticated public endpoint)
+  return withBypassRls(prisma, async () => {
+    const share = await prisma.passwordShare.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        tenantId: true,
+        shareType: true,
+        entryType: true,
+        encryptedData: true,
+        dataIv: true,
+        dataAuthTag: true,
+        sendName: true,
+        sendFilename: true,
+        sendSizeBytes: true,
+        masterKeyVersion: true,
+        expiresAt: true,
+        maxViews: true,
+        viewCount: true,
+        revokedAt: true,
+        accessPasswordHash: true,
       },
-    })
-    .catch(() => {});
+    });
 
-  // E2E share (team entries): client-side decryption via URL fragment key
-  if (share.masterKeyVersion === 0) {
+    if (!share) {
+      return <ShareError reason="notFound" />;
+    }
+
+    if (share.revokedAt) {
+      return <ShareError reason="revoked" />;
+    }
+
+    if (share.expiresAt < new Date()) {
+      return <ShareError reason="expired" />;
+    }
+
+    // Password-protected share: render gate without incrementing viewCount
+    if (share.accessPasswordHash) {
+      // Check maxViews without incrementing (for early rejection)
+      if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+        return <ShareError reason="maxViews" />;
+      }
+
+      return (
+        <ShareProtectedContent
+          shareId={share.id}
+          token={token}
+        />
+      );
+    }
+
+    // Non-protected share: existing flow with viewCount increment
+    const updated: number = await prisma.$executeRaw`
+      UPDATE "password_shares"
+      SET "view_count" = "view_count" + 1
+      WHERE "id" = ${share.id}
+        AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+
+    if (updated === 0) {
+      return <ShareError reason="maxViews" />;
+    }
+
+    // Record access log (must await inside withBypassRls transaction)
+    const ip = rateLimitIp === "unknown" ? null : rateLimitIp;
+    const ua = headersList.get("user-agent");
+    await prisma.shareAccessLog
+      .create({
+        data: {
+          shareId: share.id,
+          tenantId: share.tenantId,
+          ip,
+          userAgent: ua?.slice(0, 512) ?? null,
+        },
+      })
+      .catch(() => {});
+
+    // E2E share (team entries): client-side decryption via URL fragment key
+    if (share.masterKeyVersion === 0) {
+      return (
+        <ShareE2EEntryView
+          encryptedData={share.encryptedData}
+          dataIv={share.dataIv}
+          dataAuthTag={share.dataAuthTag}
+          entryType={share.entryType!}
+          expiresAt={share.expiresAt.toISOString()}
+          viewCount={share.viewCount + 1}
+          maxViews={share.maxViews}
+        />
+      );
+    }
+
+    // Server-encrypted share: decrypt with master key
+    let data: Record<string, unknown>;
+    try {
+      data = JSON.parse(
+        decryptShareData({
+          ciphertext: share.encryptedData,
+          iv: share.dataIv,
+          authTag: share.dataAuthTag,
+        }, share.masterKeyVersion)
+      );
+    } catch {
+      return <ShareError reason="notFound" />;
+    }
+
+    // Branch on shareType
+    if (share.shareType === "TEXT") {
+      return (
+        <ShareSendView
+          sendType="TEXT"
+          name={String(data.name ?? share.sendName ?? "")}
+          text={String(data.text ?? "")}
+          token={token}
+          expiresAt={share.expiresAt.toISOString()}
+          viewCount={share.viewCount + 1}
+          maxViews={share.maxViews}
+        />
+      );
+    }
+
+    if (share.shareType === "FILE") {
+      return (
+        <ShareSendView
+          sendType="FILE"
+          name={String(data.name ?? share.sendName ?? "")}
+          filename={share.sendFilename}
+          sizeBytes={share.sendSizeBytes}
+          token={token}
+          expiresAt={share.expiresAt.toISOString()}
+          viewCount={share.viewCount + 1}
+          maxViews={share.maxViews}
+        />
+      );
+    }
+
+    // ENTRY_SHARE (default)
     return (
-      <ShareE2EEntryView
-        encryptedData={share.encryptedData}
-        dataIv={share.dataIv}
-        dataAuthTag={share.dataAuthTag}
+      <ShareEntryView
+        data={data}
         entryType={share.entryType!}
         expiresAt={share.expiresAt.toISOString()}
         viewCount={share.viewCount + 1}
         maxViews={share.maxViews}
       />
     );
-  }
-
-  // Server-encrypted share: decrypt with master key
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(
-      decryptShareData({
-        ciphertext: share.encryptedData,
-        iv: share.dataIv,
-        authTag: share.dataAuthTag,
-      }, share.masterKeyVersion)
-    );
-  } catch {
-    return <ShareError reason="notFound" />;
-  }
-
-  // Branch on shareType
-  if (share.shareType === "TEXT") {
-    return (
-      <ShareSendView
-        sendType="TEXT"
-        name={String(data.name ?? share.sendName ?? "")}
-        text={String(data.text ?? "")}
-        token={token}
-        expiresAt={share.expiresAt.toISOString()}
-        viewCount={share.viewCount + 1}
-        maxViews={share.maxViews}
-      />
-    );
-  }
-
-  if (share.shareType === "FILE") {
-    return (
-      <ShareSendView
-        sendType="FILE"
-        name={String(data.name ?? share.sendName ?? "")}
-        filename={share.sendFilename}
-        sizeBytes={share.sendSizeBytes}
-        token={token}
-        expiresAt={share.expiresAt.toISOString()}
-        viewCount={share.viewCount + 1}
-        maxViews={share.maxViews}
-      />
-    );
-  }
-
-  // ENTRY_SHARE (default)
-  return (
-    <ShareEntryView
-      data={data}
-      entryType={share.entryType!}
-      expiresAt={share.expiresAt.toISOString()}
-      viewCount={share.viewCount + 1}
-      maxViews={share.maxViews}
-    />
-  );
+  });
 }
