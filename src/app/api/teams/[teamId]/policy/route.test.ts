@@ -77,6 +77,7 @@ const DEFAULT_RESPONSE = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
 };
 
 describe("GET /api/teams/[teamId]/policy", () => {
@@ -117,6 +118,7 @@ describe("GET /api/teams/[teamId]/policy", () => {
       requireRepromptForAll: true,
       allowExport: false,
       allowSharing: true,
+      requireSharePassword: false,
     });
 
     const res = await GET(
@@ -231,6 +233,7 @@ describe("PUT /api/teams/[teamId]/policy", () => {
       requireRepromptForAll: false,
       allowExport: true,
       allowSharing: true,
+      requireSharePassword: false,
     };
     mockPrismaTeamPolicy.upsert.mockResolvedValue(policyData);
 

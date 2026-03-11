@@ -6,9 +6,11 @@ import {
   generateShareToken,
   hashToken,
   encryptShareData,
+  generateAccessPassword,
+  hashAccessPassword,
 } from "@/lib/crypto-server";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { assertPolicyAllowsSharing, PolicyViolationError } from "@/lib/team-policy";
+import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews, permissions } =
+  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews, permissions, requirePassword } =
     parsed.data;
 
   let encryptedData: string;
@@ -137,6 +139,16 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
+    // Enforce team policy: share password requirement
+    try {
+      await assertPolicySharePassword(teamEntry.teamId, requirePassword);
+    } catch (e) {
+      if (e instanceof PolicyViolationError) {
+        return NextResponse.json({ error: API_ERROR.POLICY_SHARE_PASSWORD_REQUIRED }, { status: 403 });
+      }
+      throw e;
+    }
+
     // Store client-encrypted data as-is (masterKeyVersion=0 = E2E share)
     encryptedData = encryptedShareData!.ciphertext;
     dataIv = encryptedShareData!.iv;
@@ -145,6 +157,14 @@ export async function POST(req: NextRequest) {
     entryType = teamEntry.entryType as EntryTypeValue;
     teamId = teamEntry.teamId;
     tenantId = teamEntry.tenantId;
+  }
+
+  // Generate access password if requested
+  let accessPassword: string | undefined;
+  let accessPasswordHash: string | null = null;
+  if (requirePassword) {
+    accessPassword = generateAccessPassword();
+    accessPasswordHash = hashAccessPassword(accessPassword);
   }
 
   // Generate token
@@ -169,6 +189,7 @@ export async function POST(req: NextRequest) {
         passwordEntryId: passwordEntryId ?? null,
         teamPasswordEntryId: teamPasswordEntryId ?? null,
         permissions: permissions ?? [],
+        accessPasswordHash,
       },
     }),
   );
@@ -192,6 +213,7 @@ export async function POST(req: NextRequest) {
     token,
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
+    ...(accessPassword ? { accessPassword } : {}),
   });
 }
 

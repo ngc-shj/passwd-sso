@@ -88,5 +88,8 @@
   "apiKeyInvalid": "無効な API キーです。",
   "apiKeyScopeInsufficient": "API キーに必要なスコープがありません。",
   "itemKeyRequired": "このエントリにはItemKey暗号化が必要です。先にエントリを更新してください。",
-  "itemKeyVersionDowngrade": "エントリの暗号化バージョンをダウングレードすることはできません。"
+  "itemKeyVersionDowngrade": "エントリの暗号化バージョンをダウングレードすることはできません。",
+  "sharePasswordRequired": "このコンテンツにアクセスするにはパスワードが必要です。",
+  "sharePasswordIncorrect": "パスワードが正しくありません。",
+  "policySharePasswordRequired": "チームポリシーにより共有リンクにはパスワードが必要です。"
 }

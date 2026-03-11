@@ -13,6 +13,7 @@
   "allowExportHelp": "チームメンバーがチームデータをエクスポートすることを許可",
   "allowSharing": "共有リンクの作成を許可する",
   "allowSharingHelp": "チームメンバーがチームパスワードの共有リンクを作成することを許可",
+  "requireSharePassword": "共有リンクにパスワードを必須にする",
   "advanced": "詳細設定",
   "maxSessionDurationMinutes": "最大セッション時間（分）",
   "maxSessionDurationHelp": "空欄で制限なし。最小5分。",

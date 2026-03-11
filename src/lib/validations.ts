@@ -253,6 +253,7 @@ export const upsertTeamPolicySchema = z.object({
   requireRepromptForAll: z.boolean().default(false),
   allowExport: z.boolean().default(true),
   allowSharing: z.boolean().default(true),
+  requireSharePassword: z.boolean().default(false),
 });
 
 export const inviteSchema = z.object({
@@ -334,12 +335,14 @@ export const createSendTextSchema = z.object({
   text: z.string().min(1).max(SEND_MAX_TEXT_LENGTH),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
+  requirePassword: z.boolean().optional(),
 });
 
 export const createSendFileMetaSchema = z.object({
   name: z.string().min(1).max(SEND_NAME_MAX_LENGTH).trim(),
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.coerce.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
+  requirePassword: z.string().transform((v) => v === "true").optional(),
 });
 
 // ─── Share Link Schemas ───────────────────────────────────
@@ -415,6 +418,7 @@ export const createShareLinkSchema = z.object({
   expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
   maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
   permissions: z.array(z.enum(SHARE_PERMISSION_VALUES)).optional(),
+  requirePassword: z.boolean().optional(),
 }).refine(
   (d) => (d.passwordEntryId ? !d.teamPasswordEntryId : !!d.teamPasswordEntryId),
   { message: "Exactly one of passwordEntryId or teamPasswordEntryId is required" }
@@ -428,6 +432,13 @@ export const createShareLinkSchema = z.object({
   (d) => (d.teamPasswordEntryId ? !d.data : true),
   { message: "data must not be present for team entries (use encryptedShareData)" }
 );
+
+// ─── Share Access Password Schemas ────────────────────────
+
+export const verifyShareAccessSchema = z.object({
+  token: z.string().regex(/^[0-9a-f]{64}$/),
+  password: z.string().min(1).max(43),
+});
 
 // ─── Emergency Access Schemas ─────────────────────────────
 
@@ -516,6 +527,7 @@ export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
 export type CreateSendTextInput = z.infer<typeof createSendTextSchema>;
 export type CreateSendFileMetaInput = z.infer<typeof createSendFileMetaSchema>;
 export type CreateShareLinkInput = z.infer<typeof createShareLinkSchema>;
+export type VerifyShareAccessInput = z.infer<typeof verifyShareAccessSchema>;
 export type CreateEmergencyGrantInput = z.infer<typeof createEmergencyGrantSchema>;
 export type AcceptEmergencyGrantInput = z.infer<typeof acceptEmergencyGrantSchema>;
 export type ConfirmEmergencyGrantInput = z.infer<typeof confirmEmergencyGrantSchema>;
