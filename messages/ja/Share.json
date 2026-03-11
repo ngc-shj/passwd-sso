@@ -118,5 +118,16 @@
   "fieldTitle": "タイトル",
   "previewTitle": "共有されるフィールド",
   "previewHidden": "非表示",
-  "customFields": "カスタムフィールド"
+  "customFields": "カスタムフィールド",
+  "requirePassword": "パスワードを要求",
+  "requirePasswordDesc": "強力なパスワードが自動生成されます。受信者に別途共有してください。",
+  "accessPasswordLabel": "アクセスパスワード",
+  "accessPasswordWarning": "このパスワードは一度だけ表示されます。今すぐコピーして受信者に別途共有してください。",
+  "passwordRequired": "パスワードが必要です",
+  "passwordRequiredDesc": "このコンテンツは保護されています。アクセスパスワードを貼り付けてください。",
+  "pasteOnly": "パスワードをここに貼り付け...",
+  "unlock": "ロック解除",
+  "wrongPassword": "パスワードが正しくありません。もう一度お試しください。",
+  "tooManyAttempts": "試行回数が多すぎます。しばらく待ってから再度お試しください。",
+  "contentLoadError": "コンテンツの読み込みに失敗しました。もう一度お試しください。"
 }

@@ -104,6 +104,8 @@ export const API_ERROR = {
 
   // ── Share Links ───────────────────────────────────────────
   ALREADY_REVOKED: "ALREADY_REVOKED",
+  SHARE_PASSWORD_REQUIRED: "SHARE_PASSWORD_REQUIRED",
+  SHARE_PASSWORD_INCORRECT: "SHARE_PASSWORD_INCORRECT",
 
   // ── Send ────────────────────────────────────────────────
   SEND_TEXT_TOO_LARGE: "SEND_TEXT_TOO_LARGE",
@@ -231,6 +233,8 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   POLICY_SHARING_DISABLED: "policySharingDisabled",
   POLICY_EXPORT_DISABLED: "policyExportDisabled",
   ALREADY_REVOKED: "alreadyRevoked",
+  SHARE_PASSWORD_REQUIRED: "sharePasswordRequired",
+  SHARE_PASSWORD_INCORRECT: "sharePasswordIncorrect",
   SEND_TEXT_TOO_LARGE: "sendTextTooLarge",
   SEND_FILE_TOO_LARGE: "sendFileTooLarge",
   SEND_FILE_TYPE_NOT_ALLOWED: "sendFileTypeNotAllowed",

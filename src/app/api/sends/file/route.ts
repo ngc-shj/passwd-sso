@@ -12,6 +12,8 @@ import {
   hashToken,
   encryptShareData,
   encryptShareBinary,
+  generateAccessPassword,
+  hashAccessPassword,
 } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -61,10 +63,12 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate metadata
+  const requirePasswordRaw = formData.get("requirePassword");
   const parsed = createSendFileMetaSchema.safeParse({
     name: typeof name === "string" ? name : "",
     expiresIn: typeof expiresIn === "string" ? expiresIn : "",
     maxViews: maxViewsRaw != null ? maxViewsRaw : undefined,
+    requirePassword: requirePasswordRaw != null ? requirePasswordRaw : undefined,
   });
   if (!parsed.success) {
     return NextResponse.json(
@@ -132,6 +136,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Generate access password if requested
+  let accessPassword: string | undefined;
+  let accessPasswordHash: string | null = null;
+  if (meta.requirePassword) {
+    accessPassword = generateAccessPassword();
+    accessPasswordHash = hashAccessPassword(accessPassword);
+  }
+
   // Encrypt metadata with master key
   const encryptedMeta = encryptShareData(JSON.stringify({ name: meta.name }));
 
@@ -174,6 +186,7 @@ export async function POST(req: NextRequest) {
         masterKeyVersion: encryptedMeta.masterKeyVersion,
         expiresAt,
         maxViews: meta.maxViews ?? null,
+        accessPasswordHash,
         createdById: session.user.id,
         tenantId: actor.tenantId,
       },
@@ -198,5 +211,6 @@ export async function POST(req: NextRequest) {
     token,
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
+    ...(accessPassword ? { accessPassword } : {}),
   });
 }

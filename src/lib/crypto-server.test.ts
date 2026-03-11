@@ -14,6 +14,9 @@ import {
   getMasterKeyByVersion,
   hmacVerifier,
   verifyPassphraseVerifier,
+  generateAccessPassword,
+  hashAccessPassword,
+  verifyAccessPassword,
 } from "./crypto-server";
 import { randomBytes } from "node:crypto";
 
@@ -498,6 +501,47 @@ describe("crypto-server", () => {
       if (savedPepper) {
         process.env.VERIFIER_PEPPER_KEY = savedPepper;
       }
+    });
+  });
+
+  describe("generateAccessPassword", () => {
+    it("returns a base64url string of 43 chars (32 random bytes)", () => {
+      const pw = generateAccessPassword();
+      expect(pw).toHaveLength(43);
+      expect(/^[A-Za-z0-9_-]+$/.test(pw)).toBe(true);
+    });
+
+    it("generates unique passwords", () => {
+      const pw1 = generateAccessPassword();
+      const pw2 = generateAccessPassword();
+      expect(pw1).not.toBe(pw2);
+    });
+  });
+
+  describe("hashAccessPassword / verifyAccessPassword", () => {
+    it("verify returns true for correct password", () => {
+      const pw = generateAccessPassword();
+      const hash = hashAccessPassword(pw);
+      expect(verifyAccessPassword(pw, hash)).toBe(true);
+    });
+
+    it("verify returns false for wrong password", () => {
+      const pw = generateAccessPassword();
+      const hash = hashAccessPassword(pw);
+      expect(verifyAccessPassword("wrong-password", hash)).toBe(false);
+    });
+
+    it("hash is deterministic for same password", () => {
+      const pw = "test-password-123";
+      const h1 = hashAccessPassword(pw);
+      const h2 = hashAccessPassword(pw);
+      expect(h1).toBe(h2);
+    });
+
+    it("different passwords produce different hashes", () => {
+      const h1 = hashAccessPassword("password-a");
+      const h2 = hashAccessPassword("password-b");
+      expect(h1).not.toBe(h2);
     });
   });
 });

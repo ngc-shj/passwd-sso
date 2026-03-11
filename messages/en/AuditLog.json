@@ -37,6 +37,8 @@
   "TEAM_ROLE_UPDATE": "Changed role",
   "SHARE_CREATE": "Created share link",
   "SHARE_REVOKE": "Revoked share link",
+  "SHARE_ACCESS_VERIFY_SUCCESS": "Share password verified",
+  "SHARE_ACCESS_VERIFY_FAILED": "Share password verification failed",
   "SEND_CREATE": "Created send",
   "SEND_REVOKE": "Revoked send",
   "EMERGENCY_GRANT_CREATE": "Created emergency grant",
