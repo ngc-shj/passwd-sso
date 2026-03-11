@@ -36,7 +36,12 @@ COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/dotenv ./node_modules/dotenv
 
 # Install prisma CLI + all deps for migrate deploy
-RUN npm install prisma --no-save --ignore-scripts
+# Patch npm-bundled tar to >=7.5.11 (CVE-2026-31802)
+RUN npm install prisma --no-save --ignore-scripts && \
+    cd /usr/local/lib/node_modules/npm/node_modules/tar && \
+    npm pack tar@7.5.11 --quiet 2>/dev/null && \
+    tar xzf tar-7.5.11.tgz --strip-components=1 && \
+    rm -f tar-7.5.11.tgz
 
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
 COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
