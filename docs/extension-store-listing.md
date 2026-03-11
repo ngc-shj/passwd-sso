@@ -11,18 +11,23 @@
 
 ## Short Description (132 chars max)
 
-Autofill passwords from your self-hosted passwd-sso vault. End-to-end encrypted, open source.
+Stop typing passwords. Autofill from your self-hosted vault with one click — end-to-end encrypted.
 
 ## Detailed Description
 
-passwd-sso is a companion browser extension for the passwd-sso password manager.
+Tired of copying and pasting passwords from your passwd-sso vault? This extension brings your vault directly into the browser — log in to any site with a single click.
 
-**Features:**
-- Auto-detect login forms and autofill credentials
-- Quick copy passwords and usernames via context menu or keyboard shortcuts
-- Auto-lock vault after configurable timeout
-- End-to-end encryption — your master passphrase never leaves your device
-- Works exclusively with your self-hosted passwd-sso server
+**Why install this extension?**
+
+🔑 **One-click login** — The extension detects login forms automatically and fills in your credentials. No more switching tabs to look up passwords.
+
+📋 **Instant copy** — Right-click any page or press a shortcut to copy your password or username to the clipboard. Done in under a second.
+
+🔒 **Zero-knowledge security** — Your master passphrase never leaves your device. All data is encrypted with AES-256-GCM before it ever touches the network. Even if someone intercepts the traffic, they see only ciphertext.
+
+⏱️ **Auto-lock** — Walk away from your computer? The vault locks itself after a configurable timeout, so your credentials are never left exposed.
+
+🏠 **Your server, your data** — The extension connects only to your self-hosted passwd-sso instance. No third-party cloud, no data collection, no tracking.
 
 **Keyboard Shortcuts:**
 - Ctrl+Shift+A (Cmd+Shift+A on Mac) — Open popup
@@ -30,11 +35,13 @@ passwd-sso is a companion browser extension for the passwd-sso password manager.
 - Ctrl+Shift+U (Cmd+Shift+U on Mac) — Copy username
 - Ctrl+Shift+F (Cmd+Shift+F on Mac) — Trigger autofill
 
-**Security:**
-All vault data is encrypted client-side using AES-256-GCM. Key derivation uses PBKDF2 with 600,000 iterations. The extension communicates only with your self-hosted server instance over HTTPS.
+**Getting Started:**
+1. Install the extension
+2. Open the options page and enter your passwd-sso server URL
+3. Log in with your account and unlock the vault
+4. Visit any login page — the extension handles the rest
 
-**Open Source:**
-This extension is fully open source. See the project repository for source code and contribution guidelines.
+This extension is fully open source: https://github.com/ngc-shj/passwd-sso
 
 ## Permission Justifications
 
