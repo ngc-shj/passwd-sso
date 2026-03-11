@@ -13,6 +13,7 @@
   "allowExportHelp": "Allow team members to export team data",
   "allowSharing": "Allow share link creation",
   "allowSharingHelp": "Allow team members to create share links for team passwords",
+  "requireSharePassword": "Require password on share links",
   "advanced": "Advanced",
   "maxSessionDurationMinutes": "Max session duration (minutes)",
   "maxSessionDurationHelp": "Leave empty for no limit. Minimum 5 minutes.",

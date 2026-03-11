@@ -253,6 +253,7 @@ export const upsertTeamPolicySchema = z.object({
   requireRepromptForAll: z.boolean().default(false),
   allowExport: z.boolean().default(true),
   allowSharing: z.boolean().default(true),
+  requireSharePassword: z.boolean().default(false),
 });
 
 export const inviteSchema = z.object({

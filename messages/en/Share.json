@@ -121,6 +121,7 @@
   "customFields": "Custom Fields",
   "requirePassword": "Require password",
   "requirePasswordDesc": "A strong password will be auto-generated. Share it separately with the recipient.",
+  "requirePasswordPolicy": "Required by team policy. A strong password will be auto-generated.",
   "accessPasswordLabel": "Access Password",
   "accessPasswordWarning": "This password will only be shown once. Copy it now and share it separately with the recipient.",
   "passwordRequired": "Password Required",

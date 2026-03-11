@@ -121,6 +121,7 @@
   "customFields": "カスタムフィールド",
   "requirePassword": "パスワードを要求",
   "requirePasswordDesc": "強力なパスワードが自動生成されます。受信者に別途共有してください。",
+  "requirePasswordPolicy": "チームポリシーにより必須です。強力なパスワードが自動生成されます。",
   "accessPasswordLabel": "アクセスパスワード",
   "accessPasswordWarning": "このパスワードは一度だけ表示されます。今すぐコピーして受信者に別途共有してください。",
   "passwordRequired": "パスワードが必要です",

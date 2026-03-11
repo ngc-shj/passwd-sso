@@ -27,6 +27,7 @@ interface PolicyData {
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
+  requireSharePassword: boolean;
 }
 
 const DEFAULT_POLICY: PolicyData = {
@@ -39,6 +40,7 @@ const DEFAULT_POLICY: PolicyData = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
 };
 
 /** Validate policy fields. Returns a map of field name → error key (i18n). */
@@ -240,6 +242,12 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             label={t("allowSharing")}
             checked={policy.allowSharing}
             onChange={(v) => setPolicy((p) => ({ ...p, allowSharing: v }))}
+          />
+
+          <SwitchField
+            label={t("requireSharePassword")}
+            checked={policy.requireSharePassword}
+            onChange={(v) => setPolicy((p) => ({ ...p, requireSharePassword: v }))}
           />
         </div>
 
