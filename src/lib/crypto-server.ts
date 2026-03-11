@@ -219,10 +219,13 @@ export function generateAccessPassword(): string {
 /**
  * Hash an access password for storage.
  * Pre-hashes with SHA-256 to produce 64-char hex required by hmacVerifier.
+ *
+ * NOTE: SHA-256 is intentional here — the input is a server-generated
+ * 256-bit random token (randomBytes(32)), not a user-chosen password.
+ * A slow KDF (bcrypt/argon2) is unnecessary for high-entropy secrets.
  */
 export function hashAccessPassword(password: string): string {
-  const digest = createHash("sha256").update(password).digest("hex");
-  return hmacVerifier(digest);
+  const digest = createHash("sha256").update(password).digest("hex");  return hmacVerifier(digest);
 }
 
 /** Verify an access password against stored hash. Timing-safe. */
@@ -230,8 +233,7 @@ export function verifyAccessPassword(
   password: string,
   storedHash: string
 ): boolean {
-  const digest = createHash("sha256").update(password).digest("hex");
-  return verifyPassphraseVerifier(digest, storedHash);
+  const digest = createHash("sha256").update(password).digest("hex");  return verifyPassphraseVerifier(digest, storedHash);
 }
 
 // ─── Passphrase Verifier (HMAC pepper) ──────────────────────────
