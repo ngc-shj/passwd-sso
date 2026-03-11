@@ -356,8 +356,11 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   - `secretKeyRef` (`Uint8Array`)
   - Rationale: keep decryption material out of persistent storage
 - `sessionStorage`:
-  - No keys currently stored (previous `psso:skip-beforeunload-once` flag removed; dirty-state guards now use in-memory React state only)
-  - Rationale: UX control does not require persistent storage
+  - `psso:prf-output` (PRF-derived key material, zeroed after single use; lifespan: sign-in to vault unlock)
+  - `psso:prf-data` (PRF-wrapped secret key from server, cleared after single use)
+  - `psso:webauthn-signin` (UX flag, no secrets)
+  - Previous `psso:skip-beforeunload-once` flag removed; dirty-state guards now use in-memory React state only
+  - Rationale: PRF output is stored only transiently across page navigation during the single-ceremony sign-in flow
 - `localStorage`:
   - Watchtower UI helper state (e.g., display/ack timestamps)
   - Rationale: usability only; no secret material

@@ -25,6 +25,15 @@ export function useNavigationGuard(dirty: boolean) {
   // Browser reload / tab close guard
   useBeforeUnloadGuard(dirty);
 
+  // Clear stale dialog state when dirty becomes false (e.g. analysis completes while dialog is open)
+  useEffect(() => {
+    if (!dirty) {
+      setDialogOpen(false);
+      setPendingHref(null);
+      allowLeaveRef.current = false;
+    }
+  }, [dirty]);
+
   // SPA link click interception
   useEffect(() => {
     if (!dirty) return;
