@@ -1,6 +1,6 @@
 # Code Review: feat-share-access-password
-Date: 2026-03-11T17:05:00+09:00
-Review round: 5 (rounds 1-2 from previous session + rounds 3-5 this session)
+Date: 2026-03-11T18:40:00+09:00
+Review round: 6 (rounds 1-2 from previous session + rounds 3-6 this session)
 
 ## Rounds 1-2 — Previous session
 
@@ -80,6 +80,28 @@ Verified viewCount flow for all 4 combinations:
 
 **No findings.** All agents report clean.
 
+## Round 6 — CI lint fix review
+
+Reviewed commit `6ccf8055` (CI lint fix: extract tryFetchContent, remove unused props, add restoringRef).
+
+### Functionality Findings
+
+#### [R6-F-m-1] Minor — useEffect missing cleanup for async sessionStorage restore
+- **Problem:** No cancellation flag in useEffect. Unmount during async fetch could trigger setState/sessionStorage.removeItem on stale component.
+- **Status:** RESOLVED — Replaced restoringRef with cancelled flag pattern and cleanup return function.
+
+### Security Findings
+
+**No findings.**
+
+### Testing Findings
+
+#### [R6-T-M-1] Major — ShareProtectedContent component tests missing
+- **Status:** DEFERRED — Same as R3-T-m-2. API layer tested, component tests lower priority.
+
+#### [R6-T-M-2] Major — tryFetchContent mock documentation
+- **Status:** DEFERRED — Standard fetchApi mock pattern; no action needed.
+
 ## Final Status
 
 - Tests: 4105 passed (377 files)
@@ -103,3 +125,6 @@ Verified viewCount flow for all 4 combinations:
 | R3-S-m-2 | Minor | Personal entry policy scope | Accepted |
 | R4-F-m-2 | Minor | Double DB query | Accepted |
 | R3-T-m-2 | Minor | Component tests | Deferred |
+| R6-F-m-1 | Minor | useEffect cleanup for async restore | Resolved |
+| R6-T-M-1 | Major | Component tests (re-raised) | Deferred |
+| R6-T-M-2 | Major | tryFetchContent mock docs | Deferred |
