@@ -1,6 +1,6 @@
 # Code Review: beforeunload-dirty-state
 Date: 2026-03-11
-Review round: 3
+Review round: 4
 
 ## Changes from Previous Round
 Round 1 addressed: unused `act` import, test title mismatch, missing afterEach spy restore.
@@ -69,10 +69,10 @@ Round 2 covers full branch including post-review commits (SPA navigation guard, 
 
 ### Functionality Findings (Round 3)
 
-#### F4 [Major] TOCTOU between findMany/deleteMany in empty-trash (accepted)
-- File: `src/app/api/teams/[teamId]/passwords/empty-trash/route.ts`
+#### F4 [Critical] TOCTOU between findMany/deleteMany in empty-trash (resolved in Round 4)
+- File: `src/app/api/teams/[teamId]/passwords/empty-trash/route.ts`, `src/app/api/passwords/empty-trash/route.ts`
 - Problem: findMany and deleteMany are separate operations; concurrent restore could cause audit log IDs to diverge from actually deleted entries
-- Action: Accepted — matches personal empty-trash pattern; deleteMany re-checks `deletedAt: { not: null }` so data safety is ensured; audit log discrepancy is theoretical and low-impact
+- Action: Initially accepted; later fixed by wrapping in `prisma.$transaction` inside single RLS call (see Round 4)
 
 #### F5 [Minor] Empty trash dialog has no explicit cancel button (skipped)
 - Action: Skipped — matches personal trash dialog pattern (consistent UX)
@@ -126,3 +126,56 @@ Round 2 covers full branch including post-review commits (SPA navigation guard, 
 ### T6 [Minor] Team import toast assertion
 - Action: Added mockToastSuccess assertion
 - Modified file: src/components/passwords/use-import-execution.test.ts
+
+---
+
+## Round 4: TOCTOU fix + personal trash loading state
+
+Changes reviewed:
+- `e00c6fe5` fix: add loading state to personal empty trash button
+- `15843a17` fix: wrap empty-trash findMany+deleteMany in $transaction
+
+### Functionality Findings (Round 4)
+
+#### F4 [Critical] TOCTOU race — RESOLVED
+- Previously accepted; now fixed by wrapping findMany+deleteMany in `prisma.$transaction` inside single `withUserTenantRls`/`withTeamTenantRls` call
+- Both personal and team routes updated consistently
+
+#### F7 [Minor] DialogTrigger missing `disabled={isEmptying}` (skipped)
+- Problem: Theoretically possible to re-open dialog during emptying
+- Action: Skipped — `isEmptying` state persists across dialog re-open, confirmation button is disabled
+
+#### F8 [Minor] Individual delete/restore buttons lack loading state (skipped)
+- Problem: No `disabled` during handleDeletePermanently/handleRestore
+- Action: Skipped — pre-existing pattern, out of scope for this branch
+
+### Security Findings (Round 4)
+
+No new Critical/Major findings. TOCTOU fix verified: `$transaction` runs within the same `withTenantRls` RLS context. Authorization checks (session + `requireTeamPermission`) remain intact.
+
+#### S6 [Info] Team route missing `withRequestLog` wrapper (noted)
+- File: `src/app/api/teams/[teamId]/passwords/empty-trash/route.ts`
+- Action: Noted — consistent with other team route patterns; not a security issue
+
+### Testing Findings (Round 4)
+
+#### T8 [Major] Personal test mocks `prisma.auditLog.create` instead of `logAudit` (resolved)
+- File: `src/app/api/passwords/empty-trash/route.test.ts`
+- Problem: Tests spied on internal Prisma call rather than module boundary (`logAudit`), fragile and inconsistent with team test pattern
+- Action: Rewrote test to mock `@/lib/audit` with `mockLogAudit`, removed `mockAuditCreate`/`mockPrismaUser`/`mockWithBypassRls`
+
+#### T9 [Minor] `findMany` arguments not asserted (skipped)
+- Action: Skipped — `deleteMany` assertion with `id: { in: [...] }` implicitly verifies findMany produced correct IDs
+
+#### T10 [Minor] Empty-trash test doesn't assert `deleteMany` called when `findMany` returns `[]` (skipped)
+- Action: Skipped — Prisma always executes deleteMany even with empty `in:[]`; early-return guard is not planned
+
+## Resolution Status (Round 4)
+
+### F4 [Critical] TOCTOU race in empty-trash
+- Action: Wrapped findMany+deleteMany in `prisma.$transaction` inside single RLS call
+- Modified files: src/app/api/passwords/empty-trash/route.ts, src/app/api/teams/[teamId]/passwords/empty-trash/route.ts
+
+### T8 [Major] Personal test audit mock pattern
+- Action: Rewrote to mock `logAudit` at module boundary, consistent with team test
+- Modified file: src/app/api/passwords/empty-trash/route.test.ts
