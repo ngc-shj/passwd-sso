@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — passwd-sso</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #0a0a0a; background: #fff; line-height: 1.6; }
+    .container { max-width: 48rem; margin: 0 auto; padding: 3rem 1rem; }
+    .back { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; color: #737373; text-decoration: none; margin-bottom: 2rem; }
+    .back:hover { color: #0a0a0a; }
+    .back svg { width: 1rem; height: 1rem; }
+    h1 { font-size: 1.875rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .subtitle { font-size: 1.125rem; color: #737373; margin-bottom: 0.25rem; }
+    .updated { font-size: 0.875rem; color: #737373; margin-bottom: 2rem; }
+    .sections { display: flex; flex-direction: column; gap: 2rem; }
+    h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.75rem; }
+    p { color: #737373; }
+    ul { margin-top: 0.75rem; list-style: disc inside; color: #737373; }
+    ul li { margin-bottom: 0.25rem; }
+    ul li strong { color: #0a0a0a; }
+    a.link { color: #737373; text-decoration: underline; }
+    a.link:hover { color: #0a0a0a; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/passwd-sso/en" class="back">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+      Back to home
+    </a>
+
+    <h1>Privacy Policy</h1>
+    <p class="subtitle">passwd-sso Browser Extension</p>
+    <p class="updated">Last updated: 2026-03-11</p>
+
+    <div class="sections">
+      <section>
+        <h2>Overview</h2>
+        <p>The passwd-sso browser extension ("the Extension") is a companion to the passwd-sso password manager. This policy explains what data the Extension accesses, how it is used, and your rights.</p>
+      </section>
+
+      <section>
+        <h2>Data Collection</h2>
+        <p>The Extension does NOT collect, transmit, or sell any personal data to third parties. All vault data is end-to-end encrypted and only decrypted locally in your browser.</p>
+      </section>
+
+      <section>
+        <h2>Data Accessed Locally</h2>
+        <p>The Extension accesses the following data solely on your device:</p>
+        <ul>
+          <li><strong>storage</strong> — Extension settings and encrypted session state (via chrome.storage)</li>
+          <li><strong>activeTab</strong> — The URL of the current tab to match saved credentials for autofill</li>
+          <li><strong>clipboard</strong> — Temporarily writes passwords or usernames to the clipboard when you explicitly request it</li>
+          <li><strong>forms</strong> — Login form fields on web pages to provide autofill functionality</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Server Communication</h2>
+        <p>The Extension communicates exclusively with your self-hosted passwd-sso server instance. No data is sent to any other server. All communication uses HTTPS and encrypted payloads.</p>
+      </section>
+
+      <section>
+        <h2>Browser Permissions</h2>
+        <p>The Extension requests the following permissions:</p>
+        <ul>
+          <li><strong>storage</strong> — Save extension settings and encrypted session state</li>
+          <li><strong>alarms</strong> — Auto-lock the vault after a configurable timeout period</li>
+          <li><strong>activeTab</strong> — Detect the current page URL for credential matching and autofill</li>
+          <li><strong>scripting</strong> — Inject autofill scripts into web page forms</li>
+          <li><strong>contextMenus</strong> — Provide right-click menu options for quick copy and autofill</li>
+          <li><strong>clipboardWrite</strong> — Copy passwords and usernames to the clipboard on demand</li>
+          <li><strong>offscreen</strong> — Perform clipboard operations in the background</li>
+          <li><strong>hostPermissions</strong> — Access web pages for form detection and autofill (granted on demand)</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>Security</h2>
+        <p>All password data is encrypted client-side using AES-256-GCM before transmission. The master passphrase never leaves your device. Key derivation uses PBKDF2 with 600,000 iterations.</p>
+      </section>
+
+      <section>
+        <h2>Changes to This Policy</h2>
+        <p>We may update this policy from time to time. Changes will be reflected on this page with an updated date.</p>
+      </section>
+
+      <section>
+        <h2>Contact</h2>
+        <p>If you have questions about this privacy policy, please <a href="https://github.com/ngc-shj/passwd-sso/issues" target="_blank" rel="noopener noreferrer" class="link">open an issue</a> on the project repository.</p>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
