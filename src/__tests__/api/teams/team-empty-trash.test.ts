@@ -75,8 +75,9 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
     mockRequireTeamPermission.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
     const req = createRequest("POST");
     const res = await POST(req, createParams({ teamId: TEAM_ID }));
-    const { status } = await parseResponse(res);
+    const { status, json } = await parseResponse(res);
     expect(status).toBe(403);
+    expect(json.error).toBe("FORBIDDEN");
   });
 
   it("re-throws non-TeamAuthError", async () => {
@@ -105,6 +106,9 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
         }),
       })
     );
+
+    // Both findMany and deleteMany must use tenant RLS
+    expect(mockWithTeamTenantRls).toHaveBeenCalledTimes(2);
 
     // Summary log + 2 per-entry logs = 3 calls
     expect(mockLogAudit).toHaveBeenCalledTimes(3);

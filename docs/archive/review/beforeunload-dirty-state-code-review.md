@@ -1,6 +1,6 @@
 # Code Review: beforeunload-dirty-state
 Date: 2026-03-11
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 Round 1 addressed: unused `act` import, test title mismatch, missing afterEach spy restore.
@@ -62,3 +62,67 @@ Round 2 covers full branch including post-review commits (SPA navigation guard, 
 ### T1 [Major] No useNavigationGuard tests
 - Action: Created test file with 7 tests
 - Modified file: src/hooks/use-navigation-guard.test.ts (new)
+
+---
+
+## Round 3: New commits (team import audit, team audit log decryption, team empty trash)
+
+### Functionality Findings (Round 3)
+
+#### F4 [Major] TOCTOU between findMany/deleteMany in empty-trash (accepted)
+- File: `src/app/api/teams/[teamId]/passwords/empty-trash/route.ts`
+- Problem: findMany and deleteMany are separate operations; concurrent restore could cause audit log IDs to diverge from actually deleted entries
+- Action: Accepted — matches personal empty-trash pattern; deleteMany re-checks `deletedAt: { not: null }` so data safety is ensured; audit log discrepancy is theoretical and low-impact
+
+#### F5 [Minor] Empty trash dialog has no explicit cancel button (skipped)
+- Action: Skipped — matches personal trash dialog pattern (consistent UX)
+
+#### F6 [Minor] Empty trash button had no loading state (resolved)
+- File: `src/components/team/team-trash-list.tsx`
+- Action: Added `isEmptying` state with disabled button + Loader2 spinner
+
+### Security Findings (Round 3)
+
+#### S3 [Minor] Unvalidated from/to date strings in audit-logs API (skipped)
+- File: `src/app/api/teams/[teamId]/audit-logs/route.ts`
+- Action: Skipped — pre-existing code, out of scope for this branch
+
+#### S4 [Minor] Import audit successCount+failedCount cross-field validation (skipped)
+- File: `src/app/api/audit-logs/import/route.ts`
+- Action: Skipped — pre-existing schema design, out of scope
+
+#### S5 [Minor] withBypassRls defence-in-depth comment (skipped)
+- Action: Skipped — pre-existing pattern, out of scope
+
+### Testing Findings (Round 3)
+
+#### T4 [Critical] No test for team empty-trash endpoint (resolved)
+- Action: Created `src/__tests__/api/teams/team-empty-trash.test.ts` with 6 tests (401, 403, re-throw, happy path, empty trash, DB error)
+
+#### T5 [Major] Pre-migration ItemKey null guard not tested in audit-logs (resolved)
+- Action: Added test case in `audit-logs.test.ts` for entries with null ItemKey fields
+
+#### T6 [Minor] Team import test missing toast assertion (resolved)
+- Action: Added `mockToastSuccess` assertion in `use-import-execution.test.ts`
+
+#### T7 [Major] Frontend role derivation fails for empty trash list (accepted)
+- Problem: `canEmptyTrash` derives role from entries; if trash is empty, button is hidden even for OWNER
+- Action: Accepted — empty trash with 0 entries is a no-op; button not needed when list is empty
+
+## Resolution Status (Round 3)
+
+### F6 [Minor] Empty trash loading state
+- Action: Added isEmptying state, disabled button, Loader2 spinner
+- Modified file: src/components/team/team-trash-list.tsx
+
+### T4 [Critical] No test for team empty-trash
+- Action: Created test file with 6 tests
+- Modified file: src/__tests__/api/teams/team-empty-trash.test.ts (new)
+
+### T5 [Major] Pre-migration ItemKey null guard
+- Action: Added test case asserting entries with null ItemKey are excluded from entryOverviews
+- Modified file: src/__tests__/api/teams/audit-logs.test.ts
+
+### T6 [Minor] Team import toast assertion
+- Action: Added mockToastSuccess assertion
+- Modified file: src/components/passwords/use-import-execution.test.ts
