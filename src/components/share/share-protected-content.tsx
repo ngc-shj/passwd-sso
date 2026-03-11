@@ -6,6 +6,7 @@ import { SharePasswordGate } from "@/components/share/share-password-gate";
 import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface ShareProtectedContentProps {
   shareId: string;
@@ -50,7 +51,7 @@ export function ShareProtectedContent({
 
     // Fetch content using the access token
     try {
-      const res = await fetch(`/api/share-links/${shareId}/content`, {
+      const res = await fetchApi(`/api/share-links/${shareId}/content`, {
         headers: { Authorization: `Bearer ${newAccessToken}` },
       });
 

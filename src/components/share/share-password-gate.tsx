@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface SharePasswordGateProps {
   token: string;
@@ -45,7 +46,7 @@ export function SharePasswordGate({
     setError(null);
 
     try {
-      const res = await fetch("/api/share-links/verify-access", {
+      const res = await fetchApi("/api/share-links/verify-access", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),
