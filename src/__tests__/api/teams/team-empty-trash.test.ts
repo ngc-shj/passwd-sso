@@ -7,6 +7,7 @@ const {
   mockRequireTeamPermission,
   mockFindMany,
   mockDeleteMany,
+  mockTransaction,
   mockLogAudit,
   mockWithTeamTenantRls,
 } = vi.hoisted(() => ({
@@ -14,6 +15,7 @@ const {
   mockRequireTeamPermission: vi.fn(),
   mockFindMany: vi.fn(),
   mockDeleteMany: vi.fn(),
+  mockTransaction: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
 }));
@@ -34,10 +36,7 @@ vi.mock("@/lib/team-auth", () => {
 });
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    teamPasswordEntry: {
-      findMany: mockFindMany,
-      deleteMany: mockDeleteMany,
-    },
+    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/audit", () => ({
@@ -58,6 +57,14 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        teamPasswordEntry: {
+          findMany: mockFindMany,
+          deleteMany: mockDeleteMany,
+        },
+      })
+    );
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockDeleteMany.mockResolvedValue({ count: 2 });
   });
@@ -107,8 +114,9 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
       })
     );
 
-    // Both findMany and deleteMany must use tenant RLS
-    expect(mockWithTeamTenantRls).toHaveBeenCalledTimes(2);
+    // findMany + deleteMany run inside a single withTeamTenantRls + $transaction
+    expect(mockWithTeamTenantRls).toHaveBeenCalledTimes(1);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
 
     // Summary log + 2 per-entry logs = 3 calls
     expect(mockLogAudit).toHaveBeenCalledTimes(3);
@@ -163,7 +171,7 @@ describe("POST /api/teams/[teamId]/passwords/empty-trash", () => {
   });
 
   it("propagates db errors", async () => {
-    mockDeleteMany.mockRejectedValueOnce(new Error("db down"));
+    mockTransaction.mockRejectedValueOnce(new Error("db down"));
     const req = createRequest("POST");
     await expect(
       POST(req, createParams({ teamId: TEAM_ID }))

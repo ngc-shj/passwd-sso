@@ -32,26 +32,21 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entries = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        deletedAt: { not: null },
-      },
-      select: { id: true },
-    }),
-  );
-  const entryIds = entries.map((entry) => entry.id);
-
-  const result = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.deleteMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        deletedAt: { not: null },
-      },
-    }),
-  );
+  // Atomic findMany + deleteMany to prevent TOCTOU race
+  const { entryIds, deletedCount } = await withTeamTenantRls(teamId, async (): Promise<{ entryIds: string[]; deletedCount: number }> => {
+    const [entries, result] = await prisma.$transaction(async (tx) => {
+      const found = await tx.teamPasswordEntry.findMany({
+        where: { teamId, deletedAt: { not: null } },
+        select: { id: true },
+      });
+      const ids = found.map((e) => e.id);
+      const deleted = await tx.teamPasswordEntry.deleteMany({
+        where: { teamId, id: { in: ids }, deletedAt: { not: null } },
+      });
+      return [found, deleted] as const;
+    });
+    return { entryIds: entries.map((e) => e.id), deletedCount: result.count };
+  });
 
   const requestMeta = extractRequestMeta(req);
 
@@ -64,7 +59,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     targetId: "trash",
     metadata: {
       operation: "empty-trash",
-      deletedCount: result.count,
+      deletedCount: deletedCount,
       entryIds,
     },
     ...requestMeta,
@@ -86,5 +81,5 @@ export async function POST(req: NextRequest, { params }: Params) {
     });
   }
 
-  return NextResponse.json({ success: true, deletedCount: result.count });
+  return NextResponse.json({ success: true, deletedCount: deletedCount });
 }

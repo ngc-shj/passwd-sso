@@ -14,26 +14,21 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const entries = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: session.user.id,
-        deletedAt: { not: null },
-      },
-      select: { id: true },
-    }),
-  );
-  const entryIds = entries.map((entry) => entry.id);
-
-  const result = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.deleteMany({
-      where: {
-        userId: session.user.id,
-        id: { in: entryIds },
-        deletedAt: { not: null },
-      },
-    }),
-  );
+  // Atomic findMany + deleteMany to prevent TOCTOU race
+  const { entryIds, deletedCount } = await withUserTenantRls(session.user.id, async (): Promise<{ entryIds: string[]; deletedCount: number }> => {
+    const [entries, result] = await prisma.$transaction(async (tx) => {
+      const found = await tx.passwordEntry.findMany({
+        where: { userId: session.user.id, deletedAt: { not: null } },
+        select: { id: true },
+      });
+      const ids = found.map((e) => e.id);
+      const deleted = await tx.passwordEntry.deleteMany({
+        where: { userId: session.user.id, id: { in: ids }, deletedAt: { not: null } },
+      });
+      return [found, deleted] as const;
+    });
+    return { entryIds: entries.map((e) => e.id), deletedCount: result.count };
+  });
 
   const requestMeta = extractRequestMeta(req);
 
@@ -45,7 +40,7 @@ async function handlePOST(req: NextRequest) {
     targetId: "trash",
     metadata: {
       operation: "empty-trash",
-      deletedCount: result.count,
+      deletedCount: deletedCount,
       entryIds,
     },
     ...requestMeta,
@@ -66,7 +61,7 @@ async function handlePOST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ success: true, deletedCount: result.count });
+  return NextResponse.json({ success: true, deletedCount: deletedCount });
 }
 
 export const POST = withRequestLog(handlePOST);

@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockDeleteMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockDeleteMany, mockTransaction, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockDeleteMany: vi.fn(),
+  mockTransaction: vi.fn(),
   mockAuditCreate: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
@@ -14,10 +15,7 @@ const { mockAuth, mockFindMany, mockDeleteMany, mockAuditCreate, mockPrismaUser,
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    passwordEntry: {
-      findMany: mockFindMany,
-      deleteMany: mockDeleteMany,
-    },
+    $transaction: mockTransaction,
     auditLog: {
       create: mockAuditCreate,
     },
@@ -38,6 +36,14 @@ describe("POST /api/passwords/empty-trash", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        passwordEntry: {
+          findMany: mockFindMany,
+          deleteMany: mockDeleteMany,
+        },
+      })
+    );
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockDeleteMany.mockResolvedValue({ count: 2 });
     mockAuditCreate.mockResolvedValue({});
@@ -70,6 +76,10 @@ describe("POST /api/passwords/empty-trash", () => {
         }),
       })
     );
+
+    // Single withUserTenantRls + $transaction call
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(1);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
 
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       1,
@@ -127,7 +137,7 @@ describe("POST /api/passwords/empty-trash", () => {
   });
 
   it("propagates db errors (framework handles 500)", async () => {
-    mockDeleteMany.mockRejectedValueOnce(new Error("db down"));
+    mockTransaction.mockRejectedValueOnce(new Error("db down"));
 
     await expect(
       POST(createRequest("POST", "http://localhost:3000/api/passwords/empty-trash"))
