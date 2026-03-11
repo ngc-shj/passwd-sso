@@ -48,6 +48,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant"]],
   ["src/lib/access-restriction.ts", ["tenant"]],
+  ["src/app/api/share-links/verify-access/route.ts", ["passwordShare"]],
+  ["src/app/api/share-links/[id]/content/route.ts", ["passwordShare", "shareAccessLog"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...)

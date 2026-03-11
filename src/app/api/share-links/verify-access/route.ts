@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
 import { createShareAccessToken } from "@/lib/share-access-token";
@@ -49,18 +50,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const share = await prisma.passwordShare.findUnique({
-    where: { tokenHash },
-    select: {
-      id: true,
-      tenantId: true,
-      accessPasswordHash: true,
-      expiresAt: true,
-      revokedAt: true,
-      maxViews: true,
-      viewCount: true,
-    },
-  });
+  const share = await withBypassRls(prisma, () =>
+    prisma.passwordShare.findUnique({
+      where: { tokenHash },
+      select: {
+        id: true,
+        tenantId: true,
+        accessPasswordHash: true,
+        expiresAt: true,
+        revokedAt: true,
+        maxViews: true,
+        viewCount: true,
+      },
+    }),
+  );
 
   if (!share) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });

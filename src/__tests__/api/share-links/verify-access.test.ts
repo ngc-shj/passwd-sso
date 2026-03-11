@@ -34,6 +34,9 @@ vi.mock("@/lib/ip-access", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
 }));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),
+}));
 vi.mock("@/lib/constants", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/constants")>();
   return { ...actual };
