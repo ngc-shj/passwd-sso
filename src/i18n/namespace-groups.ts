@@ -92,3 +92,9 @@ export const NS_VAULT_RESET: readonly Namespace[] = [
   ...NS_GLOBAL,
   "VaultReset",
 ];
+
+/** Privacy policy page namespaces. */
+export const NS_PRIVACY_POLICY: readonly Namespace[] = [
+  ...NS_GLOBAL,
+  "PrivacyPolicy",
+];
