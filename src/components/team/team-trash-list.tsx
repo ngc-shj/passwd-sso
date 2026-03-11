@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
+import { Building2, Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
@@ -77,6 +77,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const { getEntryDecryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isEmptying, setIsEmptying] = useState(false);
 
   // Selection only works when scoped to a single team
   const effectiveSelectionMode = scopedTeamId ? (selectionModeProp ?? false) : false;
@@ -224,6 +225,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   const handleEmptyTrash = async () => {
     if (!scopedTeamId) return;
+    setIsEmptying(true);
     try {
       const res = await fetchApi(apiPath.teamPasswordsEmptyTrash(scopedTeamId), {
         method: "POST",
@@ -237,6 +239,8 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       clearSelection();
     } catch {
       toast.error(t("networkError"));
+    } finally {
+      setIsEmptying(false);
     }
   };
 
@@ -305,7 +309,8 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
                 <DialogDescription>{t("emptyTrashConfirm")}</DialogDescription>
               </DialogHeader>
               <DialogFooter>
-                <Button variant="destructive" onClick={handleEmptyTrash}>
+                <Button variant="destructive" onClick={handleEmptyTrash} disabled={isEmptying}>
+                  {isEmptying && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
                   {t("emptyTrash")}
                 </Button>
               </DialogFooter>

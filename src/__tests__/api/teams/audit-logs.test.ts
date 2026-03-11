@@ -424,6 +424,51 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     });
   });
 
+  it("excludes pre-migration entries without ItemKey from entryOverviews", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
+
+    const logs = [
+      {
+        id: "log-1",
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+        targetId: "entry-old",
+        metadata: null,
+        ip: null,
+        userAgent: null,
+        createdAt: new Date(),
+        user: { id: "u1", name: "Alice", email: "alice@example.com", image: null },
+      },
+    ];
+    mockFindMany.mockResolvedValue(logs);
+
+    mockTeamEntryFindMany.mockResolvedValue([
+      {
+        id: "entry-old",
+        encryptedOverview: "enc-ov",
+        overviewIv: "a".repeat(24),
+        overviewAuthTag: "b".repeat(32),
+        aadVersion: 0,
+        teamKeyVersion: 1,
+        encryptedItemKey: null,
+        itemKeyIv: null,
+        itemKeyAuthTag: null,
+        itemKeyVersion: 0,
+      },
+    ]);
+
+    const req = createRequest(
+      "GET",
+      `http://localhost/api/teams/${TEAM_ID}/audit-logs`
+    );
+    const res = await GET(req, createParams({ teamId: TEAM_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.entryOverviews).toEqual({});
+  });
+
   it("returns empty entryOverviews when no entry targets", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });

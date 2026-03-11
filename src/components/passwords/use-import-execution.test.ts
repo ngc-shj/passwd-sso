@@ -153,6 +153,7 @@ describe("useImportExecution", () => {
     });
 
     expect(mockFireImportAudit).toHaveBeenCalledWith(1, 1, 0, "team.csv", false, "o1");
+    expect(mockToastSuccess).toHaveBeenCalledWith("importedCount");
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 
