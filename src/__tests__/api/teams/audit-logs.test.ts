@@ -394,6 +394,10 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         overviewAuthTag: "b".repeat(32),
         aadVersion: 1,
         teamKeyVersion: 1,
+        encryptedItemKey: "ik-ct",
+        itemKeyIv: "c".repeat(24),
+        itemKeyAuthTag: "d".repeat(32),
+        itemKeyVersion: 1,
       },
     ]);
 
@@ -412,6 +416,10 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         overviewAuthTag: "b".repeat(32),
         aadVersion: 1,
         teamKeyVersion: 1,
+        encryptedItemKey: "ik-ct",
+        itemKeyIv: "c".repeat(24),
+        itemKeyAuthTag: "d".repeat(32),
+        itemKeyVersion: 1,
       },
     });
   });

@@ -76,6 +76,10 @@ export async function GET() {
     overviewAuthTag: entry.overviewAuthTag,
     aadVersion: entry.aadVersion,
     teamKeyVersion: entry.teamKeyVersion,
+    encryptedItemKey: entry.encryptedItemKey,
+    itemKeyIv: entry.itemKeyIv,
+    itemKeyAuthTag: entry.itemKeyAuthTag,
+    itemKeyVersion: entry.itemKeyVersion,
   }));
 
   // Sort by updatedAt desc
