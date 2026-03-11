@@ -1,10 +1,11 @@
 "use client";
 
+import { useCallback, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/passwords/copy-button";
-import { Clock, Eye, MessageSquare, Paperclip, Download } from "lucide-react";
+import { Clock, Eye, MessageSquare, Paperclip, Download, AlertTriangle } from "lucide-react";
 import { formatDateTime } from "@/lib/format-datetime";
 import { formatFileSize } from "@/lib/format-file-size";
 
@@ -18,6 +19,7 @@ interface ShareSendViewProps {
   expiresAt: string;
   viewCount: number;
   maxViews: number | null;
+  accessToken?: string;
 }
 
 export function ShareSendView({
@@ -30,9 +32,43 @@ export function ShareSendView({
   expiresAt,
   viewCount,
   maxViews,
+  accessToken,
 }: ShareSendViewProps) {
   const t = useTranslations("Share");
   const locale = useLocale();
+  const [downloadError, setDownloadError] = useState(false);
+
+  const handleDownload = useCallback(async () => {
+    if (!accessToken) {
+      // Non-protected share: direct download
+      window.location.href = `/s/${token}/download`;
+      return;
+    }
+
+    // Protected share: fetch with Authorization header
+    setDownloadError(false);
+    try {
+      const res = await fetch(`/s/${token}/download`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (!res.ok) {
+        setDownloadError(true);
+        return;
+      }
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename ?? "download";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      setDownloadError(true);
+    }
+  }, [accessToken, token, filename]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background p-4">
@@ -89,12 +125,25 @@ export function ShareSendView({
                     </p>
                   )}
                 </div>
-                <Button asChild className="w-full">
-                  <a href={`/s/${token}/download`}>
+                {downloadError && (
+                  <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-2.5 text-xs text-destructive">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    <span>{t("contentLoadError")}</span>
+                  </div>
+                )}
+                {accessToken ? (
+                  <Button className="w-full" onClick={handleDownload}>
                     <Download className="mr-2 h-4 w-4" />
                     {t("sendDownload")}
-                  </a>
-                </Button>
+                  </Button>
+                ) : (
+                  <Button asChild className="w-full">
+                    <a href={`/s/${token}/download`}>
+                      <Download className="mr-2 h-4 w-4" />
+                      {t("sendDownload")}
+                    </a>
+                  </Button>
+                )}
               </div>
             )}
           </div>

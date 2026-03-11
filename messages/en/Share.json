@@ -118,5 +118,16 @@
   "fieldTitle": "Title",
   "previewTitle": "Fields included",
   "previewHidden": "hidden",
-  "customFields": "Custom Fields"
+  "customFields": "Custom Fields",
+  "requirePassword": "Require password",
+  "requirePasswordDesc": "A strong password will be auto-generated. Share it separately with the recipient.",
+  "accessPasswordLabel": "Access Password",
+  "accessPasswordWarning": "This password will only be shown once. Copy it now and share it separately with the recipient.",
+  "passwordRequired": "Password Required",
+  "passwordRequiredDesc": "This content is protected. Paste the access password to continue.",
+  "pasteOnly": "Paste password here...",
+  "unlock": "Unlock",
+  "wrongPassword": "Incorrect password. Please try again.",
+  "tooManyAttempts": "Too many attempts. Please wait and try again.",
+  "contentLoadError": "Failed to load content. Please try again."
 }

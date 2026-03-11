@@ -183,8 +183,7 @@ describe("GET /s/[token]/download", () => {
     expect(res.status).toBe(400);
   });
 
-  it("does not check viewCount (allows download after page view)", async () => {
-    // Even with maxViews reached, download should work
+  it("returns 410 when maxViews reached", async () => {
     mockFindUnique.mockResolvedValue(
       makeFileShare({ maxViews: 1, viewCount: 1 })
     );
@@ -192,7 +191,6 @@ describe("GET /s/[token]/download", () => {
     const req = createDownloadRequest(VALID_TOKEN);
     const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
 
-    // Should succeed — download does NOT check viewCount
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(410);
   });
 });

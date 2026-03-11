@@ -6,6 +6,8 @@ import {
   generateShareToken,
   hashToken,
   encryptShareData,
+  generateAccessPassword,
+  hashAccessPassword,
 } from "@/lib/crypto-server";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { assertPolicyAllowsSharing, PolicyViolationError } from "@/lib/team-policy";
@@ -60,7 +62,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews, permissions } =
+  const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews, permissions, requirePassword } =
     parsed.data;
 
   let encryptedData: string;
@@ -147,6 +149,14 @@ export async function POST(req: NextRequest) {
     tenantId = teamEntry.tenantId;
   }
 
+  // Generate access password if requested
+  let accessPassword: string | undefined;
+  let accessPasswordHash: string | null = null;
+  if (requirePassword) {
+    accessPassword = generateAccessPassword();
+    accessPasswordHash = hashAccessPassword(accessPassword);
+  }
+
   // Generate token
   const token = generateShareToken();
   const tokenHash = hashToken(token);
@@ -169,6 +179,7 @@ export async function POST(req: NextRequest) {
         passwordEntryId: passwordEntryId ?? null,
         teamPasswordEntryId: teamPasswordEntryId ?? null,
         permissions: permissions ?? [],
+        accessPasswordHash,
       },
     }),
   );
@@ -192,6 +203,7 @@ export async function POST(req: NextRequest) {
     token,
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
+    ...(accessPassword ? { accessPassword } : {}),
   });
 }
 

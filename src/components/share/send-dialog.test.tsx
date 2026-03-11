@@ -61,6 +61,12 @@ vi.mock("@/components/ui/tabs", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/switch", () => ({
+  Switch: ({ checked, onCheckedChange, ...rest }: { checked: boolean; onCheckedChange: (v: boolean) => void } & React.ComponentProps<"button">) => (
+    <button role="switch" aria-checked={checked} onClick={() => onCheckedChange(!checked)} {...rest} />
+  ),
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));

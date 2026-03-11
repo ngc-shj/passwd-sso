@@ -5,6 +5,7 @@ import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
 import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
+import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -51,6 +52,7 @@ export default async function SharePage({ params }: Props) {
       maxViews: true,
       viewCount: true,
       revokedAt: true,
+      accessPasswordHash: true,
     },
   });
 
@@ -66,8 +68,26 @@ export default async function SharePage({ params }: Props) {
     return <ShareError reason="expired" />;
   }
 
-  // Atomically check maxViews and increment viewCount in a single query
-  // to prevent race conditions between concurrent requests
+  // Password-protected share: render gate without incrementing viewCount
+  if (share.accessPasswordHash) {
+    // Check maxViews without incrementing (for early rejection)
+    if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+      return <ShareError reason="maxViews" />;
+    }
+
+    return (
+      <ShareProtectedContent
+        shareId={share.id}
+        token={token}
+        shareType={share.shareType}
+        entryType={share.entryType}
+        expiresAt={share.expiresAt.toISOString()}
+        maxViews={share.maxViews}
+      />
+    );
+  }
+
+  // Non-protected share: existing flow with viewCount increment
   const updated: number = await prisma.$executeRaw`
     UPDATE "password_shares"
     SET "view_count" = "view_count" + 1

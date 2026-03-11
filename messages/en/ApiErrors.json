@@ -88,5 +88,7 @@
   "apiKeyInvalid": "Invalid API key.",
   "apiKeyScopeInsufficient": "API key does not have the required scope.",
   "itemKeyRequired": "This entry requires ItemKey encryption. Please update the entry first.",
-  "itemKeyVersionDowngrade": "Cannot downgrade entry encryption version."
+  "itemKeyVersionDowngrade": "Cannot downgrade entry encryption version.",
+  "sharePasswordRequired": "A password is required to access this content.",
+  "sharePasswordIncorrect": "Incorrect password."
 }
