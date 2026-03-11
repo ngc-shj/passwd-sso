@@ -6,6 +6,8 @@ import {
   generateShareToken,
   hashToken,
   encryptShareData,
+  generateAccessPassword,
+  hashAccessPassword,
 } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -49,10 +51,18 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { name, text, expiresIn, maxViews } = parsed.data;
+  const { name, text, expiresIn, maxViews, requirePassword } = parsed.data;
 
   // Encrypt text content with master key
   const encrypted = encryptShareData(JSON.stringify({ name, text }));
+
+  // Generate access password if requested
+  let accessPassword: string | undefined;
+  let accessPasswordHash: string | null = null;
+  if (requirePassword) {
+    accessPassword = generateAccessPassword();
+    accessPasswordHash = hashAccessPassword(accessPassword);
+  }
 
   // Generate token
   const token = generateShareToken();
@@ -82,6 +92,7 @@ export async function POST(req: NextRequest) {
         masterKeyVersion: encrypted.masterKeyVersion,
         expiresAt,
         maxViews: maxViews ?? null,
+        accessPasswordHash,
         createdById: session.user.id,
         tenantId: actor.tenantId,
       },
@@ -106,5 +117,6 @@ export async function POST(req: NextRequest) {
     token,
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
+    ...(accessPassword ? { accessPassword } : {}),
   });
 }

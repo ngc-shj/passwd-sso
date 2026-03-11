@@ -138,6 +138,15 @@ async function handleApiAuth(request: NextRequest) {
     return applyCorsHeaders(request, NextResponse.next(), { allowExtension: true });
   }
 
+  // Public share-link endpoints for unauthenticated share viewers.
+  // These use their own auth (access password / access token).
+  if (
+    pathname === `${API_PATH.SHARE_LINKS}/verify-access` ||
+    /^\/api\/share-links\/[^/]+\/content$/.test(pathname)
+  ) {
+    return NextResponse.next();
+  }
+
   // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
   // use their own Bearer token auth (validateScimToken) in each route handler.
   if (

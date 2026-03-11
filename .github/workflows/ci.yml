@@ -30,6 +30,8 @@ jobs:
         with:
           filters: |
             app:
+              - "Dockerfile"
+              - "docker-compose*.yml"
               - "src/**"
               - "prisma/**"
               - "proxy.ts"

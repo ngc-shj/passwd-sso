@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken, decryptShareBinary } from "@/lib/crypto-server";
+import { verifyShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -39,7 +40,10 @@ export async function GET(req: NextRequest, { params }: Params) {
       fileAuthTag: true,
       masterKeyVersion: true,
       expiresAt: true,
+      maxViews: true,
+      viewCount: true,
       revokedAt: true,
+      accessPasswordHash: true,
     },
   });
 
@@ -53,6 +57,29 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   if (share.shareType !== "FILE") {
     return new NextResponse(null, { status: 400 });
+  }
+
+  // Check maxViews (for all shares, not just password-protected)
+  if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+    return new NextResponse(null, { status: 410 });
+  }
+
+  // Password-protected share: verify access token
+  if (share.accessPasswordHash) {
+    const authHeader = req.headers.get("authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return NextResponse.json(
+        { error: API_ERROR.SHARE_PASSWORD_REQUIRED },
+        { status: 401 },
+      );
+    }
+    const accessToken = authHeader.slice(7);
+    if (!verifyShareAccessToken(accessToken, share.id)) {
+      return NextResponse.json(
+        { error: API_ERROR.UNAUTHORIZED },
+        { status: 401 },
+      );
+    }
   }
 
   if (!share.encryptedFile || !share.fileIv || !share.fileAuthTag) {
