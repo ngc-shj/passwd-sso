@@ -12,7 +12,6 @@ import { loadSecretsConfig, getPasswordPath } from "../lib/secrets-config.js";
 import { getEncryptionKey, getUserId } from "../lib/vault-state.js";
 import { autoUnlockIfNeeded } from "./unlock.js";
 import { getToken } from "../lib/api-client.js";
-import { loadConfig } from "../lib/config.js";
 import { decryptData } from "../lib/crypto.js";
 import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
 import { BLOCKED_KEYS } from "../lib/blocked-keys.js";

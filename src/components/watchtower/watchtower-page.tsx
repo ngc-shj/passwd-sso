@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
 import { PasswordEditDialogLoader } from "@/components/passwords/personal-password-edit-dialog-loader";
 import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
 import {
@@ -36,7 +35,7 @@ import {
   calculateTotalIssues,
   getWatchtowerVisibility,
 } from "@/lib/watchtower/state";
-import { resolveNavigationTarget } from "@/lib/client-navigation";
+import { useNavigationGuard } from "@/hooks/use-navigation-guard";
 import {
   formatBreachDetails,
   formatWeakDetails,
@@ -53,7 +52,6 @@ interface WatchtowerPageProps {
 export function WatchtowerPage({ scope }: WatchtowerPageProps) {
   const t = useTranslations("Watchtower");
   const locale = useLocale();
-  const router = useRouter();
   const {
     report,
     loading,
@@ -66,60 +64,8 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
     setAutoMonitorEnabled,
     lastBreachCheckAt,
   } = useWatchtower(scope);
-  const [leaveDialogOpen, setLeaveDialogOpen] = useState(false);
-  const [pendingHref, setPendingHref] = useState<string | null>(null);
   const [selectedEntry, setSelectedEntry] = useState<WatchtowerEntryRef | null>(null);
-  const allowLeaveRef = useRef(false);
-
-  useEffect(() => {
-    if (!loading) return;
-
-    const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (allowLeaveRef.current) return;
-      event.preventDefault();
-      event.returnValue = "";
-    };
-
-    const onClick = (event: MouseEvent) => {
-      const target = event.target as HTMLElement | null;
-      const anchor = target?.closest("a[href]") as HTMLAnchorElement | null;
-      if (!anchor) return;
-
-      const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
-      const targetInfo = resolveNavigationTarget(
-        anchor.href,
-        window.location.origin,
-        locale
-      );
-      if (!targetInfo.isInternal || !targetInfo.internalPath) return;
-      const currentInfo = resolveNavigationTarget(
-        currentPath,
-        window.location.origin,
-        locale
-      );
-      if (targetInfo.internalPath === currentInfo.internalPath) return;
-
-      event.preventDefault();
-      event.stopPropagation();
-      setPendingHref(targetInfo.internalPath);
-      setLeaveDialogOpen(true);
-    };
-
-    window.addEventListener("beforeunload", onBeforeUnload);
-    document.addEventListener("click", onClick, true);
-    return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
-      document.removeEventListener("click", onClick, true);
-    };
-  }, [loading, t, locale]);
-
-  const handleConfirmLeave = () => {
-    if (!pendingHref) return;
-    setLeaveDialogOpen(false);
-    setPendingHref(null);
-    allowLeaveRef.current = true;
-    router.push(pendingHref);
-  };
+  const guard = useNavigationGuard(loading);
 
   const totalIssues = report ? calculateTotalIssues(report) : 0;
   const visibility = getWatchtowerVisibility(
@@ -131,7 +77,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
-      <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+      <AlertDialog open={guard.dialogOpen} onOpenChange={guard.cancelLeave}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("leaveTitle")}</AlertDialogTitle>
@@ -139,7 +85,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("leaveStay")}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmLeave}>
+            <AlertDialogAction onClick={guard.confirmLeave}>
               {t("leaveNow")}
             </AlertDialogAction>
           </AlertDialogFooter>

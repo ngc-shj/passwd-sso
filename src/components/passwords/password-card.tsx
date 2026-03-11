@@ -836,7 +836,7 @@ export function PasswordCard({
                     // Personal: decrypt entry data, strip TOTP
                     try {
                       const { entry } = await fetchDecryptedEntry();
-                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                       
                       const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = entry;
                       setShareData(safe as Record<string, unknown>);
                     } catch {
@@ -847,7 +847,7 @@ export function PasswordCard({
                     // Team: decrypt via getDetail, strip TOTP/internal fields
                     try {
                       const detail = await getDetailProp();
-                      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                       
                       const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
                       setShareData(safe as Record<string, unknown>);
                     } catch {

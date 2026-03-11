@@ -110,6 +110,10 @@ export async function GET(req: NextRequest, { params }: Params) {
     overviewAuthTag: string;
     aadVersion: number;
     teamKeyVersion: number;
+    encryptedItemKey: string;
+    itemKeyIv: string;
+    itemKeyAuthTag: string;
+    itemKeyVersion: number;
   }> = {};
 
   if (entryIds.length > 0) {
@@ -123,17 +127,27 @@ export async function GET(req: NextRequest, { params }: Params) {
           overviewAuthTag: true,
           aadVersion: true,
           teamKeyVersion: true,
+          encryptedItemKey: true,
+          itemKeyIv: true,
+          itemKeyAuthTag: true,
+          itemKeyVersion: true,
         },
       }),
     );
 
     for (const e of entries) {
+      // Skip entries without ItemKey (pre-migration entries)
+      if (!e.encryptedItemKey || !e.itemKeyIv || !e.itemKeyAuthTag) continue;
       entryOverviews[e.id] = {
         encryptedOverview: e.encryptedOverview,
         overviewIv: e.overviewIv,
         overviewAuthTag: e.overviewAuthTag,
         aadVersion: e.aadVersion,
         teamKeyVersion: e.teamKeyVersion,
+        encryptedItemKey: e.encryptedItemKey,
+        itemKeyIv: e.itemKeyIv,
+        itemKeyAuthTag: e.itemKeyAuthTag,
+        itemKeyVersion: e.itemKeyVersion,
       };
     }
   }

@@ -25,5 +25,9 @@
   "decryptPassword": "Enter the password used to encrypt this file",
   "decryptButton": "Decrypt",
   "decrypting": "Decrypting...",
-  "decryptionFailed": "Decryption failed. Please check the password and try again."
+  "decryptionFailed": "Decryption failed. Please check the password and try again.",
+  "leaveTitle": "Interrupt import?",
+  "leaveConfirm": "An import is in progress or has unsaved data. Leaving this page will discard it. Continue?",
+  "leaveStay": "Stay on this page",
+  "leaveNow": "Leave page"
 }
