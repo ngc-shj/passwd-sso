@@ -73,5 +73,6 @@
   "close": "閉じる",
   "selectAll": "すべて選択",
   "externalTenant": "外部テナント",
-  "travelMode": "トラベルモード"
+  "travelMode": "トラベルモード",
+  "installExtension": "拡張機能をインストール"
 }

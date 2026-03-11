@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
 import { useTranslations } from "next-intl";
-import { Building2, Globe, Lock, Menu, Plane, RefreshCw, ShieldCheck } from "lucide-react";
+import { Building2, Globe, Lock, Menu, Plane, Puzzle, RefreshCw, ShieldCheck } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +23,11 @@ import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dia
 import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
 import { useActiveVault } from "@/lib/active-vault-context";
 import { useTravelMode } from "@/hooks/use-travel-mode";
+
+const CHROME_STORE_URL = process.env.NEXT_PUBLIC_CHROME_STORE_URL ?? "";
+const isValidStoreUrl = (url: string) =>
+  url.startsWith("https://chrome.google.com/webstore/") ||
+  url.startsWith("https://chromewebstore.google.com/");
 
 interface HeaderProps {
   onMenuToggle: () => void;
@@ -132,6 +137,21 @@ export function Header({ onMenuToggle }: HeaderProps) {
                   <DropdownMenuItem onClick={lock}>
                     <Lock className="h-4 w-4" />
                     {t("lockVault")}
+                  </DropdownMenuItem>
+                </>
+              )}
+              {CHROME_STORE_URL && isValidStoreUrl(CHROME_STORE_URL) && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <a
+                      href={CHROME_STORE_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      <Puzzle className="h-4 w-4" />
+                      {tDash("installExtension")}
+                    </a>
                   </DropdownMenuItem>
                 </>
               )}

@@ -62,6 +62,7 @@ export const NAMESPACES = [
   "TravelMode",
   "WebAuthn",
   "DirectorySync",
+  "PrivacyPolicy",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

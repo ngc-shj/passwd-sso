@@ -159,4 +159,10 @@ describe("Header", () => {
 
     expect(screen.getByText("signOut")).toBeInTheDocument();
   });
+
+  it("hides extension install link when NEXT_PUBLIC_CHROME_STORE_URL is not set", () => {
+    render(<Header onMenuToggle={onMenuToggle} />);
+
+    expect(screen.queryByText("installExtension")).not.toBeInTheDocument();
+  });
 });

@@ -73,5 +73,6 @@
   "close": "Close",
   "selectAll": "Select All",
   "externalTenant": "External tenant",
-  "travelMode": "Travel Mode"
+  "travelMode": "Travel Mode",
+  "installExtension": "Install Extension"
 }
