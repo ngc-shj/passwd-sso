@@ -1,34 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockDeleteMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockDeleteMany, mockTransaction, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockDeleteMany: vi.fn(),
-  mockAuditCreate: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn() },
+  mockTransaction: vi.fn(),
+  mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    passwordEntry: {
-      findMany: mockFindMany,
-      deleteMany: mockDeleteMany,
-    },
-    auditLog: {
-      create: mockAuditCreate,
-    },
-    user: mockPrismaUser,
+    $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+  extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
-}));
-vi.mock("@/lib/tenant-rls", () => ({
-  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST } from "./route";
@@ -37,10 +30,16 @@ describe("POST /api/passwords/empty-trash", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) =>
+      fn({
+        passwordEntry: {
+          findMany: mockFindMany,
+          deleteMany: mockDeleteMany,
+        },
+      })
+    );
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockDeleteMany.mockResolvedValue({ count: 2 });
-    mockAuditCreate.mockResolvedValue({});
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -71,33 +70,36 @@ describe("POST /api/passwords/empty-trash", () => {
       })
     );
 
-    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+    // Single withUserTenantRls + $transaction call
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(1);
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+
+    // Summary log + 2 per-entry logs = 3 calls
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
+    expect(mockLogAudit).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_EMPTY_TRASH",
-          metadata: expect.objectContaining({
-            operation: "empty-trash",
-            deletedCount: 2,
-            entryIds: ["p1", "p2"],
-          }),
+        action: "ENTRY_EMPTY_TRASH",
+        userId: "user-1",
+        metadata: expect.objectContaining({
+          operation: "empty-trash",
+          deletedCount: 2,
+          entryIds: ["p1", "p2"],
         }),
       })
     );
-    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+    expect(mockLogAudit).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_PERMANENT_DELETE",
-          targetId: "p1",
-          metadata: expect.objectContaining({
-            source: "empty-trash",
-            parentAction: "ENTRY_EMPTY_TRASH",
-          }),
+        action: "ENTRY_PERMANENT_DELETE",
+        userId: "user-1",
+        targetId: "p1",
+        metadata: expect.objectContaining({
+          source: "empty-trash",
+          parentAction: "ENTRY_EMPTY_TRASH",
         }),
       })
     );
-    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
   });
 
   it("returns deletedCount=0 when trash is empty", async () => {
@@ -112,22 +114,21 @@ describe("POST /api/passwords/empty-trash", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(json.deletedCount).toBe(0);
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    // Only summary log, no per-entry logs
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_EMPTY_TRASH",
-          metadata: expect.objectContaining({
-            deletedCount: 0,
-            entryIds: [],
-          }),
+        action: "ENTRY_EMPTY_TRASH",
+        metadata: expect.objectContaining({
+          deletedCount: 0,
+          entryIds: [],
         }),
       })
     );
   });
 
   it("propagates db errors (framework handles 500)", async () => {
-    mockDeleteMany.mockRejectedValueOnce(new Error("db down"));
+    mockTransaction.mockRejectedValueOnce(new Error("db down"));
 
     await expect(
       POST(createRequest("POST", "http://localhost:3000/api/passwords/empty-trash"))

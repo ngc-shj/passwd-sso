@@ -4,6 +4,8 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, IMPORT_FORMAT_VALUES } from "@/lib/constants";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { TEAM_PERMISSION } from "@/lib/constants";
 
 const bodySchema = z.object({
   requestedCount: z.number().int().min(0),
@@ -12,9 +14,10 @@ const bodySchema = z.object({
   filename: z.string().trim().min(1).max(255).optional(),
   format: z.enum(IMPORT_FORMAT_VALUES).optional(),
   encrypted: z.boolean().optional(),
+  teamId: z.string().uuid().optional(),
 });
 
-// POST /api/audit-logs/import — Record import summary audit event
+// POST /api/audit-logs/import — Record import summary audit event (personal or team)
 export async function POST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
@@ -33,12 +36,25 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
   }
 
-  const { requestedCount, successCount, failedCount, filename, format, encrypted } = result.data;
+  const { requestedCount, successCount, failedCount, filename, format, encrypted, teamId } = result.data;
+
+  // Verify team membership when logging team import
+  if (teamId) {
+    try {
+      await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_CREATE);
+    } catch (e) {
+      if (e instanceof TeamAuthError) {
+        return NextResponse.json({ error: e.message }, { status: e.status });
+      }
+      throw e;
+    }
+  }
 
   logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_IMPORT,
     userId: session.user.id,
+    ...(teamId ? { teamId } : {}),
     metadata: {
       requestedCount,
       successCount,

@@ -18,7 +18,7 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const CHALLENGE_TTL_SECONDS = 300;
 
 // POST /api/webauthn/authenticate/options
-async function handlePOST(req: NextRequest) {
+async function handlePOST(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json(
