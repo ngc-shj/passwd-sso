@@ -5,6 +5,7 @@ import {
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_TEAM,
   AUDIT_ACTION_GROUPS_PERSONAL,
+  AUDIT_ACTION_GROUPS_TENANT,
   AUDIT_ACTION_VALUES,
 } from "@/lib/constants";
 
@@ -17,11 +18,12 @@ describe("audit constants", () => {
     expect(new Set(valuesFromArray)).toEqual(new Set(valuesFromObject));
   });
 
-  it("has only valid actions in personal and team action groups", () => {
+  it("has only valid actions in personal, team, and tenant action groups", () => {
     const valid = new Set(Object.values(AUDIT_ACTION));
     const grouped = [
       ...Object.values(AUDIT_ACTION_GROUPS_PERSONAL).flat(),
       ...Object.values(AUDIT_ACTION_GROUPS_TEAM).flat(),
+      ...Object.values(AUDIT_ACTION_GROUPS_TENANT).flat(),
     ];
 
     for (const action of grouped) {

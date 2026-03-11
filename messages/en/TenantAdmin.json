@@ -65,5 +65,12 @@
   "accessRestrictionSaved": "Access restriction updated.",
   "accessRestrictionSaveFailed": "Failed to update access restriction.",
   "selfLockoutWarning": "Your current IP would be blocked by this policy. Are you sure you want to proceed?",
-  "selfLockoutConfirm": "Save Anyway"
+  "selfLockoutConfirm": "Save Anyway",
+  "roleChanged": "Role has been changed.",
+  "roleChangeFailed": "Failed to change role.",
+  "scimManagedRoleError": "Cannot change role of SCIM-managed member.",
+  "transferOwnership": "Transfer Ownership",
+  "transferOwnershipDesc": "Transfer ownership to another member. Your role will be changed to Admin.",
+  "transferOwnershipConfirm": "Transfer",
+  "transferOwnershipSuccess": "Ownership transferred successfully."
 }

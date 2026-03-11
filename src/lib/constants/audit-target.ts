@@ -15,6 +15,7 @@ export const AUDIT_TARGET_TYPE = {
   API_KEY: "ApiKey",
   WEBAUTHN_CREDENTIAL: "WebAuthnCredential",
   DIRECTORY_SYNC_CONFIG: "DirectorySyncConfig",
+  TENANT_MEMBER: "TenantMember",
 } as const;
 
 export type AuditTargetType =
