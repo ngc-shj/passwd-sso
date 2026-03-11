@@ -82,10 +82,6 @@ export default async function SharePage({ params }: Props) {
         <ShareProtectedContent
           shareId={share.id}
           token={token}
-          shareType={share.shareType}
-          entryType={share.entryType}
-          expiresAt={share.expiresAt.toISOString()}
-          maxViews={share.maxViews}
         />
       );
     }
