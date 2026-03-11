@@ -90,9 +90,7 @@ export function useImportExecution({
       setDone(true);
       setResult({ success: successCount, failed: failedCount });
 
-      if (!isTeamImport) {
-        fireImportAudit(entries.length, successCount, failedCount, sourceFilename, encryptedInput);
-      }
+      fireImportAudit(entries.length, successCount, failedCount, sourceFilename, encryptedInput, teamId);
 
       if (successCount > 0) {
         toast.success(t("importedCount", { count: successCount }));
