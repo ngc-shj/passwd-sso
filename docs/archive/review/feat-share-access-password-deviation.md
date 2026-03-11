@@ -15,4 +15,10 @@ Created: 2026-03-11T14:00:00+09:00
 - **Reason**: Pre-existing gap where downloads could bypass view limits. Fixed as part of this feature to ensure consistent enforcement.
 - **Impact scope**: src/app/s/[token]/download/route.ts, src/__tests__/api/s/download.test.ts
 
+### DEV-3: viewCount increment split between content API and download route
+- **Plan description**: viewCount incremented by content API for password-protected shares
+- **Actual implementation**: Content API skips viewCount increment for FILE shares; download route atomically increments for password-protected shares
+- **Reason**: Security review found that content API could be skipped, allowing unlimited downloads via direct access to download route. Split ensures FILE downloads are always counted.
+- **Impact scope**: src/app/api/share-links/[id]/content/route.ts, src/app/s/[token]/download/route.ts
+
 ---
