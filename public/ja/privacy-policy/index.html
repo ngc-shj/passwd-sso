@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>プライバシーポリシー — passwd-sso</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #0a0a0a; background: #fff; line-height: 1.8; }
+    .container { max-width: 48rem; margin: 0 auto; padding: 3rem 1rem; }
+    .back { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.875rem; color: #737373; text-decoration: none; margin-bottom: 2rem; }
+    .back:hover { color: #0a0a0a; }
+    .back svg { width: 1rem; height: 1rem; }
+    h1 { font-size: 1.875rem; font-weight: 700; margin-bottom: 0.5rem; }
+    .subtitle { font-size: 1.125rem; color: #737373; margin-bottom: 0.25rem; }
+    .updated { font-size: 0.875rem; color: #737373; margin-bottom: 2rem; }
+    .sections { display: flex; flex-direction: column; gap: 2rem; }
+    h2 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.75rem; }
+    p { color: #737373; }
+    ul { margin-top: 0.75rem; list-style: disc inside; color: #737373; }
+    ul li { margin-bottom: 0.25rem; }
+    ul li strong { color: #0a0a0a; }
+    a.link { color: #737373; text-decoration: underline; }
+    a.link:hover { color: #0a0a0a; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/passwd-sso/ja" class="back">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+      ホームに戻る
+    </a>
+
+    <h1>プライバシーポリシー</h1>
+    <p class="subtitle">passwd-sso ブラウザ拡張機能</p>
+    <p class="updated">最終更新日: 2026-03-11</p>
+
+    <div class="sections">
+      <section>
+        <h2>概要</h2>
+        <p>passwd-sso ブラウザ拡張機能（以下「本拡張機能」）は、passwd-sso パスワードマネージャーの補助ツールです。本ポリシーでは、本拡張機能がアクセスするデータ、その使用方法、およびお客様の権利について説明します。</p>
+      </section>
+
+      <section>
+        <h2>データの収集</h2>
+        <p>本拡張機能は、個人データを第三者に収集・送信・販売することはありません。すべての保管庫データはエンドツーエンドで暗号化され、お客様のブラウザ内でのみ復号されます。</p>
+      </section>
+
+      <section>
+        <h2>ローカルでアクセスするデータ</h2>
+        <p>本拡張機能は、お客様のデバイス上でのみ以下のデータにアクセスします：</p>
+        <ul>
+          <li><strong>storage</strong> — 拡張機能の設定および暗号化されたセッション状態（chrome.storage 経由）</li>
+          <li><strong>activeTab</strong> — 保存された認証情報とのマッチングおよびオートフィルのための現在のタブの URL</li>
+          <li><strong>clipboard</strong> — お客様の操作に応じて、パスワードまたはユーザー名を一時的にクリップボードに書き込み</li>
+          <li><strong>forms</strong> — オートフィル機能を提供するための Web ページ上のログインフォームフィールド</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>サーバーとの通信</h2>
+        <p>本拡張機能は、お客様がセルフホストする passwd-sso サーバーインスタンスとのみ通信します。他のサーバーにデータが送信されることはありません。すべての通信は HTTPS および暗号化されたペイロードを使用します。</p>
+      </section>
+
+      <section>
+        <h2>ブラウザの権限</h2>
+        <p>本拡張機能は以下の権限を要求します：</p>
+        <ul>
+          <li><strong>storage</strong> — 拡張機能の設定および暗号化されたセッション状態の保存</li>
+          <li><strong>alarms</strong> — 設定可能なタイムアウト期間後に保管庫を自動ロック</li>
+          <li><strong>activeTab</strong> — 認証情報のマッチングとオートフィルのために現在のページ URL を検出</li>
+          <li><strong>scripting</strong> — Web ページのフォームにオートフィルスクリプトを注入</li>
+          <li><strong>contextMenus</strong> — 右クリックメニューからクイックコピーおよびオートフィルを提供</li>
+          <li><strong>clipboardWrite</strong> — 要求に応じてパスワードとユーザー名をクリップボードにコピー</li>
+          <li><strong>offscreen</strong> — バックグラウンドでクリップボード操作を実行</li>
+          <li><strong>hostPermissions</strong> — フォーム検出とオートフィルのために Web ページにアクセス（要求時に付与）</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2>セキュリティ</h2>
+        <p>すべてのパスワードデータは、送信前にクライアント側で AES-256-GCM を使用して暗号化されます。マスターパスフレーズがデバイスから離れることはありません。鍵導出には 600,000 回の反復を持つ PBKDF2 を使用しています。</p>
+      </section>
+
+      <section>
+        <h2>本ポリシーの変更</h2>
+        <p>本ポリシーは随時更新される場合があります。変更は更新日とともに本ページに反映されます。</p>
+      </section>
+
+      <section>
+        <h2>お問い合わせ</h2>
+        <p>本プライバシーポリシーに関するご質問は、プロジェクトリポジトリの <a href="https://github.com/ngc-shj/passwd-sso/issues" target="_blank" rel="noopener noreferrer" class="link">Issue</a> にてお問い合わせください。</p>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
