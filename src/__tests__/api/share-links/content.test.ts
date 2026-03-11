@@ -36,6 +36,9 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: () => "1.2.3.4",
 }));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),
+}));
 
 import { GET } from "@/app/api/share-links/[id]/content/route";
 
