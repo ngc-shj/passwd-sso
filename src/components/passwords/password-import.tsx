@@ -18,6 +18,7 @@ import {
 } from "@/components/passwords/password-import-steps";
 import { useImportFileFlow } from "@/components/passwords/use-import-file-flow";
 import { useImportExecution } from "@/components/passwords/use-import-execution";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 
 // ─── Component ──────────────────────────────────────────────
 
@@ -88,6 +89,10 @@ function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelCon
     teamKeyVersion,
     teamId: scopedTeamId,
   });
+
+  // Guard during: encrypted file decryption input, preview with parsed entries, active import.
+  // Once done === true, data is already server-side so no guard needed.
+  useBeforeUnloadGuard(importing || encryptedFile !== null || (entries.length > 0 && !done));
 
   const reset = () => {
     resetExecution();

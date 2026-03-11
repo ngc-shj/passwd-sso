@@ -356,8 +356,8 @@ Client(valid時):
   - `secretKeyRef`（`Uint8Array`）
   - 理由: 復号鍵を永続ストレージへ置かないため（攻撃面を最小化）
 - `sessionStorage`:
-  - `psso:skip-beforeunload-once`（一時フラグ）
-  - 理由: 「拡張接続後にタブを閉じる」等の UX 制御のみ。秘密情報を含まない
+  - 現在キーなし（旧 `psso:skip-beforeunload-once` フラグは削除済み。ダーティステートガードは React のインメモリ state のみで管理）
+  - 理由: UX 制御に永続ストレージは不要
 - `localStorage`:
   - Watchtower の表示設定/最終確認時刻等の UI 補助情報
   - 理由: 利便性向上。秘密情報は保存しない

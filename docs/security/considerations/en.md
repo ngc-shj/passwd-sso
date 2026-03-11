@@ -356,8 +356,8 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   - `secretKeyRef` (`Uint8Array`)
   - Rationale: keep decryption material out of persistent storage
 - `sessionStorage`:
-  - `psso:skip-beforeunload-once` (temporary flag)
-  - Rationale: UX control only (e.g., close-tab flow), no secrets
+  - No keys currently stored (previous `psso:skip-beforeunload-once` flag removed; dirty-state guards now use in-memory React state only)
+  - Rationale: UX control does not require persistent storage
 - `localStorage`:
   - Watchtower UI helper state (e.g., display/ack timestamps)
   - Rationale: usability only; no secret material
