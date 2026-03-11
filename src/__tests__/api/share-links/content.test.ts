@@ -161,6 +161,12 @@ describe("GET /api/share-links/[id]/content", () => {
     expect(res.status).toBe(200);
     expect(json.shareType).toBe("ENTRY_SHARE");
     expect(json.data).toEqual({ title: "Test", password: "secret" });
+    expect(json.viewCount).toBe(1); // 0 + 1
+    expect(mockAccessLogCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ shareId: "share-1" }),
+      })
+    );
   });
 
   it("returns encrypted data for E2E share (masterKeyVersion 0)", async () => {
@@ -182,6 +188,7 @@ describe("GET /api/share-links/[id]/content", () => {
     expect(json.dataIv).toBe("e2e-iv");
     expect(json.dataAuthTag).toBe("e2e-tag");
     expect(json.data).toBeUndefined();
+    expect(json.viewCount).toBe(1); // 0 + 1
   });
 
   it("returns 404 when decryption fails", async () => {

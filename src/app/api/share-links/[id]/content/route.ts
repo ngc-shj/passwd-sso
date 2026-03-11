@@ -32,6 +32,12 @@ export async function GET(req: NextRequest, { params }: Params) {
     );
   }
   const accessToken = authHeader.slice(7);
+  if (accessToken.length > 512) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED },
+      { status: 401 },
+    );
+  }
 
   // Verify the access token
   if (!verifyShareAccessToken(accessToken, id)) {
@@ -78,15 +84,26 @@ export async function GET(req: NextRequest, { params }: Params) {
       return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
     }
 
-    // Atomically check maxViews and increment viewCount
-    const updated: number = await prisma.$executeRaw`
-      UPDATE "password_shares"
-      SET "view_count" = "view_count" + 1
-      WHERE "id" = ${share.id}
-        AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+    // Atomically check maxViews and increment viewCount.
+    // For FILE shares, viewCount is incremented by the download route instead,
+    // to prevent bypass via direct download (skipping content API).
+    let viewCountDelta = 0;
+    if (share.shareType !== "FILE") {
+      const updated: number = await prisma.$executeRaw`
+        UPDATE "password_shares"
+        SET "view_count" = "view_count" + 1
+        WHERE "id" = ${share.id}
+          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
-    if (updated === 0) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 410 });
+      if (updated === 0) {
+        return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 410 });
+      }
+      viewCountDelta = 1;
+    } else {
+      // FILE: just check maxViews without incrementing
+      if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+        return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 410 });
+      }
     }
 
     // Record access log (must await inside withBypassRls transaction)
@@ -142,7 +159,7 @@ export async function GET(req: NextRequest, { params }: Params) {
       sendFilename: share.sendFilename,
       sendSizeBytes: share.sendSizeBytes,
       expiresAt: share.expiresAt.toISOString(),
-      viewCount: share.viewCount + 1,
+      viewCount: share.viewCount + viewCountDelta,
       maxViews: share.maxViews,
     });
   });
