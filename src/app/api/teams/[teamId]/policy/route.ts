@@ -56,6 +56,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     requireRepromptForAll: policy?.requireRepromptForAll ?? false,
     allowExport: policy?.allowExport ?? true,
     allowSharing: policy?.allowSharing ?? true,
+    requireSharePassword: policy?.requireSharePassword ?? false,
   });
 }
 
@@ -136,6 +137,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     requireRepromptForAll: policy.requireRepromptForAll,
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,
+    requireSharePassword: policy.requireSharePassword,
   });
 }
 
