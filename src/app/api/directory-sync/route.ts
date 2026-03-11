@@ -26,7 +26,7 @@ const createSchema = z.object({
 
 // ─── GET ─────────────────────────────────────────────────────
 
-async function handleGET(req: NextRequest) {
+async function handleGET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json(

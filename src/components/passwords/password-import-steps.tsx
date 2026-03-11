@@ -264,13 +264,13 @@ export function fireImportAudit(
   successCount: number,
   failedCount: number,
   sourceFilename: string,
-  encryptedInput: boolean
+  encryptedInput: boolean,
+  teamId?: string,
 ) {
+  const payload = buildImportAuditPayload(entriesCount, successCount, failedCount, sourceFilename, encryptedInput);
   fetchApi(API_PATH.AUDIT_LOGS_IMPORT, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
-      buildImportAuditPayload(entriesCount, successCount, failedCount, sourceFilename, encryptedInput)
-    ),
+    body: JSON.stringify(teamId ? { ...payload, teamId } : payload),
   }).catch(() => {});
 }

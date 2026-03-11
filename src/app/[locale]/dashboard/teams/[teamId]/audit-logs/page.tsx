@@ -50,6 +50,10 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
+import { useTeamVaultOptional } from "@/lib/team-vault-core";
+import { decryptData, type EncryptedData } from "@/lib/crypto-client";
+import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
+import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto-aad";
 
 interface TeamAuditLogItem {
   id: string;
@@ -110,6 +114,18 @@ const ACTION_GROUPS = [
   { label: "groupAdmin", value: AUDIT_ACTION_GROUP.ADMIN, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ADMIN] },
 ] as const;
 
+interface TeamEntryOverview {
+  encryptedOverview: string;
+  overviewIv: string;
+  overviewAuthTag: string;
+  aadVersion: number;
+  teamKeyVersion: number;
+  encryptedItemKey: string;
+  itemKeyIv: string;
+  itemKeyAuthTag: string;
+  itemKeyVersion: number;
+}
+
 export default function TeamAuditLogsPage({
   params,
 }: {
@@ -118,6 +134,7 @@ export default function TeamAuditLogsPage({
   const { teamId } = use(params);
   const t = useTranslations("AuditLog");
   const locale = useLocale();
+  const teamVault = useTeamVaultOptional();
   const [logs, setLogs] = useState<TeamAuditLogItem[]>([]);
   const [entryNames, setEntryNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -131,6 +148,46 @@ export default function TeamAuditLogsPage({
   const [filterOpen, setFilterOpen] = useState(false);
   const [exportAllowed, setExportAllowed] = useState(true);
   const td = useTranslations("AuditDownload");
+
+  const resolveTeamEntryNames = useCallback(
+    async (overviews: Record<string, TeamEntryOverview>): Promise<Record<string, string>> => {
+      if (!teamVault) return {};
+      const teamKey = await teamVault.getTeamEncryptionKey(teamId);
+      if (!teamKey) return {};
+
+      const names: Record<string, string> = {};
+      for (const [entryId, ov] of Object.entries(overviews)) {
+        try {
+          // Unwrap ItemKey
+          const ikAad = buildItemKeyWrapAAD(teamId, entryId, ov.teamKeyVersion);
+          const rawItemKey = await unwrapItemKey(
+            { ciphertext: ov.encryptedItemKey, iv: ov.itemKeyIv, authTag: ov.itemKeyAuthTag },
+            teamKey,
+            ikAad,
+          );
+          const itemEncKey = await deriveItemEncryptionKey(rawItemKey);
+          rawItemKey.fill(0);
+
+          // Decrypt overview
+          const overviewAad = ov.aadVersion >= 1
+            ? buildTeamEntryAAD(teamId, entryId, "overview", ov.itemKeyVersion)
+            : undefined;
+          const overview = JSON.parse(
+            await decryptData(
+              { ciphertext: ov.encryptedOverview, iv: ov.overviewIv, authTag: ov.overviewAuthTag } as EncryptedData,
+              itemEncKey,
+              overviewAad,
+            ),
+          );
+          if (overview.title) names[entryId] = overview.title;
+        } catch {
+          // Decryption failed — entry will show as "deletedEntry"
+        }
+      }
+      return names;
+    },
+    [teamId, teamVault],
+  );
 
   const fetchLogs = useCallback(
     async (cursor?: string) => {
@@ -157,17 +214,18 @@ export default function TeamAuditLogsPage({
 
   useEffect(() => {
     setLoading(true);
-    fetchLogs().then((data) => {
+    fetchLogs().then(async (data) => {
       if (data) {
         setLogs(data.items);
         setNextCursor(data.nextCursor);
-        if (data.entryNames) {
-          setEntryNames(data.entryNames);
+        if (data.entryOverviews) {
+          const names = await resolveTeamEntryNames(data.entryOverviews);
+          setEntryNames(names);
         }
       }
       setLoading(false);
     });
-  }, [fetchLogs]);
+  }, [fetchLogs, resolveTeamEntryNames]);
 
   useEffect(() => {
     fetchApi(apiPath.teamPolicy(teamId))
@@ -185,8 +243,9 @@ export default function TeamAuditLogsPage({
     if (data) {
       setLogs((prev) => [...prev, ...data.items]);
       setNextCursor(data.nextCursor);
-      if (data.entryNames) {
-        setEntryNames((prev) => ({ ...prev, ...data.entryNames }));
+      if (data.entryOverviews) {
+        const names = await resolveTeamEntryNames(data.entryOverviews);
+        setEntryNames((prev) => ({ ...prev, ...names }));
       }
     }
     setLoadingMore(false);

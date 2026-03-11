@@ -194,7 +194,7 @@ function parseEd25519(buf: Buffer, offset: number): KeyObject {
   offset += pubLen;
 
   // Private key (64 bytes = 32-byte seed + 32-byte pubkey)
-  const _privLen = buf.readUInt32BE(offset);
+  // Skip 4-byte private key length prefix
   offset += 4;
   const seed = buf.subarray(offset, offset + 32);
 

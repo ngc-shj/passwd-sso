@@ -109,7 +109,7 @@ export async function runCommand(opts: RunOptions): Promise<void> {
 
   // Execute command with injected env vars (shell-free)
   // Strip PSSO_ credentials from parent env to prevent leakage to child (CWE-214)
-  const { PSSO_PASSPHRASE, PSSO_API_KEY, ...safeParentEnv } = process.env;
+  const { PSSO_PASSPHRASE: _pass, PSSO_API_KEY: _key, ...safeParentEnv } = process.env;
   const [cmd, ...args] = opts.command;
   const child = spawn(cmd, args, {
     env: { ...safeParentEnv, ...secretEnv },

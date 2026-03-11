@@ -137,6 +137,7 @@ export const apiPath = {
   teamPasswordsBulkTrash: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-trash`,
   teamPasswordsBulkArchive: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-archive`,
   teamPasswordsBulkRestore: (teamId: string) => `/api/teams/${teamId}/passwords/bulk-restore`,
+  teamPasswordsEmptyTrash: (teamId: string) => `/api/teams/${teamId}/passwords/empty-trash`,
   tenantScimTokens: () => API_PATH.TENANT_SCIM_TOKENS,
   tenantScimTokenById: (tokenId: string) =>
     `${API_PATH.TENANT_SCIM_TOKENS}/${tokenId}`,

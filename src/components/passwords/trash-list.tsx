@@ -56,6 +56,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
   const { encryptionKey, userId } = useVault();
   const [entries, setEntries] = useState<TrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isEmptying, setIsEmptying] = useState(false);
 
   const fetchTrash = useCallback(async () => {
     if (!encryptionKey) return;
@@ -176,6 +177,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
   };
 
   const handleEmptyTrash = async () => {
+    setIsEmptying(true);
     try {
       const res = await fetchApi(apiPath.passwordsEmptyTrash(), { method: "POST" });
       if (!res.ok) {
@@ -187,6 +189,8 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
       clearSelection();
     } catch {
       toast.error(t("networkError"));
+    } finally {
+      setIsEmptying(false);
     }
   };
 
@@ -228,7 +232,8 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
               <DialogDescription>{t("emptyTrashConfirm")}</DialogDescription>
             </DialogHeader>
             <DialogFooter>
-              <Button variant="destructive" onClick={handleEmptyTrash}>
+              <Button variant="destructive" onClick={handleEmptyTrash} disabled={isEmptying}>
+                {isEmptying && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
                 {t("emptyTrash")}
               </Button>
             </DialogFooter>
