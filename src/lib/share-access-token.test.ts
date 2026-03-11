@@ -67,4 +67,23 @@ describe("share-access-token", () => {
 
     vi.spyOn(Date, "now").mockReturnValue(realNow());
   });
+
+  it("accepts a token at exactly the TTL boundary (> not >=)", () => {
+    const realNow = Date.now;
+    const start = realNow();
+    const TTL_MS = 5 * 60 * 1000;
+
+    vi.spyOn(Date, "now").mockReturnValue(start);
+    const token = createShareAccessToken("share-1");
+
+    // At exactly TTL: Date.now() === exp, condition is > so still valid
+    vi.spyOn(Date, "now").mockReturnValue(start + TTL_MS);
+    expect(verifyShareAccessToken(token, "share-1")).toBe(true);
+
+    // 1ms past TTL: Date.now() > exp, rejected
+    vi.spyOn(Date, "now").mockReturnValue(start + TTL_MS + 1);
+    expect(verifyShareAccessToken(token, "share-1")).toBe(false);
+
+    vi.spyOn(Date, "now").mockReturnValue(realNow());
+  });
 });

@@ -73,6 +73,22 @@ export async function assertPolicyAllowsSharing(
   }
 }
 
+/**
+ * Assert that the share includes a password when the team policy requires it.
+ * Throws if the policy requires a share password but none was requested.
+ */
+export async function assertPolicySharePassword(
+  teamId: string,
+  requirePassword: boolean | undefined,
+): Promise<void> {
+  const policy = await getTeamPolicy(teamId);
+  if (policy.requireSharePassword && !requirePassword) {
+    throw new PolicyViolationError(
+      "Share password is required by team policy",
+    );
+  }
+}
+
 export class PolicyViolationError extends Error {
   constructor(message: string) {
     super(message);

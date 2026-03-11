@@ -2,17 +2,20 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createParams } from "../../helpers/request-builder";
 import { NextRequest } from "next/server";
 
-const { mockFindUnique, mockCheck, mockAccessLogCreate, mockDecryptShareBinary } = vi.hoisted(() => ({
+const { mockFindUnique, mockCheck, mockAccessLogCreate, mockDecryptShareBinary, mockVerifyAccessToken, mockExecuteRaw } = vi.hoisted(() => ({
   mockFindUnique: vi.fn(),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockAccessLogCreate: vi.fn().mockReturnValue({ catch: vi.fn() }),
   mockDecryptShareBinary: vi.fn().mockReturnValue(Buffer.from("decrypted-file-content")),
+  mockVerifyAccessToken: vi.fn().mockReturnValue(true),
+  mockExecuteRaw: vi.fn().mockResolvedValue(1),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordShare: { findUnique: mockFindUnique },
     shareAccessLog: { create: mockAccessLogCreate },
+    $executeRaw: mockExecuteRaw,
   },
 }));
 vi.mock("@/lib/crypto-server", () => ({
@@ -24,6 +27,12 @@ vi.mock("@/lib/tenant-rls", () => ({
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+}));
+vi.mock("@/lib/share-access-token", () => ({
+  verifyShareAccessToken: mockVerifyAccessToken,
+}));
+vi.mock("@/lib/ip-access", () => ({
+  extractClientIp: () => "1.2.3.4",
 }));
 
 import { GET } from "@/app/s/[token]/download/route";
@@ -195,5 +204,55 @@ describe("GET /s/[token]/download", () => {
     const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
 
     expect(res.status).toBe(410);
+  });
+
+  it("returns 401 for password-protected share without Authorization header", async () => {
+    mockFindUnique.mockResolvedValue(
+      makeFileShare({ accessPasswordHash: "some-hash" })
+    );
+
+    const req = createDownloadRequest(VALID_TOKEN);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error).toBe("SHARE_PASSWORD_REQUIRED");
+  });
+
+  it("returns 401 for password-protected share with invalid access token", async () => {
+    mockFindUnique.mockResolvedValue(
+      makeFileShare({ accessPasswordHash: "some-hash" })
+    );
+    mockVerifyAccessToken.mockReturnValueOnce(false);
+
+    const req = new NextRequest(`http://localhost/s/${VALID_TOKEN}/download`, {
+      headers: {
+        "x-forwarded-for": "1.2.3.4",
+        authorization: "Bearer invalid-token",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json.error).toBe("UNAUTHORIZED");
+  });
+
+  it("downloads password-protected file with valid access token", async () => {
+    mockFindUnique.mockResolvedValue(
+      makeFileShare({ accessPasswordHash: "some-hash" })
+    );
+    mockVerifyAccessToken.mockReturnValueOnce(true);
+
+    const req = new NextRequest(`http://localhost/s/${VALID_TOKEN}/download`, {
+      headers: {
+        "x-forwarded-for": "1.2.3.4",
+        authorization: "Bearer valid-access-token",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(200);
+    expect(mockVerifyAccessToken).toHaveBeenCalledWith("valid-access-token", "share-1");
   });
 });

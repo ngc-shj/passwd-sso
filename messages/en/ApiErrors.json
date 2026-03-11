@@ -90,5 +90,6 @@
   "itemKeyRequired": "This entry requires ItemKey encryption. Please update the entry first.",
   "itemKeyVersionDowngrade": "Cannot downgrade entry encryption version.",
   "sharePasswordRequired": "A password is required to access this content.",
-  "sharePasswordIncorrect": "Incorrect password."
+  "sharePasswordIncorrect": "Incorrect password.",
+  "policySharePasswordRequired": "Team policy requires a password for shared links."
 }
