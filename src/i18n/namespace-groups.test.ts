@@ -7,6 +7,7 @@ import {
   NS_PUBLIC_SHARE,
   NS_RECOVERY,
   NS_VAULT_RESET,
+  NS_PRIVACY_POLICY,
 } from "./namespace-groups";
 
 describe("namespace-groups", () => {
@@ -35,8 +36,8 @@ describe("namespace-groups", () => {
   });
 
   it("NS_DASHBOARD_ALL covers all namespaces except page-specific ones", () => {
-    // Only Metadata, Recovery, and VaultReset are intentionally excluded
-    const excluded = new Set(["Metadata", "Recovery", "VaultReset"]);
+    // Page-specific namespaces intentionally excluded from NS_DASHBOARD_ALL
+    const excluded = new Set(["Metadata", "Recovery", "VaultReset", "PrivacyPolicy"]);
     const uncovered = NAMESPACES.filter(
       (ns) => !NS_DASHBOARD_ALL.includes(ns) && !excluded.has(ns),
     );
@@ -92,5 +93,22 @@ describe("namespace-groups", () => {
 
   it("NS_VAULT_RESET has no duplicate entries", () => {
     expect(NS_VAULT_RESET.length).toBe(new Set(NS_VAULT_RESET).size);
+  });
+
+  it("NS_PRIVACY_POLICY is a superset of NS_GLOBAL and includes PrivacyPolicy", () => {
+    for (const ns of NS_GLOBAL) {
+      expect(NS_PRIVACY_POLICY).toContain(ns);
+    }
+    expect(NS_PRIVACY_POLICY).toContain("PrivacyPolicy");
+  });
+
+  it("every entry in NS_PRIVACY_POLICY belongs to NAMESPACES", () => {
+    for (const ns of NS_PRIVACY_POLICY) {
+      expect(NAMESPACES).toContain(ns);
+    }
+  });
+
+  it("NS_PRIVACY_POLICY has no duplicate entries", () => {
+    expect(NS_PRIVACY_POLICY.length).toBe(new Set(NS_PRIVACY_POLICY).size);
   });
 });

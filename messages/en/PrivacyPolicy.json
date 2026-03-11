@@ -1,0 +1,56 @@
+{
+  "title": "Privacy Policy",
+  "subtitle": "passwd-sso Browser Extension",
+  "lastUpdated": "Last updated: {date}",
+  "backToHome": "Back to home",
+  "sections": {
+    "overview": {
+      "title": "Overview",
+      "body": "The passwd-sso browser extension (\"the Extension\") is a companion to the passwd-sso password manager. This policy explains what data the Extension accesses, how it is used, and your rights."
+    },
+    "dataCollection": {
+      "title": "Data Collection",
+      "body": "The Extension does NOT collect, transmit, or sell any personal data to third parties. All vault data is end-to-end encrypted and only decrypted locally in your browser."
+    },
+    "dataAccessed": {
+      "title": "Data Accessed Locally",
+      "body": "The Extension accesses the following data solely on your device:",
+      "items": {
+        "storage": "Extension settings and encrypted session state (via chrome.storage)",
+        "activeTab": "The URL of the current tab to match saved credentials for autofill",
+        "clipboard": "Temporarily writes passwords or usernames to the clipboard when you explicitly request it",
+        "forms": "Login form fields on web pages to provide autofill functionality"
+      }
+    },
+    "serverCommunication": {
+      "title": "Server Communication",
+      "body": "The Extension communicates exclusively with your self-hosted passwd-sso server instance. No data is sent to any other server. All communication uses HTTPS and encrypted payloads."
+    },
+    "permissions": {
+      "title": "Browser Permissions",
+      "body": "The Extension requests the following permissions:",
+      "items": {
+        "storage": "Save extension settings and encrypted session state",
+        "alarms": "Auto-lock the vault after a configurable timeout period",
+        "activeTab": "Detect the current page URL for credential matching and autofill",
+        "scripting": "Inject autofill scripts into web page forms",
+        "contextMenus": "Provide right-click menu options for quick copy and autofill",
+        "clipboardWrite": "Copy passwords and usernames to the clipboard on demand",
+        "offscreen": "Perform clipboard operations in the background",
+        "hostPermissions": "Access web pages for form detection and autofill (granted on demand)"
+      }
+    },
+    "security": {
+      "title": "Security",
+      "body": "All password data is encrypted client-side using AES-256-GCM before transmission. The master passphrase never leaves your device. Key derivation uses PBKDF2 with 600,000 iterations."
+    },
+    "changes": {
+      "title": "Changes to This Policy",
+      "body": "We may update this policy from time to time. Changes will be reflected on this page with an updated date."
+    },
+    "contact": {
+      "title": "Contact",
+      "body": "If you have questions about this privacy policy, please open an issue on the project repository."
+    }
+  }
+}
