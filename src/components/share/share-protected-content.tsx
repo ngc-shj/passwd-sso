@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { SharePasswordGate } from "@/components/share/share-password-gate";
 import { ShareSendView } from "@/components/share/share-send-view";
@@ -45,24 +45,47 @@ export function ShareProtectedContent({
   const [content, setContent] = useState<ContentData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleVerified = async (newAccessToken: string) => {
-    setAccessToken(newAccessToken);
-    setError(null);
-
-    // Fetch content using the access token
+  const fetchContent = useCallback(async (tokenToUse: string): Promise<boolean> => {
     try {
       const res = await fetchApi(`/api/share-links/${shareId}/content`, {
-        headers: { Authorization: `Bearer ${newAccessToken}` },
+        headers: { Authorization: `Bearer ${tokenToUse}` },
       });
 
       if (!res.ok) {
-        setError(t("contentLoadError"));
-        return;
+        return false;
       }
 
       const data: ContentData = await res.json();
+      setAccessToken(tokenToUse);
       setContent(data);
+      return true;
     } catch {
+      return false;
+    }
+  }, [shareId]);
+
+  // Attempt to restore access token from sessionStorage on mount
+  useEffect(() => {
+    try {
+      const stored = sessionStorage.getItem(`share-access:${token}`);
+      if (stored) {
+        fetchContent(stored).then((ok) => {
+          if (!ok) {
+            // Stale or expired token — clear and show gate
+            sessionStorage.removeItem(`share-access:${token}`);
+          }
+        });
+      }
+    } catch {
+      // sessionStorage unavailable
+    }
+  }, [token, fetchContent]);
+
+  const handleVerified = async (newAccessToken: string) => {
+    setError(null);
+
+    const ok = await fetchContent(newAccessToken);
+    if (!ok) {
       setError(t("contentLoadError"));
     }
   };

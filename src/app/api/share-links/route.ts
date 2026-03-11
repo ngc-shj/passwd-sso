@@ -10,7 +10,7 @@ import {
   hashAccessPassword,
 } from "@/lib/crypto-server";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { assertPolicyAllowsSharing, PolicyViolationError } from "@/lib/team-policy";
+import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -135,6 +135,16 @@ export async function POST(req: NextRequest) {
     } catch (e) {
       if (e instanceof PolicyViolationError) {
         return NextResponse.json({ error: API_ERROR.POLICY_SHARING_DISABLED }, { status: 403 });
+      }
+      throw e;
+    }
+
+    // Enforce team policy: share password requirement
+    try {
+      await assertPolicySharePassword(teamEntry.teamId, requirePassword);
+    } catch (e) {
+      if (e instanceof PolicyViolationError) {
+        return NextResponse.json({ error: API_ERROR.POLICY_SHARE_PASSWORD_REQUIRED }, { status: 403 });
       }
       throw e;
     }
