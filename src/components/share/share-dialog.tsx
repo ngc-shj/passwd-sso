@@ -529,7 +529,7 @@ export function ShareDialog({
                   <Lock className="h-3 w-3" />
                   {t("requirePassword")}
                 </Label>
-                <p className="text-xs text-muted-foreground">
+                <p className={`text-xs ${passwordRequired ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                   {passwordRequired
                     ? t("requirePasswordPolicy")
                     : t("requirePasswordDesc")}
