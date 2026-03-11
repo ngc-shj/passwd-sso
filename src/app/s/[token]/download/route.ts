@@ -62,12 +62,8 @@ export async function GET(req: NextRequest, { params }: Params) {
       return new NextResponse(null, { status: 400 });
     }
 
-    // Check maxViews (for all shares, not just password-protected)
-    if (share.maxViews !== null && share.viewCount >= share.maxViews) {
-      return new NextResponse(null, { status: 410 });
-    }
-
-    // Password-protected share: verify access token
+    // Password-protected share: verify access token and atomically increment viewCount.
+    // The content API skips viewCount increment for FILE type, so download owns it.
     if (share.accessPasswordHash) {
       const authHeader = req.headers.get("authorization");
       if (!authHeader?.startsWith("Bearer ")) {
@@ -77,11 +73,33 @@ export async function GET(req: NextRequest, { params }: Params) {
         );
       }
       const accessToken = authHeader.slice(7);
+      if (accessToken.length > 512) {
+        return NextResponse.json(
+          { error: API_ERROR.UNAUTHORIZED },
+          { status: 401 },
+        );
+      }
       if (!verifyShareAccessToken(accessToken, share.id)) {
         return NextResponse.json(
           { error: API_ERROR.UNAUTHORIZED },
           { status: 401 },
         );
+      }
+
+      // Atomically increment viewCount for password-protected downloads
+      const updated: number = await prisma.$executeRaw`
+        UPDATE "password_shares"
+        SET "view_count" = "view_count" + 1
+        WHERE "id" = ${share.id}
+          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+
+      if (updated === 0) {
+        return new NextResponse(null, { status: 410 });
+      }
+    } else {
+      // Non-protected: viewCount already incremented by page.tsx, just check limit
+      if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+        return new NextResponse(null, { status: 410 });
       }
     }
 

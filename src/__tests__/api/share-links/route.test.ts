@@ -30,6 +30,8 @@ vi.mock("@/lib/crypto-server", () => ({
     authTag: "t".repeat(32),
     masterKeyVersion: 1,
   }),
+  generateAccessPassword: () => "test-access-password-base64url-43ch",
+  hashAccessPassword: () => "hashed-access-password",
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/team-policy", () => ({
   assertPolicyAllowsSharing: vi.fn(),
+  assertPolicySharePassword: vi.fn(),
   PolicyViolationError: class extends Error {},
 }));
 
@@ -396,6 +399,103 @@ describe("POST /api/share-links", () => {
         }),
       }),
     );
+  });
+
+  it("returns accessPassword when requirePassword is true (personal share)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      userId: DEFAULT_SESSION.user.id,
+      entryType: ENTRY_TYPE.LOGIN,
+      tenantId: "tenant-1",
+    });
+    mockCreate.mockResolvedValue({
+      id: "share-pw",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        passwordEntryId: VALID_ENTRY_ID,
+        data: { title: "Test", password: "secret" },
+        expiresIn: "1d",
+        requirePassword: true,
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.accessPassword).toBe("test-access-password-base64url-43ch");
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accessPasswordHash: "hashed-access-password",
+        }),
+      })
+    );
+  });
+
+  it("does not return accessPassword when requirePassword is absent", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      userId: DEFAULT_SESSION.user.id,
+      entryType: ENTRY_TYPE.LOGIN,
+      tenantId: "tenant-1",
+    });
+    mockCreate.mockResolvedValue({
+      id: "share-nopw",
+      expiresAt: new Date(Date.now() + 86400000),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        passwordEntryId: VALID_ENTRY_ID,
+        data: { title: "Test", password: "secret" },
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.accessPassword).toBeUndefined();
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accessPasswordHash: null,
+        }),
+      })
+    );
+  });
+
+  it("returns 403 when team policy requires password but requirePassword is false", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({ teamId: "team-123", entryType: ENTRY_TYPE.LOGIN, tenantId: "tenant-1" });
+
+    const { assertPolicySharePassword } = await import("@/lib/team-policy");
+    const { PolicyViolationError: RealPVE } = await import("@/lib/team-policy");
+    vi.mocked(assertPolicySharePassword).mockRejectedValueOnce(
+      new RealPVE("Share password is required by team policy")
+    );
+
+    const req = createRequest("POST", "http://localhost/api/share-links", {
+      body: {
+        teamPasswordEntryId: VALID_ENTRY_ID,
+        encryptedShareData: {
+          ciphertext: "c",
+          iv: "a".repeat(24),
+          authTag: "b".repeat(32),
+        },
+        entryType: ENTRY_TYPE.LOGIN,
+        expiresIn: "1d",
+      },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(403);
+    expect(json.error).toBe("POLICY_SHARE_PASSWORD_REQUIRED");
   });
 
   it("saves empty permissions with VIEW_ALL (default)", async () => {

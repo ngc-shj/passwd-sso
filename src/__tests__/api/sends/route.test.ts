@@ -27,6 +27,8 @@ vi.mock("@/lib/crypto-server", () => ({
     authTag: "t".repeat(32),
     masterKeyVersion: 1,
   }),
+  generateAccessPassword: () => "test-access-password-base64url-43ch",
+  hashAccessPassword: () => "hashed-access-password",
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
@@ -232,6 +234,56 @@ describe("POST /api/sends", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           maxViews: 5,
+        }),
+      })
+    );
+  });
+
+  it("returns accessPassword when requirePassword is true", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCreate.mockResolvedValue({
+      id: "share-pw",
+      expiresAt: new Date(),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/sends", {
+      body: { ...VALID_BODY, requirePassword: true },
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.accessPassword).toBe("test-access-password-base64url-43ch");
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accessPasswordHash: "hashed-access-password",
+        }),
+      })
+    );
+  });
+
+  it("does not return accessPassword when requirePassword is false", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockCreate.mockResolvedValue({
+      id: "share-nopw",
+      expiresAt: new Date(),
+    });
+
+    const req = createRequest("POST", "http://localhost/api/sends", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req as never);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.accessPassword).toBeUndefined();
+
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          accessPasswordHash: null,
         }),
       })
     );
