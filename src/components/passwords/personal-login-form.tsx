@@ -15,6 +15,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +43,7 @@ export function PersonalLoginForm({ mode, initialData, variant = "page", onSaved
   });
   const { values, setters } = formState;
   const isDialogVariant = variant === "dialog";
+  useBeforeUnloadGuard(!isDialogVariant && hasChanges);
   const dialogSectionClass = isDialogVariant ? ENTRY_DIALOG_FLAT_SECTION_CLASS : "";
   const {
     tagsAndFolderProps,

@@ -10,12 +10,6 @@ export function SignOutButton() {
   const t = useTranslations("Auth");
 
   const handleSignOut = () => {
-    // Allow the page navigation without triggering the beforeunload guard
-    try {
-      sessionStorage.setItem("psso:skip-beforeunload-once", "1");
-    } catch {
-      // Ignore storage access failures
-    }
     signOut({ callbackUrl: withBasePath("/auth/signin") });
   };
 

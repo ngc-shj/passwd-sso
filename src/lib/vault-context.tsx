@@ -104,9 +104,6 @@ const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
 const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
-const SKIP_BEFOREUNLOAD_ONCE_KEY = "psso:skip-beforeunload-once";
-const ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY =
-  "psso:allow-beforeunload-while-ext-connect";
 
 function hexDecode(hex: string): Uint8Array {
   const bytes = new Uint8Array(hex.length / 2);
@@ -285,46 +282,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       clearInterval(intervalId);
     };
   }, [vaultStatus, lock]);
-
-  // ─── Guard against accidental full reload while vault is unlocked ────────
-
-  useEffect(() => {
-    if (vaultStatus !== VAULT_STATUS.UNLOCKED) return;
-
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      // Allow a single intentional close flow (e.g. extension connect "Close tab")
-      try {
-        if (sessionStorage.getItem(SKIP_BEFOREUNLOAD_ONCE_KEY) === "1") {
-          sessionStorage.removeItem(SKIP_BEFOREUNLOAD_ONCE_KEY);
-          return;
-        }
-        // Allow tab close while extension-connect completion screen is shown.
-        if (sessionStorage.getItem(ALLOW_BEFOREUNLOAD_WHILE_CONNECTED_KEY) === "1") {
-          return;
-        }
-      } catch {
-        // Ignore storage access failures and keep safe default behavior.
-      }
-      e.preventDefault();
-      e.returnValue = "";
-    };
-
-    const handleReloadShortcut = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      const isReloadKey = key === "f5" || ((e.metaKey || e.ctrlKey) && key === "r");
-      if (!isReloadKey) return;
-      e.preventDefault();
-      e.stopPropagation();
-    };
-
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    window.addEventListener("keydown", handleReloadShortcut, true);
-
-    return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
-      window.removeEventListener("keydown", handleReloadShortcut, true);
-    };
-  }, [vaultStatus]);
 
   // ─── Periodic EA auto-confirm ────────────────────────────────
 

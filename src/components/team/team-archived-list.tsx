@@ -230,7 +230,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const handleToggleFavorite = async (id: string, _current: boolean) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;
@@ -246,7 +246,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     }
   };
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const handleToggleArchive = async (id: string, _current: boolean) => {
     const entry = entries.find((e) => e.id === id);
     if (!entry) return;

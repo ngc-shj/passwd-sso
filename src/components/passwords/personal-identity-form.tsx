@@ -24,6 +24,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -161,6 +162,7 @@ export function IdentityForm({
   );
 
   const hasChanges = currentSnapshot !== baselineSnapshot;
+  useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS
     : "";

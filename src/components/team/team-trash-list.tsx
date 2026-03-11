@@ -14,7 +14,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Building2, Trash2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
+import { Building2, Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
@@ -77,6 +77,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const { getEntryDecryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isEmptying, setIsEmptying] = useState(false);
 
   // Selection only works when scoped to a single team
   const effectiveSelectionMode = scopedTeamId ? (selectionModeProp ?? false) : false;
@@ -222,6 +223,27 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     }
   };
 
+  const handleEmptyTrash = async () => {
+    if (!scopedTeamId) return;
+    setIsEmptying(true);
+    try {
+      const res = await fetchApi(apiPath.teamPasswordsEmptyTrash(scopedTeamId), {
+        method: "POST",
+      });
+      if (!res.ok) {
+        toast.error(t("failedAction"));
+        return;
+      }
+      toast.success(t("emptyTrashSuccess"));
+      setEntries([]);
+      clearSelection();
+    } catch {
+      toast.error(t("networkError"));
+    } finally {
+      setIsEmptying(false);
+    }
+  };
+
   const handleDeletePermanently = async (entry: TeamTrashEntry) => {
     try {
       const res = await fetchApi(
@@ -254,6 +276,14 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     );
   }
 
+  // When scoped to a team, derive the user's role from any entry
+  const scopedRole = scopedTeamId
+    ? entries.find((e) => e.teamId === scopedTeamId)?.role
+    : undefined;
+  const canEmptyTrash =
+    scopedTeamId &&
+    (scopedRole === TEAM_ROLE.OWNER || scopedRole === TEAM_ROLE.ADMIN);
+
   return (
     <div className="mt-6">
       {!scopedTeamId && (
@@ -262,6 +292,30 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
           <h2 className="text-sm font-medium text-muted-foreground">
             {tTeam("trash")}
           </h2>
+        </div>
+      )}
+      {canEmptyTrash && (
+        <div className="mb-3 flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">{t("description")}</p>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="destructive" size="sm">
+                {t("emptyTrash")}
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t("emptyTrash")}</DialogTitle>
+                <DialogDescription>{t("emptyTrashConfirm")}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="destructive" onClick={handleEmptyTrash} disabled={isEmptying}>
+                  {isEmptying && <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />}
+                  {t("emptyTrash")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       )}
       <div className="space-y-2">

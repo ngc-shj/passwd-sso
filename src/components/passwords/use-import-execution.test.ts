@@ -121,14 +121,14 @@ describe("useImportExecution", () => {
     });
 
     expect(mockRunImportEntries).toHaveBeenCalledTimes(1);
-    expect(mockFireImportAudit).toHaveBeenCalledWith(3, 2, 1, "input.json", true);
+    expect(mockFireImportAudit).toHaveBeenCalledWith(3, 2, 1, "input.json", true, undefined);
     expect(mockToastSuccess).toHaveBeenCalledWith("importedCount");
     expect(onComplete).toHaveBeenCalledTimes(1);
     expect(result.current.done).toBe(true);
     expect(result.current.result).toEqual({ success: 2, failed: 1 });
   });
 
-  it("does not send audit for team import", async () => {
+  it("sends audit with teamId for team import", async () => {
     mockRunImportEntries.mockResolvedValue({ successCount: 1, failedCount: 0 });
     const onComplete = vi.fn();
 
@@ -152,7 +152,8 @@ describe("useImportExecution", () => {
       await result.current.runImport([makeEntry()]);
     });
 
-    expect(mockFireImportAudit).not.toHaveBeenCalled();
+    expect(mockFireImportAudit).toHaveBeenCalledWith(1, 1, 0, "team.csv", false, "o1");
+    expect(mockToastSuccess).toHaveBeenCalledWith("importedCount");
     expect(onComplete).toHaveBeenCalledTimes(1);
   });
 

@@ -24,7 +24,7 @@ export default function AcceptInvitePage({
   const t = useTranslations("Team");
   const router = useRouter();
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+   
   const [_loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteInfo | null>(null);

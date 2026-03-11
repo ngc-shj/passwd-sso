@@ -1,29 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import {
+  TEAM_PERMISSION,
+  AUDIT_ACTION,
+  AUDIT_SCOPE,
+  AUDIT_TARGET_TYPE,
+} from "@/lib/constants";
+import { withTeamTenantRls } from "@/lib/tenant-context";
 
-// POST /api/passwords/empty-trash - Permanently delete all entries in trash
-async function handlePOST(req: NextRequest) {
+type Params = { params: Promise<{ teamId: string }> };
+
+// POST /api/teams/[teamId]/passwords/empty-trash — Permanently delete all trashed entries
+export async function POST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
+  const { teamId } = await params;
+
+  try {
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+  } catch (e) {
+    if (e instanceof TeamAuthError) {
+      return NextResponse.json({ error: e.message }, { status: e.status });
+    }
+    throw e;
+  }
+
   // Atomic findMany + deleteMany to prevent TOCTOU race
-  const { entryIds, deletedCount } = await withUserTenantRls(session.user.id, async (): Promise<{ entryIds: string[]; deletedCount: number }> => {
+  const { entryIds, deletedCount } = await withTeamTenantRls(teamId, async (): Promise<{ entryIds: string[]; deletedCount: number }> => {
     const [entries, result] = await prisma.$transaction(async (tx) => {
-      const found = await tx.passwordEntry.findMany({
-        where: { userId: session.user.id, deletedAt: { not: null } },
+      const found = await tx.teamPasswordEntry.findMany({
+        where: { teamId, deletedAt: { not: null } },
         select: { id: true },
       });
       const ids = found.map((e) => e.id);
-      const deleted = await tx.passwordEntry.deleteMany({
-        where: { userId: session.user.id, id: { in: ids }, deletedAt: { not: null } },
+      const deleted = await tx.teamPasswordEntry.deleteMany({
+        where: { teamId, id: { in: ids }, deletedAt: { not: null } },
       });
       return [found, deleted] as const;
     });
@@ -33,10 +51,11 @@ async function handlePOST(req: NextRequest) {
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+    scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_EMPTY_TRASH,
     userId: session.user.id,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+    teamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: "trash",
     metadata: {
       operation: "empty-trash",
@@ -48,10 +67,11 @@ async function handlePOST(req: NextRequest) {
 
   for (const entryId of entryIds) {
     logAudit({
-      scope: AUDIT_SCOPE.PERSONAL,
+      scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
       userId: session.user.id,
-      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      teamId,
+      targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
       targetId: entryId,
       metadata: {
         source: "empty-trash",
@@ -63,5 +83,3 @@ async function handlePOST(req: NextRequest) {
 
   return NextResponse.json({ success: true, deletedCount: deletedCount });
 }
-
-export const POST = withRequestLog(handlePOST);
