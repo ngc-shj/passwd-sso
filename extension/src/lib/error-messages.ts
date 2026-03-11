@@ -15,6 +15,7 @@ const ERROR_KEY_MAP: Record<string, string> = {
   AUTO_LOCK_INVALID: "errors.autoLockInvalid",
   NO_TOTP: "errors.noTotpConfigured",
   INVALID_TOTP: "errors.invalidTotp",
+  NETWORK_ERROR: "errors.networkError",
 };
 
 export function humanizeError(code: string): string {

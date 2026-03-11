@@ -8,6 +8,7 @@ import {
   buildPersonalEntryAAD,
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import { normalizeErrorCode } from "../lib/error-utils";
 import { EXT_ENTRY_TYPE } from "../lib/constants";
 import type { DecryptedEntry } from "../types/messages";
 
@@ -169,7 +170,7 @@ export async function handleSaveLogin(
     deps.invalidateCache();
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "SAVE_FAILED" };
+    return { ok: false, error: normalizeErrorCode(err, "SAVE_FAILED") };
   }
 }
 
@@ -239,6 +240,6 @@ export async function handleUpdateLogin(
     deps.invalidateCache();
     return { ok: true };
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : "UPDATE_FAILED" };
+    return { ok: false, error: normalizeErrorCode(err, "UPDATE_FAILED") };
   }
 }

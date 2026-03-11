@@ -94,6 +94,7 @@
     "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
     "autoLockInvalid": "Auto-lock minutes must be 0 or more",
     "noTotpConfigured": "No TOTP configured for this entry",
-    "invalidTotp": "TOTP configuration is invalid for this entry"
+    "invalidTotp": "TOTP configuration is invalid for this entry",
+    "networkError": "Cannot connect to server. If using a self-signed certificate, open the server URL in a browser tab and accept the certificate first."
   }
 }

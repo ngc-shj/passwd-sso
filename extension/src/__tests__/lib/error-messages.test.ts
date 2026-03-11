@@ -24,6 +24,9 @@ describe("humanizeError", () => {
     expect(humanizeError("INVALID_PASSPHRASE")).toBe("Passphrase is incorrect.");
     expect(humanizeError("FETCH_FAILED")).toBe("Failed to load entries.");
     expect(humanizeError("NO_PASSWORD")).toBe("No password available for this entry.");
+    expect(humanizeError("NETWORK_ERROR")).toBe(
+      "Cannot connect to server. If using a self-signed certificate, open the server URL in a browser tab and accept the certificate first.",
+    );
   });
 
   it("returns code for unknown values", () => {
