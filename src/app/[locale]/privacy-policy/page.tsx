@@ -5,6 +5,7 @@ import { Link } from "@/i18n/navigation";
 import { ArrowLeft } from "lucide-react";
 
 const LAST_UPDATED = "2026-03-11";
+const ISSUES_URL = "https://github.com/ngc-shj/passwd-sso/issues";
 
 const SECTION_KEYS = [
   "overview",
@@ -57,7 +58,20 @@ export default function PrivacyPolicyPage() {
               {t(`sections.${key}.title`)}
             </h2>
             <p className="leading-relaxed text-muted-foreground">
-              {t(`sections.${key}.body`)}
+              {key === "contact"
+                ? t.rich(`sections.${key}.body`, {
+                    link: (chunks) => (
+                      <a
+                        href={ISSUES_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline hover:text-foreground"
+                      >
+                        {chunks}
+                      </a>
+                    ),
+                  })
+                : t(`sections.${key}.body`)}
             </p>
             {ITEM_SECTIONS[key] && (
               <ul className="mt-3 list-inside list-disc space-y-1 text-muted-foreground">

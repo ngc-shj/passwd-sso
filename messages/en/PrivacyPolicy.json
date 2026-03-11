@@ -50,7 +50,7 @@
     },
     "contact": {
       "title": "Contact",
-      "body": "If you have questions about this privacy policy, please open an issue on the project repository."
+      "body": "If you have questions about this privacy policy, please <link>open an issue</link> on the project repository."
     }
   }
 }
