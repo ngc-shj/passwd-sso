@@ -1273,7 +1273,7 @@ describe("token refresh alarm", () => {
       "fetch",
       vi.fn(async (url: string) => {
         if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
-          throw new Error("NetworkError");
+          throw new Error("Failed to fetch");
         }
         if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
           return {

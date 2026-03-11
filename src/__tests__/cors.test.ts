@@ -4,6 +4,9 @@ import { handlePreflight, applyCorsHeaders } from "@/lib/cors";
 
 const APP_ORIGIN = "http://localhost:3000";
 const CROSS_ORIGIN = "http://evil.com";
+const CHROME_EXT = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
+const FIREFOX_EXT = "moz-extension://a1b2c3d4-e5f6-7890-abcd-ef1234567890";
+const SAFARI_EXT = "safari-web-extension://A1B2C3D4-E5F6-7890-ABCD-EF1234567890";
 
 function makeRequest(
   method: string,
@@ -84,6 +87,87 @@ describe("cors", () => {
 
       expect(res.status).toBe(204);
       expect(res.headers.get("Access-Control-Allow-Origin")).toBe(APP_ORIGIN);
+    });
+  });
+
+  // ─── extension origin (allowExtension) ─────────────────────
+
+  describe("extension origin support", () => {
+    it("returns CORS headers for chrome-extension with allowExtension", () => {
+      const res = handlePreflight(makeRequest("OPTIONS", CHROME_EXT), {
+        allowExtension: true,
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe(CHROME_EXT);
+      expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+      expect(res.headers.get("Access-Control-Allow-Methods")).toContain("PATCH");
+      expect(res.headers.get("Access-Control-Max-Age")).toBe("86400");
+      expect(res.headers.get("Vary")).toBe("Origin");
+    });
+
+    it("returns CORS headers for moz-extension with allowExtension", () => {
+      const res = handlePreflight(makeRequest("OPTIONS", FIREFOX_EXT), {
+        allowExtension: true,
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe(FIREFOX_EXT);
+      expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+    });
+
+    it("returns CORS headers for safari-web-extension with allowExtension", () => {
+      const res = handlePreflight(makeRequest("OPTIONS", SAFARI_EXT), {
+        allowExtension: true,
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe(SAFARI_EXT);
+      expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+    });
+
+    it("rejects extension origin without allowExtension", () => {
+      const res = handlePreflight(makeRequest("OPTIONS", CHROME_EXT));
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("rejects malformed chrome-extension origin", () => {
+      const malformed = [
+        "chrome-extension://ABCDEFGHIJKLMNOPABCDEFGHIJKLMNOP", // uppercase
+        "chrome-extension://tooshort",
+        "chrome-extension://abcdefghijklmnopabcdefghijklmnop123", // too long
+      ];
+      for (const origin of malformed) {
+        const res = handlePreflight(makeRequest("OPTIONS", origin), {
+          allowExtension: true,
+        });
+        expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+      }
+    });
+
+    it("rejects malformed moz-extension origin (all hyphens)", () => {
+      const res = handlePreflight(
+        makeRequest("OPTIONS", "moz-extension://------------------------------------"),
+        { allowExtension: true },
+      );
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("rejects malformed safari-web-extension origin", () => {
+      const res = handlePreflight(
+        makeRequest("OPTIONS", "safari-web-extension://not-a-valid-uuid"),
+        { allowExtension: true },
+      );
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("applyCorsHeaders rejects extension origin without allowExtension", () => {
+      const req = makeRequest("GET", CHROME_EXT);
+      const res = applyCorsHeaders(req, NextResponse.next());
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    });
+
+    it("applyCorsHeaders includes extension headers without credentials", () => {
+      const req = makeRequest("GET", CHROME_EXT);
+      const res = applyCorsHeaders(req, NextResponse.next(), {
+        allowExtension: true,
+      });
+      expect(res.headers.get("Access-Control-Allow-Origin")).toBe(CHROME_EXT);
+      expect(res.headers.get("Access-Control-Allow-Credentials")).toBeNull();
     });
   });
 

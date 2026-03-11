@@ -1,13 +1,15 @@
 /**
  * CORS policy helpers for API routes.
  *
- * Policy: same-origin only. Cross-origin requests receive no CORS headers,
- * causing the browser to block the response. Non-browser clients are not
- * affected by CORS — server-side auth (session / Bearer) and assertOrigin()
+ * Policy: same-origin only by default. Cross-origin requests receive no CORS
+ * headers, causing the browser to block the response. Non-browser clients are
+ * not affected by CORS — server-side auth (session / Bearer) and assertOrigin()
  * provide the actual access control.
  *
- * The browser extension communicates via Background Service Worker with
- * Bearer tokens, bypassing browser CORS entirely.
+ * Browser extension exception: Service Worker fetch with an Authorization
+ * header triggers a CORS preflight. For Bearer-authenticated routes, the
+ * preflight handler permits chrome-extension:// origins so that the actual
+ * request can proceed.
  */
 
 import { NextResponse } from "next/server";
@@ -39,19 +41,32 @@ function resolveOrigin(): string | null {
  * - Origin absent → empty (same-origin navigation, no CORS needed)
  * - APP_URL unset → empty (deny-equivalent for browsers)
  */
-function corsHeaders(request: NextRequest): Record<string, string> {
+function isExtensionOrigin(origin: string): boolean {
+  return /^chrome-extension:\/\/[a-z]{32}$/.test(origin) ||
+    /^moz-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(origin) ||
+    /^safari-web-extension:\/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(origin);
+}
+
+function corsHeaders(
+  request: NextRequest,
+  opts?: { allowExtension?: boolean },
+): Record<string, string> {
   const origin = request.headers.get("origin");
   if (!origin) return {};
 
   const appOrigin = resolveOrigin();
-  if (!appOrigin) return {};
 
-  if (origin === appOrigin) {
+  const allowed =
+    (appOrigin && origin === appOrigin) ||
+    (opts?.allowExtension && isExtensionOrigin(origin));
+
+  if (allowed) {
     return {
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Allow-Credentials": "true",
+      // Credentials not needed for extension (Bearer token in header)
+      ...(origin === appOrigin ? { "Access-Control-Allow-Credentials": "true" } : {}),
       "Access-Control-Max-Age": "86400",
       "Vary": "Origin",
     };
@@ -62,12 +77,16 @@ function corsHeaders(request: NextRequest): Record<string, string> {
 /**
  * Handle OPTIONS preflight for API routes.
  * Same-origin → 204 with CORS headers.
- * Cross-origin → 204 without CORS headers (browser blocks the actual request).
+ * Extension origin + allowExtension → 204 with CORS headers.
+ * Other cross-origin → 204 without CORS headers (browser blocks the actual request).
  */
-export function handlePreflight(request: NextRequest): NextResponse {
+export function handlePreflight(
+  request: NextRequest,
+  opts?: { allowExtension?: boolean },
+): NextResponse {
   return new NextResponse(null, {
     status: 204,
-    headers: corsHeaders(request),
+    headers: corsHeaders(request, opts),
   });
 }
 
@@ -79,8 +98,9 @@ export function handlePreflight(request: NextRequest): NextResponse {
 export function applyCorsHeaders(
   request: NextRequest,
   response: NextResponse,
+  opts?: { allowExtension?: boolean },
 ): NextResponse {
-  for (const [key, value] of Object.entries(corsHeaders(request))) {
+  for (const [key, value] of Object.entries(corsHeaders(request, opts))) {
     if (key === "Vary") {
       // Merge into existing Vary with case-insensitive dedup
       // e.g. "Accept-Encoding" → "Accept-Encoding, Origin"

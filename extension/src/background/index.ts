@@ -28,6 +28,7 @@ import {
   type TeamKeyWrapContext,
 } from "../lib/crypto-team";
 import { getSettings } from "../lib/storage";
+import { normalizeErrorCode } from "../lib/error-utils";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
   persistSession,
@@ -1568,7 +1569,7 @@ async function handleMessage(
         sendResponse({
           type: "UNLOCK_VAULT",
           ok: false,
-          error: err instanceof Error ? err.message : "UNLOCK_FAILED",
+          error: normalizeErrorCode(err, "UNLOCK_FAILED"),
         });
       }
       return;
@@ -1614,7 +1615,7 @@ async function handleMessage(
         sendResponse({
           type: "FETCH_PASSWORDS",
           entries: null,
-          error: err instanceof Error ? err.message : "FETCH_FAILED",
+          error: normalizeErrorCode(err, "FETCH_FAILED"),
         });
       }
       return;
@@ -1691,7 +1692,7 @@ async function handleMessage(
         sendResponse({
           type: "COPY_PASSWORD",
           password: null,
-          error: err instanceof Error ? err.message : "FETCH_FAILED",
+          error: normalizeErrorCode(err, "FETCH_FAILED"),
         });
       }
       return;
@@ -1805,7 +1806,7 @@ async function handleMessage(
         sendResponse({
           type: "AUTOFILL",
           ok: false,
-          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+          error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
       }
       return;
@@ -1828,7 +1829,7 @@ async function handleMessage(
         sendResponse({
           type: "AUTOFILL_CREDIT_CARD",
           ok: false,
-          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+          error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
       }
       return;
@@ -1851,7 +1852,7 @@ async function handleMessage(
         sendResponse({
           type: "AUTOFILL_IDENTITY",
           ok: false,
-          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+          error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
       }
       return;
@@ -1958,7 +1959,7 @@ async function handleMessage(
         sendResponse({
           type: "AUTOFILL_FROM_CONTENT",
           ok: false,
-          error: err instanceof Error ? err.message : "AUTOFILL_FAILED",
+          error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
       }
       return;
