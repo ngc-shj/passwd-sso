@@ -18,7 +18,17 @@ import {
 } from "@/components/passwords/password-import-steps";
 import { useImportFileFlow } from "@/components/passwords/use-import-file-flow";
 import { useImportExecution } from "@/components/passwords/use-import-execution";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useNavigationGuard } from "@/hooks/use-navigation-guard";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // ─── Component ──────────────────────────────────────────────
 
@@ -92,7 +102,8 @@ function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelCon
 
   // Guard during: encrypted file decryption input, preview with parsed entries, active import.
   // Once done === true, data is already server-side so no guard needed.
-  useBeforeUnloadGuard(importing || encryptedFile !== null || (entries.length > 0 && !done));
+  const isDirty = importing || encryptedFile !== null || (entries.length > 0 && !done);
+  const guard = useNavigationGuard(isDirty);
 
   const reset = () => {
     resetExecution();
@@ -149,7 +160,25 @@ function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelCon
     </>
   );
 
-  return content;
+  return (
+    <>
+      <AlertDialog open={guard.dialogOpen} onOpenChange={guard.cancelLeave}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("leaveTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("leaveConfirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("leaveStay")}</AlertDialogCancel>
+            <AlertDialogAction onClick={guard.confirmLeave}>
+              {t("leaveNow")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {content}
+    </>
+  );
 }
 
 interface ImportPagePanelProps {

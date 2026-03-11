@@ -25,5 +25,9 @@
   "decryptPassword": "暗号化時に設定したパスワードを入力してください",
   "decryptButton": "復号する",
   "decrypting": "復号中...",
-  "decryptionFailed": "復号に失敗しました。パスワードを確認して再度お試しください。"
+  "decryptionFailed": "復号に失敗しました。パスワードを確認して再度お試しください。",
+  "leaveTitle": "インポートを中断しますか？",
+  "leaveConfirm": "インポートの処理中、または未保存のデータがあります。このページを離れるとデータが失われます。移動しますか？",
+  "leaveStay": "このページに残る",
+  "leaveNow": "移動する"
 }
