@@ -21,21 +21,23 @@ export function useNavigationGuard(dirty: boolean) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [pendingHref, setPendingHref] = useState<string | null>(null);
   const allowLeaveRef = useRef(false);
+  const [prevDirty, setPrevDirty] = useState(dirty);
 
   // Browser reload / tab close guard
   useBeforeUnloadGuard(dirty);
 
-  // Clear stale dialog state when dirty becomes false (e.g. analysis completes while dialog is open)
-  useEffect(() => {
+  // Clear stale dialog state when dirty becomes false (adjust state during rendering)
+  if (prevDirty !== dirty) {
+    setPrevDirty(dirty);
     if (!dirty) {
       setDialogOpen(false);
       setPendingHref(null);
-      allowLeaveRef.current = false;
     }
-  }, [dirty]);
+  }
 
   // SPA link click interception
   useEffect(() => {
+    allowLeaveRef.current = false;
     if (!dirty) return;
 
     const onClick = (event: MouseEvent) => {

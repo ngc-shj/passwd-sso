@@ -86,7 +86,7 @@ describe("createE2EPasswordSchema", () => {
   });
 
   it("id is required when aadVersion defaults to 1", () => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const { id: _, ...baseWithoutId } = validBase;
     expect(() => createE2EPasswordSchema.parse(baseWithoutId)).toThrow(
       "id is required when aadVersion >= 1"
@@ -109,7 +109,7 @@ describe("createE2EPasswordSchema", () => {
   });
 
   it("rejects aadVersion=1 without id", () => {
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+     
     const { id: _, ...baseWithoutId } = validBase;
     expect(() =>
       createE2EPasswordSchema.parse({ ...baseWithoutId, aadVersion: 1 }),
