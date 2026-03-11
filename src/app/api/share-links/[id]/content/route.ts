@@ -129,7 +129,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         dataIv: share.dataIv,
         dataAuthTag: share.dataAuthTag,
         expiresAt: share.expiresAt.toISOString(),
-        viewCount: share.viewCount + 1,
+        viewCount: share.viewCount + viewCountDelta,
         maxViews: share.maxViews,
       });
     }
