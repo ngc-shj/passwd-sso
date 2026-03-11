@@ -174,6 +174,7 @@ export function ShareDialog({
   const [createdAccessPassword, setCreatedAccessPassword] = useState<string | null>(null);
   const [passwordCopied, setPasswordCopied] = useState(false);
   const [sharingAllowed, setSharingAllowed] = useState(true);
+  const [passwordRequired, setPasswordRequired] = useState(false);
 
   const entryParam = passwordEntryId
     ? `passwordEntryId=${passwordEntryId}`
@@ -209,6 +210,12 @@ export function ShareDialog({
       .then((data) => {
         if (data && data.allowSharing === false) setSharingAllowed(false);
         else setSharingAllowed(true);
+        if (data && data.requireSharePassword === true) {
+          setPasswordRequired(true);
+          setRequirePassword(true);
+        } else {
+          setPasswordRequired(false);
+        }
       })
       .catch(() => {});
   }, [open, teamId]);
@@ -523,12 +530,15 @@ export function ShareDialog({
                   {t("requirePassword")}
                 </Label>
                 <p className="text-xs text-muted-foreground">
-                  {t("requirePasswordDesc")}
+                  {passwordRequired
+                    ? t("requirePasswordPolicy")
+                    : t("requirePasswordDesc")}
                 </p>
               </div>
               <Switch
                 checked={requirePassword}
                 onCheckedChange={setRequirePassword}
+                disabled={passwordRequired}
               />
             </div>
 

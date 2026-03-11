@@ -11,6 +11,7 @@ export interface TeamPolicyData {
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
+  requireSharePassword: boolean;
 }
 
 const DEFAULT_POLICY: TeamPolicyData = {
@@ -23,6 +24,7 @@ const DEFAULT_POLICY: TeamPolicyData = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
 };
 
 /**
@@ -45,6 +47,7 @@ export async function getTeamPolicy(teamId: string): Promise<TeamPolicyData> {
     requireRepromptForAll: policy.requireRepromptForAll,
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,
+    requireSharePassword: policy.requireSharePassword,
   };
 }
 
