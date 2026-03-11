@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { SharePasswordGate } from "@/components/share/share-password-gate";
 import { ShareSendView } from "@/components/share/share-send-view";
@@ -51,8 +51,6 @@ export function ShareProtectedContent({
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [content, setContent] = useState<ContentData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const restoringRef = useRef(false);
-
   const fetchContent = useCallback(async (tokenToUse: string): Promise<boolean> => {
     const data = await tryFetchContent(shareId, tokenToUse);
     if (!data) return false;
@@ -63,13 +61,13 @@ export function ShareProtectedContent({
 
   // Attempt to restore access token from sessionStorage on mount
   useEffect(() => {
-    if (restoringRef.current) return;
-    restoringRef.current = true;
+    let cancelled = false;
 
     try {
       const stored = sessionStorage.getItem(`share-access:${token}`);
       if (stored) {
         tryFetchContent(shareId, stored).then((data) => {
+          if (cancelled) return;
           if (data) {
             setAccessToken(stored);
             setContent(data);
@@ -81,6 +79,8 @@ export function ShareProtectedContent({
     } catch {
       // sessionStorage unavailable
     }
+
+    return () => { cancelled = true; };
   }, [token, shareId]);
 
   const handleVerified = async (newAccessToken: string) => {
