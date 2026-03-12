@@ -89,6 +89,9 @@ describe("API_PATH", () => {
   it("builds team and emergency paths", () => {
     expect(apiPath.teamById("team-1")).toBe("/api/teams/team-1");
     expect(apiPath.teamMembers("team-1")).toBe("/api/teams/team-1/members");
+    expect(apiPath.teamMembersSearch("team-1")).toBe(
+      "/api/teams/team-1/members/search"
+    );
     expect(apiPath.teamMemberById("team-1", "mem-1")).toBe(
       "/api/teams/team-1/members/mem-1"
     );

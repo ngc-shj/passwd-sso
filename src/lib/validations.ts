@@ -261,6 +261,11 @@ export const inviteSchema = z.object({
   role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),
 });
 
+export const addMemberSchema = z.object({
+  userId: z.string().cuid(),
+  role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),
+});
+
 export const updateMemberRoleSchema = z.object({
   role: z.enum(TEAM_ROLE_VALUES),
 });
@@ -521,6 +526,7 @@ export type CreateTeamE2EPasswordInput = z.infer<typeof createTeamE2EPasswordSch
 export type UpdateTeamE2EPasswordInput = z.infer<typeof updateTeamE2EPasswordSchema>;
 export type UpdateTeamInput = z.infer<typeof updateTeamSchema>;
 export type InviteInput = z.infer<typeof inviteSchema>;
+export type AddMemberInput = z.infer<typeof addMemberSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 export type UpdateTenantMemberRoleInput = z.infer<typeof updateTenantMemberRoleSchema>;
 export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
