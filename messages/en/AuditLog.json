@@ -32,6 +32,7 @@
   "ENTRY_EXPORT": "Exported entries",
   "ATTACHMENT_UPLOAD": "Uploaded attachment",
   "ATTACHMENT_DELETE": "Deleted attachment",
+  "TEAM_MEMBER_ADD": "Added member",
   "TEAM_MEMBER_INVITE": "Invited member",
   "TEAM_MEMBER_REMOVE": "Removed member",
   "TEAM_ROLE_UPDATE": "Changed role",
