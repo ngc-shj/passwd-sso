@@ -318,9 +318,9 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
           </Dialog>
         </div>
       )}
-      <div className="space-y-2">
+      <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
         {sortedFiltered.map((entry) => (
-          <Card key={entry.id} className="transition-colors hover:bg-accent/30">
+          <Card key={entry.id} className="transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
             <CardContent className="flex items-center gap-3 px-4 py-2">
               {effectiveSelectionMode && (
                 <Checkbox

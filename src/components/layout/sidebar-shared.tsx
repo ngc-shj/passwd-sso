@@ -77,7 +77,7 @@ export function FolderTreeNode({
 
   return (
     <>
-      <div className={cn("group/folder flex items-center rounded-md transition-colors", activeFolderId === folder.id ? "bg-secondary" : "hover:bg-accent/30")} style={{ paddingLeft: `${depth * 12}px` }}>
+      <div className={cn("group/folder flex items-center rounded-md transition-colors", activeFolderId === folder.id ? "bg-secondary" : "hover:bg-accent/30 dark:hover:bg-accent/50")} style={{ paddingLeft: `${depth * 12}px` }}>
         <Button
           variant={activeFolderId === folder.id ? "secondary" : "ghost"}
           className="flex-1 justify-start gap-2 min-w-0 rounded-none hover:bg-transparent dark:hover:bg-transparent"
@@ -226,7 +226,7 @@ export function TagTreeNode({
       <div
         className={cn(
           "group/tag flex items-center rounded-md transition-colors",
-          activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent/30",
+          activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent/30 dark:hover:bg-accent/50",
         )}
         style={{ paddingLeft: `${depth * 12}px` }}
       >

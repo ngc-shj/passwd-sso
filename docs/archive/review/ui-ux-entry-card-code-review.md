@@ -40,17 +40,26 @@ Standardized sidebar icon button hover to shadcn ghost default.
 - **Status**: Resolved
 
 ### F8 [Minor] Dark mode accent/30 visibility concern
-- **Status**: Deferred — requires manual browser testing
+- **Problem**: `hover:bg-accent/30` may be too subtle in dark mode
+- **Action**: Added `dark:hover:bg-accent/50` alongside `hover:bg-accent/30` on all 17 container elements, matching shadcn ghost button dark mode pattern
+- **Status**: Resolved
 
 ### F9 [Minor] teams/page.tsx unused `group` class
-- **Status**: Deferred — pre-existing, out of scope
+- **Action**: Removed `group` class — no `group-hover:` children exist
+- **Status**: Resolved
+
+## Phase 3 — Deferred Items (Round 5)
+
+### T3 [Minor] Team list spacing inconsistency
+- **Problem**: trash-list.tsx, team-trash-list.tsx, team-archived-list.tsx used fixed `space-y-2` while password-list.tsx used conditional spacing
+- **Action**: Changed to conditional `selectionMode ? "space-y-2" : "space-y-1"` in all three files
+- **Status**: Resolved
 
 ## Security Findings
 No findings (all rounds).
 
 ## Testing Findings
 - No snapshot tests affected
-- Trash component tests missing (pre-existing)
 - sidebar-shared.tsx bare `hover:bg-accent` on buttons is intentional (shadcn ghost default)
 - Hover pattern lint rule not enforced (improvement suggestion for future)
 
@@ -58,7 +67,7 @@ No findings (all rounds).
 
 | Context | Pattern |
 |---------|---------|
-| Container/row (with nested buttons) | `hover:bg-accent/30` |
+| Container/row (with nested buttons) | `hover:bg-accent/30 dark:hover:bg-accent/50` |
 | Dropdown selection items | `hover:bg-accent` (100%) |
 | Non-interactive containers | No hover |
 | Buttons (shadcn ghost) | `hover:bg-accent` (framework default) |

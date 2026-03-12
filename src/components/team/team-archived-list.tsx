@@ -422,7 +422,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           </h2>
         </div>
       )}
-      <div className="space-y-2">
+      <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
         {sortedFiltered.map((entry) =>
           effectiveSelectionMode ? (
             <div key={entry.id} className="flex items-start gap-2">

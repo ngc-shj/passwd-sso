@@ -585,7 +585,7 @@ export function PasswordCard({
   return (
     <>
       <Card
-        className="py-0 gap-0 overflow-hidden border-l-2 border-l-transparent transition-colors hover:border-l-primary hover:bg-accent/30"
+        className="py-0 gap-0 overflow-hidden border-l-2 border-l-transparent transition-colors hover:border-l-primary hover:bg-accent/30 dark:hover:bg-accent/50"
         onClick={() => onToggleExpand(id)}
       >
         <CardContent

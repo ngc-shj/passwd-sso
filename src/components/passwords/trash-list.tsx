@@ -241,7 +241,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
         </Dialog>
       </div>
 
-      <div className="space-y-2">
+      <div className={selectionMode ? "space-y-2" : "space-y-1"}>
         {filtered.length === 0 && (
           <Card className="rounded-xl border bg-card/80 p-10">
             <div className="flex flex-col items-center justify-center text-center">
@@ -250,7 +250,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
           </Card>
         )}
         {filtered.map((entry) => (
-          <Card key={entry.id} className="transition-colors hover:bg-accent/30">
+          <Card key={entry.id} className="transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
             <CardContent className="flex items-center gap-3 px-4 py-2">
               {selectionMode && (
                 <Checkbox
