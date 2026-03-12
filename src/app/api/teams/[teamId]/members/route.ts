@@ -102,6 +102,11 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   const { userId, role } = parsed.data;
 
+  // Cannot add yourself
+  if (userId === session.user.id) {
+    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+  }
+
   type MemberResult = {
     id: string;
     userId: string;
@@ -227,9 +232,9 @@ function isPrismaUniqueConstraintError(e: unknown): boolean {
     return false;
   }
   // Verify it's the teamId+userId constraint, not an unrelated one
-  const meta = "meta" in e ? (e as { meta?: { target?: string[] } }).meta : undefined;
-  if (meta?.target) {
+  const meta = "meta" in e ? (e as { meta?: { target?: unknown } }).meta : undefined;
+  if (Array.isArray(meta?.target)) {
     return meta.target.includes("teamId") && meta.target.includes("userId");
   }
-  return false; // Unknown constraint — let the caller re-throw
+  return false; // Unknown constraint or non-array target — let the caller re-throw
 }

@@ -341,7 +341,7 @@ export default function TeamSettingsPage({
         const data = await res.json();
         toast.error(
           data.error === "SCIM_MANAGED_MEMBER"
-            ? t("addMemberFailed")
+            ? t("scimManagedCannotAdd")
             : t("alreadyMember"),
         );
         setAdding(null);

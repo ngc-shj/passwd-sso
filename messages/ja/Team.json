@@ -142,5 +142,6 @@
   "addButton": "追加",
   "memberAdded": "メンバーを追加しました",
   "addMemberFailed": "メンバーの追加に失敗しました",
+  "scimManagedCannotAdd": "SCIM管理のメンバーはIdP経由で再有効化してください",
   "noTenantMembersFound": "該当するメンバーが見つかりません"
 }

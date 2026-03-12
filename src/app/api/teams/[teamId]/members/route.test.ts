@@ -230,7 +230,18 @@ describe("POST /api/teams/[teamId]/members", () => {
     expect(res.status).toBe(201);
     expect(json.userId).toBe(TARGET_USER_ID);
     expect(json.reactivated).toBe(false);
-    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "TEAM_MEMBER_ADD",
+        targetType: "TeamMember",
+        targetId: "new-m-1",
+        metadata: expect.objectContaining({
+          userId: TARGET_USER_ID,
+          role: TEAM_ROLE.MEMBER,
+          reactivated: false,
+        }),
+      }),
+    );
   });
 
   it("reactivates a deactivated member", async () => {
@@ -254,6 +265,9 @@ describe("POST /api/teams/[teamId]/members", () => {
     const json = await res.json();
     expect(res.status).toBe(201);
     expect(json.reactivated).toBe(true);
+    expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
+      where: { teamId: TEAM_ID, userId: TARGET_USER_ID },
+    });
   });
 
   it("returns 409 for active member", async () => {
@@ -332,5 +346,50 @@ describe("POST /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(409);
+  });
+
+  it("re-throws P2002 with no meta.target (unknown constraint)", async () => {
+    const p2002Error = Object.assign(new Error("Unique constraint"), {
+      code: "P2002",
+    });
+    mockPrismaTeamMember.create.mockRejectedValue(p2002Error);
+
+    await expect(
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
+          body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
+        }),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("re-throws P2002 for unrelated constraint", async () => {
+    const p2002Error = Object.assign(new Error("Unique constraint"), {
+      code: "P2002",
+      meta: { target: ["email"] },
+    });
+    mockPrismaTeamMember.create.mockRejectedValue(p2002Error);
+
+    await expect(
+      POST(
+        createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
+          body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
+        }),
+        createParams({ teamId: TEAM_ID }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("returns 400 when adding yourself", async () => {
+    mockAuth.mockResolvedValue({ user: { id: TARGET_USER_ID } });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {
+        body: { userId: TARGET_USER_ID, role: TEAM_ROLE.MEMBER },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
   });
 });

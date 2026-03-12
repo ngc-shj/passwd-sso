@@ -1,19 +1,16 @@
 # Code Review: team-member-direct-add
 Date: 2026-03-12
-Review round: 2
+Review round: 3
 
-## Round 1 Findings
+## Round 1 Findings (from initial review)
 
 ### F2 [Major] isPrismaUniqueConstraintError doesn't verify constraint target
-- File: `src/app/api/teams/[teamId]/members/route.ts:220-227`
 - Resolution: Added `meta.target` check for `teamId` and `userId` fields with safe fallback to `false`.
 
 ### F3 [Minor] UI shows same error for ALREADY_A_MEMBER and SCIM_MANAGED_MEMBER
-- File: `src/app/[locale]/dashboard/teams/[teamId]/settings/page.tsx:339-343`
 - Resolution: Read response body and distinguish error codes in toast message.
 
 ### S3 [Minor] Pending invitation email→userId query missing tenantId filter
-- File: `src/app/api/teams/[teamId]/members/search/route.ts:70-73`
 - Resolution: Added `tenantId: team.tenantId` to the User findMany query.
 
 ### T1 [Major] No test file for search route
@@ -27,28 +24,54 @@ Review round: 2
 
 ## Round 2 Findings
 
-### F2-followup [Minor] Fallback `return true` too permissive (Functionality)
+### F2-followup [Minor] Fallback `return true` too permissive
 - Resolution: Changed fallback from `return true` to `return false` — unknown constraints now re-throw.
 
-### F3-B [Minor] Pre-existing bug: handleInvite uses wrong error string (Functionality)
-- File: `src/app/[locale]/dashboard/teams/[teamId]/settings/page.tsx:219`
-- Problem: `data.error === "User is already a member"` doesn't match API response `"ALREADY_A_MEMBER"`.
+### F3-B [Minor] Pre-existing bug: handleInvite uses wrong error string
 - Resolution: Fixed to `data.error === "ALREADY_A_MEMBER"`.
 
-### T2-B [Minor] Second 404 path untested (Testing)
-- Problem: Case where user exists but has no active TenantMember was untested.
+### T2-B [Minor] Second 404 path untested
 - Resolution: Added dedicated test case.
 
-### Remaining Minor findings (accepted, not fixed — pre-existing patterns or low impact)
-- N1 [Minor] TOCTOU between `requireTeamPermission` and `withTeamTenantRls` — pre-existing pattern across all team routes. Acceptable.
-- N2 [Minor] Global `prisma` used inside `withTeamTenantRls` callback — pre-existing pattern, works via AsyncLocalStorage + Prisma extension.
-- N3 [Informational] Clipboard auto-write of invite token — pre-existing UX pattern.
-- T1-A [Minor] Pending invitation test fragile mock ordering — acceptable for unit tests.
-- T1-B [Minor] No max(100) boundary test — low risk, schema validation is declarative.
-- T2-C [Minor] Shallow audit log assertion — acceptable, audit integration tested elsewhere.
+## Round 3 Findings (sub-tab refactor + comprehensive review)
+
+### F1 [Major] search/route.ts — withTeamTenantRls exception not caught
+- Problem: `withTeamTenantRls` throws `TENANT_NOT_RESOLVED` if team deleted between auth and RLS
+- Resolution: Added try/catch around `withTeamTenantRls` call, returns `[]` on error
+
+### F2-R3/S3-R3 [Major] isPrismaUniqueConstraintError — Array.isArray guard
+- Problem: `meta.target` could be non-array; string `target` would cause substring match
+- Resolution: Added `Array.isArray(meta?.target)` runtime guard
+
+### S1 [Major] LIKE wildcard characters not escaped
+- Problem: `%` and `_` passed directly to Prisma `contains` (→ ILIKE) → DoS via full-table scans
+- Resolution: Added `query.replace(/[%_\\]/g, "\\$&")` escaping
+
+### S2 [Major] No self-add guard
+- Problem: ADMIN could add themselves, changing own role via reactivation path
+- Resolution: Added `userId === session.user.id` check returning 400
+
+### F3-R3 [Minor] SCIM_MANAGED_MEMBER error message too generic
+- Problem: UI showed generic failure for SCIM-managed members
+- Resolution: Added `scimManagedCannotAdd` i18n key with IdP guidance
+
+### T1-R3 [Major] P2002 race condition test missing edge cases
+- Resolution: Added tests for P2002 with no meta (re-throw) and unrelated constraint (re-throw)
+
+### T2-R3 [Major] Reactivation test doesn't verify key cleanup
+- Resolution: Added `expect(mockPrismaTeamMemberKey.deleteMany)` assertion
+
+### T3-R3 [Major] Audit log test doesn't assert arguments
+- Resolution: Changed to `toHaveBeenCalledWith(expect.objectContaining({...}))`
+
+### T4-R3 [Minor] Missing boundary test for q > 100 chars
+- Resolution: Added test with 101 chars expecting 400
+
+### T5-R3 [Minor] Self-add test
+- Resolution: Added test expecting 400
 
 ## Final Status
 
-All Critical and Major findings resolved. All Minor findings either fixed or documented as accepted.
-Tests: 381 files, 4146 tests passing.
+All Critical and Major findings resolved across 3 rounds.
+Tests: 381 files, 4150 tests passing.
 Build: Production build successful.

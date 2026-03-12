@@ -142,5 +142,6 @@
   "addButton": "Add",
   "memberAdded": "Member added",
   "addMemberFailed": "Failed to add member",
+  "scimManagedCannotAdd": "SCIM-managed members must be reactivated through your IdP",
   "noTenantMembersFound": "No matching members found"
 }

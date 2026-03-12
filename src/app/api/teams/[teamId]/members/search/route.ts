@@ -38,63 +38,70 @@ export async function GET(req: NextRequest, { params }: Params) {
     );
   }
 
-  const query = parsed.data;
+  // Escape LIKE wildcards to prevent full-table scans
+  const query = parsed.data.replace(/[%_\\]/g, "\\$&");
 
-  const results = await withTeamTenantRls(teamId, async () => {
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    });
-    if (!team) return [];
-
-    // Get active team member userIds to exclude
-    const activeMembers = await prisma.teamMember.findMany({
-      where: { teamId, deactivatedAt: null },
-      select: { userId: true },
-    });
-    const activeMemberIds = new Set(activeMembers.map((m) => m.userId));
-
-    // Get non-expired pending invitation emails, then resolve to userIds
-    const pendingInvitations = await prisma.teamInvitation.findMany({
-      where: {
-        teamId,
-        status: INVITATION_STATUS.PENDING,
-        expiresAt: { gt: new Date() },
-      },
-      select: { email: true },
-    });
-    const pendingEmails = pendingInvitations.map((inv) => inv.email);
-
-    let pendingUserIds = new Set<string>();
-    if (pendingEmails.length > 0) {
-      const pendingUsers = await prisma.user.findMany({
-        where: { email: { in: pendingEmails }, tenantId: team.tenantId },
-        select: { id: true },
+  let results: { id: string; name: string | null; email: string | null; image: string | null }[];
+  try {
+    results = await withTeamTenantRls(teamId, async () => {
+      const team = await prisma.team.findUnique({
+        where: { id: teamId },
+        select: { tenantId: true },
       });
-      pendingUserIds = new Set(pendingUsers.map((u) => u.id));
-    }
+      if (!team) return [];
 
-    // Combine exclusion set
-    const excludeIds = [...activeMemberIds, ...pendingUserIds];
+      // Get active team member userIds to exclude
+      const activeMembers = await prisma.teamMember.findMany({
+        where: { teamId, deactivatedAt: null },
+        select: { userId: true },
+      });
+      const activeMemberIds = new Set(activeMembers.map((m) => m.userId));
 
-    // Search tenant members
-    return prisma.user.findMany({
-      where: {
-        tenantId: team.tenantId,
-        ...(excludeIds.length > 0 && { id: { notIn: excludeIds } }),
-        tenantMemberships: {
-          some: { tenantId: team.tenantId, deactivatedAt: null },
+      // Get non-expired pending invitation emails, then resolve to userIds
+      const pendingInvitations = await prisma.teamInvitation.findMany({
+        where: {
+          teamId,
+          status: INVITATION_STATUS.PENDING,
+          expiresAt: { gt: new Date() },
         },
-        OR: [
-          { name: { contains: query, mode: "insensitive" } },
-          { email: { contains: query, mode: "insensitive" } },
-        ],
-      },
-      select: { id: true, name: true, email: true, image: true },
-      take: 10,
-      orderBy: { name: "asc" },
+        select: { email: true },
+      });
+      const pendingEmails = pendingInvitations.map((inv) => inv.email);
+
+      let pendingUserIds = new Set<string>();
+      if (pendingEmails.length > 0) {
+        const pendingUsers = await prisma.user.findMany({
+          where: { email: { in: pendingEmails }, tenantId: team.tenantId },
+          select: { id: true },
+        });
+        pendingUserIds = new Set(pendingUsers.map((u) => u.id));
+      }
+
+      // Combine exclusion set
+      const excludeIds = [...activeMemberIds, ...pendingUserIds];
+
+      // Search tenant members
+      return prisma.user.findMany({
+        where: {
+          tenantId: team.tenantId,
+          ...(excludeIds.length > 0 && { id: { notIn: excludeIds } }),
+          tenantMemberships: {
+            some: { tenantId: team.tenantId, deactivatedAt: null },
+          },
+          OR: [
+            { name: { contains: query, mode: "insensitive" } },
+            { email: { contains: query, mode: "insensitive" } },
+          ],
+        },
+        select: { id: true, name: true, email: true, image: true },
+        take: 10,
+        orderBy: { name: "asc" },
+      });
     });
-  });
+  } catch {
+    // withTeamTenantRls throws if tenant cannot be resolved (e.g., team deleted between auth and RLS)
+    results = [];
+  }
 
   return NextResponse.json(
     results.map((u) => ({

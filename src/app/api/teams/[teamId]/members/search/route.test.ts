@@ -94,6 +94,16 @@ describe("GET /api/teams/[teamId]/members/search", () => {
     expect(res.status).toBe(400);
   });
 
+  it("returns 400 when q exceeds 100 characters", async () => {
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/members/search`, {
+        searchParams: { q: "a".repeat(101) },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it("returns empty array when team not found", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue(null);
     const res = await GET(
