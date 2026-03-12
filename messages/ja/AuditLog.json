@@ -32,6 +32,7 @@
   "ENTRY_EXPORT": "エクスポート実行",
   "ATTACHMENT_UPLOAD": "添付ファイルのアップロード",
   "ATTACHMENT_DELETE": "添付ファイルの削除",
+  "TEAM_MEMBER_ADD": "メンバー追加",
   "TEAM_MEMBER_INVITE": "メンバー招待",
   "TEAM_MEMBER_REMOVE": "メンバー削除",
   "TEAM_ROLE_UPDATE": "ロール変更",
