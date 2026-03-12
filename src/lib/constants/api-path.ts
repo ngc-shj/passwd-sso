@@ -81,6 +81,7 @@ export const apiPath = {
     `${API_PATH.EMERGENCY_ACCESS}/${grantId}/vault/entries`,
   teamById: (teamId: string) => `${API_PATH.TEAMS}/${teamId}`,
   teamMembers: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/members`,
+  teamMembersSearch: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/members/search`,
   teamMemberById: (teamId: string, memberId: string) =>
     `${API_PATH.TEAMS}/${teamId}/members/${memberId}`,
   teamInvitations: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/invitations`,

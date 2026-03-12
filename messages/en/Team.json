@@ -136,5 +136,12 @@
   "cancel": "Cancel",
   "externalTenant": "External tenant",
   "searchMembers": "Search members...",
-  "noMatchingMembers": "No members match your search."
+  "noMatchingMembers": "No members match your search.",
+  "addFromTenant": "Add from Tenant",
+  "searchTenantMembers": "Search tenant members...",
+  "addButton": "Add",
+  "memberAdded": "Member added",
+  "addMemberFailed": "Failed to add member",
+  "scimManagedCannotAdd": "SCIM-managed members must be reactivated through your IdP",
+  "noTenantMembersFound": "No matching members found"
 }
