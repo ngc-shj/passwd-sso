@@ -192,7 +192,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
 
       {/* Mobile sidebar (sheet) */}
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="left" className="w-56 p-0">
+        <SheetContent side="left" className="w-56 p-0 overflow-auto">
           <VisuallyHidden.Root>
             <SheetTitle>{t("sidebar")}</SheetTitle>
           </VisuallyHidden.Root>

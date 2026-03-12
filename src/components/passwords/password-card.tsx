@@ -585,7 +585,7 @@ export function PasswordCard({
   return (
     <>
       <Card
-        className="transition-colors hover:bg-accent"
+        className="py-0 gap-0 overflow-hidden border-l-2 border-l-transparent transition-colors hover:border-l-primary"
         onClick={() => onToggleExpand(id)}
       >
         <CardContent
@@ -913,7 +913,7 @@ export function PasswordCard({
         {expanded && (
           detailLoading ? (
             <div
-              className="flex items-center justify-center py-6 border-t"
+              className="flex items-center justify-center py-3 border-t"
               onClick={(e) => e.stopPropagation()}
             >
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
