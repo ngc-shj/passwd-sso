@@ -294,7 +294,7 @@ export function TeamAttachmentSection({
             return (
               <div
                 key={att.id}
-                className="flex items-center gap-2 rounded-lg border bg-background/80 px-3 py-2 transition-colors hover:bg-accent"
+                className="flex items-center gap-2 rounded-lg border bg-background/80 px-3 py-2 transition-colors hover:bg-accent/30"
               >
                 <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
                 <div className="flex-1 min-w-0">

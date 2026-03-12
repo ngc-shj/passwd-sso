@@ -315,7 +315,7 @@ export default function ShareLinksPage() {
         <>
           <Card className="rounded-xl border bg-card/80 divide-y">
             {links.map((link) => (
-              <div key={link.id} className="transition-colors hover:bg-accent">
+              <div key={link.id} className="transition-colors hover:bg-accent/30">
                 <div className="px-4 py-3 flex items-start gap-3">
                   <div className="shrink-0 mt-0.5">
                     {link.isActive ? (
@@ -440,7 +440,7 @@ export default function ShareLinksPage() {
                             {accessLogs.map((log) => (
                               <div
                                 key={log.id}
-                                className="flex items-center justify-between rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent"
+                                className="flex items-center justify-between rounded-lg px-2 py-1 text-xs text-muted-foreground hover:bg-accent/30"
                               >
                                 <span>{formatDate(log.createdAt)}</span>
                                 <span className="font-mono">{log.ip ?? "-"}</span>
