@@ -149,7 +149,6 @@ export async function POST(req: NextRequest) {
     metadata: {
       targetVersion,
       revokedShares,
-      ip,
     },
     ip,
   });

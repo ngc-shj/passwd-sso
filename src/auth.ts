@@ -5,6 +5,7 @@ import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant-claim";
+import { sessionMetaStorage } from "@/lib/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -282,19 +283,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   events: {
     async signIn({ user }) {
       if (user.id) {
+        const meta = sessionMetaStorage.getStore();
         logAudit({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.AUTH_LOGIN,
           userId: user.id,
+          ip: meta?.ip ?? null,
+          userAgent: meta?.userAgent ?? null,
         });
       }
     },
     async signOut(message) {
       if ("session" in message && message.session?.userId) {
+        const meta = sessionMetaStorage.getStore();
         logAudit({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.AUTH_LOGOUT,
           userId: message.session.userId,
+          ip: meta?.ip ?? null,
+          userAgent: meta?.userAgent ?? null,
         });
       }
     },

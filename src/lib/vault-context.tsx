@@ -152,7 +152,11 @@ async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: str
 // ─── Provider ───────────────────────────────────────────────────
 
 export function VaultProvider({ children }: { children: ReactNode }) {
-  const { data: session, status: sessionStatus } = useSession();
+  const { data: session, status: sessionStatus, update } = useSession();
+  const updateRef = useRef(update);
+  useEffect(() => {
+    updateRef.current = update;
+  }, [update]);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
@@ -206,6 +210,30 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
     checkVaultStatus();
   }, [session, sessionStatus]);
+
+  // ─── Timeout fallback for LOADING state ──────────────────────
+  // If session sync stalls after OIDC re-auth, retry then fall back to LOCKED
+
+  useEffect(() => {
+    if (vaultStatus !== VAULT_STATUS.LOADING) return;
+
+    // First timeout: force a session refresh after 10s
+    const retryTimer = setTimeout(() => {
+      updateRef.current();
+    }, 10_000);
+
+    // Second timeout: if still LOADING after 15s, show lock screen
+    const fallbackTimer = setTimeout(() => {
+      setVaultStatus((prev) =>
+        prev === VAULT_STATUS.LOADING ? VAULT_STATUS.LOCKED : prev,
+      );
+    }, 15_000);
+
+    return () => {
+      clearTimeout(retryTimer);
+      clearTimeout(fallbackTimer);
+    };
+  }, [vaultStatus]);
 
   // ─── Auto-lock on inactivity ──────────────────────────────────
 
