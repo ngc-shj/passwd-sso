@@ -11,6 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -45,7 +46,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
           description: true,
           createdAt: true,
           updatedAt: true,
-          _count: { select: { members: true, passwords: true } },
+          _count: { select: { members: true, passwords: { where: { ...ACTIVE_ENTRY_WHERE } } } },
           tenant: { select: { name: true } },
         },
       }),

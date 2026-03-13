@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { createTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import {
   validateParentChain,
   buildTagTree,
@@ -26,7 +27,7 @@ export async function GET(req: NextRequest) {
         _count: {
           select: {
             passwords: {
-              where: { deletedAt: null, isArchived: false },
+              where: { ...ACTIVE_ENTRY_WHERE },
             },
           },
         },

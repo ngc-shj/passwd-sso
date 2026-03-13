@@ -9,6 +9,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -45,10 +46,9 @@ async function handleGET(req: NextRequest) {
         userId,
         ...(trashOnly
           ? { deletedAt: { not: null } }
-          : { deletedAt: null }),
-        ...(archivedOnly
-          ? { isArchived: true }
-          : trashOnly ? {} : { isArchived: false }),
+          : archivedOnly
+            ? { deletedAt: null, isArchived: true }
+            : { ...ACTIVE_ENTRY_WHERE }),
         ...(favoritesOnly ? { isFavorite: true } : {}),
         ...(tagId ? { tags: { some: { id: tagId } } } : {}),
         ...(entryType ? { entryType } : {}),

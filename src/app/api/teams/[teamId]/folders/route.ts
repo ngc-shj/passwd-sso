@@ -12,6 +12,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -49,7 +50,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
         _count: {
           select: {
             entries: {
-              where: { deletedAt: null },
+              where: { ...ACTIVE_ENTRY_WHERE },
             },
           },
         },
