@@ -24,7 +24,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag, Terminal } from "lucide-react";
-import { toast } from "sonner";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -38,6 +37,7 @@ import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
 import { useBulkAction } from "@/hooks/use-bulk-action";
+import { useTeamEntryMutations } from "@/hooks/use-team-entry-mutations";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 import { fetchApi } from "@/lib/url-helpers";
@@ -374,32 +374,15 @@ export default function TeamDashboardPage({
     }
   };
 
-  const handleToggleArchive = async (id: string, current: boolean) => {
-    setPasswords((prev) => prev.filter((e) => e.id !== id));
-    try {
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isArchived: !current }),
-      });
-      if (!res.ok) fetchPasswords();
-    } catch {
-      fetchPasswords();
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    setPasswords((prev) => prev.filter((e) => e.id !== id));
-    try {
-      const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
-        method: "DELETE",
-      });
-      if (!res.ok) fetchPasswords();
-    } catch {
-      toast.error(t("networkError"));
-      fetchPasswords();
-    }
-  };
+  const {
+    toggleArchive: handleToggleArchive,
+    deleteEntry: handleDelete,
+    handleSaved,
+  } = useTeamEntryMutations<TeamPasswordEntry>({
+    teamId,
+    setEntries: setPasswords,
+    refetchEntries: fetchPasswords,
+  });
 
   const decryptFullBlob = useCallback(
     async (id: string, raw: Record<string, unknown>) => {
@@ -940,7 +923,7 @@ export default function TeamDashboardPage({
           open={formOpen}
           onOpenChange={setFormOpen}
           onSaved={() => {
-            fetchPasswords();
+            handleSaved();
             setExpandedId(null);
             setRefreshKey((k) => k + 1);
           }}
@@ -956,7 +939,7 @@ export default function TeamDashboardPage({
           open={formOpen}
           onOpenChange={setFormOpen}
           onSaved={() => {
-            fetchPasswords();
+            handleSaved();
             setExpandedId(null);
             setRefreshKey((k) => k + 1);
           }}

@@ -11,6 +11,7 @@ import { Plus, Users, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
+import { notifyTeamDataChanged } from "@/lib/events";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 
 interface TeamListItem {
@@ -45,7 +46,7 @@ export default function TeamsPage() {
 
   const handleCreated = () => {
     fetchTeams();
-    window.dispatchEvent(new CustomEvent("team-data-changed"));
+    notifyTeamDataChanged();
   };
 
   useEffect(() => {

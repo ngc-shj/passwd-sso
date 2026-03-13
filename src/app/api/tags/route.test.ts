@@ -50,6 +50,25 @@ describe("GET /api/tags", () => {
     ]);
   });
 
+  it("passes ACTIVE_ENTRY_WHERE filter to count query", async () => {
+    mockPrismaTag.findMany.mockResolvedValue([]);
+    const req = createRequest("GET", "http://localhost:3000/api/tags");
+    await GET(req);
+    expect(mockPrismaTag.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: expect.objectContaining({
+            select: expect.objectContaining({
+              passwords: expect.objectContaining({
+                where: expect.objectContaining({ deletedAt: null, isArchived: false }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("returns empty array when no tags", async () => {
     mockPrismaTag.findMany.mockResolvedValue([]);
     const req = createRequest("GET", "http://localhost:3000/api/tags");

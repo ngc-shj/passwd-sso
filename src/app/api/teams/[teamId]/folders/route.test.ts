@@ -118,6 +118,26 @@ describe("GET /api/teams/[teamId]/folders", () => {
       },
     ]);
   });
+  it("passes ACTIVE_ENTRY_WHERE filter to count query", async () => {
+    mockPrismaTeamFolder.findMany.mockResolvedValue([]);
+    await GET(
+      createRequest("GET", BASE),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(mockPrismaTeamFolder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: expect.objectContaining({
+            select: expect.objectContaining({
+              entries: expect.objectContaining({
+                where: expect.objectContaining({ deletedAt: null, isArchived: false }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
 });
 
 describe("POST /api/teams/[teamId]/folders", () => {

@@ -24,6 +24,7 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
+import { notifyTeamDataChanged } from "@/lib/events";
 
 interface TeamArchivedEntry {
   id: string;
@@ -262,6 +263,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     } catch {
       fetchArchived();
     }
+    notifyTeamDataChanged();
   };
 
   const handleDelete = async (id: string) => {
@@ -276,6 +278,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     } catch {
       fetchArchived();
     }
+    notifyTeamDataChanged();
   };
 
   const decryptFullBlob = useCallback(
@@ -551,6 +554,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           onSaved={() => {
             fetchArchived();
             setExpandedId(null);
+            notifyTeamDataChanged();
           }}
         />
       )}

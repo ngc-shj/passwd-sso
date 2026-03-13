@@ -10,6 +10,7 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import {
   validateParentChain,
   buildTagTree,
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest, { params }: Params) {
         _count: {
           select: {
             passwords: {
-              where: { deletedAt: null, isArchived: false },
+              where: { ...ACTIVE_ENTRY_WHERE },
             },
           },
         },

@@ -117,6 +117,36 @@ describe("GET /api/teams/[teamId]", () => {
     expect(json.tenantName).toBe("Acme Corp");
   });
 
+  it("passes ACTIVE_ENTRY_WHERE filter to password count query", async () => {
+    mockPrismaTeam.findUnique.mockResolvedValue({
+      id: TEAM_ID,
+      name: "My Team",
+      slug: "my-team",
+      description: null,
+      createdAt: now,
+      updatedAt: now,
+      _count: { members: 1, passwords: 0 },
+      tenant: { name: "Acme" },
+    });
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(mockPrismaTeam.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          _count: expect.objectContaining({
+            select: expect.objectContaining({
+              passwords: expect.objectContaining({
+                where: expect.objectContaining({ deletedAt: null, isArchived: false }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("returns 404 when team not found", async () => {
     mockPrismaTeam.findUnique.mockResolvedValue(null);
     const res = await GET(

@@ -31,6 +31,7 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
+import { notifyTeamDataChanged } from "@/lib/events";
 
 interface TeamTrashEntry {
   id: string;
@@ -215,6 +216,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       if (res.ok) {
         toast.success(t("restored"));
         setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+        notifyTeamDataChanged();
       } else {
         toast.error(t("failedAction"));
       }
@@ -237,6 +239,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       toast.success(t("emptyTrashSuccess"));
       setEntries([]);
       clearSelection();
+      notifyTeamDataChanged();
     } catch {
       toast.error(t("networkError"));
     } finally {

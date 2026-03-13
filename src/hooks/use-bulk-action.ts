@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants/api-path";
 import { fetchApi } from "@/lib/url-helpers";
+import { notifyTeamDataChanged } from "@/lib/events";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -25,7 +26,9 @@ export interface UseBulkActionOptions {
    * The caller is responsible for:
    * - Clearing selection (`clearSelection()`)
    * - Refreshing the entry list (`fetchPasswords()`, etc.)
-   * - Notifying parent of data changes (`onDataChange?.()`)
+   *
+   * Note: For team scope, `team-data-changed` is dispatched automatically
+   * after onSuccess — no manual dispatch needed.
    */
   onSuccess: () => void;
 }
@@ -147,6 +150,7 @@ export function useBulkAction({
 
       setDialogOpen(false);
       onSuccess();
+      if (scope.type === "team") notifyTeamDataChanged();
     } catch {
       const keys = TOAST_KEYS[pendingAction];
       toast.error(t(keys.error));

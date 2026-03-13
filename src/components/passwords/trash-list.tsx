@@ -26,6 +26,7 @@ import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 import { fetchApi } from "@/lib/url-helpers";
+import { notifyVaultDataChanged } from "@/lib/events";
 
 interface TrashEntry {
   id: string;
@@ -143,6 +144,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
     onSuccess: () => {
       clearSelection();
       fetchTrash();
+      notifyVaultDataChanged();
     },
   });
 
@@ -152,6 +154,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
       if (res.ok) {
         toast.success(t("restored"));
         setEntries((prev) => prev.filter((e) => e.id !== id));
+        notifyVaultDataChanged();
       } else {
         toast.error(t("failedAction"));
       }

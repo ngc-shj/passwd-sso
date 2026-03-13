@@ -85,6 +85,24 @@ describe("GET /api/folders", () => {
     ]);
   });
 
+  it("passes ACTIVE_ENTRY_WHERE filter to count query", async () => {
+    mockPrismaFolder.findMany.mockResolvedValue([]);
+    await GET();
+    expect(mockPrismaFolder.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: expect.objectContaining({
+          _count: expect.objectContaining({
+            select: expect.objectContaining({
+              entries: expect.objectContaining({
+                where: expect.objectContaining({ deletedAt: null, isArchived: false }),
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it("returns empty array when no folders", async () => {
     mockPrismaFolder.findMany.mockResolvedValue([]);
     const res = await GET();
