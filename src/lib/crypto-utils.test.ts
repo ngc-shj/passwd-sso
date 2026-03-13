@@ -84,4 +84,9 @@ describe("hexDecode", () => {
     expect(() => hexDecode("abc")).toThrow("input length must be even");
     expect(() => hexDecode("a")).toThrow("input length must be even");
   });
+
+  it("throws on non-hex characters", () => {
+    expect(() => hexDecode("zzzz")).toThrow("non-hex characters");
+    expect(() => hexDecode("gg00")).toThrow("non-hex characters");
+  });
 });

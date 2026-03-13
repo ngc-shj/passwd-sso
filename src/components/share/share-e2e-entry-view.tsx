@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareError } from "@/components/share/share-error";
-import { hexDecode } from "@/lib/crypto-utils";
+import { hexDecode, toArrayBuffer } from "@/lib/crypto-utils";
 
 interface ShareE2EEntryViewProps {
   encryptedData: string; // hex ciphertext
@@ -45,21 +45,18 @@ async function decryptShareE2E(
   combined.set(ciphertext);
   combined.set(authTag, ciphertext.length);
 
-  const toAB = (arr: Uint8Array): ArrayBuffer =>
-    arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer;
-
   const key = await crypto.subtle.importKey(
     "raw",
-    toAB(keyBytes),
+    toArrayBuffer(keyBytes),
     { name: "AES-GCM" },
     false,
     ["decrypt"]
   );
 
   const decrypted = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: toAB(iv) },
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
     key,
-    toAB(combined)
+    toArrayBuffer(combined)
   );
 
   const plaintext = new TextDecoder().decode(decrypted);
