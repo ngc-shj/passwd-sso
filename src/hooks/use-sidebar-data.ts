@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  TEAM_DATA_CHANGED_EVENT,
+  VAULT_DATA_CHANGED_EVENT,
+} from "@/lib/events";
 
 export interface SidebarTagItem {
   id: string;
@@ -157,20 +161,13 @@ export function useSidebarData(pathname: string) {
 
   useEffect(() => {
     const handler = () => refreshData();
-    window.addEventListener("vault-data-changed", handler);
-    window.addEventListener("team-data-changed", handler);
+    window.addEventListener(VAULT_DATA_CHANGED_EVENT, handler);
+    window.addEventListener(TEAM_DATA_CHANGED_EVENT, handler);
     return () => {
-      window.removeEventListener("vault-data-changed", handler);
-      window.removeEventListener("team-data-changed", handler);
+      window.removeEventListener(VAULT_DATA_CHANGED_EVENT, handler);
+      window.removeEventListener(TEAM_DATA_CHANGED_EVENT, handler);
     };
   }, [refreshData]);
-
-  const notifyDataChanged = () => {
-    window.dispatchEvent(new CustomEvent("vault-data-changed"));
-    window.dispatchEvent(new CustomEvent("team-data-changed"));
-  };
-
-  const notifyTeamDataChanged = notifyDataChanged;
 
   return {
     tags,
@@ -180,7 +177,5 @@ export function useSidebarData(pathname: string) {
     teamFolderGroups,
     lastError,
     refreshData,
-    notifyDataChanged,
-    notifyTeamDataChanged,
   };
 }

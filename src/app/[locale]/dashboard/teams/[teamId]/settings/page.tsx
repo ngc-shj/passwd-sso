@@ -42,6 +42,7 @@ import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { notifyTeamDataChanged } from "@/lib/events";
 import { filterMembers } from "@/lib/filter-members";
 import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 
@@ -183,7 +184,7 @@ export default function TeamSettingsPage({
       }
       if (!res.ok) throw new Error("Failed");
       toast.success(t("updated"));
-      window.dispatchEvent(new CustomEvent("team-data-changed"));
+      notifyTeamDataChanged();
       fetchAll();
     } catch {
       toast.error(t("updateFailed"));
@@ -197,7 +198,7 @@ export default function TeamSettingsPage({
       const res = await fetchApi(apiPath.teamById(teamId), { method: "DELETE" });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("deleted"));
-      window.dispatchEvent(new CustomEvent("team-data-changed"));
+      notifyTeamDataChanged();
       router.push("/dashboard/teams");
     } catch {
       toast.error(t("deleteFailed"));
@@ -273,7 +274,7 @@ export default function TeamSettingsPage({
       });
       if (!res.ok) throw new Error("Failed");
       toast.success(t("ownershipTransferred"));
-      window.dispatchEvent(new CustomEvent("team-data-changed"));
+      notifyTeamDataChanged();
       fetchAll();
     } catch {
       toast.error(t("networkError"));
