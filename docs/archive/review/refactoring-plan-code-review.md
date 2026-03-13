@@ -1,67 +1,37 @@
 # Code Review: refactoring-plan
-Date: 2026-03-14T01:48:00+09:00
-Review round: 2
+Date: 2026-03-14T01:55:00+09:00
+Review round: 3
 
 ## Changes from Previous Round
-Round 2: Fixed duplicate import in crypto-team.ts (S2c), replaced inline hexDecode in share-e2e-entry-view.tsx with import from crypto-utils (F5)
+Round 3: Replaced inline `toAB` with `toArrayBuffer` import (F-N1), added hexDecode non-hex character validation (S-N1), added auth-or-token.ts to coverage.include (F-N3/T-N1). Skipped F-N2 (export+import comment) as style-only.
 
 ## Functionality Findings
 
-### [F1] Minor — `"use client"` directive on crypto-utils.ts
-- **File:** `src/lib/crypto-utils.ts:1`
-- **Problem:** Module is imported by server-side code (crypto-emergency.ts, crypto-recovery.ts) but had `"use client"` directive
-- **Impact:** Semantic mismatch; future Next.js versions may enforce this boundary
-- **Resolution:** Removed `"use client"` directive
-
-### [F2] Minor — `hexDecode` silently truncates odd-length input
-- **File:** `src/lib/crypto-utils.ts:28-34`
-- **Problem:** Odd-length hex strings have their last character silently dropped
-- **Impact:** Silent data corruption risk for future callers
-- **Resolution:** Added `hex.length % 2 !== 0` check that throws; added test case
-
-### [F3] Minor — Unnecessary `as ZodError` cast in parse-body.ts
-- **File:** `src/lib/parse-body.ts:46`
-- **Problem:** Zod 4 properly types `parsed.error` — cast is redundant
-- **Resolution:** Removed cast and unused `ZodError` type import
-
-### [F4] Minor — `parse-body.ts` and `with-request-log.ts` missing from coverage.include
-- **File:** `vitest.config.ts`
-- **Problem:** Key shared utilities not tracked in coverage reports
-- **Resolution:** Added both to `coverage.include`
+### [F1] Minor — `"use client"` directive on crypto-utils.ts — Resolved (Round 1)
+### [F2] Minor — `hexDecode` silently truncates odd-length input — Resolved (Round 1)
+### [F3] Minor — Unnecessary `as ZodError` cast in parse-body.ts — Resolved (Round 1)
+### [F4] Minor — `parse-body.ts` and `with-request-log.ts` missing from coverage.include — Resolved (Round 1)
+### [F5] Minor — Inline hexDecode copy in share-e2e-entry-view.tsx — Resolved (Round 2)
+### [F-N1] Minor — Inline `toAB` duplicates `toArrayBuffer` in share-e2e-entry-view.tsx — Resolved (Round 3)
+### [F-N2] Minor — Dual export+import in crypto-client.ts lacks comment — Skipped (style-only, valid pattern)
+### [F-N3] Minor — `auth-or-token.ts` threshold without coverage.include — Resolved (Round 3)
 
 ## Security Findings
 
-### [S1] Major — ESLint violation in test setup mock
-- **File:** `src/__tests__/setup.ts:8`
-- **Problem:** `<H extends Function>` violates `@typescript-eslint/no-unsafe-function-type`
-- **Impact:** `npm run lint` would fail
-- **Resolution:** Changed to `<H extends (...args: any[]) => unknown>` with eslint-disable comment
-
-### [S2] Minor — Import statement in middle of file (crypto-recovery.ts)
-- **File:** `src/lib/crypto-recovery.ts:27`
-- **Problem:** `import { toArrayBuffer, textEncode }` placed after constant declarations
-- **Resolution:** Moved import to top import block
-
-### [S3] Minor — `hexDecode` odd-length validation (same as F2)
-- Merged with F2
-
-### [S4] Minor — Regression test `allLogArgs` missing `mockChild`
-- **File:** `src/__tests__/with-request-log.test.ts:352`
-- **Problem:** Inconsistent spy coverage vs negative tests in same describe block
-- **Resolution:** Added `mockChild` to `allLogArgs` call
+### [S1] Major — ESLint violation in test setup mock — Resolved (Round 1)
+### [S2] Minor — Import statement in middle of file (crypto-recovery.ts) — Resolved (Round 1)
+### [S2b] Minor — Import placement in vault-context.tsx — Resolved (Round 1)
+### [S2c] Minor — Duplicate import in crypto-team.ts — Resolved (Round 2)
+### [S3] Minor — `hexDecode` odd-length validation — Merged with F2
+### [S4] Minor — Regression test `allLogArgs` missing `mockChild` — Resolved (Round 1)
+### [S-N1] Minor — `hexDecode` accepts non-hex characters silently — Resolved (Round 3)
 
 ## Testing Findings
 
-### [T1] Minor — `hexDecode` odd-length test case missing (same as F2)
-- Merged with F2
-
-### [T2] Minor — Coverage config gap (same as F4)
-- Merged with F4
-
-### [T3] Minor — `not.toContain("headers")` assertion too broad
-- **File:** `src/__tests__/with-request-log.test.ts:329`
-- **Problem:** String match on serialized JSON is fragile
-- **Resolution:** Changed to direct key check on `mockChild.mock.calls[0][0]`
+### [T1] Minor — `hexDecode` odd-length test case missing — Merged with F2
+### [T2] Minor — Coverage config gap — Merged with F4
+### [T3] Minor — `not.toContain("headers")` assertion too broad — Resolved (Round 1)
+### [T-N1] Minor — `auth-or-token.ts` threshold without coverage.include — Merged with F-N3
 
 ## Resolution Status
 
@@ -83,7 +53,7 @@ Round 2: Fixed duplicate import in crypto-team.ts (S2c), replaced inline hexDeco
 
 ### [F4/T2] Minor — Coverage config gap
 - Action: Added parse-body.ts and with-request-log.ts to coverage.include
-- Modified file: `vitest.config.ts:31-32`
+- Modified file: `vitest.config.ts:30-31`
 
 ### [S2] Minor — Import placement in crypto-recovery.ts
 - Action: Moved import to top of file
@@ -108,3 +78,18 @@ Round 2: Fixed duplicate import in crypto-team.ts (S2c), replaced inline hexDeco
 ### [F5] Minor — Inline hexDecode copy in share-e2e-entry-view.tsx
 - Action: Replaced inline function with `import { hexDecode } from "@/lib/crypto-utils"`
 - Modified file: `src/components/share/share-e2e-entry-view.tsx:9,20-26`
+
+### [F-N1] Minor — Inline toAB duplicates toArrayBuffer
+- Action: Replaced inline `toAB` with `toArrayBuffer` import from crypto-utils
+- Modified file: `src/components/share/share-e2e-entry-view.tsx:9,48-49`
+
+### [F-N3/T-N1] Minor — auth-or-token.ts threshold without coverage.include
+- Action: Added `src/lib/auth-or-token.ts` to `coverage.include`
+- Modified file: `vitest.config.ts:32`
+
+### [S-N1] Minor — hexDecode non-hex character validation
+- Action: Added regex validation `!/^[0-9a-fA-F]*$/.test(hex)` with test case
+- Modified files: `src/lib/crypto-utils.ts:30`, `src/lib/crypto-utils.test.ts:88-91`
+
+### [F-N2] Minor — Dual export+import comment (Skipped)
+- Reason: Valid TypeScript pattern; adding a comment is marginal value
