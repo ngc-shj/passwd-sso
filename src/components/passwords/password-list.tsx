@@ -344,7 +344,7 @@ export function PasswordList({
   }
 
   return (
-    <div className="space-y-2">
+    <div className={selectionMode ? "space-y-2" : "space-y-1"}>
       {entries.map((entry) => (
         selectionMode ? (
           <div key={entry.id} className="flex items-start gap-2">
