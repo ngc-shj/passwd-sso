@@ -3,13 +3,14 @@
 import { useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { TeamImportPagePanel } from "@/components/passwords/password-import";
+import { notifyVaultDataChanged } from "@/lib/events";
 
 export default function TeamImportPage() {
   const params = useParams<{ teamId: string }>();
   const router = useRouter();
 
   const handleComplete = useCallback(() => {
-    window.dispatchEvent(new Event("vault-data-changed"));
+    notifyVaultDataChanged();
     router.refresh();
   }, [router]);
 

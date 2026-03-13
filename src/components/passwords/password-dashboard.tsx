@@ -31,6 +31,7 @@ import { usePersonalTags } from "@/hooks/use-personal-tags";
 import { buildFolderPath } from "@/lib/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
+import { VAULT_DATA_CHANGED_EVENT, notifyVaultDataChanged } from "@/lib/events";
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
 
@@ -149,8 +150,8 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   // Listen for vault-data-changed (import, etc.)
   useEffect(() => {
     const handler = () => setRefreshKey((k) => k + 1);
-    window.addEventListener("vault-data-changed", handler);
-    return () => window.removeEventListener("vault-data-changed", handler);
+    window.addEventListener(VAULT_DATA_CHANGED_EVENT, handler);
+    return () => window.removeEventListener(VAULT_DATA_CHANGED_EVENT, handler);
   }, []);
 
   // Keyboard shortcuts
@@ -224,7 +225,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
 
   const handleDataChange = () => {
     setRefreshKey((k) => k + 1);
-    window.dispatchEvent(new CustomEvent("vault-data-changed"));
+    notifyVaultDataChanged();
   };
 
   return (

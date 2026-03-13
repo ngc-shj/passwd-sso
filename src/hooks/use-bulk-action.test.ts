@@ -355,4 +355,37 @@ describe("useBulkAction", () => {
     // Should use fallback = selectedIds.size = 3
     expect(t).toHaveBeenCalledWith("bulkMovedToTrash", { count: 3 });
   });
+
+  it("dispatches team-data-changed after onSuccess for team scope", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ processedCount: 1 }),
+    });
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    const { result } = setup(new Set(["a"]), { type: "team", teamId: "t1" });
+    act(() => result.current.requestAction("archive"));
+    await act(() => result.current.executeAction());
+
+    expect(dispatchSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "team-data-changed" }),
+    );
+    dispatchSpy.mockRestore();
+  });
+
+  it("does NOT dispatch team-data-changed for personal scope", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ movedCount: 1 }),
+    });
+    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
+    const { result } = setup(new Set(["a"]), { type: "personal" });
+    act(() => result.current.requestAction("trash"));
+    await act(() => result.current.executeAction());
+
+    const teamEvents = dispatchSpy.mock.calls.filter(
+      ([e]) => e instanceof CustomEvent && (e as CustomEvent).type === "team-data-changed",
+    );
+    expect(teamEvents).toHaveLength(0);
+    dispatchSpy.mockRestore();
+  });
 });
