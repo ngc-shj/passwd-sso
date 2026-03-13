@@ -10,6 +10,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
@@ -59,19 +60,9 @@ async function handlePOST(
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = acceptEmergencyGrantByIdSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const { granteePublicKey, encryptedPrivateKey } = parsed.data;
+  const result = await parseBody(req, acceptEmergencyGrantByIdSchema);
+  if (!result.ok) return result.response;
+  const { granteePublicKey, encryptedPrivateKey } = result.data;
 
   await withUserTenantRls(session.user.id, async () =>
     prisma.$transaction([

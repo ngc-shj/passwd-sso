@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { assertOrigin } from "@/lib/csrf";
 import { extractClientIp } from "@/lib/ip-access";
@@ -79,25 +80,9 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  const parsed = emailSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 },
-    );
-  }
-
-  const { email } = parsed.data;
+  const result = await parseBody(req, emailSchema);
+  if (!result.ok) return result.response;
+  const { email } = result.data;
 
   // Look up user and their credentials (cross-tenant, unauthenticated)
   let allowCredentials: Array<{ credentialId: string; transports: string[] }>;

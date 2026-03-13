@@ -8,6 +8,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
 // POST /api/emergency-access/[id]/confirm — Owner performs key escrow
@@ -51,19 +52,9 @@ async function handlePOST(
     return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = confirmEmergencyGrantSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion } = parsed.data;
+  const result = await parseBody(req, confirmEmergencyGrantSchema);
+  if (!result.ok) return result.response;
+  const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion } = result.data;
 
   // Validate keyAlgorithm is compatible with wrapVersion
   const allowedAlgorithms = SUPPORTED_KEY_ALGORITHMS[wrapVersion];

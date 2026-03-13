@@ -79,7 +79,7 @@ describe("POST /api/audit-logs/export", () => {
     );
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("INVALID_BODY");
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("logs personal export when no teamId", async () => {

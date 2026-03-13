@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -103,19 +104,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-  const parsed = createWebhookSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(req, createWebhookSchema);
+  if (!result.ok) return result.response;
+  const { data } = result;
 
   // Check webhook count limit
   const existingCount = await withTeamTenantRls(teamId, async () =>
@@ -147,12 +138,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       data: {
         teamId,
         tenantId: team.tenantId,
-        url: parsed.data.url,
+        url: data.url,
         secretEncrypted: encrypted.ciphertext,
         secretIv: encrypted.iv,
         secretAuthTag: encrypted.authTag,
         masterKeyVersion: version,
-        events: parsed.data.events,
+        events: data.events,
       },
     }),
   );
@@ -162,7 +153,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.WEBHOOK_CREATE,
     userId: session.user.id,
     teamId,
-    metadata: { webhookId: webhook.id, url: parsed.data.url },
+    metadata: { webhookId: webhook.id, url: data.url },
     ...extractRequestMeta(req),
   });
 

@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
@@ -41,19 +42,9 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
-  }
-
-  const parsed = alertSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
-  }
-
-  const { newBreachCount, teamId } = parsed.data;
+  const result = await parseBody(req, alertSchema);
+  if (!result.ok) return result.response;
+  const { newBreachCount, teamId } = result.data;
 
   const rateLimitKey = teamId
     ? `rl:watchtower:alert:team:${teamId}`

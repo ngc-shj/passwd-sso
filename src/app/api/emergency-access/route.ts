@@ -11,6 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
@@ -27,19 +28,9 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = createEmergencyGrantSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const { granteeEmail, waitDays } = parsed.data;
+  const result = await parseBody(req, createEmergencyGrantSchema);
+  if (!result.ok) return result.response;
+  const { granteeEmail, waitDays } = result.data;
 
   // Cannot grant to self
   if (granteeEmail.toLowerCase() === sessionEmail.toLowerCase()) {
