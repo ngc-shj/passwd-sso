@@ -10,7 +10,7 @@ const teamTags = [{ id: "team-tag-1", name: "Ops", color: null, count: 1 }];
 const teamFolders = [{ id: "team-folder-1", name: "Infra", parentId: null, sortOrder: 0, entryCount: 4 }];
 
 function createFetchMock() {
-  return vi.fn(async (url: string) => {
+  return vi.fn(async (url: string, _init?: RequestInit) => {
     if (url === "/api/tags") return { ok: true, json: async () => tags };
     if (url === "/api/folders") return { ok: true, json: async () => folders };
     if (url === "/api/teams") return { ok: true, json: async () => teams };
@@ -43,11 +43,12 @@ describe("useSidebarData", () => {
       expect(result.current.teamFolderGroups).toHaveLength(1);
     });
 
-    expect(fetchMock).toHaveBeenCalledWith("/api/tags");
-    expect(fetchMock).toHaveBeenCalledWith("/api/folders");
-    expect(fetchMock).toHaveBeenCalledWith("/api/teams");
-    expect(fetchMock).toHaveBeenCalledWith("/api/teams/team-1/tags");
-    expect(fetchMock).toHaveBeenCalledWith("/api/teams/team-1/folders");
+    const noStore = { cache: "no-store" };
+    expect(fetchMock).toHaveBeenCalledWith("/api/tags", noStore);
+    expect(fetchMock).toHaveBeenCalledWith("/api/folders", noStore);
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams", noStore);
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/team-1/tags", noStore);
+    expect(fetchMock).toHaveBeenCalledWith("/api/teams/team-1/folders", noStore);
   });
 
   it("refreshes on vault-data-changed event", async () => {
