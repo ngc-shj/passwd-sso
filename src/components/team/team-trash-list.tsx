@@ -203,6 +203,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     onSuccess: () => {
       clearSelection();
       fetchTrash();
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
     },
   });
 
@@ -215,6 +216,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       if (res.ok) {
         toast.success(t("restored"));
         setEntries((prev) => prev.filter((e) => e.id !== entry.id));
+        window.dispatchEvent(new CustomEvent("team-data-changed"));
       } else {
         toast.error(t("failedAction"));
       }
