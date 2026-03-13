@@ -168,11 +168,15 @@ describe("POST /api/auth/passkey/verify", () => {
     });
     await POST(req);
 
-    expect(mockLogAudit).toHaveBeenCalledWith({
-      scope: "PERSONAL",
-      action: "AUTH_LOGIN",
-      userId: "user-1",
-    });
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "PERSONAL",
+        action: "AUTH_LOGIN",
+        userId: "user-1",
+        ip: null,
+        userAgent: null,
+      }),
+    );
   });
 
   it("returns 403 when origin is invalid", async () => {
