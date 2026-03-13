@@ -8,15 +8,17 @@ import {
   TenantAuthError,
 } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
 type Params = { params: Promise<{ userId: string }> };
 
 // PUT /api/tenant/members/[userId] — Change tenant member role
-export async function PUT(req: NextRequest, { params }: Params) {
+async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -55,20 +57,8 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // Validate request body
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = updateTenantMemberRoleSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(req, updateTenantMemberRoleSchema);
+  if (!result.ok) return result.response;
 
   // Look up target with explicit tenantId filter (defense-in-depth)
   const target = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -94,7 +84,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   }
 
   // Ownership transfer
-  if (parsed.data.role === TENANT_ROLE.OWNER) {
+  if (result.data.role === TENANT_ROLE.OWNER) {
     const updated = await withTenantRls(prisma, actor.tenantId, async () => {
       // Re-verify actor is still OWNER inside RLS scope
       const currentActor = await prisma.tenantMember.findFirst({
@@ -160,7 +150,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const updated = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.tenantMember.update({
       where: { id: target.id },
-      data: { role: parsed.data.role },
+      data: { role: result.data.role },
       include: {
         user: { select: { id: true, name: true, email: true, image: true } },
       },
@@ -174,7 +164,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
     targetId: target.id,
-    metadata: { newRole: parsed.data.role, previousRole: target.role },
+    metadata: { newRole: result.data.role, previousRole: target.role },
     ...extractRequestMeta(req),
   });
 
@@ -187,3 +177,5 @@ export async function PUT(req: NextRequest, { params }: Params) {
     image: updated.user.image,
   });
 }
+
+export const PUT = withRequestLog(handlePUT);

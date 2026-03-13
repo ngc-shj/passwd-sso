@@ -15,6 +15,7 @@ import {
 } from "@/lib/constants";
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -43,7 +44,7 @@ function formatCsvRow(values: string[]): string {
 const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail", "metadata"];
 
 // GET /api/teams/[teamId]/audit-logs/download — Download team audit logs (ADMIN/OWNER)
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -235,3 +236,5 @@ export async function GET(req: NextRequest, { params }: Params) {
     },
   });
 }
+
+export const GET = withRequestLog(handleGET);

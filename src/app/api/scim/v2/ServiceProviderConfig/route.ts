@@ -6,9 +6,10 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { prisma } from "@/lib/prisma";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/scim/v2/ServiceProviderConfig
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -43,3 +44,5 @@ export async function GET(req: NextRequest) {
     }),
   );
 }
+
+export const GET = withRequestLog(handleGET);

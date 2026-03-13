@@ -18,6 +18,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -46,7 +47,7 @@ const createWebhookSchema = z.object({
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -85,7 +86,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // POST /api/teams/[teamId]/webhooks — Create a webhook
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -179,3 +180,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     { status: 201 },
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

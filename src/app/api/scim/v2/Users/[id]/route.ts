@@ -16,6 +16,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -67,7 +68,7 @@ async function fetchUserResource(tenantId: string, userId: string, baseUrl: stri
 }
 
 // GET /api/scim/v2/Users/[id]
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -98,7 +99,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // PUT /api/scim/v2/Users/[id] — Full replace
-export async function PUT(req: NextRequest, { params }: Params) {
+async function handlePUT(req: NextRequest, { params }: Params): Promise<Response> {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -210,9 +211,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return { resource, userId, auditAction };
   });
   if ("error" in resultResponse) {
-    return resultResponse.error;
+    return resultResponse.error as Response;
   }
-  const { resource, userId, auditAction } = resultResponse;
+  const { resource, userId, auditAction } = resultResponse as Exclude<typeof resultResponse, { error: unknown }>;
 
   // Session invalidation on deactivation (fail-open)
   let invalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
@@ -247,7 +248,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // PATCH /api/scim/v2/Users/[id] — Partial update
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function handlePATCH(req: NextRequest, { params }: Params): Promise<Response> {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -333,9 +334,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return { resource, userId, auditAction };
   });
   if ("error" in resultResponse) {
-    return resultResponse.error;
+    return resultResponse.error as Response;
   }
-  const { resource, userId, auditAction } = resultResponse;
+  const { resource, userId, auditAction } = resultResponse as Exclude<typeof resultResponse, { error: unknown }>;
 
   // Session invalidation on deactivation (fail-open)
   let patchInvalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
@@ -369,7 +370,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/scim/v2/Users/[id] — Remove from tenant
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params): Promise<Response> {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -432,9 +433,9 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     return { userId, member };
   });
   if ("error" in resultResponse) {
-    return resultResponse.error;
+    return resultResponse.error as Response;
   }
-  const { userId, member } = resultResponse;
+  const { userId, member } = resultResponse as Exclude<typeof resultResponse, { error: unknown }>;
 
   // Session invalidation after deletion (fail-open)
   let deleteInvalidationCounts: { sessions: number; extensionTokens: number; apiKeys: number } | undefined;
@@ -463,3 +464,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return new Response(null, { status: 204 });
 }
+
+export const GET = withRequestLog(handleGET);
+export const PUT = withRequestLog(handlePUT);
+export const PATCH = withRequestLog(handlePATCH);
+export const DELETE = withRequestLog(handleDELETE);

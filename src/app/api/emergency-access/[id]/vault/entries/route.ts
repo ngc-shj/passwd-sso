@@ -5,9 +5,10 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -74,3 +75,5 @@ export async function GET(
 
   return NextResponse.json(entries);
 }
+
+export const GET = withRequestLog(handleGET);

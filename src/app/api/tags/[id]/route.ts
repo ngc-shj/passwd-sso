@@ -3,11 +3,13 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { updateTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/tag-tree";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // PUT /api/tags/[id] - Update a tag
-export async function PUT(
+async function handlePUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -28,30 +30,18 @@ export async function PUT(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = updateTagSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  const result = await parseBody(req, updateTagSchema);
+  if (!result.ok) return result.response;
 
   const updateData: Record<string, unknown> = {};
-  if (parsed.data.name !== undefined) updateData.name = parsed.data.name;
-  if (parsed.data.color !== undefined)
-    updateData.color = parsed.data.color || null;
+  if (result.data.name !== undefined) updateData.name = result.data.name;
+  if (result.data.color !== undefined)
+    updateData.color = result.data.color || null;
 
   // Handle parentId change
-  const parentIdChanged = parsed.data.parentId !== undefined;
+  const parentIdChanged = result.data.parentId !== undefined;
   if (parentIdChanged) {
-    const newParentId = parsed.data.parentId ?? null;
+    const newParentId = result.data.parentId ?? null;
     updateData.parentId = newParentId;
 
     if (newParentId) {
@@ -119,7 +109,7 @@ export async function PUT(
 }
 
 // DELETE /api/tags/[id] - Delete a tag
-export async function DELETE(
+async function handleDELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -146,3 +136,6 @@ export async function DELETE(
 
   return NextResponse.json({ success: true });
 }
+
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

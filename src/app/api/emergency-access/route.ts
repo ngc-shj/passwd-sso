@@ -11,11 +11,12 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 
 // POST /api/emergency-access — Create a new emergency access grant
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
 }
 
 // GET /api/emergency-access — List emergency access grants
-export async function GET() {
+async function handleGET() {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -172,3 +173,6 @@ export async function GET() {
 
   return NextResponse.json(result);
 }
+
+export const POST = withRequestLog(handlePOST);
+export const GET = withRequestLog(handleGET);

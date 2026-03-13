@@ -24,6 +24,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const HEX64_RE = /^[0-9a-fA-F]{64}$/;
 
@@ -56,7 +57,7 @@ function verifyAdminToken(req: NextRequest): boolean {
   return timingSafeEqual(expectedHash, providedHash);
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   // Bearer token auth (checked before rate limit to prevent unauthenticated DoS)
   if (!verifyAdminToken(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -159,3 +160,5 @@ export async function POST(req: NextRequest) {
     revokedShares,
   });
 }
+
+export const POST = withRequestLog(handlePOST);

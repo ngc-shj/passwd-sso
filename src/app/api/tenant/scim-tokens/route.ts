@@ -6,11 +6,13 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { generateScimToken } from "@/lib/scim/token-utils";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -21,7 +23,7 @@ const createTokenSchema = z.object({
 });
 
 // GET /api/tenant/scim-tokens — List SCIM tokens for the tenant
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   void req;
 
   const session = await auth();
@@ -62,7 +64,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/tenant/scim-tokens — Generate a new SCIM token
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -81,20 +83,8 @@ export async function POST(req: NextRequest) {
     throw err;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = createTokenSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(req, createTokenSchema);
+  if (!result.ok) return result.response;
 
   // Limit active (non-revoked, non-expired) tokens per tenant (max 10)
   const tokenCount = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -116,8 +106,8 @@ export async function POST(req: NextRequest) {
   const plaintext = generateScimToken();
   const tokenHash = hashToken(plaintext);
 
-  const expiresAt = parsed.data.expiresInDays
-    ? new Date(Date.now() + parsed.data.expiresInDays * 24 * 60 * 60 * 1000)
+  const expiresAt = result.data.expiresInDays
+    ? new Date(Date.now() + result.data.expiresInDays * 24 * 60 * 60 * 1000)
     : null;
 
   const token = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -125,7 +115,7 @@ export async function POST(req: NextRequest) {
       data: {
         tenantId: actor.tenantId,
         tokenHash,
-        description: parsed.data.description ?? null,
+        description: result.data.description ?? null,
         expiresAt,
         createdById: session.user.id,
       },
@@ -139,7 +129,7 @@ export async function POST(req: NextRequest) {
     tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
     targetId: token.id,
-    metadata: { description: parsed.data.description, expiresInDays: parsed.data.expiresInDays },
+    metadata: { description: result.data.description, expiresInDays: result.data.expiresInDays },
     ...extractRequestMeta(req),
   });
 
@@ -155,3 +145,6 @@ export async function POST(req: NextRequest) {
     { status: 201, headers: { "Cache-Control": "no-store" } },
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

@@ -16,6 +16,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -31,7 +32,7 @@ const alertSchema = z.object({
 
 // POST /api/watchtower/alert
 // Called by the client after auto-monitor detects new breaches.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const originError = assertOrigin(req);
   if (originError) return originError;
 
@@ -113,3 +114,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withRequestLog(handlePOST);

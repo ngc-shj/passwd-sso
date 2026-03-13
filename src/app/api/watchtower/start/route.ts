@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -13,7 +14,7 @@ const scanLimiter = createRateLimiter({
 
 // POST /api/watchtower/start
 // Enforces per-user cooldown for full watchtower scans.
-export async function POST() {
+async function handlePOST() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -31,3 +32,5 @@ export async function POST() {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withRequestLog(handlePOST);
