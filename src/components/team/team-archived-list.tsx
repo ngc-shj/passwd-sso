@@ -554,6 +554,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           onSaved={() => {
             fetchArchived();
             setExpandedId(null);
+            window.dispatchEvent(new CustomEvent("team-data-changed"));
           }}
         />
       )}

@@ -143,6 +143,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
     onSuccess: () => {
       clearSelection();
       fetchTrash();
+      window.dispatchEvent(new CustomEvent("vault-data-changed"));
     },
   });
 
@@ -152,6 +153,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
       if (res.ok) {
         toast.success(t("restored"));
         setEntries((prev) => prev.filter((e) => e.id !== id));
+        window.dispatchEvent(new CustomEvent("vault-data-changed"));
       } else {
         toast.error(t("failedAction"));
       }
