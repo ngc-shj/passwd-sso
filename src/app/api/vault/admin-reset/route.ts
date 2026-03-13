@@ -4,7 +4,6 @@ import { z } from "zod/v4";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -44,9 +43,20 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  const result = await parseBody(req, adminResetSchema);
-  if (!result.ok) return result.response;
-  const { token, confirmation } = result.data;
+  // Inline parsing: security-sensitive endpoint — do not expose schema details
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
+  }
+
+  const parsed = adminResetSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
+  }
+
+  const { token, confirmation } = parsed.data;
 
   // Confirmation must be exact English string
   if (confirmation !== CONFIRMATION_TOKEN) {

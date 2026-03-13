@@ -42,6 +42,8 @@ async function handlePOST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
+  // Note: parseBody runs before rate limit because the rate limit key depends
+  // on teamId from the parsed body. This is acceptable since auth is checked first.
   const result = await parseBody(req, alertSchema);
   if (!result.ok) return result.response;
   const { newBreachCount, teamId } = result.data;
