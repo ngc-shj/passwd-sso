@@ -66,6 +66,21 @@ describe("useSidebarData", () => {
     });
   });
 
+  it("refreshes on team-data-changed event", async () => {
+    renderHook(() => useSidebarData("/dashboard"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const firstCallCount = fetchMock.mock.calls.length;
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
+    });
+
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCallCount);
+    });
+  });
+
   it("notifies via notifyDataChanged", async () => {
     const dispatchSpy = vi.spyOn(window, "dispatchEvent");
     const { result } = renderHook(() => useSidebarData("/dashboard"));
