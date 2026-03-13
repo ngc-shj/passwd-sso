@@ -10,6 +10,7 @@ import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -50,10 +51,9 @@ export async function GET(req: NextRequest, { params }: Params) {
         teamId: teamId,
         ...(trashOnly
           ? { deletedAt: { not: null } }
-          : { deletedAt: null }),
-        ...(archivedOnly
-          ? { isArchived: true }
-          : trashOnly ? {} : { isArchived: false }),
+          : archivedOnly
+            ? { deletedAt: null, isArchived: true }
+            : { ...ACTIVE_ENTRY_WHERE }),
         ...(favoritesOnly
           ? { favorites: { some: { userId } } }
           : {}),

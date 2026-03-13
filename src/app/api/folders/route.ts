@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
 function getPersonalParent(id: string): Promise<ParentNode | null> {
   return prisma.folder
@@ -29,7 +30,7 @@ export async function GET() {
         _count: {
           select: {
             entries: {
-              where: { deletedAt: null },
+              where: { ...ACTIVE_ENTRY_WHERE },
             },
           },
         },
