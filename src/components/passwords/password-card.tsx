@@ -589,7 +589,7 @@ export function PasswordCard({
         onClick={() => onToggleExpand(id)}
       >
         <CardContent
-          className="flex items-center gap-3 px-4 py-2"
+          className="flex items-center gap-3 px-4 py-3"
         >
           <div className="shrink-0 text-muted-foreground">
             {expanded ? (
