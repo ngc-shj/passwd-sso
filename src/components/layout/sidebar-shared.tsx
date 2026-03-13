@@ -77,7 +77,7 @@ export function FolderTreeNode({
 
   return (
     <>
-      <div className={cn("group/folder flex items-center rounded-md transition-colors", activeFolderId === folder.id ? "bg-secondary" : "hover:bg-accent dark:hover:bg-accent/50")} style={{ paddingLeft: `${depth * 12}px` }}>
+      <div className={cn("group/folder flex items-center rounded-md transition-colors", activeFolderId === folder.id ? "bg-secondary" : "hover:bg-accent/30 dark:hover:bg-accent/50")} style={{ paddingLeft: `${depth * 12}px` }}>
         <Button
           variant={activeFolderId === folder.id ? "secondary" : "ghost"}
           className="flex-1 justify-start gap-2 min-w-0 rounded-none hover:bg-transparent dark:hover:bg-transparent"
@@ -114,7 +114,7 @@ export function FolderTreeNode({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-black/[0.1] dark:hover:bg-white/[0.15]"
+                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/folder:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-accent hover:text-accent-foreground"
                   aria-label={`${folder.name} menu`}
                 >
                   <MoreVertical className="h-3.5 w-3.5" />
@@ -226,7 +226,7 @@ export function TagTreeNode({
       <div
         className={cn(
           "group/tag flex items-center rounded-md transition-colors",
-          activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent dark:hover:bg-accent/50",
+          activeTagId === tag.id ? "bg-secondary" : "hover:bg-accent/30 dark:hover:bg-accent/50",
         )}
         style={{ paddingLeft: `${depth * 12}px` }}
       >
@@ -276,7 +276,7 @@ export function TagTreeNode({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-black/[0.1] dark:hover:bg-white/[0.15]"
+                  className="peer absolute inset-0 h-7 w-7 opacity-0 transition-opacity group-hover/tag:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100 rounded hover:bg-accent hover:text-accent-foreground"
                   aria-label={`${tag.name} menu`}
                 >
                   <MoreVertical className="h-3.5 w-3.5" />

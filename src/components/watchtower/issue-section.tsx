@@ -62,7 +62,7 @@ export function IssueSection({
   return (
     <div className="rounded-xl border bg-card/80">
       <button
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent transition-colors"
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent/30 dark:hover:bg-accent/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <Icon className={`h-5 w-5 shrink-0 ${config.color}`} />
@@ -141,7 +141,7 @@ export function ReusedSection({
   return (
     <div className="rounded-xl border bg-card/80">
       <button
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent transition-colors"
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent/30 dark:hover:bg-accent/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <Icon className={`h-5 w-5 shrink-0 ${config.color}`} />
@@ -227,7 +227,7 @@ export function DuplicateSection({
   return (
     <div className="rounded-xl border bg-card/80">
       <button
-        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent transition-colors"
+        className="w-full flex items-center gap-3 p-4 text-left hover:bg-accent/30 dark:hover:bg-accent/50 transition-colors"
         onClick={() => setExpanded(!expanded)}
       >
         <Icon className="h-5 w-5 shrink-0 text-purple-500" />
