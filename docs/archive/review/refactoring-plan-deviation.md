@@ -21,11 +21,15 @@ Created: 2026-03-14T01:20:00+09:00
 - **Reason**: TypeScript inference limitation with complex `withTenantRls` + try/catch + discriminated union return types. Pre-existing issue exposed by the `RouteHandler` type constraint.
 - **Impact scope**: `src/app/api/scim/v2/Groups/[id]/route.ts`, `src/app/api/scim/v2/Users/[id]/route.ts`
 
-### DEV-4: Item 6 parseBody — partial rollout (29 of 63 routes)
+### DEV-4: Item 6 parseBody — partial rollout (44 of 72 routes)
 - **Plan description**: Create shared body parsing utility and apply to all routes
-- **Actual implementation**: Applied to 29 routes matching the standard pattern (INVALID_JSON + VALIDATION_ERROR with details)
-- **Reason**: Some routes use variant patterns (INVALID_BODY error code, no details field, multi-step parsing with multiple schemas). These variants would require behavior changes to standardize, which is out of scope for a mechanical extraction.
-- **Impact scope**: 34 routes still use inline body parsing; no behavior change
+- **Actual implementation**: Applied to 44 routes total (29 initial + 12 Type A + 2 Type B + 1 Type C)
+- **Reason**: Remaining 26 routes cannot be mechanically migrated:
+  - Type D (8): Multi-step/manual validation without Zod schemas — requires new schema creation
+  - Type E (4): No schema validation at all — requires try/catch + Zod schema addition
+  - Type F (5): SCIM endpoints use `scimError()` protocol-specific responses — incompatible with `parseBody`
+  - Other (9): `admin/rotate-master-key` + `passwords/generate` + bulk operation routes with custom validation
+- **Impact scope**: 28 routes still use inline body parsing. Type B migration changed error code from `INVALID_BODY` to `VALIDATION_ERROR` (with details) in 2 routes (audit-logs/import, audit-logs/export). 2 Type B routes (vault/admin-reset, auth/passkey/options/email) reverted to inline parsing per security review — these are security-sensitive/unauthenticated endpoints where schema detail leakage is unacceptable
 
 ### DEV-5: Implementation scope — P1-P3 items deferred
 - **Plan description**: Implement all 19 items

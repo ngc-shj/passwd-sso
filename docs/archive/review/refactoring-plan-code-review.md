@@ -1,9 +1,9 @@
 # Code Review: refactoring-plan
-Date: 2026-03-14T01:55:00+09:00
-Review round: 3
+Date: 2026-03-14T02:15:00+09:00
+Review round: 4 (parseBody batch review round 1)
 
 ## Changes from Previous Round
-Round 3: Replaced inline `toAB` with `toArrayBuffer` import (F-N1), added hexDecode non-hex character validation (S-N1), added auth-or-token.ts to coverage.include (F-N3/T-N1). Skipped F-N2 (export+import comment) as style-only.
+Round 4: Extended parseBody migration to 17 additional routes (Type A/B/C). Security review found schema detail leakage in security-sensitive endpoints — reverted vault/admin-reset and auth/passkey/options/email to inline parsing. Added VALIDATION_ERROR assertions to 4 test files. Documented parseBody ordering in watchtower/alert.
 
 ## Functionality Findings
 
@@ -93,3 +93,21 @@ Round 3: Replaced inline `toAB` with `toArrayBuffer` import (F-N1), added hexDec
 
 ### [F-N2] Minor — Dual export+import comment (Skipped)
 - Reason: Valid TypeScript pattern; adding a comment is marginal value
+
+## Round 4 Findings (parseBody batch)
+
+### [S-R4-1] Major — Schema detail leakage in security-sensitive endpoints
+- Action: Reverted vault/admin-reset and auth/passkey/options/email to inline parsing
+- Modified files: `src/app/api/vault/admin-reset/route.ts`, `src/app/api/auth/passkey/options/email/route.ts`
+
+### [S-R4-2] Minor — parseBody before rate limit in watchtower/alert
+- Action: Documented ordering rationale (rate limit key depends on teamId from body)
+- Modified file: `src/app/api/watchtower/alert/route.ts`
+
+### [T-R4-1] Major — Missing error code assertions in Type B route tests
+- Action: Added VALIDATION_ERROR assertions to watchtower/alert, audit-logs/import tests
+- Modified files: `src/app/api/watchtower/alert/route.test.ts`, `src/app/api/audit-logs/import/route.test.ts`
+
+### [T-R4-2] Minor — Missing error code assertions in emergency-access tests
+- Action: Added VALIDATION_ERROR assertions to reject and route tests
+- Modified files: `src/app/api/emergency-access/reject/route.test.ts`, `src/app/api/emergency-access/route.test.ts`
