@@ -239,6 +239,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       toast.success(t("emptyTrashSuccess"));
       setEntries([]);
       clearSelection();
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
     } catch {
       toast.error(t("networkError"));
     } finally {
