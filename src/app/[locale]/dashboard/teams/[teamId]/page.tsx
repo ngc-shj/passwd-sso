@@ -386,6 +386,7 @@ export default function TeamDashboardPage({
     } catch {
       fetchPasswords();
     }
+    window.dispatchEvent(new CustomEvent("team-data-changed"));
   };
 
   const handleDelete = async (id: string) => {
@@ -399,6 +400,7 @@ export default function TeamDashboardPage({
       toast.error(t("networkError"));
       fetchPasswords();
     }
+    window.dispatchEvent(new CustomEvent("team-data-changed"));
   };
 
   const decryptFullBlob = useCallback(
@@ -943,6 +945,7 @@ export default function TeamDashboardPage({
             fetchPasswords();
             setExpandedId(null);
             setRefreshKey((k) => k + 1);
+            window.dispatchEvent(new CustomEvent("team-data-changed"));
           }}
           entryType={newEntryType}
           defaultFolderId={activeFolderId ?? null}
@@ -959,6 +962,7 @@ export default function TeamDashboardPage({
             fetchPasswords();
             setExpandedId(null);
             setRefreshKey((k) => k + 1);
+            window.dispatchEvent(new CustomEvent("team-data-changed"));
           }}
           defaultFolderId={activeFolderId ?? null}
           defaultTags={matchedTag ? [{ id: matchedTag.id, name: matchedTag.name, color: matchedTag.color ?? null }] : undefined}

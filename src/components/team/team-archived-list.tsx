@@ -227,6 +227,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     onSuccess: () => {
       clearSelection();
       fetchArchived();
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
     },
   });
 
@@ -262,6 +263,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     } catch {
       fetchArchived();
     }
+    window.dispatchEvent(new CustomEvent("team-data-changed"));
   };
 
   const handleDelete = async (id: string) => {
@@ -276,6 +278,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     } catch {
       fetchArchived();
     }
+    window.dispatchEvent(new CustomEvent("team-data-changed"));
   };
 
   const decryptFullBlob = useCallback(
