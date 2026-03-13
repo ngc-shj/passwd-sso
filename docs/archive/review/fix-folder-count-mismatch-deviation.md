@@ -15,4 +15,10 @@ Created: 2026-03-13T00:00:00+09:00
 - **Reason**: After deploying the API-side fix, user reported the sidebar folder count still did not update after archiving. Root cause was the browser's default HTTP caching returning stale API responses on re-fetch.
 - **Impact scope**: `src/hooks/use-sidebar-data.ts`, `src/hooks/use-sidebar-data.test.ts`
 
+### D3: Added data-changed event dispatches to mutation handlers (not in original plan)
+- **Plan description**: Plan did not address client-side event notification
+- **Actual implementation**: Added `team-data-changed` / `vault-data-changed` event dispatches to all mutation handlers (archive, delete, create, edit, restore, empty trash, bulk actions) across team page, team archived list, team trash list, and personal trash list
+- **Reason**: Code review found that mutation handlers were not notifying the sidebar hook to re-fetch updated counts. The sidebar hook listens for these DOM events to trigger data refresh.
+- **Impact scope**: `src/app/[locale]/dashboard/teams/[teamId]/page.tsx`, `src/components/team/team-archived-list.tsx`, `src/components/team/team-trash-list.tsx`, `src/components/passwords/trash-list.tsx`
+
 ---
