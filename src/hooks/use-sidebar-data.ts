@@ -55,7 +55,7 @@ async function fetchArray<T>(
   onError?: (message: string) => void,
 ): Promise<T[] | null> {
   try {
-    const res = await fetchApi(url);
+    const res = await fetchApi(url, { cache: "no-store" });
     if (!res.ok) {
       onError?.(`Failed to fetch ${url}: ${res.status}`);
       return null;
