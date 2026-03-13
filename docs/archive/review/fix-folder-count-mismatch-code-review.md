@@ -38,3 +38,8 @@ No findings. Confirmed:
 ### T1 [Minor] Missing tag test
 - Action: Added ACTIVE_ENTRY_WHERE filter verification test
 - Modified file: src/app/api/tags/route.test.ts:53-70
+
+### F3 [Major] Browser HTTP cache causing stale sidebar counts (Round 2)
+- Action: Added `{ cache: "no-store" }` to fetchApi calls in useSidebarData
+- Modified file: src/hooks/use-sidebar-data.ts:58
+- Modified file: src/hooks/use-sidebar-data.test.ts:13,46-51
