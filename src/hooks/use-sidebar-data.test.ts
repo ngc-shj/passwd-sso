@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { useSidebarData } from "./use-sidebar-data";
+import { VAULT_DATA_CHANGED_EVENT, TEAM_DATA_CHANGED_EVENT } from "@/lib/events";
 
 const teams = [{ id: "team-1", name: "Security", slug: "security", role: "ADMIN" }];
 const tags = [{ id: "tag-1", name: "Critical", color: "red", passwordCount: 2 }];
@@ -58,7 +59,7 @@ describe("useSidebarData", () => {
     const firstCallCount = fetchMock.mock.calls.length;
 
     act(() => {
-      window.dispatchEvent(new CustomEvent("vault-data-changed"));
+      window.dispatchEvent(new CustomEvent(VAULT_DATA_CHANGED_EVENT));
     });
 
     await waitFor(() => {
@@ -73,31 +74,12 @@ describe("useSidebarData", () => {
     const firstCallCount = fetchMock.mock.calls.length;
 
     act(() => {
-      window.dispatchEvent(new CustomEvent("team-data-changed"));
+      window.dispatchEvent(new CustomEvent(TEAM_DATA_CHANGED_EVENT));
     });
 
     await waitFor(() => {
       expect(fetchMock.mock.calls.length).toBeGreaterThan(firstCallCount);
     });
-  });
-
-  it("notifies via notifyDataChanged", async () => {
-    const dispatchSpy = vi.spyOn(window, "dispatchEvent");
-    const { result } = renderHook(() => useSidebarData("/dashboard"));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalled();
-    });
-    const initialCallCount = fetchMock.mock.calls.length;
-
-    await act(async () => {
-      result.current.notifyDataChanged();
-    });
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(initialCallCount);
-    });
-
-    expect(dispatchSpy).toHaveBeenCalledWith(expect.any(CustomEvent));
   });
 
   it("re-fetches when pathname changes", async () => {
@@ -128,8 +110,8 @@ describe("useSidebarData", () => {
     unmount();
 
     act(() => {
-      window.dispatchEvent(new CustomEvent("vault-data-changed"));
-      window.dispatchEvent(new CustomEvent("team-data-changed"));
+      window.dispatchEvent(new CustomEvent(VAULT_DATA_CHANGED_EVENT));
+      window.dispatchEvent(new CustomEvent(TEAM_DATA_CHANGED_EVENT));
     });
 
     expect(fetchMock.mock.calls.length).toBe(firstCallCount);
@@ -180,7 +162,7 @@ describe("useSidebarData", () => {
 
     shouldFailTags = false;
     act(() => {
-      window.dispatchEvent(new CustomEvent("vault-data-changed"));
+      window.dispatchEvent(new CustomEvent(VAULT_DATA_CHANGED_EVENT));
     });
 
     await waitFor(() => {
@@ -244,7 +226,7 @@ describe("useSidebarData", () => {
     const { result } = renderHook(() => useSidebarData("/dashboard"));
 
     act(() => {
-      window.dispatchEvent(new CustomEvent("vault-data-changed"));
+      window.dispatchEvent(new CustomEvent(VAULT_DATA_CHANGED_EVENT));
     });
 
     await waitFor(() => {

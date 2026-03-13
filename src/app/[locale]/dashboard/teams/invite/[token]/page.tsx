@@ -8,6 +8,7 @@ import { Building2, CheckCircle2, XCircle, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { notifyTeamDataChanged } from "@/lib/events";
 
 interface InviteInfo {
   team: { id: string; name: string; slug: string };
@@ -54,7 +55,7 @@ export default function AcceptInvitePage({
 
       const data: InviteInfo = await res.json();
       setResult(data);
-      window.dispatchEvent(new CustomEvent("team-data-changed"));
+      notifyTeamDataChanged();
       toast.success(t("accepted"));
     } catch {
       setError(t("networkError"));
