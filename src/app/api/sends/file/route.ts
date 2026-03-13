@@ -25,11 +25,12 @@ import {
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const sendFileLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 
 // POST /api/sends/file — Create a file Send
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -214,3 +215,5 @@ export async function POST(req: NextRequest) {
     ...(accessPassword ? { accessPassword } : {}),
   });
 }
+
+export const POST = withRequestLog(handlePOST);

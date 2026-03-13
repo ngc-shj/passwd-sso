@@ -70,6 +70,8 @@ describe("POST /api/emergency-access/reject", () => {
       body: {},
     }));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 404 when token invalid", async () => {

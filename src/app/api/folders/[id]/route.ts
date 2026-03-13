@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import {
   validateParentFolder,
   validateFolderDepth,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 function getPersonalParent(userId: string, id: string): Promise<ParentNode | null> {
   return withUserTenantRls(userId, async () =>
@@ -22,7 +24,7 @@ function getPersonalParent(userId: string, id: string): Promise<ParentNode | nul
 }
 
 // PUT /api/folders/[id] - Update a folder
-export async function PUT(
+async function handlePUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -43,22 +45,10 @@ export async function PUT(
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, updateFolderSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = updateFolderSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { name, parentId, sortOrder } = parsed.data;
+  const { name, parentId, sortOrder } = result.data;
   const updateData: Record<string, unknown> = {};
 
   if (name !== undefined) updateData.name = name;
@@ -190,7 +180,7 @@ export async function PUT(
 }
 
 // DELETE /api/folders/[id] - Delete a folder (children promote to parent)
-export async function DELETE(
+async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -290,3 +280,6 @@ export async function DELETE(
 
   return NextResponse.json({ success: true });
 }
+
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

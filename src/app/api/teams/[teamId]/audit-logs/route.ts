@@ -12,13 +12,14 @@ import {
 } from "@/lib/constants";
 import type { AuditAction } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 // GET /api/teams/[teamId]/audit-logs — Team audit logs (ADMIN/OWNER only)
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -168,3 +169,5 @@ export async function GET(req: NextRequest, { params }: Params) {
     entryOverviews,
   });
 }
+
+export const GET = withRequestLog(handleGET);

@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+
+// Override the global passthrough mock from setup.ts so we test the real implementation
+vi.unmock("@/lib/with-request-log");
 
 // Capture log output via mocked pino
 const { mockInfo, mockError, mockChild } = vi.hoisted(() => {
@@ -269,5 +272,87 @@ describe("withRequestLog", () => {
 
     expect(body.id).toBe("entry-123");
     expect(handler).toHaveBeenCalledWith(req, { params: paramsPromise });
+  });
+
+  // --- data masking: sensitive headers must never appear in logs ---
+
+  describe("sensitive header exclusion", () => {
+    const BEARER_TOKEN = "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.secret-payload";
+    const SESSION_COOKIE = "authjs.session-token=abc123def456";
+
+    function allLogArgs(...spies: ReturnType<typeof vi.fn>[]) {
+      return JSON.stringify(
+        spies.flatMap((spy) => spy.mock.calls),
+      );
+    }
+
+    it("does not log Authorization header value", async () => {
+      const { withRequestLog } = await import("@/lib/with-request-log");
+
+      const handler = vi.fn().mockResolvedValue(
+        NextResponse.json({ ok: true }),
+      );
+      const wrapped = withRequestLog(handler);
+
+      const req = createRequest("GET", "http://localhost:3000/api/passwords", {
+        headers: {
+          Authorization: `Bearer ${BEARER_TOKEN}`,
+          Cookie: SESSION_COOKIE,
+        },
+      });
+      await wrapped(req);
+
+      const logged = allLogArgs(mockInfo, mockError, mockChild);
+      expect(logged).not.toContain(BEARER_TOKEN);
+      expect(logged).not.toContain(SESSION_COOKIE);
+    });
+
+    it("does not serialize request headers into any log field", async () => {
+      const { withRequestLog } = await import("@/lib/with-request-log");
+
+      const handler = vi.fn().mockResolvedValue(
+        NextResponse.json({ ok: true }),
+      );
+      const wrapped = withRequestLog(handler);
+
+      const req = createRequest("GET", "http://localhost:3000/api/passwords", {
+        headers: {
+          Authorization: `Bearer ${BEARER_TOKEN}`,
+          Cookie: SESSION_COOKIE,
+          "X-Custom-Secret": "my-secret-value",
+        },
+      });
+      await wrapped(req);
+
+      const logged = allLogArgs(mockInfo, mockError, mockChild);
+      expect(logged).not.toContain("my-secret-value");
+      // Verify headers object is not passed as a structured log field
+      const childArg = mockChild.mock.calls[0][0];
+      expect(Object.keys(childArg)).not.toContain("headers");
+    });
+
+    it("regression: detection mechanism catches intentional header leakage", async () => {
+      // Verify the negative assertion is not vacuously passing by testing
+      // a handler that intentionally logs headers — confirm our spy catches it.
+      const { withRequestLog } = await import("@/lib/with-request-log");
+
+      const leakyHandler = vi.fn().mockImplementation(async (req: NextRequest) => {
+        // Intentionally leak headers via the request-scoped logger
+        const { getLogger } = await import("@/lib/logger");
+        const log = getLogger();
+        log.info({ headers: Object.fromEntries(req.headers.entries()) }, "leaked");
+        return NextResponse.json({ ok: true });
+      });
+      const wrapped = withRequestLog(leakyHandler);
+
+      const req = createRequest("GET", "http://localhost:3000/api/passwords", {
+        headers: { Authorization: `Bearer ${BEARER_TOKEN}` },
+      });
+      await wrapped(req);
+
+      // The spy SHOULD have captured the token because the handler leaked it
+      const logged = allLogArgs(mockInfo, mockError, mockChild);
+      expect(logged).toContain(BEARER_TOKEN);
+    });
   });
 });

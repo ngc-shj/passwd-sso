@@ -79,6 +79,7 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
+  // Inline parsing: unauthenticated endpoint — do not expose schema details
   let body: unknown;
   try {
     body = await req.json();

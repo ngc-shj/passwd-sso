@@ -11,11 +11,12 @@ import {
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 // POST /api/teams/[teamId]/passwords/empty-trash — Permanently delete all trashed entries
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -83,3 +84,5 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true, deletedCount: deletedCount });
 }
+
+export const POST = withRequestLog(handlePOST);

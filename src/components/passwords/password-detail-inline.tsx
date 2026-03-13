@@ -99,7 +99,7 @@ interface PasswordDetailInlineProps {
   teamId?: string;
 }
 
-const REVEAL_TIMEOUT = 30_000;
+import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
 
 export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTeamId }: PasswordDetailInlineProps) {
   const t = useTranslations("PasswordDetail");
@@ -160,28 +160,28 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const handleReveal = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowPassword(true);
-      setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowPassword(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealCardNumber = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowCardNumber(true);
-      setTimeout(() => setShowCardNumber(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowCardNumber(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealCvv = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowCvv(true);
-      setTimeout(() => setShowCvv(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowCvv(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealIdNumber = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowIdNumber(true);
-      setTimeout(() => setShowIdNumber(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowIdNumber(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
@@ -196,49 +196,49 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const handleRevealCredentialId = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowCredentialId(true);
-      setTimeout(() => setShowCredentialId(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowCredentialId(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealAccountNumber = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowAccountNumber(true);
-      setTimeout(() => setShowAccountNumber(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowAccountNumber(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealRoutingNumber = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowRoutingNumber(true);
-      setTimeout(() => setShowRoutingNumber(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowRoutingNumber(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealIban = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowIban(true);
-      setTimeout(() => setShowIban(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowIban(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealLicenseKey = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowLicenseKey(true);
-      setTimeout(() => setShowLicenseKey(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowLicenseKey(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealPrivateKey = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowPrivateKey(true);
-      setTimeout(() => setShowPrivateKey(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowPrivateKey(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
   const handleRevealSshPassphrase = useCallback(() => {
     requireVerification(data.id, data.requireReprompt ?? false, () => {
       setShowSshPassphrase(true);
-      setTimeout(() => setShowSshPassphrase(false), REVEAL_TIMEOUT);
+      setTimeout(() => setShowSshPassphrase(false), REVEAL_TIMEOUT_MS);
     });
   }, [data.id, data.requireReprompt, requireVerification]);
 
@@ -1079,7 +1079,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                                   next.delete(idx);
                                   return next;
                                 });
-                              }, REVEAL_TIMEOUT);
+                              }, REVEAL_TIMEOUT_MS);
                             });
                           }
                         }}
@@ -1180,7 +1180,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
                                   next.delete(idx);
                                   return next;
                                 });
-                              }, REVEAL_TIMEOUT);
+                              }, REVEAL_TIMEOUT_MS);
                             });
                           }
                         }}

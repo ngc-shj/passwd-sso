@@ -6,13 +6,14 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, INVITATION_STATUS } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 const querySchema = z.string().min(1).max(100);
 
 // GET /api/teams/[teamId]/members/search?q=<query> — Search tenant members to add
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -112,3 +113,5 @@ export async function GET(req: NextRequest, { params }: Params) {
     })),
   );
 }
+
+export const GET = withRequestLog(handleGET);

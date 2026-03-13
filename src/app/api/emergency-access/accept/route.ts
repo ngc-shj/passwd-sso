@@ -11,11 +11,13 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { parseBody } from "@/lib/parse-body";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
 // POST /api/emergency-access/accept — Accept an emergency access invitation
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -25,19 +27,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = acceptEmergencyGrantSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const { token, granteePublicKey, encryptedPrivateKey } = parsed.data;
+  const result = await parseBody(req, acceptEmergencyGrantSchema);
+  if (!result.ok) return result.response;
+  const { token, granteePublicKey, encryptedPrivateKey } = result.data;
 
   // Hash the token for DB lookup (DB stores only the hash)
   const grant = await withUserTenantRls(session.user.id, async () =>
@@ -122,3 +114,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ status: EA_STATUS.ACCEPTED });
 }
+
+export const POST = withRequestLog(handlePOST);

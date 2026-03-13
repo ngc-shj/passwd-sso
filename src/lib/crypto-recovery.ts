@@ -14,26 +14,13 @@
  */
 
 import { hexEncode, hexDecode } from "./crypto-client";
+import { toArrayBuffer, textEncode } from "./crypto-utils";
 
 const HKDF_RECOVERY_WRAP_INFO = "passwd-sso-recovery-wrap-v1";
 const HKDF_RECOVERY_VERIFIER_INFO = "passwd-sso-recovery-verifier-v1";
 const RECOVERY_KEY_BYTES = 32;
 const IV_LENGTH = 12;
 const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
-
-
-// ─── Utility ────────────────────────────────────────────────────
-
-function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(
-    arr.byteOffset,
-    arr.byteOffset + arr.byteLength,
-  ) as ArrayBuffer;
-}
-
-function textEncode(text: string): ArrayBuffer {
-  return toArrayBuffer(new TextEncoder().encode(text));
-}
 
 // ─── Base32 Encode / Decode ─────────────────────────────────────
 

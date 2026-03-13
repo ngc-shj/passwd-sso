@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -18,7 +19,7 @@ function isValidHex(value: string, byteLength: number): boolean {
 }
 
 // GET /api/teams/[teamId]/passwords/[id]/history/[historyId] — Return encrypted history blob (client decrypts)
-export async function GET(_req: NextRequest, { params }: Params) {
+async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -74,7 +75,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 // PATCH /api/teams/[teamId]/passwords/[id]/history/[historyId] — re-encrypt team history entry
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function handlePATCH(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -220,3 +221,6 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const GET = withRequestLog(handleGET);
+export const PATCH = withRequestLog(handlePATCH);

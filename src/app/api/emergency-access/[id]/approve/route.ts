@@ -9,9 +9,10 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -76,3 +77,5 @@ export async function POST(
 
   return NextResponse.json({ status: EA_STATUS.ACTIVATED });
 }
+
+export const POST = withRequestLog(handlePOST);

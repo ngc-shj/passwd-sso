@@ -7,13 +7,14 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ tokenId: string }> };
 
 export const runtime = "nodejs";
 
 // DELETE /api/tenant/scim-tokens/[tokenId] — Revoke a SCIM token
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -68,3 +69,5 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const DELETE = withRequestLog(handleDELETE);

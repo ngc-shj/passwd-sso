@@ -3,9 +3,10 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/passwords/[id]/history - List entry history (encrypted blobs)
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -52,3 +53,5 @@ export async function GET(
     })),
   );
 }
+
+export const GET = withRequestLog(handleGET);
