@@ -8,32 +8,22 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { logAudit } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const ipLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 const tokenLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 // POST /api/share-links/verify-access — Verify access password for a share
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const ip = extractClientIp(req) ?? "unknown";
   const ua = req.headers.get("user-agent")?.slice(0, 512) ?? null;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, verifyShareAccessSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = verifyShareAccessSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { token, password } = parsed.data;
+  const { token, password } = result.data;
   const tokenHash = hashToken(token);
 
   // Rate limit by IP+tokenHash and by tokenHash globally
@@ -121,3 +111,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ accessToken });
 }
+
+export const POST = withRequestLog(handlePOST);

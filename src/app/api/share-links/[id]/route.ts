@@ -5,11 +5,12 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
 
 // DELETE /api/share-links/[id] — Revoke a share link
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -73,3 +74,5 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const DELETE = withRequestLog(handleDELETE);

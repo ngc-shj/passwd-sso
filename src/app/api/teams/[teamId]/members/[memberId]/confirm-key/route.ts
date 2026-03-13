@@ -4,14 +4,16 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
 // POST /api/teams/[teamId]/members/[memberId]/confirm-key
 // Admin distributes the team key to a member by encrypting it with member's ECDH public key
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -71,22 +73,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, teamMemberKeySchema);
+  if (!result.ok) return result.response;
 
-  const parsed = teamMemberKeySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const data = parsed.data;
+  const data = result.data;
 
   // Atomic check-and-set: re-verify keyDistributed + deactivatedAt + teamKeyVersion inside transaction (S-12/F-16/S-24)
   const distributed = await withTeamTenantRls(teamId, async () =>
@@ -167,3 +157,5 @@ export async function POST(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const POST = withRequestLog(handlePOST);

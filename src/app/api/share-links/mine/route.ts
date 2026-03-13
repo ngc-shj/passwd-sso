@@ -5,11 +5,12 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only
 // - Team context (`team` present): all links in the team
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -127,3 +128,5 @@ export async function GET(req: NextRequest) {
     nextCursor,
   });
 }
+
+export const GET = withRequestLog(handleGET);

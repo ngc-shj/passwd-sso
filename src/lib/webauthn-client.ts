@@ -34,27 +34,8 @@ function base64urlDecode(s: string): Uint8Array {
   return bytes;
 }
 
-function hexDecode(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-export function hexEncode(buf: Uint8Array): string {
-  return Array.from(buf)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-/** Convert Uint8Array to ArrayBuffer (fixes TS 5.9 BufferSource compatibility) */
-function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(
-    arr.byteOffset,
-    arr.byteOffset + arr.byteLength,
-  ) as ArrayBuffer;
-}
+import { hexDecode, hexEncode, toArrayBuffer } from "./crypto-utils";
+export { hexEncode };
 
 // ─── Option conversion ─────────────────────────────────────
 

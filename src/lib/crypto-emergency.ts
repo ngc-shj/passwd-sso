@@ -79,14 +79,7 @@ export interface WrapContext {
 
 // ─── Utility ────────────────────────────────────────────────
 
-function textEncode(text: string): ArrayBuffer {
-  const arr = new TextEncoder().encode(text);
-  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer;
-}
-
-function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(arr.byteOffset, arr.byteOffset + arr.byteLength) as ArrayBuffer;
-}
+import { textEncode, toArrayBuffer } from "./crypto-utils";
 
 /**
  * Build AAD bytes from WrapContext.

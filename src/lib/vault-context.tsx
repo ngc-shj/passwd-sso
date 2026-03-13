@@ -37,6 +37,7 @@ import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
+import { hexDecode, hexEncode } from "./crypto-utils";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
@@ -104,20 +105,6 @@ const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
 const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
-
-function hexDecode(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-function hexEncode(buf: Uint8Array): string {
-  return Array.from(buf)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
 
 // ─── Emergency Access Auto-Confirm ──────────────────────────
 

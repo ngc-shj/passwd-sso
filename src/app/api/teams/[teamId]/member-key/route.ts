@@ -5,12 +5,13 @@ import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 // GET /api/teams/[teamId]/member-key — Get own TeamMemberKey
 // Query: ?keyVersion=N (optional, defaults to latest)
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -93,3 +94,5 @@ export async function GET(req: NextRequest, { params }: Params) {
     wrapVersion: memberKey.wrapVersion,
   });
 }
+
+export const GET = withRequestLog(handleGET);

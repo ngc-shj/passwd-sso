@@ -82,6 +82,8 @@ describe("POST /api/emergency-access", () => {
       body: { granteeEmail: "grantee@test.com", waitDays: 5 },
     }));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for self-invite", async () => {

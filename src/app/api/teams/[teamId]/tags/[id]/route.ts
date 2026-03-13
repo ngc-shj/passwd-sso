@@ -4,14 +4,16 @@ import { prisma } from "@/lib/prisma";
 import { updateTeamTagSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/tag-tree";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // PUT /api/teams/[teamId]/tags/[id] — Update team tag
-export async function PUT(req: NextRequest, { params }: Params) {
+async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -35,30 +37,18 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = updateTeamTagSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  const result = await parseBody(req, updateTeamTagSchema);
+  if (!result.ok) return result.response;
 
   const updateData: Record<string, unknown> = {};
-  if (parsed.data.name !== undefined) updateData.name = parsed.data.name;
-  if (parsed.data.color !== undefined)
-    updateData.color = parsed.data.color || null;
+  if (result.data.name !== undefined) updateData.name = result.data.name;
+  if (result.data.color !== undefined)
+    updateData.color = result.data.color || null;
 
   // Handle parentId change
-  const parentIdChanged = parsed.data.parentId !== undefined;
+  const parentIdChanged = result.data.parentId !== undefined;
   if (parentIdChanged) {
-    const newParentId = parsed.data.parentId ?? null;
+    const newParentId = result.data.parentId ?? null;
     updateData.parentId = newParentId;
 
     if (newParentId) {
@@ -123,7 +113,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/teams/[teamId]/tags/[id] — Delete team tag
-export async function DELETE(_req: NextRequest, { params }: Params) {
+async function handleDELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -153,3 +143,6 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

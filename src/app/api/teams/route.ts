@@ -5,15 +5,17 @@ import { prisma } from "@/lib/prisma";
 import { authOrToken } from "@/lib/auth-or-token";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { getLogger } from "@/lib/logger";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/teams — List teams the user belongs to
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/teams — Create a new E2E-enabled team
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -89,21 +91,9 @@ export async function POST(req: NextRequest) {
   }
   const tenantId = actor.tenantId;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = createTeamE2ESchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-  const { id: clientId, name, slug, description, teamMemberKey } = parsed.data;
+  const result = await parseBody(req, createTeamE2ESchema);
+  if (!result.ok) return result.response;
+  const { id: clientId, name, slug, description, teamMemberKey } = result.data;
 
   // Check slug uniqueness in tenant context
   let existing;
@@ -195,3 +185,6 @@ export async function POST(req: NextRequest) {
     { status: 201 }
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

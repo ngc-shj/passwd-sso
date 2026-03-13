@@ -3,6 +3,7 @@ import { z } from "zod/v4";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
@@ -16,6 +17,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -31,7 +33,7 @@ const alertSchema = z.object({
 
 // POST /api/watchtower/alert
 // Called by the client after auto-monitor detects new breaches.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const originError = assertOrigin(req);
   if (originError) return originError;
 
@@ -40,19 +42,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
-  }
-
-  const parsed = alertSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
-  }
-
-  const { newBreachCount, teamId } = parsed.data;
+  // Note: parseBody runs before rate limit because the rate limit key depends
+  // on teamId from the parsed body. This is acceptable since auth is checked first.
+  const result = await parseBody(req, alertSchema);
+  if (!result.ok) return result.response;
+  const { newBreachCount, teamId } = result.data;
 
   const rateLimitKey = teamId
     ? `rl:watchtower:alert:team:${teamId}`
@@ -113,3 +107,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withRequestLog(handlePOST);

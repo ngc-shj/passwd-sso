@@ -9,15 +9,17 @@ import {
   TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
 // PUT /api/teams/[teamId]/members/[memberId] — Change member role
-export async function PUT(req: NextRequest, { params }: Params) {
+async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -49,23 +51,11 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = updateMemberRoleSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  const result = await parseBody(req, updateMemberRoleSchema);
+  if (!result.ok) return result.response;
 
   // Owner transfer: only OWNER can promote someone to OWNER
-  if (parsed.data.role === TEAM_ROLE.OWNER) {
+  if (result.data.role === TEAM_ROLE.OWNER) {
     if (actorMembership.role !== TEAM_ROLE.OWNER) {
       return NextResponse.json(
         { error: API_ERROR.OWNER_ONLY },
@@ -132,7 +122,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
   const updated = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.update({
       where: { id: memberId },
-      data: { role: parsed.data.role },
+      data: { role: result.data.role },
       include: {
         user: { select: { id: true, name: true, email: true, image: true } },
       },
@@ -146,7 +136,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
     teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: memberId,
-    metadata: { newRole: parsed.data.role, previousRole: target.role },
+    metadata: { newRole: result.data.role, previousRole: target.role },
     ...extractRequestMeta(req),
   });
 
@@ -161,7 +151,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/teams/[teamId]/members/[memberId] — Remove member
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -250,3 +240,6 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

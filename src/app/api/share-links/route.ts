@@ -14,6 +14,7 @@ import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationEr
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
   AUDIT_TARGET_TYPE,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -34,7 +36,7 @@ const EXPIRY_MAP: Record<string, number> = {
 };
 
 // POST /api/share-links — Create a share link
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -47,23 +49,11 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = createShareLinkSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  const result = await parseBody(req, createShareLinkSchema);
+  if (!result.ok) return result.response;
 
   const { passwordEntryId, teamPasswordEntryId, data, encryptedShareData, expiresIn, maxViews, permissions, requirePassword } =
-    parsed.data;
+    result.data;
 
   let encryptedData: string;
   let dataIv: string;
@@ -218,7 +208,7 @@ export async function POST(req: NextRequest) {
 }
 
 // GET /api/share-links — List share links for an entry
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -267,3 +257,6 @@ export async function GET(req: NextRequest) {
     })),
   });
 }
+
+export const POST = withRequestLog(handlePOST);
+export const GET = withRequestLog(handleGET);

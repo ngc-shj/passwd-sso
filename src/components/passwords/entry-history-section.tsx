@@ -31,6 +31,7 @@ import { useReprompt } from "@/hooks/use-reprompt";
 import { formatDateTime, formatDate } from "@/lib/format-datetime";
 import { DISPLAY_KEYS, SENSITIVE_KEYS, DATE_KEYS, TRANSLATED_VALUE_KEYS } from "./entry-history-keys";
 import { fetchApi } from "@/lib/url-helpers";
+import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
 
 interface HistoryEntry {
   id: string;
@@ -78,7 +79,7 @@ function ViewContent({ data }: { data: Record<string, unknown> }) {
             n.delete(key);
             return n;
           });
-        }, 30_000);
+        }, REVEAL_TIMEOUT_MS);
       }
       return next;
     });

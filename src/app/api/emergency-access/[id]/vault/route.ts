@@ -6,11 +6,12 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 // GET /api/emergency-access/[id]/vault — Get ECDH data for vault access
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -94,3 +95,5 @@ export async function GET(
     owner: grant.owner,
   });
 }
+
+export const GET = withRequestLog(handleGET);

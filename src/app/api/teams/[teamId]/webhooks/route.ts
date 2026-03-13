@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -18,6 +19,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -46,7 +48,7 @@ const createWebhookSchema = z.object({
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -85,7 +87,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // POST /api/teams/[teamId]/webhooks — Create a webhook
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -102,19 +104,9 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-  const parsed = createWebhookSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(req, createWebhookSchema);
+  if (!result.ok) return result.response;
+  const { data } = result;
 
   // Check webhook count limit
   const existingCount = await withTeamTenantRls(teamId, async () =>
@@ -146,12 +138,12 @@ export async function POST(req: NextRequest, { params }: Params) {
       data: {
         teamId,
         tenantId: team.tenantId,
-        url: parsed.data.url,
+        url: data.url,
         secretEncrypted: encrypted.ciphertext,
         secretIv: encrypted.iv,
         secretAuthTag: encrypted.authTag,
         masterKeyVersion: version,
-        events: parsed.data.events,
+        events: data.events,
       },
     }),
   );
@@ -161,7 +153,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     action: AUDIT_ACTION.WEBHOOK_CREATE,
     userId: session.user.id,
     teamId,
-    metadata: { webhookId: webhook.id, url: parsed.data.url },
+    metadata: { webhookId: webhook.id, url: data.url },
     ...extractRequestMeta(req),
   });
 
@@ -179,3 +171,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     { status: 201 },
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

@@ -8,6 +8,7 @@ import {
   TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -77,20 +78,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = upsertTeamPolicySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(req, upsertTeamPolicySchema);
+  if (!result.ok) return result.response;
 
   // Resolve tenantId from team
   const team = await withTeamTenantRls(teamId, async () =>
@@ -109,9 +98,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       create: {
         teamId,
         tenantId: team.tenantId,
-        ...parsed.data,
+        ...result.data,
       },
-      update: parsed.data,
+      update: result.data,
     }),
   );
 
@@ -123,7 +112,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM,
     targetId: teamId,
-    metadata: parsed.data,
+    metadata: result.data,
     ...meta,
   });
 
