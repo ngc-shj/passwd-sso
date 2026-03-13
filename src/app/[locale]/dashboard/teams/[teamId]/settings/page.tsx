@@ -554,7 +554,7 @@ export default function TeamSettingsPage({
                       {filteredMembers.map((m) => (
                         <div
                           key={m.id}
-                          className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
+                          className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                         >
                           <Avatar className="h-8 w-8">
                             <AvatarImage src={m.image ?? undefined} />
@@ -633,7 +633,7 @@ export default function TeamSettingsPage({
                           .map((m) => (
                             <div
                               key={m.id}
-                              className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
+                              className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                             >
                               <Avatar className="h-8 w-8">
                                 <AvatarImage src={m.image ?? undefined} />
@@ -718,7 +718,7 @@ export default function TeamSettingsPage({
                             searchResults.map((u) => (
                               <div
                                 key={u.userId}
-                                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
+                                className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                               >
                                 <Avatar className="h-8 w-8">
                                   <AvatarImage src={u.image ?? undefined} />
@@ -808,7 +808,7 @@ export default function TeamSettingsPage({
                           {invitations.map((inv) => (
                             <div
                               key={inv.id}
-                              className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent"
+                              className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                             >
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-medium">{inv.email}</p>
