@@ -7,6 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
@@ -44,7 +45,7 @@ async function handleGET(req: NextRequest) {
         _count: {
           select: {
             passwords: {
-              where: { deletedAt: null, isArchived: false },
+              where: { ...ACTIVE_ENTRY_WHERE },
             },
           },
         },
