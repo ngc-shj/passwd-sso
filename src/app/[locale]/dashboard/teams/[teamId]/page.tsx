@@ -572,6 +572,7 @@ export default function TeamDashboardPage({
     onSuccess: () => {
       clearSelection();
       fetchPasswords();
+      window.dispatchEvent(new CustomEvent("team-data-changed"));
     },
   });
 
