@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authOrToken } from "@/lib/auth-or-token";
+import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -12,15 +12,15 @@ async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const authed = await authOrToken(req);
-  if (!authed || authed.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
+  // IP restriction is not enforced here (matches pre-checkAuth behavior).
+  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  if (!authed.ok) return authed.response;
   // API keys cannot manage API keys
-  if (authed.type === "api_key") {
+  if (authed.auth.type === "api_key") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
-  const userId = authed.userId;
+  const userId = authed.auth.userId;
 
   const { id } = await params;
 

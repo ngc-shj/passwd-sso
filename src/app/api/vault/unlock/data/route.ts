@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { authOrToken } from "@/lib/auth-or-token";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { checkAuth } from "@/lib/check-auth";
 
 export const runtime = "nodejs";
 
@@ -16,28 +15,9 @@ export const runtime = "nodejs";
  * The client cannot decrypt the secret key without the correct passphrase.
  */
 async function handleGET(req: NextRequest) {
-  const authResult = await authOrToken(
-    req,
-    EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA,
-  );
-  if (authResult?.type === "scope_insufficient") {
-    return NextResponse.json(
-      { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
-      { status: 403 },
-    );
-  }
-  if (!authResult) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
-  }
-  const userId = authResult.userId;
-
-  if (authResult.type !== "session") {
-    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
-    if (denied) return denied;
-  }
+  const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
+  if (!authResult.ok) return authResult.response;
+  const userId = authResult.auth.userId;
 
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({

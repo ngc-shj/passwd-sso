@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { authOrToken } from "@/lib/auth-or-token";
+import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -16,15 +16,15 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
-  const authed = await authOrToken(req);
-  if (!authed || authed.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
+  // IP restriction is not enforced here (matches pre-checkAuth behavior).
+  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  if (!authed.ok) return authed.response;
   // API keys cannot manage API keys (only session or extension token)
-  if (authed.type === "api_key") {
+  if (authed.auth.type === "api_key") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
-  const userId = authed.userId;
+  const userId = authed.auth.userId;
 
   const keys = await withUserTenantRls(userId, async () =>
     prisma.apiKey.findMany({
@@ -59,15 +59,15 @@ async function handleGET(req: NextRequest) {
 
 // POST /api/api-keys — Create a new API key (session or extension token, NOT API key)
 async function handlePOST(req: NextRequest) {
-  const authed = await authOrToken(req);
-  if (!authed || authed.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
+  // IP restriction is not enforced here (matches pre-checkAuth behavior).
+  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  if (!authed.ok) return authed.response;
   // API keys cannot create API keys
-  if (authed.type === "api_key") {
+  if (authed.auth.type === "api_key") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
-  const userId = authed.userId;
+  const userId = authed.auth.userId;
 
   let body: unknown;
   try {
