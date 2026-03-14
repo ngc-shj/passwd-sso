@@ -361,32 +361,25 @@ interface PasswordCardProps {
 
 ## P3: Low Cost / Low Impact (Quality Polish)
 
-### 17. Standardize Audit Log Metadata Extraction
+### 17. Standardize Audit Log Metadata Extraction ✅
 
 **Problem**: Some routes pass `ip` and `userAgent` directly to `logAudit()`, while others use `...extractRequestMeta(req)`.
 
 **Action**: Standardize on `...extractRequestMeta(req)` across all routes.
 
+**Status**: Completed. 2 files migrated:
+- `src/app/api/auth/passkey/verify/route.ts` — replaced manual `meta` construction with `extractRequestMeta(req)`
+- `src/app/api/share-links/verify-access/route.ts` — replaced manual `ip`/`ua` extraction with `extractRequestMeta(req)` spread
+
 **Risk**: Low — mechanical replacement.
 
-### 18. Evaluate `crypto-aad.ts` Unification (Requires Assessment)
+### 18. Evaluate `crypto-aad.ts` Unification ✅ (No Action Needed)
 
 **Problem**: `buildPersonalEntryAAD()` and `buildTeamEntryAAD()` in `src/lib/crypto-aad.ts` appear to share logic.
 
-**Current state**: A shared internal `buildAADBytes()` function already exists (line 33). Both public functions are thin wrappers. This item may already be resolved.
+**Assessment result**: Already resolved. `buildAADBytes()` centralizes all binary AAD encoding logic. Both `buildPersonalEntryAAD()` and `buildTeamEntryAAD()` are thin wrappers delegating to `buildAADBytes()`. `buildTeamKeyWrapAAD` in `crypto-team.ts` also delegates to `buildAADBytes()`. No duplicate `AAD_VERSION` constants (each scope has its own intentional version). No further unification needed.
 
-**Assessment needed**: Before implementing, verify whether further unification adds value. If `buildAADBytes` already centralizes the logic, close this item as "already refactored."
-
-**If unification proceeds**: Use TypeScript overload signatures with literal discriminants to prevent `vaultType` omission:
-```typescript
-function buildEntryAAD(scope: "PV", params: { userId: string; entryId: string }): Uint8Array;
-function buildEntryAAD(scope: "OV", params: { teamId: string; entryId: string; vaultType: "blob" | "overview"; itemKeyVersion: number }): Uint8Array;
-```
-Keep `crypto-team.ts`'s `"OK"` scope (TeamMemberKey wrapping) as a separate public function, but refactor `buildTeamKeyWrapAAD` to call `buildAADBytes(AAD_SCOPE_TEAM_KEY, 4, [...fields])` internally instead of maintaining its own hand-rolled binary encoder loop. Also import `AAD_VERSION` from `crypto-aad.ts` instead of redeclaring it in `crypto-team.ts` (eliminates constant drift risk). Add regression tests with known AAD byte vectors to verify output is unchanged after refactoring. Audit all existing call sites of `buildTeamEntryAAD` that rely on the `vaultType = "blob"` default — these must be updated to pass `vaultType` explicitly before switching to overload signatures.
-
-**Risk**: If unified carelessly, `vaultType` omission weakens cross-field replay protection. Overload signatures mitigate this.
-
-### 19. Unify Encrypted Field Response Format
+### 19. Unify Encrypted Field Response Format (Deferred)
 
 **Problem**: Personal password API returns nested encryption objects:
 ```json
@@ -399,7 +392,9 @@ Team password API returns flat structure:
 
 **Action**: Standardize on one format (prefer nested for clarity). This is a **breaking API change** and requires a careful migration strategy.
 
-**Migration strategy**:
+**Status**: Deferred. Requires API versioning strategy (v1 → v2), affects 30-35 files including 185+ `blobIv`/`blobAuthTag` references. Will be addressed as a separate initiative with proper deprecation and migration planning.
+
+**Migration strategy** (for future implementation):
 1. **API versioning**: Introduce the new format in `/api/v2/` endpoints. Keep `/api/v1/` unchanged
 2. **Deprecation period**: Add `X-Deprecation-Notice` header to old-format responses for 2 release cycles
 3. **Client migration**: Update all frontend consumers to use the new nested format. Search for all `blobIv`, `blobAuthTag` field accesses

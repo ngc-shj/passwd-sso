@@ -7,7 +7,7 @@ import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
 import { createCustomAdapter } from "@/lib/auth-adapter";
 import { sessionMetaStorage } from "@/lib/session-meta";
-import { logAudit } from "@/lib/audit";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { extractClientIp } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -103,11 +103,7 @@ async function handlePOST(req: NextRequest) {
   const adapter = createCustomAdapter();
 
   // Run createSession inside sessionMetaStorage so IP/UA are captured
-  const meta = {
-    ip: extractClientIp(req),
-    userAgent: req.headers.get("user-agent") ?? null,
-    acceptLanguage: req.headers.get("accept-language") ?? null,
-  };
+  const meta = extractRequestMeta(req);
 
   await sessionMetaStorage.run(meta, async () => {
     await adapter.createSession!({
@@ -122,8 +118,7 @@ async function handlePOST(req: NextRequest) {
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.AUTH_LOGIN,
     userId: user.id,
-    ip: meta.ip,
-    userAgent: meta.userAgent,
+    ...meta,
   });
 
   // Set session cookie
