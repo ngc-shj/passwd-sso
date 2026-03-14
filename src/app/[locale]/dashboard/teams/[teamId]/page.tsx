@@ -801,29 +801,7 @@ export default function TeamDashboardPage({
                   />
                   <div className="flex-1 min-w-0">
                     <PasswordCard
-                      id={entry.id}
-                      entryType={entry.entryType}
-                      title={entry.title}
-                      username={entry.username}
-                      urlHost={entry.urlHost}
-                      snippet={entry.snippet}
-                      brand={entry.brand}
-                      lastFour={entry.lastFour}
-                      cardholderName={entry.cardholderName}
-                      fullName={entry.fullName}
-                      idNumberLast4={entry.idNumberLast4}
-                      relyingPartyId={entry.relyingPartyId}
-                      bankName={entry.bankName}
-                      accountNumberLast4={entry.accountNumberLast4}
-                      softwareName={entry.softwareName}
-                      licensee={entry.licensee}
-                      keyType={entry.keyType}
-                      fingerprint={entry.fingerprint}
-                      requireReprompt={entry.requireReprompt}
-                      expiresAt={entry.expiresAt}
-                      tags={entry.tags}
-                      isFavorite={entry.isFavorite}
-                      isArchived={entry.isArchived}
+                      entry={entry}
                       expanded={expandedId === entry.id}
                       onToggleFavorite={handleToggleFavorite}
                       onToggleArchive={handleToggleArchive}
@@ -853,29 +831,7 @@ export default function TeamDashboardPage({
               ) : (
                 <PasswordCard
                   key={entry.id}
-                  id={entry.id}
-                  entryType={entry.entryType}
-                  title={entry.title}
-                  username={entry.username}
-                  urlHost={entry.urlHost}
-                  snippet={entry.snippet}
-                  brand={entry.brand}
-                  lastFour={entry.lastFour}
-                  cardholderName={entry.cardholderName}
-                  fullName={entry.fullName}
-                  idNumberLast4={entry.idNumberLast4}
-                  relyingPartyId={entry.relyingPartyId}
-                  bankName={entry.bankName}
-                  accountNumberLast4={entry.accountNumberLast4}
-                  softwareName={entry.softwareName}
-                  licensee={entry.licensee}
-                  keyType={entry.keyType}
-                  fingerprint={entry.fingerprint}
-                  requireReprompt={entry.requireReprompt}
-                  expiresAt={entry.expiresAt}
-                  tags={entry.tags}
-                  isFavorite={entry.isFavorite}
-                  isArchived={entry.isArchived}
+                  entry={entry}
                   expanded={expandedId === entry.id}
                   onToggleFavorite={handleToggleFavorite}
                   onToggleArchive={handleToggleArchive}

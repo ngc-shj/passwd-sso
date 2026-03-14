@@ -11,6 +11,7 @@ import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -33,7 +34,7 @@ const unlockLimiter = createRateLimiter({
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Lockout check — before rate limiter and passphrase verification
@@ -48,25 +49,19 @@ async function handlePOST(request: NextRequest) {
   const rateKey = `rl:vault_unlock:${session.user.id}`;
   if (!(await unlockLimiter.check(rateKey)).allowed) {
     getLogger().warn({ userId: session.user.id }, "vault.unlock.rateLimited");
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = unlockSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return validationError(parsed.error.flatten());
   }
 
   const user = await withUserTenantRls(session.user.id, async () =>
@@ -86,10 +81,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user?.vaultSetupAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 404 }
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
   }
 
   // Verify: SHA-256(authHash + serverSalt) === stored serverHash

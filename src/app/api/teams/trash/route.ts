@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { unauthorized } from "@/lib/api-response";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -11,7 +12,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Find all teams the user is a member of (with role for permission check)

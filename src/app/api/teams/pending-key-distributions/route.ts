@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { unauthorized } from "@/lib/api-response";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -12,7 +12,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Find teams where the user is OWNER or ADMIN and team is E2E-enabled

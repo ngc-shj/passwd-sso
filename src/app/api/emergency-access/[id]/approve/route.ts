@@ -10,6 +10,7 @@ import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/c
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 // POST /api/emergency-access/[id]/approve — Owner early-approves emergency access request
 async function handlePOST(
@@ -18,7 +19,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -30,14 +31,11 @@ async function handlePOST(
   );
 
   if (!grant || grant.ownerId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (!canTransition(grant.status, EA_STATUS.ACTIVATED)) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_STATUS },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.INVALID_STATUS, 400);
   }
 
   await withUserTenantRls(session.user.id, async () =>

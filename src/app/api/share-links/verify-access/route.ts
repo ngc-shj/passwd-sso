@@ -8,6 +8,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { logAudit } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -28,16 +29,10 @@ async function handlePOST(req: NextRequest) {
 
   // Rate limit by IP+tokenHash and by tokenHash globally
   if (!(await ipLimiter.check(`rl:share_verify_ip:${ip}:${tokenHash}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
   if (!(await tokenLimiter.check(`rl:share_verify_token:${tokenHash}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const share = await withBypassRls(prisma, () =>
@@ -56,22 +51,19 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!share) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (share.revokedAt || share.expiresAt < new Date()) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (share.maxViews !== null && share.viewCount >= share.maxViews) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (!share.accessPasswordHash) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   if (!verifyAccessPassword(password, share.accessPasswordHash)) {
@@ -88,10 +80,7 @@ async function handlePOST(req: NextRequest) {
       userAgent: ua,
     });
 
-    return NextResponse.json(
-      { error: API_ERROR.SHARE_PASSWORD_INCORRECT },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
   }
 
   // Log successful verification

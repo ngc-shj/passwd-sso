@@ -6,6 +6,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,7 @@ export const runtime = "nodejs";
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   await withUserTenantRls(session.user.id, async () =>

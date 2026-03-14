@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -25,7 +26,7 @@ async function handleGET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id, historyId } = await params;
@@ -38,10 +39,10 @@ async function handleGET(
   );
 
   if (!entry) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const history = await withUserTenantRls(session.user.id, async () =>
@@ -51,7 +52,7 @@ async function handleGET(
   );
 
   if (!history || history.entryId !== id) {
-    return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
   }
 
   return NextResponse.json({
@@ -75,11 +76,11 @@ async function handlePATCH(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await reencryptLimiter.check(`rl:history_reencrypt:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { id, historyId } = await params;
@@ -89,24 +90,24 @@ async function handlePATCH(
 
   // Validate required fields
   if (!encryptedBlob || !blobIv || !blobAuthTag || keyVersion == null || !oldBlobHash) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate blob format
   if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0 || encryptedBlob.length > 1_000_000) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof blobIv !== "string" || !isValidHex(blobIv, 12)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof blobAuthTag !== "string" || !isValidHex(blobAuthTag, 16)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof keyVersion !== "number" || !Number.isInteger(keyVersion)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof oldBlobHash !== "string" || !isValidHex(oldBlobHash, 32)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Verify ownership
@@ -118,10 +119,10 @@ async function handlePATCH(
   );
 
   if (!entry) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const history = await withUserTenantRls(session.user.id, async () =>
@@ -131,7 +132,7 @@ async function handlePATCH(
   );
 
   if (!history || history.entryId !== id) {
-    return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
   }
 
   // Prevent key version downgrade or same-version re-encryption

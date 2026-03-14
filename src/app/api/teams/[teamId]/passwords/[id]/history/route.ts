@@ -5,6 +5,7 @@ import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -12,7 +13,7 @@ type Params = { params: Promise<{ teamId: string; id: string }> };
 async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -21,7 +22,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -34,7 +35,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const histories = await withTeamTenantRls(teamId, async () =>

@@ -6,6 +6,7 @@ import { verifyShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const contentLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -18,34 +19,22 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const ip = extractClientIp(req) ?? "unknown";
   if (!(await contentLimiter.check(`rl:share_content:${ip}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   // Extract access token from Authorization header
   const authHeader = req.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
-    return NextResponse.json(
-      { error: API_ERROR.SHARE_PASSWORD_REQUIRED },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.SHARE_PASSWORD_REQUIRED, 401);
   }
   const accessToken = authHeader.slice(7);
   if (accessToken.length > 512) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   // Verify the access token
   if (!verifyShareAccessToken(accessToken, id)) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   // All DB access must bypass RLS (unauthenticated public endpoint)
@@ -73,16 +62,16 @@ async function handleGET(req: NextRequest, { params }: Params) {
     });
 
     if (!share) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     // Only allow for password-protected shares
     if (!share.accessPasswordHash) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     if (share.revokedAt || share.expiresAt < new Date()) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     // Atomically check maxViews and increment viewCount.
@@ -97,13 +86,13 @@ async function handleGET(req: NextRequest, { params }: Params) {
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
-        return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 410 });
+        return errorResponse(API_ERROR.NOT_FOUND, 410);
       }
       viewCountDelta = 1;
     } else {
       // FILE: just check maxViews without incrementing
       if (share.maxViews !== null && share.viewCount >= share.maxViews) {
-        return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 410 });
+        return errorResponse(API_ERROR.NOT_FOUND, 410);
       }
     }
 
@@ -149,7 +138,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         )
       );
     } catch {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     return NextResponse.json({

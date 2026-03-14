@@ -66,29 +66,12 @@ import type {
   EntryTotp,
 } from "@/lib/entry-form-types";
 import { fetchApi } from "@/lib/url-helpers";
+import type { EntryCardData } from "@/types/entry-card";
+
+export type { EntryCardData };
 
 interface PasswordCardProps {
-  id: string;
-  entryType?: EntryTypeValue;
-  title: string;
-  username: string | null;
-  urlHost: string | null;
-  snippet?: string | null;
-  brand?: string | null;
-  lastFour?: string | null;
-  cardholderName?: string | null;
-  fullName?: string | null;
-  idNumberLast4?: string | null;
-  relyingPartyId?: string | null;
-  bankName?: string | null;
-  accountNumberLast4?: string | null;
-  softwareName?: string | null;
-  licensee?: string | null;
-  keyType?: string | null;
-  fingerprint?: string | null;
-  tags: EntryTagNameColor[];
-  isFavorite: boolean;
-  isArchived: boolean;
+  entry: EntryCardData;
   expanded: boolean;
   onToggleFavorite: (id: string, current: boolean) => void;
   onToggleArchive: (id: string, current: boolean) => void;
@@ -108,10 +91,6 @@ interface PasswordCardProps {
   createdBy?: string | null;
   // Optional: team context
   teamId?: string;
-  // Optional: reprompt indicator
-  requireReprompt?: boolean;
-  // Optional: expiration date
-  expiresAt?: string | null;
 }
 
 interface VaultEntryFull {
@@ -191,27 +170,7 @@ function scheduleClearClipboard(copiedValue: string) {
 }
 
 export function PasswordCard({
-  id,
-  entryType = ENTRY_TYPE.LOGIN,
-  title,
-  username,
-  urlHost,
-  snippet,
-  brand,
-  lastFour,
-  cardholderName,
-  fullName,
-  idNumberLast4,
-  relyingPartyId,
-  bankName,
-  accountNumberLast4,
-  softwareName,
-  licensee,
-  keyType,
-  fingerprint,
-  tags,
-  isFavorite,
-  isArchived,
+  entry,
   expanded,
   onToggleFavorite,
   onToggleArchive,
@@ -226,9 +185,32 @@ export function PasswordCard({
   canDelete = true,
   createdBy,
   teamId,
-  requireReprompt = false,
-  expiresAt,
 }: PasswordCardProps) {
+  const {
+    id,
+    entryType = ENTRY_TYPE.LOGIN,
+    title,
+    username,
+    urlHost,
+    snippet,
+    brand,
+    lastFour,
+    cardholderName,
+    fullName,
+    idNumberLast4,
+    relyingPartyId,
+    bankName,
+    accountNumberLast4,
+    softwareName,
+    licensee,
+    keyType,
+    fingerprint,
+    tags,
+    isFavorite,
+    isArchived,
+    requireReprompt = false,
+    expiresAt,
+  } = entry;
   const scopedTeamId = teamId;
   const isTeamMode = !!getPasswordProp;
   const isNote = entryType === ENTRY_TYPE.SECURE_NOTE;

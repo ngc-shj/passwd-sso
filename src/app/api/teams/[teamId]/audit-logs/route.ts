@@ -13,6 +13,7 @@ import {
 import type { AuditAction } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -22,7 +23,7 @@ const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -31,7 +32,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -89,7 +90,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       }),
     );
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = logs.length > limit;

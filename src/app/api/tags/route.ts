@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
@@ -18,7 +19,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const tags = await withUserTenantRls(session.user.id, async () =>
@@ -69,7 +70,7 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const result = await parseBody(req, createTagSchema);
@@ -83,7 +84,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (!actor) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Validate parent chain if parentId is provided
@@ -118,10 +119,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existing) {
-    return NextResponse.json(
-      { error: API_ERROR.TAG_ALREADY_EXISTS },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
   }
 
   const tag = await withUserTenantRls(session.user.id, async () =>

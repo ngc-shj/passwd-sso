@@ -8,6 +8,7 @@ import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -16,7 +17,7 @@ type Params = { params: Promise<{ teamId: string; memberId: string }> };
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, memberId } = await params;
@@ -30,7 +31,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       );
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -44,10 +45,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!targetMember || targetMember.teamId !== teamId || targetMember.deactivatedAt !== null) {
-    return NextResponse.json(
-      { error: API_ERROR.MEMBER_NOT_FOUND },
-      { status: 404 }
-    );
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
 
   // Verify the target user has an ECDH public key (vault set up)
@@ -59,18 +57,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!targetUser?.ecdhPublicKey) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_READY },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_READY, 409);
   }
 
   // Prevent overwriting an already-distributed key (S-11)
   if (targetMember.keyDistributed) {
-    return NextResponse.json(
-      { error: API_ERROR.KEY_ALREADY_DISTRIBUTED },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED, 409);
   }
 
   const result = await parseBody(req, teamMemberKeySchema);
@@ -137,22 +129,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (distributed === "member_not_found") {
-    return NextResponse.json(
-      { error: API_ERROR.MEMBER_NOT_FOUND },
-      { status: 404 }
-    );
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
   if (distributed === "already_distributed") {
-    return NextResponse.json(
-      { error: API_ERROR.KEY_ALREADY_DISTRIBUTED },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.KEY_ALREADY_DISTRIBUTED, 409);
   }
   if (distributed === "version_mismatch") {
-    return NextResponse.json(
-      { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
   }
 
   return NextResponse.json({ success: true });

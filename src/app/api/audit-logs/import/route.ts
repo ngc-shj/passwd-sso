@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_ACTION, AUDIT_SCOPE, IMPORT_FORMAT_VALUES } from "@/lib/constants";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
@@ -23,7 +24,7 @@ const bodySchema = z.object({
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const parsed = await parseBody(req, bodySchema);
@@ -36,7 +37,7 @@ async function handlePOST(req: NextRequest) {
       await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_CREATE);
     } catch (e) {
       if (e instanceof TeamAuthError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        return errorResponse(e.message, e.status);
       }
       throw e;
     }

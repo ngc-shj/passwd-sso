@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 
 // POST /api/passwords/[id]/restore - Restore from trash
 async function handlePOST(
@@ -14,7 +15,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -26,15 +27,15 @@ async function handlePOST(
   );
 
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (existing.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   if (!existing.deletedAt) {
-    return NextResponse.json({ error: API_ERROR.NOT_IN_TRASH }, { status: 400 });
+    return errorResponse(API_ERROR.NOT_IN_TRASH, 400);
   }
 
   await withUserTenantRls(session.user.id, async () =>

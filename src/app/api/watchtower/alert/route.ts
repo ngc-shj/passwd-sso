@@ -18,6 +18,7 @@ import { notificationTitle, notificationBody } from "@/lib/notification-messages
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -39,7 +40,7 @@ async function handlePOST(req: NextRequest) {
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Note: parseBody runs before rate limit because the rate limit key depends
@@ -65,7 +66,7 @@ async function handlePOST(req: NextRequest) {
       await requireTeamMember(session.user.id, teamId);
     } catch (e) {
       if (e instanceof TeamAuthError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        return errorResponse(e.message, e.status);
       }
       throw e;
     }

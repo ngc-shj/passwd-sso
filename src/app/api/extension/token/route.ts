@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { validateExtensionToken } from "@/lib/extension-token";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
@@ -28,17 +29,11 @@ const tokenLimiter = createRateLimiter({
 async function handlePOST() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   if (!(await tokenLimiter.check(`rl:ext_token:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const now = new Date();
@@ -53,10 +48,7 @@ async function handlePOST() {
     }),
   );
   if (!actor) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const created = await withUserTenantRls(session.user.id, async () =>
@@ -105,10 +97,7 @@ async function handleDELETE(req: NextRequest) {
       EXTENSION_TOKEN_REVOKED: 400,
       EXTENSION_TOKEN_EXPIRED: 400,
     };
-    return NextResponse.json(
-      { error: API_ERROR[result.error] },
-      { status: statusMap[result.error] ?? 400 },
-    );
+    return errorResponse(API_ERROR[result.error], statusMap[result.error] ?? 400);
   }
 
   await withUserTenantRls(result.data.userId, async () =>

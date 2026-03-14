@@ -14,6 +14,7 @@ import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationEr
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, notFound, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
@@ -39,14 +40,11 @@ const EXPIRY_MAP: Record<string, number> = {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await shareLinkLimiter.check(`rl:share_create:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const result = await parseBody(req, createShareLinkSchema);
@@ -72,7 +70,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (!entry || entry.userId !== session.user.id) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     // `data` is required by schema when `passwordEntryId` is set.
@@ -103,7 +101,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (!teamEntry) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     try {
@@ -114,7 +112,7 @@ async function handlePOST(req: NextRequest) {
         );
     } catch (e) {
       if (e instanceof TeamAuthError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        return errorResponse(e.message, e.status);
       }
       throw e;
     }
@@ -124,7 +122,7 @@ async function handlePOST(req: NextRequest) {
       await assertPolicyAllowsSharing(teamEntry.teamId);
     } catch (e) {
       if (e instanceof PolicyViolationError) {
-        return NextResponse.json({ error: API_ERROR.POLICY_SHARING_DISABLED }, { status: 403 });
+        return errorResponse(API_ERROR.POLICY_SHARING_DISABLED, 403);
       }
       throw e;
     }
@@ -134,7 +132,7 @@ async function handlePOST(req: NextRequest) {
       await assertPolicySharePassword(teamEntry.teamId, requirePassword);
     } catch (e) {
       if (e instanceof PolicyViolationError) {
-        return NextResponse.json({ error: API_ERROR.POLICY_SHARE_PASSWORD_REQUIRED }, { status: 403 });
+        return errorResponse(API_ERROR.POLICY_SHARE_PASSWORD_REQUIRED, 403);
       }
       throw e;
     }
@@ -211,7 +209,7 @@ async function handlePOST(req: NextRequest) {
 async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { searchParams } = new URL(req.url);
@@ -219,10 +217,7 @@ async function handleGET(req: NextRequest) {
   const teamPasswordEntryId = searchParams.get("teamPasswordEntryId");
 
   if (!passwordEntryId && !teamPasswordEntryId) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   const where: Record<string, unknown> = {
