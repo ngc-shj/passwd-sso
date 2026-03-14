@@ -259,12 +259,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         return true;
       }
 
-      const ok = await ensureTenantMembershipForSignIn(
-        userId,
-        params.account,
-        (params.profile ?? null) as Record<string, unknown> | null,
-      );
-      return ok;
+      try {
+        const ok = await ensureTenantMembershipForSignIn(
+          userId,
+          params.account,
+          (params.profile ?? null) as Record<string, unknown> | null,
+        );
+        return ok;
+      } catch (error) {
+        // MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED is handled inside
+        // ensureTenantMembershipForSignIn and returns false (not thrown here).
+        // Any other error is unexpected — log and block sign-in.
+        console.error(
+          `[AUTH_SIGNIN] provider=${provider ?? "unknown"} action=ensureTenantMembership error=${
+            error instanceof Error ? error.constructor.name : "unknown"
+          }`,
+        );
+        return false;
+      }
     },
     async session({ session, user }) {
       // Auth.js v5 database strategy passes raw adapter fields;

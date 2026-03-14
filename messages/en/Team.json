@@ -93,6 +93,8 @@
   "inviteExpired": "This invitation has expired",
   "inviteInvalid": "Invalid invitation",
   "networkError": "Network error",
+  "retryAccept": "Retry",
+  "vaultRequiredForInvite": "Please set up or unlock your vault to accept this invitation.",
   "forbidden": "You do not have permission to perform this action",
   "transferOwnership": "Transfer Ownership",
   "transferOwnershipDesc": "Transfer the owner role to another member. You will be demoted to Admin.",
