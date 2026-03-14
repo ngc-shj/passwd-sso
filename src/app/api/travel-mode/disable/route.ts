@@ -9,6 +9,7 @@ import { checkLockout, recordFailure } from "@/lib/account-lockout";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ const disableSchema = z.object({
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Lockout check — shared with vault unlock
@@ -40,7 +41,7 @@ async function handlePOST(request: NextRequest) {
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = disableSchema.safeParse(body);
@@ -62,7 +63,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   if (!user) {
-    return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
   }
 
   if (!user.travelModeActive) {

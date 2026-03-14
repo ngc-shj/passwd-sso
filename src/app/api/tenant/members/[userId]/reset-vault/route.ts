@@ -22,6 +22,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -49,7 +50,7 @@ async function handlePOST(
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { userId: targetUserId } = await params;
@@ -63,14 +64,14 @@ async function handlePOST(
     );
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
 
   // Cannot reset own vault
   if (targetUserId === session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   // Find the target member in same tenant
@@ -88,12 +89,12 @@ async function handlePOST(
   );
 
   if (!targetMember) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Role hierarchy check: actor must be strictly above target
   if (!isTenantRoleAbove(actor.role, targetMember.role)) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   // Rate limits
@@ -194,7 +195,7 @@ async function handleGET(
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { userId: targetUserId } = await params;
@@ -207,7 +208,7 @@ async function handleGET(
     );
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }

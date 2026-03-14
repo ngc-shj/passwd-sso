@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -14,7 +15,7 @@ export const runtime = "nodejs";
 async function handleGET(_request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const user = await withUserTenantRls(session.user.id, async () =>
@@ -28,7 +29,7 @@ async function handleGET(_request: NextRequest) {
   );
 
   if (!user) {
-    return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
   }
 
   return NextResponse.json({

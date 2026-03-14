@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -14,7 +15,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id, historyId } = await params;
@@ -26,10 +27,10 @@ async function handlePOST(
   );
 
   if (!entry) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const history = await withUserTenantRls(session.user.id, async () =>
@@ -39,7 +40,7 @@ async function handlePOST(
   );
 
   if (!history || history.entryId !== id) {
-    return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
   }
 
   // Snapshot current blob, then overwrite with history version

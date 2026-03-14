@@ -15,6 +15,7 @@ import {
   isValidSendFilename,
 } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
 
@@ -29,7 +30,7 @@ async function handleGET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -38,7 +39,7 @@ async function handleGET(
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -51,7 +52,7 @@ async function handleGET(
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const attachments = await withTeamTenantRls(teamId, async () =>
@@ -79,7 +80,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -88,7 +89,7 @@ async function handlePOST(
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -101,15 +102,12 @@ async function handlePOST(
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Require ItemKey (itemKeyVersion >= 1) for attachment upload
   if ((entry.itemKeyVersion ?? 0) < 1) {
-    return NextResponse.json(
-      { error: API_ERROR.ITEM_KEY_REQUIRED },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.ITEM_KEY_REQUIRED, 400);
   }
 
   // Check attachment count limit
@@ -119,10 +117,7 @@ async function handlePOST(
     }),
   );
   if (count >= MAX_ATTACHMENTS_PER_ENTRY) {
-    return NextResponse.json(
-      { error: API_ERROR.ATTACHMENT_LIMIT_EXCEEDED },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.ATTACHMENT_LIMIT_EXCEEDED, 400);
   }
 
   // Early rejection: check Content-Length before consuming body into memory
@@ -130,10 +125,7 @@ async function handlePOST(
   if (contentLength) {
     const declaredSize = parseInt(contentLength, 10);
     if (!isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
-      return NextResponse.json(
-        { error: API_ERROR.PAYLOAD_TOO_LARGE },
-        { status: 413 }
-      );
+      return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE, 413);
     }
   }
 
@@ -142,7 +134,7 @@ async function handlePOST(
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_FORM_DATA }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_FORM_DATA, 400);
   }
 
   const clientId = formData.get("id") as string | null;
@@ -156,95 +148,65 @@ async function handlePOST(
   const encryptionModeStr = formData.get("encryptionMode") as string | null;
 
   if (!file || !iv || !authTag || !filename || !contentType || !sizeBytes) {
-    return NextResponse.json(
-      { error: API_ERROR.MISSING_REQUIRED_FIELDS },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
   }
 
   // Validate iv/authTag format (hex strings)
   if (!/^[0-9a-f]{24}$/.test(iv)) {
-    return NextResponse.json({ error: API_ERROR.INVALID_IV_FORMAT }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_IV_FORMAT, 400);
   }
   if (!/^[0-9a-f]{32}$/.test(authTag)) {
-    return NextResponse.json({ error: API_ERROR.INVALID_AUTH_TAG_FORMAT }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_AUTH_TAG_FORMAT, 400);
   }
 
   // Validate original file size (before encryption)
   const originalSize = parseInt(sizeBytes, 10);
   if (isNaN(originalSize) || originalSize <= 0 || originalSize > MAX_FILE_SIZE) {
-    return NextResponse.json(
-      { error: API_ERROR.FILE_TOO_LARGE },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
   }
 
   // Validate extension
   const ext = getExtension(filename);
   if (!ALLOWED_EXTENSIONS.includes(ext as typeof ALLOWED_EXTENSIONS[number])) {
-    return NextResponse.json(
-      { error: API_ERROR.EXTENSION_NOT_ALLOWED },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.EXTENSION_NOT_ALLOWED, 400);
   }
 
   // Validate content type
   if (!ALLOWED_CONTENT_TYPES.includes(contentType as typeof ALLOWED_CONTENT_TYPES[number])) {
-    return NextResponse.json(
-      { error: API_ERROR.CONTENT_TYPE_NOT_ALLOWED },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.CONTENT_TYPE_NOT_ALLOWED, 400);
   }
 
   // Validate filename (reject path traversal, CRLF, null bytes, Windows reserved names, etc.)
   if (!isValidSendFilename(filename)) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_FILENAME },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.INVALID_FILENAME, 400);
   }
   const sanitizedFilename = filename.slice(0, 255);
 
   // Read encrypted blob and validate actual size
   const buffer = Buffer.from(await file.arrayBuffer());
   if (buffer.length > MAX_FILE_SIZE) {
-    return NextResponse.json(
-      { error: API_ERROR.FILE_TOO_LARGE },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
   }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
 
   // encryptionMode is required and must be 1 (ItemKey)
   if (!encryptionModeStr) {
-    return NextResponse.json(
-      { error: API_ERROR.MISSING_REQUIRED_FIELDS },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.MISSING_REQUIRED_FIELDS, 400);
   }
   const encryptionMode = parseInt(encryptionModeStr, 10);
   if (encryptionMode !== 1) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate aadVersion (must be 1)
   if (aadVersion !== 1) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate client-provided attachmentId format (UUID v4)
   if (clientId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clientId)) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   const blobStore = getAttachmentBlobStore();

@@ -6,6 +6,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { z } from "zod";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 
 const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 
@@ -18,21 +19,18 @@ const requestSchema = z.discriminatedUnion("mode", [
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await generateLimiter.check(`rl:pw_generate:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   // Support legacy requests without mode field
@@ -42,10 +40,7 @@ async function handlePOST(req: NextRequest) {
 
   const parsed = requestSchema.safeParse(input);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return validationError(parsed.error.flatten());
   }
 
   const data = parsed.data;

@@ -5,6 +5,7 @@ import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/check-auth";
+import { errorResponse } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -33,7 +34,7 @@ async function handleGET(request: NextRequest) {
   );
 
   if (!user) {
-    return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
   }
 
   return NextResponse.json({

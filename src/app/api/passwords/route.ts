@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, forbidden, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { authOrToken } from "@/lib/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
@@ -18,10 +19,10 @@ const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 async function handleGET(req: NextRequest) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (authResult?.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT }, { status: 403 });
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
   }
   if (!authResult) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authResult.userId;
 
@@ -111,10 +112,10 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE);
   if (authResult?.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT }, { status: 403 });
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
   }
   if (!authResult) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authResult.userId;
 
@@ -184,10 +185,10 @@ async function handlePOST(req: NextRequest) {
 
   if ("error" in createResult) {
     if (createResult.error === "UNAUTHORIZED") {
-      return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+      return unauthorized();
     }
     const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: detail }, { status: 400 });
+    return validationError(detail);
   }
 
   const { entry } = createResult;

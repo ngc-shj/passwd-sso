@@ -12,6 +12,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
 async function handlePOST(
@@ -20,7 +21,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -32,7 +33,7 @@ async function handlePOST(
   );
 
   if (!grant || grant.ownerId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const result = await parseBody(req, revokeEmergencyGrantSchema);
@@ -42,10 +43,7 @@ async function handlePOST(
   if (permanent) {
     // Full revoke
     if (!canTransition(grant.status, EA_STATUS.REVOKED)) {
-      return NextResponse.json(
-        { error: API_ERROR.INVALID_STATUS },
-        { status: 400 }
-      );
+      return errorResponse(API_ERROR.INVALID_STATUS, 400);
     }
 
     await withUserTenantRls(session.user.id, async () =>
@@ -93,10 +91,7 @@ async function handlePOST(
   } else {
     // Reject request only (revert to IDLE)
     if (!canTransition(grant.status, EA_STATUS.IDLE)) {
-      return NextResponse.json(
-        { error: API_ERROR.INVALID_STATUS },
-        { status: 400 }
-      );
+      return errorResponse(API_ERROR.INVALID_STATUS, 400);
     }
 
     await withUserTenantRls(session.user.id, async () =>

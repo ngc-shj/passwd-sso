@@ -11,6 +11,7 @@ import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -40,7 +41,7 @@ async function handlePOST(req: NextRequest) {
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Inline parsing: security-sensitive endpoint — do not expose schema details
@@ -48,12 +49,12 @@ async function handlePOST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_BODY, 400);
   }
 
   const parsed = adminResetSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_BODY, 400);
   }
 
   const { token, confirmation } = parsed.data;
@@ -76,12 +77,12 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!resetRecord) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Token must belong to the authenticated user
   if (resetRecord.targetUserId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   // Token must not be expired

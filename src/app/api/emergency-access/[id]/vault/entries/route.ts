@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 async function handleGET(
@@ -14,7 +15,7 @@ async function handleGET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -26,14 +27,11 @@ async function handleGET(
   );
 
   if (!grant || grant.granteeId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (grant.status !== EA_STATUS.ACTIVATED) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_ACTIVATED },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.NOT_ACTIVATED, 403);
   }
 
   // Fetch all non-deleted entries for the owner

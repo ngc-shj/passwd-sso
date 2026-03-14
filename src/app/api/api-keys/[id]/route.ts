@@ -3,6 +3,7 @@ import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -18,7 +19,7 @@ async function handleDELETE(
   if (!authed.ok) return authed.response;
   // API keys cannot manage API keys
   if (authed.auth.type === "api_key") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authed.auth.userId;
 
@@ -32,11 +33,11 @@ async function handleDELETE(
   );
 
   if (!key || key.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.API_KEY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.API_KEY_NOT_FOUND, 404);
   }
 
   if (key.revokedAt) {
-    return NextResponse.json({ error: API_ERROR.API_KEY_ALREADY_REVOKED }, { status: 400 });
+    return errorResponse(API_ERROR.API_KEY_ALREADY_REVOKED, 400);
   }
 
   await withUserTenantRls(userId, async () =>

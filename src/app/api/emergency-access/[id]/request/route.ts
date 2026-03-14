@@ -11,6 +11,7 @@ import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/c
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
 
@@ -21,11 +22,11 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await requestLimiter.check(`rl:ea_request:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { id } = await params;
@@ -37,14 +38,11 @@ async function handlePOST(
   );
 
   if (!grant || grant.granteeId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (!canTransition(grant.status, EA_STATUS.REQUESTED)) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_STATUS },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.INVALID_STATUS, 400);
   }
 
   const now = new Date();

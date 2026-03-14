@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { authOrToken } from "@/lib/auth-or-token";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, forbidden } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
@@ -18,7 +19,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 async function handleGET(req: NextRequest) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authResult.userId;
 
@@ -76,7 +77,7 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Only OWNER / ADMIN can create teams
@@ -85,7 +86,7 @@ async function handlePOST(req: NextRequest) {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.TEAM_CREATE);
   } catch (e) {
     if (e instanceof TenantAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -110,15 +111,12 @@ async function handlePOST(req: NextRequest) {
       (e.message === "TENANT_NOT_RESOLVED" ||
         e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
     ) {
-      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+      return forbidden();
     }
     throw e;
   }
   if (existing) {
-    return NextResponse.json(
-      { error: API_ERROR.SLUG_ALREADY_TAKEN },
-      { status: 409 },
-    );
+    return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN, 409);
   }
 
   let team;
@@ -162,13 +160,10 @@ async function handlePOST(req: NextRequest) {
       (e.message === "TENANT_NOT_RESOLVED" ||
         e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
     ) {
-      return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+      return forbidden();
     }
     if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return NextResponse.json(
-        { error: API_ERROR.SLUG_ALREADY_TAKEN },
-        { status: 409 }
-      );
+      return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN, 409);
     }
     throw e;
   }

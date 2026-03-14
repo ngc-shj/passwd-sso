@@ -7,6 +7,7 @@ import { parseBody } from "@/lib/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/tag-tree";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 
 // PUT /api/tags/[id] - Update a tag
 async function handlePUT(
@@ -15,7 +16,7 @@ async function handlePUT(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -24,10 +25,10 @@ async function handlePUT(
     prisma.tag.findUnique({ where: { id } }),
   );
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const result = await parseBody(req, updateTagSchema);
@@ -86,10 +87,7 @@ async function handlePUT(
       }),
     );
     if (duplicate) {
-      return NextResponse.json(
-        { error: API_ERROR.TAG_ALREADY_EXISTS },
-        { status: 409 }
-      );
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
     }
   }
 
@@ -115,7 +113,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -124,10 +122,10 @@ async function handleDELETE(
     prisma.tag.findUnique({ where: { id } }),
   );
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   await withUserTenantRls(session.user.id, async () =>

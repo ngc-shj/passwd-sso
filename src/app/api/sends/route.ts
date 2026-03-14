@@ -12,6 +12,7 @@ import {
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   AUDIT_TARGET_TYPE,
@@ -28,14 +29,11 @@ const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await sendTextLimiter.check(`rl:send_text:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const result = await parseBody(req, createSendTextSchema);
@@ -66,7 +64,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (!actor) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const share = await withUserTenantRls(session.user.id, async () =>

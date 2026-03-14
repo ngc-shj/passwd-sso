@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { validateExtensionToken } from "@/lib/extension-token";
 import { EXTENSION_TOKEN_TTL_MS } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -25,19 +26,13 @@ async function handlePOST(req: NextRequest) {
   const result = await validateExtensionToken(req);
 
   if (!result.ok) {
-    return NextResponse.json(
-      { error: API_ERROR[result.error] },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR[result.error], 401);
   }
 
   const { tokenId, userId, scopes } = result.data;
 
   if (!(await refreshLimiter.check(`rl:ext_refresh:${userId}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   // Verify user's Auth.js session is still active
@@ -52,10 +47,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!activeSession) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded
@@ -91,10 +83,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!created) {
-    return NextResponse.json(
-      { error: API_ERROR.EXTENSION_TOKEN_REVOKED },
-      { status: 401 },
-    );
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_REVOKED, 401);
   }
 
   return NextResponse.json({

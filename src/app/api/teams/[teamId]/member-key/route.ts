@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -14,7 +15,7 @@ type Params = { params: Promise<{ teamId: string }> };
 async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authResult.userId;
 
@@ -24,7 +25,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await requireTeamMember(userId, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -38,10 +39,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   );
 
   if (!membership?.keyDistributed) {
-    return NextResponse.json(
-      { error: API_ERROR.KEY_NOT_DISTRIBUTED },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.KEY_NOT_DISTRIBUTED, 403);
   }
 
   // Optional keyVersion query param (for history restore with old key)
@@ -51,10 +49,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (keyVersionParam) {
     const keyVersion = parseInt(keyVersionParam, 10);
     if (isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR },
-        { status: 400 }
-      );
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
     memberKey = await withTeamTenantRls(teamId, async () =>
       prisma.teamMemberKey.findUnique({
@@ -78,10 +73,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   if (!memberKey) {
-    return NextResponse.json(
-      { error: API_ERROR.MEMBER_KEY_NOT_FOUND },
-      { status: 404 }
-    );
+    return errorResponse(API_ERROR.MEMBER_KEY_NOT_FOUND, 404);
   }
 
   return NextResponse.json({

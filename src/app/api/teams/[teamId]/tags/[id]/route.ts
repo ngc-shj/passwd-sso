@@ -9,6 +9,7 @@ import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { validateParentChain, TagTreeError } from "@/lib/tag-tree";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -16,7 +17,7 @@ type Params = { params: Promise<{ teamId: string; id: string }> };
 async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -25,7 +26,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -34,7 +35,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     prisma.teamTag.findUnique({ where: { id } }),
   );
   if (!tag || tag.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const result = await parseBody(req, updateTeamTagSchema);
@@ -116,7 +117,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 async function handleDELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -125,7 +126,7 @@ async function handleDELETE(_req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -134,7 +135,7 @@ async function handleDELETE(_req: NextRequest, { params }: Params) {
     prisma.teamTag.findUnique({ where: { id } }),
   );
   if (!tag || tag.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   await withTeamTenantRls(teamId, async () =>

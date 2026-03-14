@@ -10,6 +10,7 @@ import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -17,7 +18,7 @@ type Params = { params: Promise<{ teamId: string }> };
 async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -26,7 +27,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -73,7 +74,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -82,7 +83,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -94,7 +95,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   // Cannot add yourself
   if (userId === session.user.id) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   type MemberResult = {
@@ -175,17 +176,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     });
   } catch (e) {
     if (e instanceof AlreadyMemberError) {
-      return NextResponse.json({ error: API_ERROR.ALREADY_A_MEMBER }, { status: 409 });
+      return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
     }
     if (e instanceof ScimManagedError) {
-      return NextResponse.json({ error: API_ERROR.SCIM_MANAGED_MEMBER }, { status: 409 });
+      return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
     }
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     // Prisma unique constraint violation (race condition)
     if (isPrismaUniqueConstraintError(e)) {
-      return NextResponse.json({ error: API_ERROR.ALREADY_A_MEMBER }, { status: 409 });
+      return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
     }
     throw e;
   }

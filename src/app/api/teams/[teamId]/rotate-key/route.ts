@@ -10,6 +10,7 @@ import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@
 import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -60,7 +61,7 @@ const rotateKeySchema = z.object({
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -69,7 +70,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -82,7 +83,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!team) {
-    return NextResponse.json({ error: API_ERROR.TEAM_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.TEAM_NOT_FOUND, 404);
   }
 
   const result = await parseBody(req, rotateKeySchema);
@@ -220,22 +221,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     if (e instanceof Error && e.message === "TEAM_KEY_VERSION_CONFLICT") {
-      return NextResponse.json(
-        { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
-        { status: 409 }
-      );
+      return errorResponse(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
     }
     if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
-      return NextResponse.json(
-        { error: API_ERROR.ENTRY_COUNT_MISMATCH },
-        { status: 400 }
-      );
+      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
     }
     if (e instanceof TxValidationError) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: e.details },
-        { status: 400 }
-      );
+      return validationError(e.details);
     }
     throw e;
   }

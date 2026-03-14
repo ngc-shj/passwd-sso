@@ -13,6 +13,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ async function handleGET(req: NextRequest) {
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   let actor;
@@ -39,7 +40,7 @@ async function handleGET(req: NextRequest) {
     );
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -67,7 +68,7 @@ async function handleGET(req: NextRequest) {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   let actor;
@@ -78,7 +79,7 @@ async function handlePOST(req: NextRequest) {
     );
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }

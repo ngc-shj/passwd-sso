@@ -7,6 +7,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -17,7 +18,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const result = await parseBody(req, rejectEmergencyGrantSchema);
@@ -32,21 +33,15 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (!grant) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 }
-    );
+    return notFound();
   }
 
   if (grant.status !== EA_STATUS.PENDING) {
-    return NextResponse.json({ error: API_ERROR.INVITATION_ALREADY_USED }, { status: 410 });
+    return errorResponse(API_ERROR.INVITATION_ALREADY_USED, 410);
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return NextResponse.json(
-      { error: API_ERROR.INVITATION_WRONG_EMAIL },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL, 403);
   }
 
   await withUserTenantRls(session.user.id, async () =>

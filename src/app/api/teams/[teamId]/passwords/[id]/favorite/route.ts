@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -14,7 +15,7 @@ type Params = { params: Promise<{ teamId: string; id: string }> };
 async function handlePOST(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -23,7 +24,7 @@ async function handlePOST(_req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -37,7 +38,7 @@ async function handlePOST(_req: NextRequest, { params }: Params) {
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Toggle: if exists, remove; if not, create
