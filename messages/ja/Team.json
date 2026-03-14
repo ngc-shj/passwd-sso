@@ -93,6 +93,8 @@
   "inviteExpired": "この招待は期限切れです",
   "inviteInvalid": "無効な招待です",
   "networkError": "ネットワークエラー",
+  "retryAccept": "再試行",
+  "vaultRequiredForInvite": "招待を受け入れるには、保管庫のセットアップまたはアンロックが必要です。",
   "forbidden": "この操作を行う権限がありません",
   "transferOwnership": "オーナー権限の譲渡",
   "transferOwnershipDesc": "オーナー権限を他のメンバーに譲渡します。あなたは管理者に降格されます。",

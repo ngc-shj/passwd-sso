@@ -55,7 +55,9 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
   }
 
-  // Verify the invitation email matches the authenticated user
+  // Verify the invitation email matches the authenticated user.
+  // Known limitation: uses case-insensitive comparison only.
+  // Gmail alias normalization (+tag removal, dot removal) is not handled.
   if (invitation.email.toLowerCase() !== session.user.email.toLowerCase()) {
     return errorResponse(API_ERROR.INVITATION_WRONG_EMAIL, 403);
   }

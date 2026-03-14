@@ -60,5 +60,6 @@
   "recoveryKeyGenerating": "Generating Recovery Key...",
   "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key.",
   "vaultMustBeUnlocked": "Vault must be unlocked.",
-  "or": "or"
+  "or": "or",
+  "setupInviteContext": "To accept this invitation, you need to set up your vault first. Please set a passphrase below."
 }

@@ -14,11 +14,15 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Loader2, Eye, EyeOff, ShieldCheck } from "lucide-react";
+import { Loader2, Eye, EyeOff, ShieldCheck, Info } from "lucide-react";
 import { getStrength, STRENGTH_COLORS } from "./passphrase-strength";
 import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 
-export function VaultSetupWizard() {
+interface VaultSetupWizardProps {
+  contextMessage?: string;
+}
+
+export function VaultSetupWizard({ contextMessage }: VaultSetupWizardProps) {
   const t = useTranslations("Vault");
   const { setup } = useVault();
 
@@ -51,7 +55,14 @@ export function VaultSetupWizard() {
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
-      <Card className="w-full max-w-md rounded-xl border">
+      <div className="w-full max-w-md space-y-4">
+      {contextMessage && (
+        <div className="flex items-start gap-3 rounded-lg border border-blue-500/30 bg-blue-50 p-4 text-sm text-blue-800 dark:bg-blue-950/20 dark:text-blue-200">
+          <Info className="h-5 w-5 mt-0.5 shrink-0" />
+          <p>{contextMessage}</p>
+        </div>
+      )}
+      <Card className="w-full rounded-xl border">
         <CardHeader className="text-center">
           <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
             <ShieldCheck className="h-6 w-6 text-primary" />
@@ -150,6 +161,7 @@ export function VaultSetupWizard() {
           </form>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }
