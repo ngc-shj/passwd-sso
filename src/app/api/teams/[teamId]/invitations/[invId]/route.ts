@@ -5,11 +5,12 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; invId: string }> };
 
 // DELETE /api/teams/[teamId]/invitations/[invId] — Cancel invitation
-export async function DELETE(_req: NextRequest, { params }: Params) {
+async function handleDELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -45,3 +46,5 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const DELETE = withRequestLog(handleDELETE);

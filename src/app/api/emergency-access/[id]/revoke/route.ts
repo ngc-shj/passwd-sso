@@ -10,9 +10,11 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { parseBody } from "@/lib/parse-body";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // POST /api/emergency-access/[id]/revoke — Owner revokes or rejects request
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
@@ -33,19 +35,9 @@ export async function POST(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = revokeEmergencyGrantSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
-  }
-
-  const { permanent } = parsed.data;
+  const result = await parseBody(req, revokeEmergencyGrantSchema);
+  if (!result.ok) return result.response;
+  const { permanent } = result.data;
 
   if (permanent) {
     // Full revoke
@@ -131,3 +123,5 @@ export async function POST(
     return NextResponse.json({ status: EA_STATUS.IDLE });
   }
 }
+
+export const POST = withRequestLog(handlePOST);

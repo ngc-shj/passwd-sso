@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
+import { parseBody } from "@/lib/parse-body";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -64,31 +65,15 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  const parsed = verifyRegistrationSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
+  const result = await parseBody(req, verifyRegistrationSchema);
+  if (!result.ok) return result.response;
   const {
     response,
     nickname,
     prfEncryptedSecretKey,
     prfSecretKeyIv,
     prfSecretKeyAuthTag,
-  } = parsed.data;
+  } = result.data;
 
   // Consume challenge from Redis (separate key from authentication)
   const challenge = await redis.getdel(`webauthn:challenge:register:${userId}`);

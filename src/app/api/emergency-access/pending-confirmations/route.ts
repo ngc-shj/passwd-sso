@@ -4,10 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/emergency-access/pending-confirmations
 // Returns ACCEPTED/STALE grants owned by the current user that need key escrow
-export async function GET() {
+async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -37,3 +38,5 @@ export async function GET() {
 
   return NextResponse.json(grants);
 }
+
+export const GET = withRequestLog(handleGET);

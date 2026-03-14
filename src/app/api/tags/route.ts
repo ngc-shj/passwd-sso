@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createTagSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import {
@@ -11,9 +12,10 @@ import {
   flattenTagTree,
   TagTreeError,
 } from "@/lib/tag-tree";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/tags - List user's tags with password count
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -64,28 +66,16 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/tags - Create a new tag
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, createTagSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = createTagSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { name, color, parentId } = parsed.data;
+  const { name, color, parentId } = result.data;
   const actor = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },
@@ -151,3 +141,6 @@ export async function POST(req: NextRequest) {
     { status: 201 }
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

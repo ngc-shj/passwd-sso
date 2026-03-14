@@ -12,6 +12,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -102,7 +103,7 @@ async function buildResourceFromMapping(
 }
 
 // GET /api/scim/v2/Groups/[id]
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -129,7 +130,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // PUT /api/scim/v2/Groups/[id] — Full member replacement
-export async function PUT(req: NextRequest, { params }: Params) {
+async function handlePUT(req: NextRequest, { params }: Params): Promise<Response> {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -247,9 +248,9 @@ export async function PUT(req: NextRequest, { params }: Params) {
     return { resource, mapping, toAdd, toRemove };
   });
   if ("error" in resultResponse) {
-    return resultResponse.error;
+    return resultResponse.error as Response;
   }
-  const { resource, mapping, toAdd, toRemove } = resultResponse;
+  const { resource, mapping, toAdd, toRemove } = resultResponse as Exclude<typeof resultResponse, { error: unknown }>;
 
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
@@ -267,7 +268,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // PATCH /api/scim/v2/Groups/[id] — Add/remove members
-export async function PATCH(req: NextRequest, { params }: Params) {
+async function handlePATCH(req: NextRequest, { params }: Params): Promise<Response> {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -371,9 +372,9 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     return { resource, mapping };
   });
   if ("error" in resultResponse) {
-    return resultResponse.error;
+    return resultResponse.error as Response;
   }
-  const { resource, mapping } = resultResponse;
+  const { resource, mapping } = resultResponse as Exclude<typeof resultResponse, { error: unknown }>;
 
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
@@ -394,7 +395,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/scim/v2/Groups/[id] — Not allowed
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params): Promise<Response> {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -413,3 +414,8 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return scimError(405, "Role-based groups cannot be deleted");
 }
+
+export const GET = withRequestLog(handleGET);
+export const PUT = withRequestLog(handlePUT);
+export const PATCH = withRequestLog(handlePATCH);
+export const DELETE = withRequestLog(handleDELETE);

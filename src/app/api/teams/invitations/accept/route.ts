@@ -6,11 +6,12 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
 // POST /api/teams/invitations/accept — Accept an invitation by token
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -167,3 +168,5 @@ export async function POST(req: NextRequest) {
     vaultSetupRequired,
   });
 }
+
+export const POST = withRequestLog(handlePOST);

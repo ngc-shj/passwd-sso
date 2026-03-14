@@ -5,9 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -55,7 +57,7 @@ const rotateKeySchema = z.object({
 });
 
 // POST /api/teams/[teamId]/rotate-key — Rotate team encryption key
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -83,22 +85,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     return NextResponse.json({ error: API_ERROR.TEAM_NOT_FOUND }, { status: 404 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, rotateKeySchema);
+  if (!result.ok) return result.response;
 
-  const parsed = rotateKeySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { newTeamKeyVersion, entries, memberKeys } = parsed.data;
+  const { newTeamKeyVersion, entries, memberKeys } = result.data;
 
   // Validate version increment
   if (newTeamKeyVersion !== team.teamKeyVersion + 1) {
@@ -271,3 +261,5 @@ export async function POST(req: NextRequest, { params }: Params) {
     teamKeyVersion: newTeamKeyVersion,
   });
 }
+
+export const POST = withRequestLog(handlePOST);

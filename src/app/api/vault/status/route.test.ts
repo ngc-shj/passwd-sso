@@ -1,19 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { NextResponse } from "next/server";
+import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuthOrToken, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuthOrToken: vi.fn(),
+const { mockCheckAuth, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() => ({
+  mockCheckAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
-}));
-vi.mock("@/lib/access-restriction", () => ({
-  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -21,30 +20,42 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { NextRequest } from "next/server";
 import { GET } from "./route";
+
+function authOk(userId = "test-user-id", type = "session") {
+  const auth = type === "token"
+    ? { type, userId, scopes: [] as string[] }
+    : { type, userId };
+  return { ok: true, auth };
+}
+
+function authFail(status = 401, error = "UNAUTHORIZED") {
+  return { ok: false, response: NextResponse.json({ error }, { status }) };
+}
 
 describe("GET /api/vault/status", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockCheckAuth.mockResolvedValue(authOk());
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuthOrToken.mockResolvedValue(null);
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    mockCheckAuth.mockResolvedValue(authFail());
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     expect(res.status).toBe(401);
   });
 
   it("returns 403 when scope insufficient", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    mockCheckAuth.mockResolvedValue(
+      authFail(403, "EXTENSION_TOKEN_SCOPE_INSUFFICIENT"),
+    );
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     expect(res.status).toBe(403);
   });
 
   it("returns 404 when user not found", async () => {
     mockPrismaUser.findUnique.mockResolvedValue(null);
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     expect(res.status).toBe(404);
   });
 
@@ -58,7 +69,7 @@ describe("GET /api/vault/status", () => {
       recoveryKeySetAt: null,
       tenant: { vaultAutoLockMinutes: null },
     });
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json).toEqual({
@@ -82,7 +93,7 @@ describe("GET /api/vault/status", () => {
       recoveryKeySetAt: null,
       tenant: { vaultAutoLockMinutes: null },
     });
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.setupRequired).toBe(false);
@@ -103,17 +114,13 @@ describe("GET /api/vault/status", () => {
       recoveryKeySetAt: new Date(),
       tenant: { vaultAutoLockMinutes: null },
     });
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();
     expect(json.hasRecoveryKey).toBe(true);
   });
 
   it("works with Bearer token auth", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "token",
-      userId: "token-user-id",
-      scopes: ["vault:unlock-data"],
-    });
+    mockCheckAuth.mockResolvedValue(authOk("token-user-id", "token"));
     mockPrismaUser.findUnique.mockResolvedValue({
       vaultSetupAt: new Date(),
       accountSalt: "b".repeat(64),
@@ -123,7 +130,7 @@ describe("GET /api/vault/status", () => {
       recoveryKeySetAt: null,
       tenant: { vaultAutoLockMinutes: 30 },
     });
-    const res = await GET(new NextRequest("http://localhost/api/vault/status"));
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();
     expect(res.status).toBe(200);
     expect(json.accountSalt).toBe("b".repeat(64));

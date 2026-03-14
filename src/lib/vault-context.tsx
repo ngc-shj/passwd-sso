@@ -25,7 +25,6 @@ import {
   encryptBinary,
   decryptBinary,
 } from "./crypto-client";
-import { createKeyEscrow } from "./crypto-emergency";
 import { TeamVaultProvider } from "./team-vault-context";
 import {
   generateECDHKeyPair,
@@ -33,14 +32,17 @@ import {
   exportPrivateKey,
   deriveEcdhWrappingKey,
 } from "./crypto-team";
-import { API_PATH, apiPath, VAULT_STATUS } from "@/lib/constants";
+import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
+import { hexDecode, hexEncode } from "./crypto-utils";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
 } from "./webauthn-client";
+import { AutoLockProvider } from "./auto-lock-context";
+import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "./emergency-access-context";
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {
@@ -98,72 +100,22 @@ interface VaultContextValue {
 
 const VaultContext = createContext<VaultContextValue | null>(null);
 
-// ─── Constants ──────────────────────────────────────────────────
-
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
-const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
-const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
-
-function hexDecode(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
-  }
-  return bytes;
-}
-
-function hexEncode(buf: Uint8Array): string {
-  return Array.from(buf)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-}
-
-// ─── Emergency Access Auto-Confirm ──────────────────────────
-
-async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string, keyVersion: number): Promise<void> {
-  const res = await fetchApi(API_PATH.EMERGENCY_PENDING_CONFIRMATIONS);
-  if (!res.ok) return;
-  const grants: Array<{
-    id: string;
-    granteeId: string;
-    granteePublicKey: string;
-  }> = await res.json();
-
-  for (const grant of grants) {
-    try {
-      const escrow = await createKeyEscrow(secretKey, grant.granteePublicKey, {
-        grantId: grant.id,
-        ownerId,
-        granteeId: grant.granteeId,
-        keyVersion,
-      });
-      await fetchApi(apiPath.emergencyConfirm(grant.id), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(escrow),
-      });
-    } catch {
-      // Skip individual grant failures
-    }
-  }
-}
-
 // ─── Provider ───────────────────────────────────────────────────
 
 export function VaultProvider({ children }: { children: ReactNode }) {
-  const { data: session, status: sessionStatus } = useSession();
+  const { data: session, status: sessionStatus, update } = useSession();
+  const updateRef = useRef(update);
+  useEffect(() => {
+    updateRef.current = update;
+  }, [update]);
   const [vaultStatus, setVaultStatus] = useState<VaultStatus>(VAULT_STATUS.LOADING);
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
+  const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
   const wrappedKeyRef = useRef<{ ciphertext: string; iv: string; authTag: string } | null>(null);
-  const lastActivityRef = useRef(Date.now());
-  const hiddenAtRef = useRef<number | null>(null);
-  const autoLockMsRef = useRef(DEFAULT_INACTIVITY_TIMEOUT_MS);
-  const hiddenLockMsRef = useRef(DEFAULT_HIDDEN_TIMEOUT_MS);
   // ECDH key pair for team E2E encryption
   const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
   const ecdhPublicKeyJwkRef = useRef<string | null>(null);
@@ -189,8 +141,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         setHasRecoveryKey(!!data.hasRecoveryKey);
         // Apply tenant-configured vault auto-lock timeout
         if (data.vaultAutoLockMinutes != null && data.vaultAutoLockMinutes > 0) {
-          autoLockMsRef.current = data.vaultAutoLockMinutes * 60_000;
-          hiddenLockMsRef.current = Math.min(data.vaultAutoLockMinutes * 60_000, DEFAULT_HIDDEN_TIMEOUT_MS);
+          setAutoLockMinutes(data.vaultAutoLockMinutes);
         }
         setVaultStatus((prev) => {
           // SETUP_REQUIRED always wins (vault was reset while unlocked)
@@ -207,7 +158,29 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     checkVaultStatus();
   }, [session, sessionStatus]);
 
-  // ─── Auto-lock on inactivity ──────────────────────────────────
+  // ─── Timeout fallback for LOADING state ──────────────────────
+  // If session sync stalls after OIDC re-auth, retry then fall back to LOCKED
+
+  useEffect(() => {
+    if (vaultStatus !== VAULT_STATUS.LOADING) return;
+
+    // First timeout: force a session refresh after 10s
+    const retryTimer = setTimeout(() => {
+      updateRef.current();
+    }, 10_000);
+
+    // Second timeout: if still LOADING after 15s, show lock screen
+    const fallbackTimer = setTimeout(() => {
+      setVaultStatus((prev) =>
+        prev === VAULT_STATUS.LOADING ? VAULT_STATUS.LOCKED : prev,
+      );
+    }, 15_000);
+
+    return () => {
+      clearTimeout(retryTimer);
+      clearTimeout(fallbackTimer);
+    };
+  }, [vaultStatus]);
 
   const lock = useCallback(() => {
     if (secretKeyRef.current) {
@@ -225,94 +198,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       prev === VAULT_STATUS.UNLOCKED ? VAULT_STATUS.LOCKED : prev
     );
   }, []);
-
-  useEffect(() => {
-    if (vaultStatus !== VAULT_STATUS.UNLOCKED) return;
-
-    const updateActivity = () => {
-      lastActivityRef.current = Date.now();
-    };
-
-    const handleVisibility = () => {
-      if (document.hidden) {
-        hiddenAtRef.current = Date.now();
-      } else {
-        hiddenAtRef.current = null;
-        updateActivity();
-      }
-    };
-
-    const checkInactivity = () => {
-      const now = Date.now();
-
-      // When tab is hidden, only check hidden timeout (not inactivity).
-      // The user may be active in other tabs — that's not "inactivity".
-      if (document.hidden) {
-        if (hiddenAtRef.current && now - hiddenAtRef.current > hiddenLockMsRef.current) {
-          lock();
-        }
-        return;
-      }
-
-      // Tab is visible — check inactivity timeout
-      const sinceActivity = now - lastActivityRef.current;
-      if (sinceActivity > autoLockMsRef.current) {
-        lock();
-      }
-    };
-
-    window.addEventListener("mousemove", updateActivity);
-    window.addEventListener("keydown", updateActivity);
-    window.addEventListener("click", updateActivity);
-    window.addEventListener("scroll", updateActivity, true);
-    window.addEventListener("wheel", updateActivity, { passive: true });
-    window.addEventListener("touchstart", updateActivity);
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    const intervalId = setInterval(checkInactivity, ACTIVITY_CHECK_INTERVAL_MS);
-
-    return () => {
-      window.removeEventListener("mousemove", updateActivity);
-      window.removeEventListener("keydown", updateActivity);
-      window.removeEventListener("click", updateActivity);
-      window.removeEventListener("scroll", updateActivity, true);
-      window.removeEventListener("wheel", updateActivity);
-      window.removeEventListener("touchstart", updateActivity);
-      document.removeEventListener("visibilitychange", handleVisibility);
-      clearInterval(intervalId);
-    };
-  }, [vaultStatus, lock]);
-
-  // ─── Periodic EA auto-confirm ────────────────────────────────
-
-  useEffect(() => {
-    if (vaultStatus !== VAULT_STATUS.UNLOCKED || !session?.user?.id) return;
-
-    const userId = session.user.id;
-    let inFlight = false;
-
-    const run = () => {
-      if (inFlight || !secretKeyRef.current) return;
-      inFlight = true;
-      confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current)
-        .catch(() => {})
-        .finally(() => { inFlight = false; });
-    };
-
-    const intervalId = setInterval(run, EA_CONFIRM_INTERVAL_MS);
-
-    // Re-check on tab focus and network reconnect
-    const handleVisible = () => { if (!document.hidden) run(); };
-    const handleOnline = () => run();
-    document.addEventListener("visibilitychange", handleVisible);
-    window.addEventListener("online", handleOnline);
-
-    return () => {
-      clearInterval(intervalId);
-      document.removeEventListener("visibilitychange", handleVisible);
-      window.removeEventListener("online", handleOnline);
-    };
-  }, [vaultStatus, session?.user?.id]);
 
   // ─── SecretKey cleanup on unmount / page unload ─────────────
 
@@ -409,7 +294,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     secretKey.fill(0);
     setEncryptionKey(encKey);
     setVaultStatus(VAULT_STATUS.UNLOCKED);
-    lastActivityRef.current = Date.now();
   }, []);
 
   // ─── Unlock ───────────────────────────────────────────────────
@@ -522,15 +406,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // 7. Auto-confirm pending emergency access grants (async nonblocking)
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
-        confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {
-          // Silently ignore — emergency access confirmation is best-effort
-        });
+        const sk = new Uint8Array(secretKeyRef.current);
+        confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
+          .catch(() => {})
+          .finally(() => sk.fill(0));
       }
 
       // 8. Store encryption key in memory
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
-      lastActivityRef.current = Date.now();
 
       return true;
     } catch (err) {
@@ -666,13 +550,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // 8. Auto-confirm pending emergency access grants
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
-        confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {});
+        const sk = new Uint8Array(secretKeyRef.current);
+        confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
+          .catch(() => {})
+          .finally(() => sk.fill(0));
       }
 
       // 9. Set unlocked
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
-      lastActivityRef.current = Date.now();
 
       return true;
     } catch (err) {
@@ -796,13 +682,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // Auto-confirm pending emergency access grants
       const userId = session?.user?.id;
       if (userId && secretKeyRef.current) {
-        confirmPendingEmergencyGrants(secretKeyRef.current, userId, keyVersionRef.current).catch(() => {});
+        const sk = new Uint8Array(secretKeyRef.current);
+        confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
+          .catch(() => {})
+          .finally(() => sk.fill(0));
       }
 
       // Set unlocked
       setEncryptionKey(encKey);
       setVaultStatus(VAULT_STATUS.UNLOCKED);
-      lastActivityRef.current = Date.now();
 
       return true;
     } catch (err) {
@@ -919,13 +807,26 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         getEcdhPublicKeyJwk,
       }}
     >
-      <TeamVaultProvider
-        getEcdhPrivateKeyBytes={getEcdhPrivateKeyBytes}
-        getUserId={getUserId}
-        vaultUnlocked={vaultStatus === VAULT_STATUS.UNLOCKED}
+      <AutoLockProvider
+        vaultStatus={vaultStatus}
+        lock={lock}
+        autoLockMinutes={autoLockMinutes}
       >
-        {children}
-      </TeamVaultProvider>
+        <EmergencyAccessProvider
+          vaultStatus={vaultStatus}
+          getSecretKey={getSecretKey}
+          keyVersion={keyVersionRef.current}
+          userId={session?.user?.id}
+        >
+          <TeamVaultProvider
+            getEcdhPrivateKeyBytes={getEcdhPrivateKeyBytes}
+            getUserId={getUserId}
+            vaultUnlocked={vaultStatus === VAULT_STATUS.UNLOCKED}
+          >
+            {children}
+          </TeamVaultProvider>
+        </EmergencyAccessProvider>
+      </AutoLockProvider>
     </VaultContext.Provider>
   );
 }

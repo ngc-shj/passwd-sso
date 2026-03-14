@@ -26,6 +26,7 @@ import {
   exportPublicKey,
   importPublicKey,
 } from "./crypto-emergency";
+import { toArrayBuffer, textEncode } from "./crypto-utils";
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -49,23 +50,6 @@ const AAD_SCOPE_TEAM_KEY = "OK";
 
 /** AAD version for team key wrapping */
 const AAD_VERSION = 1;
-
-// ─── Utility ────────────────────────────────────────────────────
-
-function toArrayBuffer(arr: Uint8Array): ArrayBuffer {
-  return arr.buffer.slice(
-    arr.byteOffset,
-    arr.byteOffset + arr.byteLength
-  ) as ArrayBuffer;
-}
-
-function textEncode(text: string): ArrayBuffer {
-  const arr = new TextEncoder().encode(text);
-  return arr.buffer.slice(
-    arr.byteOffset,
-    arr.byteOffset + arr.byteLength
-  ) as ArrayBuffer;
-}
 
 // ─── Team Symmetric Key Generation ───────────────────────────────
 

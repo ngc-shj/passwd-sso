@@ -4,11 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // GET /api/teams/[teamId]/passwords/[id]/history - List team entry history
-export async function GET(_req: NextRequest, { params }: Params) {
+async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -61,3 +62,5 @@ export async function GET(_req: NextRequest, { params }: Params) {
     })),
   );
 }
+
+export const GET = withRequestLog(handleGET);

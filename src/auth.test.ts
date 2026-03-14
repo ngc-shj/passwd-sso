@@ -7,6 +7,8 @@ const {
   mockSlugifyTenant,
   mockTenantClaimStore,
   mockTenantClaimGetStore,
+  mockSessionMetaGetStore,
+  mockLogAudit,
 } = vi.hoisted(() => {
   const mockPrisma = {
     tenant: {
@@ -89,6 +91,8 @@ const {
     mockSlugifyTenant: vi.fn(),
     mockTenantClaimStore: { tenantClaim: null as string | null },
     mockTenantClaimGetStore: vi.fn(),
+    mockSessionMetaGetStore: vi.fn(),
+    mockLogAudit: vi.fn(),
   };
 });
 
@@ -110,7 +114,11 @@ vi.mock("@/lib/auth-adapter", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAudit: mockLogAudit,
+}));
+
+vi.mock("@/lib/session-meta", () => ({
+  sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -555,5 +563,97 @@ describe("NextAuth basePath", () => {
     expect(config).toHaveProperty("basePath");
     expect(typeof config.basePath).toBe("string");
     expect((config.basePath as string).endsWith("/api/auth")).toBe(true);
+  });
+});
+
+describe("auth events", () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const events = (nextAuthInitArgs[0] as any).events as {
+    signIn: (params: { user: { id?: string } }) => Promise<void>;
+    signOut: (message: { session?: { userId?: string } }) => Promise<void>;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe("signIn event", () => {
+    it("logs AUTH_LOGIN with IP/UA from sessionMetaStorage", async () => {
+      mockSessionMetaGetStore.mockReturnValue({
+        ip: "192.168.1.1",
+        userAgent: "Mozilla/5.0",
+        acceptLanguage: "ja",
+      });
+
+      await events.signIn({ user: { id: "user-1" } });
+
+      expect(mockLogAudit).toHaveBeenCalledWith({
+        scope: "PERSONAL",
+        action: "AUTH_LOGIN",
+        userId: "user-1",
+        ip: "192.168.1.1",
+        userAgent: "Mozilla/5.0",
+      });
+    });
+
+    it("falls back to null when sessionMetaStorage is empty", async () => {
+      mockSessionMetaGetStore.mockReturnValue(undefined);
+
+      await events.signIn({ user: { id: "user-1" } });
+
+      expect(mockLogAudit).toHaveBeenCalledWith({
+        scope: "PERSONAL",
+        action: "AUTH_LOGIN",
+        userId: "user-1",
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    it("does not log when user.id is missing", async () => {
+      await events.signIn({ user: {} });
+
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("signOut event", () => {
+    it("logs AUTH_LOGOUT with IP/UA from sessionMetaStorage", async () => {
+      mockSessionMetaGetStore.mockReturnValue({
+        ip: "10.0.0.1",
+        userAgent: "Chrome/120",
+        acceptLanguage: "en",
+      });
+
+      await events.signOut({ session: { userId: "user-2" } });
+
+      expect(mockLogAudit).toHaveBeenCalledWith({
+        scope: "PERSONAL",
+        action: "AUTH_LOGOUT",
+        userId: "user-2",
+        ip: "10.0.0.1",
+        userAgent: "Chrome/120",
+      });
+    });
+
+    it("falls back to null when sessionMetaStorage is empty", async () => {
+      mockSessionMetaGetStore.mockReturnValue(undefined);
+
+      await events.signOut({ session: { userId: "user-2" } });
+
+      expect(mockLogAudit).toHaveBeenCalledWith({
+        scope: "PERSONAL",
+        action: "AUTH_LOGOUT",
+        userId: "user-2",
+        ip: null,
+        userAgent: null,
+      });
+    });
+
+    it("does not log when session is missing", async () => {
+      await events.signOut({});
+
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    });
   });
 });

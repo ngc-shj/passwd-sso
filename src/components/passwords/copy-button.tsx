@@ -18,7 +18,7 @@ interface CopyButtonProps {
   size?: "icon" | "sm" | "default";
 }
 
-const CLIPBOARD_CLEAR_DELAY = 30_000; // 30 seconds
+import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 
 export function CopyButton({
   getValue,
@@ -52,7 +52,7 @@ export function CopyButton({
             // Clipboard may be unavailable (background tab / denied)
           }
         }
-      }, CLIPBOARD_CLEAR_DELAY);
+      }, CLIPBOARD_CLEAR_TIMEOUT_MS);
 
       setTimeout(() => setCopied(false), 2000);
     } catch {

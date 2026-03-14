@@ -17,12 +17,13 @@ import { notificationTitle, notificationBody } from "@/lib/notification-messages
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
 // POST /api/tenant/members/[userId]/reset-vault/[resetId]/revoke
 // Revoke a pending vault reset. Tenant OWNER/ADMIN only.
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string; resetId: string }> },
 ) {
@@ -125,3 +126,5 @@ export async function POST(
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withRequestLog(handlePOST);
