@@ -6,7 +6,7 @@ import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
 import { createShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
-import { logAudit } from "@/lib/audit";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -19,7 +19,7 @@ const tokenLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 // POST /api/share-links/verify-access — Verify access password for a share
 async function handlePOST(req: NextRequest) {
   const ip = extractClientIp(req) ?? "unknown";
-  const ua = req.headers.get("user-agent")?.slice(0, 512) ?? null;
+  const reqMeta = extractRequestMeta(req);
 
   const result = await parseBody(req, verifyShareAccessSchema);
   if (!result.ok) return result.response;
@@ -76,8 +76,7 @@ async function handlePOST(req: NextRequest) {
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
       metadata: { ip },
-      ip: ip === "unknown" ? null : ip,
-      userAgent: ua,
+      ...reqMeta,
     });
 
     return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
@@ -92,8 +91,7 @@ async function handlePOST(req: NextRequest) {
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { ip },
-    ip: ip === "unknown" ? null : ip,
-    userAgent: ua,
+    ...reqMeta,
   });
 
   const accessToken = createShareAccessToken(share.id);

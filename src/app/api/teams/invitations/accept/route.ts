@@ -8,6 +8,8 @@ import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { parseBody } from "@/lib/parse-body";
+import { invitationAcceptSchema } from "@/lib/validations";
 
 const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
 
@@ -22,17 +24,10 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
+  const result = await parseBody(req, invitationAcceptSchema);
+  if (!result.ok) return result.response;
 
-  const { token } = body as { token?: string };
-  if (!token || typeof token !== "string") {
-    return errorResponse(API_ERROR.TOKEN_REQUIRED, 400);
-  }
+  const { token } = result.data;
 
   // Invitation lookup must bypass RLS: the invitee is not yet in the team's tenant
   const invitation = await withBypassRls(prisma, async () =>

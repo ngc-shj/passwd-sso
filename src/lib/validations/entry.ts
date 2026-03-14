@@ -8,6 +8,7 @@ import {
   CHARS_FIELD_MAX,
   asciiPrintable,
   encryptedFieldSchema,
+  hexString,
 } from "./common";
 
 export const entryTypeSchema = z.enum(ENTRY_TYPE_VALUES);
@@ -59,6 +60,40 @@ export const updateE2EPasswordSchema = z.object({
   entryType: entryTypeSchema.optional(),
   requireReprompt: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
+});
+
+// ─── Generate Request Schema (with legacy mode fallback) ────
+
+export const generateRequestSchema = z.preprocess(
+  (val) => typeof val === "object" && val !== null && !("mode" in val)
+    ? { mode: "password", ...val }
+    : val,
+  z.discriminatedUnion("mode", [
+    z.object({ mode: z.literal("password") }).merge(generatePasswordSchema),
+    z.object({ mode: z.literal("passphrase") }).merge(generatePassphraseSchema),
+  ]),
+);
+
+// ─── History Re-encrypt Schemas ─────────────────────────────
+
+export const historyReencryptSchema = z.object({
+  encryptedBlob: z.string().min(1).max(1_000_000),
+  blobIv: hexString(12),
+  blobAuthTag: hexString(16),
+  keyVersion: z.number().int(),
+  oldBlobHash: hexString(32),
+});
+
+export const teamHistoryReencryptSchema = z.object({
+  encryptedBlob: z.string().min(1).max(1_000_000),
+  blobIv: hexString(12),
+  blobAuthTag: hexString(16),
+  teamKeyVersion: z.number(),
+  itemKeyVersion: z.number().optional(),
+  encryptedItemKey: z.string().optional(),
+  itemKeyIv: hexString(12).optional(),
+  itemKeyAuthTag: hexString(16).optional(),
+  oldBlobHash: hexString(32),
 });
 
 // ─── Type Exports ──────────────────────────────────────────

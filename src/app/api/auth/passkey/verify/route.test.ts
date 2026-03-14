@@ -45,6 +45,11 @@ vi.mock("@/lib/session-meta", () => ({
 
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  extractRequestMeta: () => ({
+    ip: null,
+    userAgent: null,
+    acceptLanguage: null,
+  }),
 }));
 
 vi.mock("@/lib/constants", () => ({

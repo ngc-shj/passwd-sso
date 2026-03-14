@@ -33,6 +33,11 @@ vi.mock("@/lib/ip-access", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  extractRequestMeta: () => ({
+    ip: "1.2.3.4",
+    userAgent: "test-agent",
+    acceptLanguage: "en",
+  }),
 }));
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),
