@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { unauthorized } from "@/lib/api-response";
 import { EA_STATUS } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";

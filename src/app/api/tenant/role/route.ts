@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { getTenantMembership } from "@/lib/tenant-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { unauthorized } from "@/lib/api-response";

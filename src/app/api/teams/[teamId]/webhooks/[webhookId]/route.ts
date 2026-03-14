@@ -3,7 +3,6 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,

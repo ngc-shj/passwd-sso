@@ -14,7 +14,7 @@ import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationEr
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,

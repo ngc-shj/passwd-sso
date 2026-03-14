@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, forbidden, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { authOrToken } from "@/lib/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
