@@ -10,6 +10,71 @@ import type {
   EntryTagNameColor,
   EntryTotp,
 } from "@/lib/entry-form-types";
+import type { TOTPEntry } from "@/components/passwords/totp-field";
+
+/**
+ * Detail view data for a single entry (after decryption).
+ * Used by PasswordDetailInline and its section components.
+ */
+export interface InlineDetailData {
+  id: string;
+  title?: string;
+  entryType?: EntryTypeValue;
+  requireReprompt?: boolean;
+  password: string;
+  content?: string;
+  isMarkdown?: boolean;
+  url: string | null;
+  urlHost: string | null;
+  notes: string | null;
+  customFields: EntryCustomField[];
+  passwordHistory: EntryPasswordHistory[];
+  totp?: TOTPEntry;
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  brand?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
+  fullName?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  username?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  sshPassphrase?: string | null;
+  sshComment?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
 /**
  * Full decrypted entry data.
