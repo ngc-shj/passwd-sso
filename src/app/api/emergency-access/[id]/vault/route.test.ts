@@ -1,13 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
     update: vi.fn(),
   },
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -21,8 +21,8 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { GET } from "./route";
@@ -136,5 +136,6 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(json.wrapVersion).toBe(1);
     expect(json.keyVersion).toBe(1);
     expect(json.granteeKeyPair).toBeTruthy();
+    expect(mockWithBypassRls).toHaveBeenCalled();
   });
 });

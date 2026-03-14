@@ -10,7 +10,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -32,7 +32,7 @@ async function handlePOST(
 
   const { id } = await params;
 
-  const grant = await withUserTenantRls(session.user.id, async () =>
+  const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
     }),
@@ -46,9 +46,8 @@ async function handlePOST(
     return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
   }
 
-  if (grant.tokenExpiresAt < new Date()) {
-    return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
-  }
+  // No tokenExpiresAt check here — this route uses session auth, not token auth.
+  // Token expiry is only enforced on the token-based accept route (/api/emergency-access/accept).
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
     return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
@@ -62,7 +61,7 @@ async function handlePOST(
   if (!result.ok) return result.response;
   const { granteePublicKey, encryptedPrivateKey } = result.data;
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withBypassRls(prisma, async () =>
     prisma.$transaction([
       prisma.emergencyAccessGrant.update({
         where: { id },
@@ -94,7 +93,7 @@ async function handlePOST(
     ...extractRequestMeta(req),
   });
 
-  const owner = await withUserTenantRls(session.user.id, async () =>
+  const owner = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },

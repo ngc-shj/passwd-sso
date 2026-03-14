@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
@@ -10,6 +10,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockSendEmail, mockWithUserTe
   mockPrismaUser: { findUnique: vi.fn() },
   mockSendEmail: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -23,6 +24,9 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST } from "./route";
@@ -91,6 +95,17 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     expect(res.status).toBe(400);
   });
 
+  it("approves successfully even when grantee user not found (deleted account)", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue(null);
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   it("approves REQUESTED grant successfully", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
@@ -106,6 +121,8 @@ describe("POST /api/emergency-access/[id]/approve", () => {
         activatedAt: expect.any(Date),
       },
     });
+    // Cross-tenant grantee lookup uses withBypassRls
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
     // Sends approved email to grantee
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({

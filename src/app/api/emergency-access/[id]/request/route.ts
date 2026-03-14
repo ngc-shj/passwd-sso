@@ -9,7 +9,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -31,7 +31,7 @@ async function handlePOST(
 
   const { id } = await params;
 
-  const grant = await withUserTenantRls(session.user.id, async () =>
+  const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
     }),
@@ -48,7 +48,7 @@ async function handlePOST(
   const now = new Date();
   const waitExpiresAt = new Date(now.getTime() + grant.waitDays * 24 * 60 * 60 * 1000);
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.update({
       where: { id },
       data: {
@@ -69,14 +69,14 @@ async function handlePOST(
     ...extractRequestMeta(req),
   });
 
-  const owner = await withUserTenantRls(session.user.id, async () =>
+  const owner = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },
     }),
   );
   if (owner?.email) {
-    const grantee = await withUserTenantRls(session.user.id, async () =>
+    const grantee = await withBypassRls(prisma, async () =>
       prisma.user.findUnique({
         where: { id: session.user.id },
         select: { name: true, email: true },

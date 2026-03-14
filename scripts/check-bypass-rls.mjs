@@ -52,6 +52,17 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/share-links/[id]/content/route.ts", ["passwordShare", "shareAccessLog"]],
   ["src/app/s/[token]/page.tsx", ["passwordShare", "shareAccessLog"]],
   ["src/app/s/[token]/download/route.ts", ["passwordShare", "shareAccessLog"]],
+  // Emergency access: cross-tenant grantee look-ups require RLS bypass
+  ["src/app/api/emergency-access/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/accept/route.ts", ["emergencyAccessGrant", "emergencyAccessKeyPair", "user"]],
+  ["src/app/api/emergency-access/reject/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/accept/route.ts", ["emergencyAccessGrant", "emergencyAccessKeyPair", "user"]],
+  ["src/app/api/emergency-access/[id]/approve/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/decline/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/request/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/revoke/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
+  ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...)

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -20,7 +20,7 @@ async function handleGET(
 
   const { id } = await params;
 
-  const grant = await withUserTenantRls(session.user.id, async () =>
+  const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
     }),
@@ -35,7 +35,7 @@ async function handleGET(
   }
 
   // Fetch all non-deleted entries for the owner
-  const entries = await withUserTenantRls(session.user.id, async () =>
+  const entries = await withBypassRls(prisma, async () =>
     prisma.passwordEntry.findMany({
       where: {
         userId: grant.ownerId,
