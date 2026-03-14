@@ -89,7 +89,7 @@ async function handlePOST() {
     token: plaintext,
     expiresAt: created.expiresAt.toISOString(),
     scope: created.scope.split(","),
-  });
+  }, { status: 201 });
 }
 
 /**

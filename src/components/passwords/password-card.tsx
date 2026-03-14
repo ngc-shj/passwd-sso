@@ -165,8 +165,8 @@ interface VaultEntryFull {
   keyType?: string | null;
   keySize?: number | null;
   fingerprint?: string | null;
-  passphrase?: string | null;
-  comment?: string | null;
+  sshPassphrase?: string | null;
+  sshComment?: string | null;
 }
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
@@ -414,8 +414,8 @@ export function PasswordCard({
             keyType: entry.keyType,
             keySize: entry.keySize,
             fingerprint: entry.fingerprint,
-            sshPassphrase: entry.passphrase,
-            sshComment: entry.comment,
+            sshPassphrase: entry.sshPassphrase,
+            sshComment: entry.sshComment,
             createdAt: raw.createdAt as string,
             updatedAt: raw.updatedAt as string,
           });

@@ -1,7 +1,6 @@
-import { encryptData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { API_PATH, apiPath } from "@/lib/constants";
-import { fetchApi } from "@/lib/url-helpers";
+import { buildEncryptedEntryBody, submitEntry } from "@/lib/entry-save-core";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface SavePersonalEntryParams {
@@ -38,29 +37,24 @@ export async function savePersonalEntry({
   const entryId = mode === "create" ? crypto.randomUUID() : initialId!;
   const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
 
-  const encryptedBlob = await encryptData(fullBlob, encryptionKey, aad);
-  const encryptedOverview = await encryptData(overviewBlob, encryptionKey, aad);
-
-  const body: Record<string, unknown> = {
-    ...(mode === "create" ? { id: entryId } : {}),
-    encryptedBlob,
-    encryptedOverview,
-    keyVersion: 1,
-    aadVersion: aad ? AAD_VERSION : 0,
+  const body = await buildEncryptedEntryBody({
+    mode,
+    entryId,
+    encryptionKey,
+    fullBlob,
+    overviewBlob,
+    blobAAD: aad,
+    overviewAAD: aad,
     tagIds,
-  };
-
-  if (entryType !== undefined) body.entryType = entryType;
-  if (requireReprompt !== undefined) body.requireReprompt = requireReprompt;
-  if (expiresAt !== undefined) body.expiresAt = expiresAt;
-  if (folderId !== undefined) body.folderId = folderId;
+    extra: {
+      keyVersion: 1,
+      aadVersion: aad ? AAD_VERSION : 0,
+    },
+    optionals: { entryType, requireReprompt, expiresAt, folderId },
+  });
 
   const endpoint = mode === "create" ? API_PATH.PASSWORDS : apiPath.passwordById(initialId!);
   const method = mode === "create" ? "POST" : "PUT";
 
-  return fetchApi(endpoint, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return submitEntry(endpoint, method, body);
 }

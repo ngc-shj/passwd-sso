@@ -162,7 +162,7 @@ describe("POST /api/sends/file", () => {
     );
     const res = await POST(req as never);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
   });
 
   it("returns 400 when file size exceeds 10MB", async () => {
@@ -194,7 +194,7 @@ describe("POST /api/sends/file", () => {
     const req = createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
   });
 
   it("accepts file when declared type is application/octet-stream even if detected type differs", async () => {
@@ -206,7 +206,7 @@ describe("POST /api/sends/file", () => {
     const req = createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
   });
 
   it("returns 400 when magic byte does not match declared content type", async () => {
@@ -234,7 +234,7 @@ describe("POST /api/sends/file", () => {
     );
     const res = await POST(req as never);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
   });
 
   it("returns 400 when filename contains path traversal", async () => {
@@ -259,7 +259,7 @@ describe("POST /api/sends/file", () => {
     const req = createMultipartRequest("http://localhost/api/sends/file", fd);
     const res = await POST(req as never);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
   });
 
   it("returns 400 for emoji in filename", async () => {
@@ -327,7 +327,7 @@ describe("POST /api/sends/file", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.id).toBe("share-1");
     expect(json.token).toBe("a".repeat(64));
     expect(json.url).toBe(`/s/${"a".repeat(64)}`);

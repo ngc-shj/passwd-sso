@@ -135,7 +135,7 @@ describe("POST /api/sends", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.token).toBeDefined();
   });
 
@@ -192,7 +192,7 @@ describe("POST /api/sends", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.id).toBe("share-1");
     expect(json.token).toBe("a".repeat(64));
     expect(json.url).toBe(`/s/${"a".repeat(64)}`);
@@ -229,7 +229,7 @@ describe("POST /api/sends", () => {
     });
     const res = await POST(req as never);
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -252,7 +252,7 @@ describe("POST /api/sends", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.accessPassword).toBe("test-access-password-base64url-43ch");
 
     expect(mockCreate).toHaveBeenCalledWith(
@@ -277,7 +277,7 @@ describe("POST /api/sends", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.accessPassword).toBeUndefined();
 
     expect(mockCreate).toHaveBeenCalledWith(

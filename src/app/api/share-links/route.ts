@@ -204,7 +204,7 @@ async function handlePOST(req: NextRequest) {
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
     ...(accessPassword ? { accessPassword } : {}),
-  });
+  }, { status: 201 });
 }
 
 // GET /api/share-links — List share links for an entry
