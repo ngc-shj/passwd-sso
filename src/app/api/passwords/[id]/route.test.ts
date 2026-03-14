@@ -2,9 +2,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockAuthOrToken: vi.fn(),
+const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+  mockCheckAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
     update: vi.fn(),
@@ -23,8 +22,7 @@ const { mockAuth, mockAuthOrToken, mockPrismaPasswordEntry, mockPrismaHistory, m
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
-vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -42,9 +40,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/access-restriction", () => ({
-  enforceAccessRestriction: vi.fn().mockResolvedValue(null),
-}));
+import { NextResponse } from "next/server";
 
 import { GET, PUT, DELETE } from "./route";
 
@@ -75,13 +71,13 @@ const ownedEntry = {
 describe("GET /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockAuditCreate.mockResolvedValue({});
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuthOrToken.mockResolvedValue(null);
+    mockCheckAuth.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }) });
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
       createParams({ id: PW_ID }),
@@ -90,7 +86,7 @@ describe("GET /api/passwords/[id]", () => {
   });
 
   it("returns 403 when scope insufficient", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    mockCheckAuth.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "EXTENSION_TOKEN_SCOPE_INSUFFICIENT" }, { status: 403 }) });
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
       createParams({ id: PW_ID }),
@@ -99,7 +95,7 @@ describe("GET /api/passwords/[id]", () => {
   });
 
   it("accepts Bearer token auth", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "test-user-id", scopes: ["passwords:read"] });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "test-user-id", scopes: ["passwords:read"] } });
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`, {
@@ -241,7 +237,7 @@ describe("PUT /api/passwords/[id]", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
     mockPrismaTag.count.mockResolvedValue(1);
@@ -256,7 +252,7 @@ describe("PUT /api/passwords/[id]", () => {
   };
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuthOrToken.mockResolvedValue(null);
+    mockCheckAuth.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }) });
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
       createParams({ id: PW_ID }),
@@ -305,7 +301,7 @@ describe("PUT /api/passwords/[id]", () => {
   });
 
   it("returns 403 when write scope is insufficient", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    mockCheckAuth.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "EXTENSION_TOKEN_SCOPE_INSUFFICIENT" }, { status: 403 }) });
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
       createParams({ id: PW_ID }),
@@ -612,12 +608,12 @@ describe("PUT /api/passwords/[id]", () => {
 describe("DELETE /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockAuditCreate.mockResolvedValue({});
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockCheckAuth.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }) });
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/passwords/${PW_ID}`),
       createParams({ id: PW_ID }),

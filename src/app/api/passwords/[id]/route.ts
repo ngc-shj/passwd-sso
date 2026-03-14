@@ -1,37 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { checkAuth } from "@/lib/check-auth";
 import { parseBody } from "@/lib/parse-body";
-import { authOrToken } from "@/lib/auth-or-token";
 import { withRequestLog } from "@/lib/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (authResult?.type === "scope_insufficient") {
-    return NextResponse.json(
-      { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
-      { status: 403 },
-    );
-  }
-  if (!authResult) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
-  const userId = authResult.userId;
-
-  if (authResult.type !== "session") {
-    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
-    if (denied) return denied;
-  }
+  const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
+  if (!authResult.ok) return authResult.response;
+  const userId = authResult.auth.userId;
 
   const { id } = await params;
 
@@ -81,22 +66,9 @@ async function handlePUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE);
-  if (authResult?.type === "scope_insufficient") {
-    return NextResponse.json(
-      { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
-      { status: 403 },
-    );
-  }
-  if (!authResult) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
-  const userId = authResult.userId;
-
-  if (authResult.type !== "session") {
-    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
-    if (denied) return denied;
-  }
+  const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
+  if (!authResult.ok) return authResult.response;
+  const userId = authResult.auth.userId;
 
   const { id } = await params;
 
@@ -227,20 +199,20 @@ async function handlePUT(
 }
 
 // DELETE /api/passwords/[id] - Soft delete (move to trash)
+// Session-only: token support for deletion deferred to Phase E (requires PASSWORDS_DELETE scope)
 async function handleDELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth();
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+  const authResult = await checkAuth(req);
+  if (!authResult.ok) return authResult.response;
+  const userId = authResult.auth.userId;
 
   const { id } = await params;
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
 
-  const existing = await withUserTenantRls(session.user.id, async () =>
+  const existing = await withUserTenantRls(userId, async () =>
     prisma.passwordEntry.findUnique({
       where: { id },
     }),
@@ -250,16 +222,16 @@ async function handleDELETE(
     return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
   }
 
-  if (existing.userId !== session.user.id) {
+  if (existing.userId !== userId) {
     return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
   }
 
   if (permanent) {
-    await withUserTenantRls(session.user.id, async () =>
+    await withUserTenantRls(userId, async () =>
       prisma.passwordEntry.delete({ where: { id } }),
     );
   } else {
-    await withUserTenantRls(session.user.id, async () =>
+    await withUserTenantRls(userId, async () =>
       prisma.passwordEntry.update({
         where: { id },
         data: { deletedAt: new Date() },
@@ -272,7 +244,7 @@ async function handleDELETE(
     action: permanent
       ? AUDIT_ACTION.ENTRY_PERMANENT_DELETE
       : AUDIT_ACTION.ENTRY_TRASH,
-    userId: session.user.id,
+    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },

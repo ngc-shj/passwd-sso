@@ -27,9 +27,11 @@ export default defineConfig({
         "src/lib/scim/*.ts",
         "src/lib/webauthn-authorize.ts",
         "src/lib/webauthn-server.ts",
+        "src/lib/check-auth.ts",
         "src/lib/parse-body.ts",
         "src/lib/with-request-log.ts",
         "src/lib/auth-or-token.ts",
+        "src/lib/access-restriction.ts",
       ],
       exclude: ["src/app/api/auth/\\[...nextauth\\]/**"],
       thresholds: {
