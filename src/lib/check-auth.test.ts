@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 
 const { mockAuth, mockAuthOrToken, mockEnforceAccessRestriction } = vi.hoisted(
   () => ({
@@ -88,7 +89,7 @@ describe("checkAuth", () => {
       });
 
       const result = await checkAuth(makeRequest(), {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result).toEqual({
@@ -112,7 +113,7 @@ describe("checkAuth", () => {
       });
 
       const result = await checkAuth(req, {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result).toEqual({
@@ -141,7 +142,7 @@ describe("checkAuth", () => {
       });
 
       const result = await checkAuth(req, {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result).toEqual({
@@ -165,7 +166,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
 
       const result = await checkAuth(makeRequest(), {
-        scope: "passwords:write" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE,
       });
 
       expect(result.ok).toBe(false);
@@ -180,7 +181,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue(null);
 
       const result = await checkAuth(makeRequest(), {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result.ok).toBe(false);
@@ -205,7 +206,7 @@ describe("checkAuth", () => {
       mockEnforceAccessRestriction.mockResolvedValue(deniedResponse);
 
       const result = await checkAuth(req, {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result.ok).toBe(false);
@@ -230,7 +231,7 @@ describe("checkAuth", () => {
       mockEnforceAccessRestriction.mockResolvedValue(deniedResponse);
 
       const result = await checkAuth(req, {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result.ok).toBe(false);
@@ -253,7 +254,7 @@ describe("checkAuth", () => {
       });
 
       const result = await checkAuth(makeRequest("ext_token"), {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
         skipAccessRestriction: true,
       });
 
@@ -314,7 +315,7 @@ describe("checkAuth", () => {
     it("throws when scope is set with allowTokens: false", async () => {
       await expect(
         checkAuth(makeRequest(), {
-          scope: "passwords:read" as any,
+          scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
           allowTokens: false,
         }),
       ).rejects.toThrow(
@@ -331,7 +332,7 @@ describe("checkAuth", () => {
       mockAuthOrToken.mockResolvedValue(null);
 
       const result = await checkAuth(makeRequest("revoked_token"), {
-        scope: "passwords:read" as any,
+        scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ,
       });
 
       expect(result.ok).toBe(false);

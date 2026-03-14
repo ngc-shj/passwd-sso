@@ -328,7 +328,7 @@ export default function TeamSettingsPage({
       clearTimeout(timer);
       abortRef.current?.abort();
     };
-  }, [addSearch, teamId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [addSearch, teamId]);
 
   const handleAddMember = useCallback(async (userId: string) => {
     setAdding(userId);
