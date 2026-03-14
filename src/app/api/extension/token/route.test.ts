@@ -113,7 +113,7 @@ describe("POST /api/extension/token", () => {
     const res = await POST();
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.token).toBe("a".repeat(64));
     expect(json.scope).toContain("passwords:read");
     expect(json.expiresAt).toBeDefined();

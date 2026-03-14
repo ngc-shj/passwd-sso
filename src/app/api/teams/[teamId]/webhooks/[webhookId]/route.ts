@@ -10,11 +10,12 @@ import {
   AUDIT_SCOPE,
 } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; webhookId: string }> };
 
 // DELETE /api/teams/[teamId]/webhooks/[webhookId] — Delete a webhook
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -57,3 +58,5 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const DELETE = withRequestLog(handleDELETE);

@@ -122,6 +122,8 @@ async function handlePOST(req: NextRequest) {
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.AUTH_LOGIN,
     userId: user.id,
+    ip: meta.ip,
+    userAgent: meta.userAgent,
   });
 
   // Set session cookie

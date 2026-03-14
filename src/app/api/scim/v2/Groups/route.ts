@@ -15,6 +15,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [
   TEAM_ROLE.ADMIN,
@@ -71,7 +72,7 @@ async function loadGroupMembers(teamId: string, role: TeamRole): Promise<ScimGro
 }
 
 // GET /api/scim/v2/Groups — List all tenant mappings
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -131,7 +132,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/scim/v2/Groups — Register tenant group mapping
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -225,3 +226,6 @@ export async function POST(req: NextRequest) {
     );
   });
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

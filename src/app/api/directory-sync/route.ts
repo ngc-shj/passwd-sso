@@ -8,6 +8,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -98,26 +99,10 @@ async function handlePOST(req: NextRequest) {
   }
   const tenantId = member.tenantId;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
+  const result = await parseBody(req, createSchema);
+  if (!result.ok) return result.response;
   const { provider, displayName, enabled, syncIntervalMinutes, credentials } =
-    parsed.data;
+    result.data;
 
   // Check uniqueness (one config per provider per tenant)
   const existing = await withUserTenantRls(session.user.id, () =>

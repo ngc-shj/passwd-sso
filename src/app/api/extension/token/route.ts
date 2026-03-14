@@ -11,6 +11,7 @@ import {
   EXTENSION_TOKEN_TTL_MS,
   EXTENSION_TOKEN_MAX_ACTIVE,
 } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -24,7 +25,7 @@ const tokenLimiter = createRateLimiter({
  * Requires Auth.js session (user must be logged in on the web app).
  * Returns the plaintext token (only visible once).
  */
-export async function POST() {
+async function handlePOST() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json(
@@ -88,14 +89,14 @@ export async function POST() {
     token: plaintext,
     expiresAt: created.expiresAt.toISOString(),
     scope: created.scope.split(","),
-  });
+  }, { status: 201 });
 }
 
 /**
  * DELETE /api/extension/token — Revoke the token used in Authorization header.
  * The Bearer token identifies which token to revoke.
  */
-export async function DELETE(req: NextRequest) {
+async function handleDELETE(req: NextRequest) {
   const result = await validateExtensionToken(req);
 
   if (!result.ok) {
@@ -119,3 +120,6 @@ export async function DELETE(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withRequestLog(handlePOST);
+export const DELETE = withRequestLog(handleDELETE);

@@ -169,7 +169,7 @@ interface VaultEntryFull {
   comment?: string | null;
 }
 
-const CLIPBOARD_CLEAR_DELAY = 30_000;
+import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 
 function scheduleClearClipboard(copiedValue: string) {
   setTimeout(async () => {
@@ -187,7 +187,7 @@ function scheduleClearClipboard(copiedValue: string) {
         // Clipboard may be unavailable (background tab / denied)
       }
     }
-  }, CLIPBOARD_CLEAR_DELAY);
+  }, CLIPBOARD_CLEAR_TIMEOUT_MS);
 }
 
 export function PasswordCard({

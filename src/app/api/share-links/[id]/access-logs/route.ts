@@ -3,11 +3,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/share-links/[id]/access-logs — List access logs for a share link
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -57,3 +58,5 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ items, nextCursor });
 }
+
+export const GET = withRequestLog(handleGET);

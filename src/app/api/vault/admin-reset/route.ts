@@ -10,6 +10,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -23,7 +24,7 @@ const adminResetSchema = z.object({
 // POST /api/vault/admin-reset
 // Execute a vault reset initiated by a team admin.
 // The target user must be authenticated and submit the token + confirmation.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const originError = assertOrigin(req);
   if (originError) return originError;
 
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
+  // Inline parsing: security-sensitive endpoint — do not expose schema details
   let body: unknown;
   try {
     body = await req.json();
@@ -144,3 +146,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ success: true });
 }
+
+export const POST = withRequestLog(handlePOST);

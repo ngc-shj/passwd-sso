@@ -23,9 +23,10 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/scim/v2/Users — List/filter users in the tenant
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -124,7 +125,7 @@ export async function GET(req: NextRequest) {
 }
 
 // POST /api/scim/v2/Users — Create tenant user
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const result = await validateScimToken(req);
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
@@ -261,3 +262,6 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

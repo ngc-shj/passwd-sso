@@ -10,30 +10,24 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { parseBody } from "@/lib/parse-body";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // POST /api/emergency-access/reject — Reject an emergency access invitation
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const parsed = rejectEmergencyGrantSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }, { status: 400 });
-  }
+  const result = await parseBody(req, rejectEmergencyGrantSchema);
+  if (!result.ok) return result.response;
+  const { data } = result;
 
   // Hash the token for DB lookup (DB stores only the hash)
   const grant = await withUserTenantRls(session.user.id, async () =>
     prisma.emergencyAccessGrant.findUnique({
-      where: { tokenHash: hashToken(parsed.data.token) },
+      where: { tokenHash: hashToken(data.token) },
     }),
   );
 
@@ -86,3 +80,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ status: EA_STATUS.REJECTED });
 }
+
+export const POST = withRequestLog(handlePOST);

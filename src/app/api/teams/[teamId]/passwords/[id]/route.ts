@@ -11,14 +11,16 @@ import {
   TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // GET /api/teams/[teamId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -86,7 +88,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // PUT /api/teams/[teamId]/passwords/[id] — Update password (E2E: full blob replacement)
-export async function PUT(req: NextRequest, { params }: Params) {
+async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -142,22 +144,10 @@ export async function PUT(req: NextRequest, { params }: Params) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, updateTeamE2EPasswordSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = updateTeamE2EPasswordSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = parsed.data;
+  const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = result.data;
   const isFullUpdate = encryptedBlob !== undefined;
 
   // Prevent itemKeyVersion downgrade (v1→v0) — cryptographic downgrade attack
@@ -305,7 +295,7 @@ export async function PUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/teams/[teamId]/passwords/[id] — Soft delete (move to trash)
-export async function DELETE(req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -368,3 +358,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   return NextResponse.json({ success: true });
 }
+
+export const GET = withRequestLog(handleGET);
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

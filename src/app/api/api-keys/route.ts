@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { authOrToken } from "@/lib/auth-or-token";
+import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
@@ -16,15 +17,15 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
-  const authed = await authOrToken(req);
-  if (!authed || authed.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
+  // IP restriction is not enforced here (matches pre-checkAuth behavior).
+  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  if (!authed.ok) return authed.response;
   // API keys cannot manage API keys (only session or extension token)
-  if (authed.type === "api_key") {
+  if (authed.auth.type === "api_key") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
-  const userId = authed.userId;
+  const userId = authed.auth.userId;
 
   const keys = await withUserTenantRls(userId, async () =>
     prisma.apiKey.findMany({
@@ -59,32 +60,20 @@ async function handleGET(req: NextRequest) {
 
 // POST /api/api-keys — Create a new API key (session or extension token, NOT API key)
 async function handlePOST(req: NextRequest) {
-  const authed = await authOrToken(req);
-  if (!authed || authed.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
+  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
+  // IP restriction is not enforced here (matches pre-checkAuth behavior).
+  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  if (!authed.ok) return authed.response;
   // API keys cannot create API keys
-  if (authed.type === "api_key") {
+  if (authed.auth.type === "api_key") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
-  const userId = authed.userId;
+  const userId = authed.auth.userId;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, apiKeyCreateSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = apiKeyCreateSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { name, scope: scopes, expiresAt } = parsed.data;
+  const { name, scope: scopes, expiresAt } = result.data;
 
   // Check key limit
   const existingCount = await withUserTenantRls(userId, async () =>

@@ -12,11 +12,12 @@ import {
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -175,3 +176,5 @@ export async function GET(req: NextRequest) {
     relatedUsers,
   });
 }
+
+export const GET = withRequestLog(handleGET);

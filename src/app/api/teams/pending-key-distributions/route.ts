@@ -4,11 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/teams/pending-key-distributions
 // Returns all pending key distributions across all teams where the user is OWNER/ADMIN.
 // Used for automatic background key distribution after vault unlock.
-export async function GET() {
+async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -71,3 +72,5 @@ export async function GET() {
 
   return NextResponse.json(result);
 }
+
+export const GET = withRequestLog(handleGET);

@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { validateExtensionToken } from "@/lib/extension-token";
 import { EXTENSION_TOKEN_TTL_MS } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,7 @@ const refreshLimiter = createRateLimiter({
  * Accepts a still-valid Bearer token and issues a new token with fresh TTL.
  * The old token is revoked atomically.
  */
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const result = await validateExtensionToken(req);
 
   if (!result.ok) {
@@ -102,3 +103,5 @@ export async function POST(req: NextRequest) {
     scope: scopes,
   });
 }
+
+export const POST = withRequestLog(handlePOST);

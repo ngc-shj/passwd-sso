@@ -5,12 +5,13 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
 // GET /api/tenant/members
 // List all tenant members (OWNER/ADMIN only).
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   void req;
 
   const session = await auth();
@@ -85,3 +86,5 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json(result);
 }
+
+export const GET = withRequestLog(handleGET);

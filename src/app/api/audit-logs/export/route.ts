@@ -4,7 +4,9 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { z } from "zod/v4";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, EXPORT_FORMAT_VALUES } from "@/lib/constants";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const bodySchema = z.object({
   teamId: z.string().optional(),
@@ -16,24 +18,14 @@ const bodySchema = z.object({
 });
 
 // POST /api/audit-logs/export — Record export audit event
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
-
-  const result = bodySchema.safeParse(body);
-  if (!result.success) {
-    return NextResponse.json({ error: API_ERROR.INVALID_BODY }, { status: 400 });
-  }
-
+  const parsed = await parseBody(req, bodySchema);
+  if (!parsed.ok) return parsed.response;
   const {
     teamId,
     entryCount,
@@ -41,7 +33,7 @@ export async function POST(req: NextRequest) {
     filename,
     encrypted,
     includeTeams,
-  } = result.data;
+  } = parsed.data;
 
   // Verify team membership when teamId is specified
   if (teamId) {
@@ -72,3 +64,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ ok: true });
 }
+
+export const POST = withRequestLog(handlePOST);

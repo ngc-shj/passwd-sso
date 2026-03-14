@@ -32,6 +32,8 @@ describe("POST /api/audit-logs/import", () => {
   it("returns 400 for invalid body", async () => {
     const res = await POST(createRequest("POST", URL, { body: { requestedCount: -1, successCount: 1, failedCount: 0 } }));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("accepts xml format", async () => {

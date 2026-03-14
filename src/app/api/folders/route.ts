@@ -4,10 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { withRequestLog } from "@/lib/with-request-log";
 
 function getPersonalParent(id: string): Promise<ParentNode | null> {
   return prisma.folder
@@ -16,7 +18,7 @@ function getPersonalParent(id: string): Promise<ParentNode | null> {
 }
 
 // GET /api/folders - List user's folders with entry count
-export async function GET() {
+async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -52,28 +54,16 @@ export async function GET() {
 }
 
 // POST /api/folders - Create a new folder
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, createFolderSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = createFolderSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { name, parentId, sortOrder } = parsed.data;
+  const { name, parentId, sortOrder } = result.data;
   const actor = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },
@@ -173,3 +163,6 @@ export async function POST(req: NextRequest) {
     { status: 201 },
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

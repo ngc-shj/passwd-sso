@@ -98,21 +98,29 @@ describe("POST /api/watchtower/alert", () => {
   it("returns 400 for invalid body (missing newBreachCount)", async () => {
     const res = await POST(makeRequest({}));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for invalid body (negative count)", async () => {
     const res = await POST(makeRequest({ newBreachCount: -1 }));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for invalid body (count exceeds max)", async () => {
     const res = await POST(makeRequest({ newBreachCount: 10001 }));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for invalid body (float)", async () => {
     const res = await POST(makeRequest({ newBreachCount: 1.5 }));
     expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 429 when rate limited", async () => {

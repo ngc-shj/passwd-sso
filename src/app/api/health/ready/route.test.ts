@@ -101,9 +101,5 @@ describe("GET /api/health/ready", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("sets X-Request-Id header", async () => {
-    mockRunHealthChecks.mockResolvedValue(healthyResponse());
-    const res = await GET(createRequest());
-    expect(res.headers.get("X-Request-Id")).toBeTruthy();
-  });
+  // X-Request-Id header is tested in with-request-log.test.ts
 });

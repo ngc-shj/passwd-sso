@@ -9,10 +9,12 @@ import {
   TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -25,7 +27,7 @@ function getTeamParent(teamId: string, id: string): Promise<ParentNode | null> {
 }
 
 // GET /api/teams/[teamId]/folders - List team folders with entry count
-export async function GET(_req: NextRequest, { params }: Params) {
+async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -72,7 +74,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 // POST /api/teams/[teamId]/folders - Create a team folder
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -89,22 +91,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, createFolderSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = createFolderSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { name, parentId, sortOrder } = parsed.data;
+  const { name, parentId, sortOrder } = result.data;
 
   // Parent ownership + existence check
   if (parentId) {
@@ -205,3 +195,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     { status: 201 },
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

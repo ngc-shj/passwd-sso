@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ id: string; historyId: string }> };
 
@@ -18,7 +19,7 @@ function isValidHex(value: string, byteLength: number): boolean {
 }
 
 // GET /api/passwords/[id]/history/[historyId] — individual history entry
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: Params,
 ) {
@@ -68,7 +69,7 @@ export async function GET(
 }
 
 // PATCH /api/passwords/[id]/history/[historyId] — re-encrypt history entry
-export async function PATCH(
+async function handlePATCH(
   req: NextRequest,
   { params }: Params,
 ) {
@@ -188,3 +189,6 @@ export async function PATCH(
 
   return NextResponse.json({ success: true });
 }
+
+export const GET = withRequestLog(handleGET);
+export const PATCH = withRequestLog(handlePATCH);
