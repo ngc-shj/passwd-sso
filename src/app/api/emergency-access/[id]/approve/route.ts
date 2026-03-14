@@ -9,6 +9,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -60,7 +61,8 @@ async function handlePOST(
 
   const granteeId = grant.granteeId;
   if (granteeId) {
-    const grantee = await withUserTenantRls(session.user.id, async () =>
+    // Bypass RLS: grantee may be in a different tenant
+    const grantee = await withBypassRls(prisma, async () =>
       prisma.user.findUnique({
         where: { id: granteeId },
         select: { email: true, name: true, locale: true },

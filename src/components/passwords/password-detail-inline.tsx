@@ -32,9 +32,11 @@ interface PasswordDetailInlineProps {
   onEdit?: () => void;
   onRefresh?: () => void;
   teamId?: string;
+  /** When true, skip remote fetches (history, attachments) — used for emergency vault */
+  readOnly?: boolean;
 }
 
-export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTeamId }: PasswordDetailInlineProps) {
+export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTeamId, readOnly }: PasswordDetailInlineProps) {
   const t = useTranslations("PasswordDetail");
   const tc = useTranslations("Common");
   const locale = useLocale();
@@ -45,6 +47,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
   const [teamAttachments, setTeamAttachments] = useState<TeamAttachmentMeta[]>([]);
 
   useEffect(() => {
+    if (readOnly) return;
     let cancelled = false;
     async function loadAttachments() {
       try {
@@ -66,7 +69,7 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
     }
     loadAttachments();
     return () => { cancelled = true; };
-  }, [data.id, scopedTeamId]);
+  }, [data.id, scopedTeamId, readOnly]);
 
   const sectionProps = { data, requireVerification, createGuardedGetter };
 
@@ -98,30 +101,34 @@ export function PasswordDetailInline({ data, onEdit, onRefresh, teamId: scopedTe
         <LoginSection {...sectionProps} />
       )}
 
-      {/* Entry History (full blob snapshots) */}
-      <EntryHistorySection
-        entryId={data.id}
-        teamId={scopedTeamId}
-        requireReprompt={data.requireReprompt ?? false}
-        onRestore={onRefresh}
-      />
-
-      {/* Attachments */}
-      {scopedTeamId ? (
-        <TeamAttachmentSection
+      {/* Entry History (full blob snapshots) — hidden in read-only emergency vault */}
+      {!readOnly && (
+        <EntryHistorySection
+          entryId={data.id}
           teamId={scopedTeamId}
-          entryId={data.id}
-          attachments={teamAttachments}
-          onAttachmentsChange={setTeamAttachments}
-          readOnly={!onEdit}
+          requireReprompt={data.requireReprompt ?? false}
+          onRestore={onRefresh}
         />
-      ) : (
-        <AttachmentSection
-          entryId={data.id}
-          attachments={attachments}
-          onAttachmentsChange={setAttachments}
-          readOnly={!onEdit}
-        />
+      )}
+
+      {/* Attachments — hidden in read-only emergency vault */}
+      {!readOnly && (
+        scopedTeamId ? (
+          <TeamAttachmentSection
+            teamId={scopedTeamId}
+            entryId={data.id}
+            attachments={teamAttachments}
+            onAttachmentsChange={setTeamAttachments}
+            readOnly={!onEdit}
+          />
+        ) : (
+          <AttachmentSection
+            entryId={data.id}
+            attachments={attachments}
+            onAttachmentsChange={setAttachments}
+            readOnly={!onEdit}
+          />
+        )
       )}
 
       {/* Timestamps + Edit */}

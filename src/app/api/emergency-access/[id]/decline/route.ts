@@ -7,7 +7,7 @@ import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-acc
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -23,7 +23,7 @@ async function handlePOST(
 
   const { id } = await params;
 
-  const grant = await withUserTenantRls(session.user.id, async () =>
+  const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
     }),
@@ -41,7 +41,7 @@ async function handlePOST(
     return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.update({
       where: { id },
       data: { status: EA_STATUS.REJECTED },
@@ -58,7 +58,7 @@ async function handlePOST(
     ...extractRequestMeta(req),
   });
 
-  const owner = await withUserTenantRls(session.user.id, async () =>
+  const owner = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },

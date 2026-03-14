@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockPrismaUser, mockTransaction, mockSendEmail, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockPrismaUser, mockTransaction, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     findUnique: vi.fn(),
@@ -13,7 +13,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaKeyPair, mockPrismaUser, mockTransa
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
   mockSendEmail: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -36,8 +36,8 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST } from "./route";

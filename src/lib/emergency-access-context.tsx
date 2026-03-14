@@ -70,6 +70,9 @@ export function EmergencyAccessProvider({
         });
     };
 
+    // Run immediately on mount/unlock so key escrow doesn't wait for the first interval
+    run();
+
     const intervalId = setInterval(run, EA_CONFIRM_INTERVAL_MS);
 
     const handleVisible = () => { if (!document.hidden) run(); };

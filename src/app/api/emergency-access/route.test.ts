@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: {
     create: vi.fn(),
@@ -12,6 +12,7 @@ const { mockAuth, mockPrismaGrant, mockPrismaUser, mockCheck, mockSendEmail, moc
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSendEmail: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -32,6 +33,9 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST, GET } from "./route";
@@ -118,6 +122,9 @@ describe("POST /api/emergency-access", () => {
         }),
       })
     );
+    // withBypassRls used for cross-tenant grantee lookup; withUserTenantRls for owner-scoped ops
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockWithUserTenantRls).toHaveBeenCalled();
     // Sends invite email to grantee
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({
