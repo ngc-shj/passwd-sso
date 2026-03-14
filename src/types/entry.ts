@@ -1,0 +1,81 @@
+/**
+ * Canonical entry type definitions for client-side (decrypted) entry data.
+ * All fields here live inside encrypted blobs — no API contract or DB migration needed.
+ */
+
+import type { EntryTypeValue } from "@/lib/constants";
+import type {
+  EntryCustomField,
+  EntryPasswordHistory,
+  EntryTagNameColor,
+  EntryTotp,
+} from "@/lib/entry-form-types";
+
+/**
+ * Full decrypted entry data.
+ * This is the superset of all entry fields stored inside the encrypted blob.
+ * Field names here are canonical; other types (InlineDetailData, ExportEntry) derive from these.
+ */
+export interface FullEntryData {
+  entryType?: EntryTypeValue;
+  title: string;
+  username?: string | null;
+  password?: string;
+  url?: string | null;
+  notes?: string | null;
+  content?: string;
+  isMarkdown?: boolean;
+  tags: EntryTagNameColor[];
+  customFields?: EntryCustomField[];
+  passwordHistory?: EntryPasswordHistory[];
+  totp?: EntryTotp;
+  // Credit card
+  cardholderName?: string | null;
+  cardNumber?: string | null;
+  brand?: string | null;
+  expiryMonth?: string | null;
+  expiryYear?: string | null;
+  cvv?: string | null;
+  // Identity
+  fullName?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  dateOfBirth?: string | null;
+  nationality?: string | null;
+  idNumber?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  // Passkey
+  relyingPartyId?: string | null;
+  relyingPartyName?: string | null;
+  credentialId?: string | null;
+  creationDate?: string | null;
+  deviceInfo?: string | null;
+  // Bank account
+  bankName?: string | null;
+  accountType?: string | null;
+  accountHolderName?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  swiftBic?: string | null;
+  iban?: string | null;
+  branchName?: string | null;
+  // Software license
+  softwareName?: string | null;
+  licenseKey?: string | null;
+  version?: string | null;
+  licensee?: string | null;
+  purchaseDate?: string | null;
+  expirationDate?: string | null;
+  // SSH key
+  privateKey?: string | null;
+  publicKey?: string | null;
+  keyType?: string | null;
+  keySize?: number | null;
+  fingerprint?: string | null;
+  /** Blob key is "passphrase"; UI display types (InlineDetailData) alias to "sshPassphrase" */
+  passphrase?: string | null;
+  /** Blob key is "comment"; UI display types (InlineDetailData) alias to "sshComment" */
+  comment?: string | null;
+}

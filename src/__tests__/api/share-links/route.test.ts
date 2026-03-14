@@ -162,7 +162,7 @@ describe("POST /api/share-links", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.token).toBe("a".repeat(64));
     expect(json.url).toBe("/s/" + "a".repeat(64));
     expect(json.id).toBe("share-1");
@@ -218,7 +218,7 @@ describe("POST /api/share-links", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.id).toBe("share-e2e");
 
     // Verify E2E sentinel masterKeyVersion=0 is saved
@@ -356,7 +356,7 @@ describe("POST /api/share-links", () => {
     });
     const res = await POST(req as never);
     const { status } = await parseResponse(res);
-    expect(status).toBe(200);
+    expect(status).toBe(201);
 
     // Verify permissions are saved to DB
     expect(mockCreate).toHaveBeenCalledWith(
@@ -390,7 +390,7 @@ describe("POST /api/share-links", () => {
     });
     const res = await POST(req as never);
     const { status } = await parseResponse(res);
-    expect(status).toBe(200);
+    expect(status).toBe(201);
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -424,7 +424,7 @@ describe("POST /api/share-links", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.accessPassword).toBe("test-access-password-base64url-43ch");
 
     expect(mockCreate).toHaveBeenCalledWith(
@@ -458,7 +458,7 @@ describe("POST /api/share-links", () => {
     const res = await POST(req as never);
     const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
+    expect(status).toBe(201);
     expect(json.accessPassword).toBeUndefined();
 
     expect(mockCreate).toHaveBeenCalledWith(
@@ -519,7 +519,7 @@ describe("POST /api/share-links", () => {
     });
     const res = await POST(req as never);
     const { status } = await parseResponse(res);
-    expect(status).toBe(200);
+    expect(status).toBe(201);
 
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({

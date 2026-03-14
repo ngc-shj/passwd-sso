@@ -106,7 +106,7 @@ describe("POST /api/emergency-access", () => {
       body: { granteeEmail: "grantee@test.com", waitDays: 7 },
     }));
     const json = await res.json();
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(201);
     expect(json.id).toBe("grant-1");
     expect(json.token).toBe("mock-token-hex"); // plaintext token in response
     expect(json.status).toBe(EA_STATUS.PENDING);

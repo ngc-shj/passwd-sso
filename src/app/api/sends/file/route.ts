@@ -213,7 +213,7 @@ async function handlePOST(req: NextRequest) {
     url: `/s/${token}`,
     expiresAt: share.expiresAt,
     ...(accessPassword ? { accessPassword } : {}),
-  });
+  }, { status: 201 });
 }
 
 export const POST = withRequestLog(handlePOST);
