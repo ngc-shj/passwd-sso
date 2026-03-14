@@ -113,7 +113,7 @@ async function handlePOST(req: NextRequest) {
     granteeEmail: grant.granteeEmail,
     waitDays: grant.waitDays,
     tokenExpiresAt: grant.tokenExpiresAt.toISOString(),
-  });
+  }, { status: 201 });
 }
 
 // GET /api/emergency-access — List emergency access grants

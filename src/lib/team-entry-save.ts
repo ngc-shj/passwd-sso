@@ -1,7 +1,6 @@
-import { encryptData } from "@/lib/crypto-client";
 import { buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
 import { apiPath } from "@/lib/constants";
-import { fetchApi } from "@/lib/url-helpers";
+import { buildEncryptedEntryBody, submitEntry } from "@/lib/entry-save-core";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface SaveTeamEntryParams {
@@ -45,35 +44,27 @@ export async function saveTeamEntry({
   const blobAAD = buildTeamEntryAAD(teamId, entryId, "blob", itemKeyVersion);
   const overviewAAD = buildTeamEntryAAD(teamId, entryId, "overview", itemKeyVersion);
 
-  const encryptedBlob = await encryptData(fullBlob, encryptionKey, blobAAD);
-  const encryptedOverview = await encryptData(overviewBlob, encryptionKey, overviewAAD);
-
-  const body: Record<string, unknown> = {
-    encryptedBlob,
-    encryptedOverview,
-    aadVersion: AAD_VERSION,
-    teamKeyVersion,
-    itemKeyVersion,
+  const body = await buildEncryptedEntryBody({
+    mode,
+    entryId,
+    encryptionKey,
+    fullBlob,
+    overviewBlob,
+    blobAAD,
+    overviewAAD,
     tagIds,
-  };
-
-  // Send client-generated ID so the server uses the same ID that was bound into the AAD
-  if (mode === "create") body.id = entryId;
-
-  if (encryptedItemKey !== undefined) body.encryptedItemKey = encryptedItemKey;
-  if (entryType !== undefined) body.entryType = entryType;
-  if (teamFolderId !== undefined) body.teamFolderId = teamFolderId;
-  if (requireReprompt !== undefined) body.requireReprompt = requireReprompt;
-  if (expiresAt !== undefined) body.expiresAt = expiresAt;
+    extra: {
+      aadVersion: AAD_VERSION,
+      teamKeyVersion,
+      itemKeyVersion,
+    },
+    optionals: { encryptedItemKey, entryType, teamFolderId, requireReprompt, expiresAt },
+  });
 
   const endpoint = mode === "create"
     ? apiPath.teamPasswords(teamId)
     : apiPath.teamPasswordById(teamId, entryId);
   const method = mode === "create" ? "POST" : "PUT";
 
-  return fetchApi(endpoint, {
-    method,
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  return submitEntry(endpoint, method, body);
 }
