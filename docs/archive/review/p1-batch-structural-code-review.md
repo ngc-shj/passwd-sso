@@ -39,7 +39,7 @@ No findings.
 ### T4 [Minor] `EXPECTED_SENSITIVE` references `"passphrase"` (sub-point of T2)
 - **Resolution**: `"passphrase"` IS the correct blob key. No change needed.
 
-## Resolution Status
+## Resolution Status (Round 1)
 All findings resolved in commit `review(1)`.
 - F1 Critical: Fixed (reverted VaultEntryFull to blob keys)
 - F2 Minor: Fixed (added export)
@@ -47,3 +47,39 @@ All findings resolved in commit `review(1)`.
 - T2 Major: Dismissed (blob keys are correct)
 - T3 Major: Fixed (added tests)
 - T4 Minor: Dismissed (blob keys are correct)
+
+---
+
+# Code Review Round 2
+Date: 2026-03-14
+
+## Changes from Previous Round
+Round 1 fixes applied. Round 2 review by three expert agents.
+
+## Functionality Findings (Round 2)
+### F3 [Minor] Deviation log DEV-03 inaccurately described VaultEntryFull rename
+- **Status**: Resolved
+- **Action**: Updated DEV-03 to accurately state fields were intentionally NOT renamed (blob key rationale)
+
+## Security Findings (Round 2)
+No findings.
+
+## Testing Findings (Round 2)
+### T5 [Major → Dismissed] team-entry-save.test.ts missing
+- **Status**: Dismissed — file exists (4122 bytes, created during implementation)
+
+### T6 [Minor] submitEntry PUT path untested
+- **Status**: Resolved — added PUT method test case to entry-save-core.test.ts
+
+### T7 [Minor] extra spread order could overwrite core fields
+- **Status**: Resolved — added JSDoc warning to BuildEncryptedBodyParams.extra
+
+### T8 [Minor] encryptData mock type mismatch
+- **Status**: Skipped — mock tests behavior not type accuracy, no real issue
+
+## Resolution Status (Round 2)
+- F3 Minor: Fixed (deviation log updated)
+- T5 Major: Dismissed (file exists)
+- T6 Minor: Fixed (PUT test added)
+- T7 Minor: Fixed (JSDoc added)
+- T8 Minor: Skipped (not actionable)

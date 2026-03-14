@@ -26,12 +26,12 @@ Created: 2026-03-14
 
 ---
 
-### DEV-03: Item 7 — `VaultEntryFull` and `InlineDetailData` not updated to extend `FullEntryData`
+### DEV-03: Item 7 — `VaultEntryFull` fields NOT renamed; structural extension deferred
 
-- **Plan description**: Steps 7.4 and 7.5 specified updating `InlineDetailData` and `VaultEntryFull` to extend or use `Pick<FullEntryData, ...>`.
-- **Actual implementation**: `VaultEntryFull` (in `password-card.tsx`) and `InlineDetailData` (in `password-detail-inline.tsx`) remain as standalone interfaces. `FullEntryData` was created in `src/types/entry.ts` as a canonical reference type but neither existing interface was refactored to derive from it. Only the field rename (`passphrase` → `sshPassphrase`, `comment` → `sshComment`) was applied to `VaultEntryFull`.
-- **Reason**: The rename was the high-priority functional fix. The structural extension (`extends FullEntryData`) is a cosmetic/consistency improvement with higher refactoring risk (both interfaces have fields with different optionality and nullability than `FullEntryData`). Deferring the structural extension avoids accidental type narrowing regressions in a large component (`password-detail-inline.tsx`, ~1258 lines).
-- **Impact scope**: `FullEntryData` exists as a canonical reference and can be used for future derivations. No runtime impact. The rename is applied and correct.
+- **Plan description**: Steps 7.3–7.5 specified renaming `passphrase` → `sshPassphrase` and `comment` → `sshComment` in `VaultEntryFull`, and updating both `InlineDetailData` and `VaultEntryFull` to extend or use `Pick<FullEntryData, ...>`.
+- **Actual implementation**: `VaultEntryFull` (in `password-card.tsx` and `personal-password-edit-dialog-loader.tsx`) retains `passphrase`/`comment` as field names. A mapping at `password-card.tsx:417–418` converts `entry.passphrase` → `sshPassphrase` and `entry.comment` → `sshComment` when building `InlineDetailData`. Neither `VaultEntryFull` nor `InlineDetailData` extends `FullEntryData`. `InlineDetailData` already uses `sshPassphrase`/`sshComment`.
+- **Reason**: `VaultEntryFull` fields represent the JSON keys inside the encrypted blob. The blob is stored as ciphertext and existing entries already encode these fields as `passphrase`/`comment`. Renaming the interface fields would create a mismatch between the TypeScript type and the actual blob structure, requiring either a data migration or a deserialization mapping layer — both out of scope for this refactoring. The structural extension is deferred due to differing optionality/nullability across interfaces.
+- **Impact scope**: No runtime impact. `FullEntryData` exists as a canonical reference with `sshPassphrase`/`sshComment` names. The blob-to-display mapping in `password-card.tsx` handles the name translation.
 
 ---
 

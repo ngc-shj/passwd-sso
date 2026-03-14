@@ -10,7 +10,8 @@ interface BuildEncryptedBodyParams {
   blobAAD?: Uint8Array;
   overviewAAD?: Uint8Array;
   tagIds: string[];
-  /** Extra fields merged into the body (scope-specific: keyVersion, aadVersion, team fields, etc.) */
+  /** Extra fields merged into the body (scope-specific: keyVersion, aadVersion, team fields, etc.).
+   *  Must NOT contain core keys: id, encryptedBlob, encryptedOverview, tagIds. */
   extra: Record<string, unknown>;
   /** Optional fields set only when defined */
   optionals?: Record<string, unknown>;

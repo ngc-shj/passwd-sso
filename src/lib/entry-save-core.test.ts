@@ -85,7 +85,7 @@ describe("buildEncryptedEntryBody", () => {
 });
 
 describe("submitEntry", () => {
-  it("calls fetchApi with correct method and body", async () => {
+  it("calls fetchApi with POST method and body", async () => {
     const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 201 }));
 
     const body = { id: "x", encryptedBlob: "enc" };
@@ -97,6 +97,19 @@ describe("submitEntry", () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(init.method).toBe("POST");
     expect(JSON.parse(String(init.body))).toEqual(body);
+
+    fetchMock.mockRestore();
+  });
+
+  it("calls fetchApi with PUT method for edit", async () => {
+    const fetchMock = vi.spyOn(global, "fetch").mockResolvedValue(new Response(null, { status: 200 }));
+
+    const body = { encryptedBlob: "enc" };
+    const res = await submitEntry("/api/passwords/entry-1", "PUT", body);
+
+    expect(res.status).toBe(200);
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(init.method).toBe("PUT");
 
     fetchMock.mockRestore();
   });
