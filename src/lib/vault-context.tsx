@@ -405,13 +405,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 7. Auto-confirm pending emergency access grants (async nonblocking)
       const userId = session?.user?.id;
-      if (userId) {
-        const sk = getSecretKey();
-        if (sk) {
-          confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
-            .catch(() => {})
-            .finally(() => sk.fill(0));
-        }
+      if (userId && secretKeyRef.current) {
+        const sk = new Uint8Array(secretKeyRef.current);
+        confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
+          .catch(() => {})
+          .finally(() => sk.fill(0));
       }
 
       // 8. Store encryption key in memory
@@ -551,13 +549,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 8. Auto-confirm pending emergency access grants
       const userId = session?.user?.id;
-      if (userId) {
-        const sk = getSecretKey();
-        if (sk) {
-          confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
-            .catch(() => {})
-            .finally(() => sk.fill(0));
-        }
+      if (userId && secretKeyRef.current) {
+        const sk = new Uint8Array(secretKeyRef.current);
+        confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
+          .catch(() => {})
+          .finally(() => sk.fill(0));
       }
 
       // 9. Set unlocked
@@ -685,13 +681,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // Auto-confirm pending emergency access grants
       const userId = session?.user?.id;
-      if (userId) {
-        const sk = getSecretKey();
-        if (sk) {
-          confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
-            .catch(() => {})
-            .finally(() => sk.fill(0));
-        }
+      if (userId && secretKeyRef.current) {
+        const sk = new Uint8Array(secretKeyRef.current);
+        confirmPendingEmergencyGrants(sk, userId, keyVersionRef.current)
+          .catch(() => {})
+          .finally(() => sk.fill(0));
       }
 
       // Set unlocked

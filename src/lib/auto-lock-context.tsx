@@ -21,7 +21,7 @@ export function AutoLockProvider({
   autoLockMinutes,
   children,
 }: AutoLockProviderProps) {
-  const lastActivityRef = useRef(Date.now());
+  const lastActivityRef = useRef(0);
   const hiddenAtRef = useRef<number | null>(null);
   const autoLockMsRef = useRef(DEFAULT_INACTIVITY_TIMEOUT_MS);
   const hiddenLockMsRef = useRef(DEFAULT_HIDDEN_TIMEOUT_MS);
