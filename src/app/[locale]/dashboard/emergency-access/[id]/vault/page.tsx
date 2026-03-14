@@ -1,16 +1,15 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
 import { useVault } from "@/lib/vault-context";
-import { VAULT_STATUS, apiPath } from "@/lib/constants";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { VAULT_STATUS, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
 import { useRouter } from "@/i18n/navigation";
-import { ArrowLeft, Eye, EyeOff, KeyRound, Lock } from "lucide-react";
+import { ArrowLeft, KeyRound, Loader2, Lock } from "lucide-react";
 import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 import {
   decryptPrivateKey,
@@ -20,8 +19,15 @@ import {
 import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
+import { PasswordCard } from "@/components/passwords/password-card";
+import type { EntryCardData } from "@/types/entry-card";
+import type { InlineDetailData } from "@/types/entry";
+import type { EntryTagNameColor } from "@/lib/entry-form-types";
 
-interface VaultEntry {
+// No-op handler for read-only mode (stable reference across renders)
+const noop = () => {};
+
+interface RawVaultEntry {
   id: string;
   encryptedBlob: string;
   blobIv: string;
@@ -34,16 +40,33 @@ interface VaultEntry {
   entryType: string;
   isFavorite: boolean;
   isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
-interface DecryptedEntry {
-  id: string;
-  entryType: string;
+interface DecryptedOverview {
   title: string;
-  username?: string;
-  password?: string;
-  url?: string;
-  notes?: string;
+  username?: string | null;
+  urlHost?: string | null;
+  snippet?: string | null;
+  brand?: string | null;
+  lastFour?: string | null;
+  cardholderName?: string | null;
+  fullName?: string | null;
+  idNumberLast4?: string | null;
+  relyingPartyId?: string | null;
+  bankName?: string | null;
+  accountNumberLast4?: string | null;
+  softwareName?: string | null;
+  licensee?: string | null;
+  keyType?: string | null;
+  fingerprint?: string | null;
+  tags: EntryTagNameColor[];
+}
+
+interface DisplayEntry {
+  card: EntryCardData;
+  raw: RawVaultEntry;
 }
 
 export default function EmergencyVaultPage() {
@@ -53,11 +76,15 @@ export default function EmergencyVaultPage() {
   const router = useRouter();
   const { status: vaultStatus, encryptionKey } = useVault();
 
-  const [entries, setEntries] = useState<DecryptedEntry[]>([]);
+  const [entries, setEntries] = useState<DisplayEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ownerName, setOwnerName] = useState("");
-  const [visiblePasswords, setVisiblePasswords] = useState<Set<string>>(new Set());
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [decryptFailCount, setDecryptFailCount] = useState(0);
+  // Owner's derived encryption key, stored after ECDH unwrap for lazy blob decryption
+  const ownerEncKeyRef = useRef<CryptoKey | null>(null);
+  const ownerIdRef = useRef<string>("");
 
   const decryptEntries = useCallback(async () => {
     if (!encryptionKey) {
@@ -77,6 +104,7 @@ export default function EmergencyVaultPage() {
       }
       const vaultData = await vaultRes.json();
       setOwnerName(vaultData.owner?.name || vaultData.owner?.email || "");
+      ownerIdRef.current = vaultData.ownerId;
 
       // 2. Decrypt grantee's ECDH private key
       const granteePrivKeyBytes = await decryptPrivateKey(
@@ -89,7 +117,7 @@ export default function EmergencyVaultPage() {
       );
       const granteePrivKey = await importPrivateKey(granteePrivKeyBytes);
 
-      // 3. Unwrap owner's secretKey (with HKDF salt and WrapContext AAD)
+      // 3. Unwrap owner's secretKey
       const hkdfSalt = hexDecode(vaultData.hkdfSalt);
       const wrapCtx = {
         grantId: vaultData.grantId,
@@ -113,6 +141,7 @@ export default function EmergencyVaultPage() {
       // 4. Derive owner's encryption key
       const ownerEncKey = await deriveEncryptionKey(ownerSecretKey);
       ownerSecretKey.fill(0);
+      ownerEncKeyRef.current = ownerEncKey;
 
       // 5. Fetch encrypted entries
       const entriesRes = await fetchApi(apiPath.emergencyGrantVaultEntries(grantId));
@@ -121,36 +150,56 @@ export default function EmergencyVaultPage() {
         setLoading(false);
         return;
       }
-      const rawEntries: VaultEntry[] = await entriesRes.json();
+      const rawEntries: RawVaultEntry[] = await entriesRes.json();
 
-      // 6. Decrypt all entries
-      const decrypted: DecryptedEntry[] = [];
+      // 6. Decrypt overviews for list display
+      const decrypted: DisplayEntry[] = [];
+      let failCount = 0;
       for (const entry of rawEntries) {
         try {
-          const blobEncrypted: EncryptedData = {
-            ciphertext: entry.encryptedBlob,
-            iv: entry.blobIv,
-            authTag: entry.blobAuthTag,
-          };
           const aad = entry.aadVersion >= 1
             ? buildPersonalEntryAAD(vaultData.ownerId, entry.id)
             : undefined;
-          const plaintext = await decryptData(blobEncrypted, ownerEncKey, aad);
-          const data = JSON.parse(plaintext);
+          const overviewEncrypted: EncryptedData = {
+            ciphertext: entry.encryptedOverview,
+            iv: entry.overviewIv,
+            authTag: entry.overviewAuthTag,
+          };
+          const overviewPlain = await decryptData(overviewEncrypted, ownerEncKey, aad);
+          const overview: DecryptedOverview = JSON.parse(overviewPlain);
+
           decrypted.push({
-            id: entry.id,
-            entryType: entry.entryType,
-            title: data.title || "Untitled",
-            username: data.username,
-            password: data.password,
-            url: data.url,
-            notes: data.notes,
+            card: {
+              id: entry.id,
+              entryType: (entry.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
+              title: overview.title || "Untitled",
+              username: overview.username ?? null,
+              urlHost: overview.urlHost ?? null,
+              snippet: overview.snippet ?? null,
+              brand: overview.brand ?? null,
+              lastFour: overview.lastFour ?? null,
+              cardholderName: overview.cardholderName ?? null,
+              fullName: overview.fullName ?? null,
+              idNumberLast4: overview.idNumberLast4 ?? null,
+              relyingPartyId: overview.relyingPartyId ?? null,
+              bankName: overview.bankName ?? null,
+              accountNumberLast4: overview.accountNumberLast4 ?? null,
+              softwareName: overview.softwareName ?? null,
+              licensee: overview.licensee ?? null,
+              keyType: overview.keyType ?? null,
+              fingerprint: overview.fingerprint ?? null,
+              tags: overview.tags ?? [],
+              isFavorite: entry.isFavorite,
+              isArchived: entry.isArchived,
+            },
+            raw: entry,
           });
         } catch {
-          // Skip entries that fail to decrypt
+          failCount++;
         }
       }
 
+      setDecryptFailCount(failCount);
       setEntries(decrypted);
     } catch {
       setError(t("networkError"));
@@ -165,14 +214,121 @@ export default function EmergencyVaultPage() {
     }
   }, [vaultStatus, decryptEntries]);
 
-  const togglePassword = (id: string) => {
-    setVisiblePasswords((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
+  // Clear crypto refs on unmount
+  useEffect(() => {
+    return () => {
+      ownerEncKeyRef.current = null;
+      ownerIdRef.current = "";
+    };
+  }, []);
+
+  const decryptBlob = useCallback(async (entry: RawVaultEntry) => {
+    const ownerEncKey = ownerEncKeyRef.current;
+    if (!ownerEncKey) throw new Error("Owner key not available");
+    const aad = entry.aadVersion >= 1
+      ? buildPersonalEntryAAD(ownerIdRef.current, entry.id)
+      : undefined;
+    const blobEncrypted: EncryptedData = {
+      ciphertext: entry.encryptedBlob,
+      iv: entry.blobIv,
+      authTag: entry.blobAuthTag,
+    };
+    return JSON.parse(await decryptData(blobEncrypted, ownerEncKey, aad));
+  }, []);
+
+  const makeGetDetail = useCallback((displayEntry: DisplayEntry) => {
+    return async (): Promise<InlineDetailData> => {
+      const data = await decryptBlob(displayEntry.raw);
+      return {
+        id: displayEntry.raw.id,
+        entryType: (displayEntry.raw.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
+        requireReprompt: false,
+        password: data.password ?? "",
+        content: data.content,
+        isMarkdown: data.isMarkdown,
+        url: data.url ?? null,
+        urlHost: displayEntry.card.urlHost,
+        notes: data.notes ?? null,
+        customFields: data.customFields ?? [],
+        passwordHistory: data.passwordHistory ?? [],
+        totp: data.totp,
+        cardholderName: data.cardholderName,
+        cardNumber: data.cardNumber,
+        brand: data.brand,
+        expiryMonth: data.expiryMonth,
+        expiryYear: data.expiryYear,
+        cvv: data.cvv,
+        fullName: data.fullName,
+        address: data.address,
+        phone: data.phone,
+        email: data.email,
+        dateOfBirth: data.dateOfBirth,
+        nationality: data.nationality,
+        idNumber: data.idNumber,
+        issueDate: data.issueDate,
+        expiryDate: data.expiryDate,
+        relyingPartyId: data.relyingPartyId,
+        relyingPartyName: data.relyingPartyName,
+        username: data.username,
+        credentialId: data.credentialId,
+        creationDate: data.creationDate,
+        deviceInfo: data.deviceInfo,
+        bankName: data.bankName,
+        accountType: data.accountType,
+        accountHolderName: data.accountHolderName,
+        accountNumber: data.accountNumber,
+        routingNumber: data.routingNumber,
+        swiftBic: data.swiftBic,
+        iban: data.iban,
+        branchName: data.branchName,
+        softwareName: data.softwareName,
+        licenseKey: data.licenseKey,
+        version: data.version,
+        licensee: data.licensee,
+        purchaseDate: data.purchaseDate,
+        expirationDate: data.expirationDate,
+        privateKey: data.privateKey,
+        publicKey: data.publicKey,
+        keyType: data.keyType,
+        keySize: data.keySize,
+        fingerprint: data.fingerprint,
+        sshPassphrase: data.passphrase,
+        sshComment: data.comment,
+        createdAt: displayEntry.raw.createdAt,
+        updatedAt: displayEntry.raw.updatedAt,
+      };
+    };
+  }, [decryptBlob]);
+
+  const makeGetPassword = useCallback((displayEntry: DisplayEntry) => {
+    return async (): Promise<string> => {
+      const data = await decryptBlob(displayEntry.raw);
+      return data.password ?? "";
+    };
+  }, [decryptBlob]);
+
+  const makeGetUrl = useCallback((displayEntry: DisplayEntry) => {
+    return async (): Promise<string | null> => {
+      const data = await decryptBlob(displayEntry.raw);
+      return data.url ?? null;
+    };
+  }, [decryptBlob]);
+
+  // Pre-compute stable callback references keyed by entry ID for O(1) lookup
+  const entryCallbackMap = useMemo(
+    () =>
+      new Map(
+        entries.map((entry) => [
+          entry.card.id,
+          {
+            getPassword: makeGetPassword(entry),
+            getDetail: makeGetDetail(entry),
+            getUrl: makeGetUrl(entry),
+          },
+        ])
+      ),
+    [entries, makeGetDetail, makeGetPassword, makeGetUrl]
+  );
 
   if (vaultStatus !== VAULT_STATUS.UNLOCKED) {
     return (
@@ -212,14 +368,20 @@ export default function EmergencyVaultPage() {
         </Card>
 
         {loading && (
-          <Card className="rounded-xl border bg-card/80 p-10">
-            <div className="py-8 text-center text-muted-foreground">...</div>
-          </Card>
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
         )}
 
         {error && (
           <Card className="rounded-xl border border-red-500/40 bg-red-500/5 p-4 text-center text-red-700 dark:text-red-400">
             {error}
+          </Card>
+        )}
+
+        {!loading && decryptFailCount > 0 && (
+          <Card className="rounded-xl border border-yellow-500/40 bg-yellow-500/5 p-4 text-center text-yellow-700 dark:text-yellow-400">
+            {t("decryptFailWarning", { count: String(decryptFailCount) })}
           </Card>
         )}
 
@@ -229,75 +391,29 @@ export default function EmergencyVaultPage() {
           </Card>
         )}
 
-        <div className="space-y-2">
-          {entries.map((entry) => (
-            <Card key={entry.id} className="rounded-xl border bg-card/80">
-              <CardHeader className="py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{entry.title}</span>
-                    <Badge variant="outline" className="text-xs">
-                      {entry.entryType}
-                    </Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-1 py-2 text-sm">
-                {entry.username && (
-                  <div className="flex items-center gap-2">
-                    <span className="w-20 text-muted-foreground">{t("username")}:</span>
-                    <button
-                      className="font-mono hover:underline"
-                      onClick={() => {
-                        navigator.clipboard.writeText(entry.username!);
-                        toast.success(t("copied"));
-                      }}
-                    >
-                      {entry.username}
-                    </button>
-                  </div>
-                )}
-                {entry.password && (
-                  <div className="flex items-center gap-2">
-                    <span className="w-20 text-muted-foreground">{t("password")}:</span>
-                    <button
-                      className="font-mono hover:underline"
-                      onClick={() => {
-                        navigator.clipboard.writeText(entry.password!);
-                        toast.success(t("copied"));
-                      }}
-                    >
-                      {visiblePasswords.has(entry.id) ? entry.password : "••••••••"}
-                    </button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => togglePassword(entry.id)}
-                    >
-                      {visiblePasswords.has(entry.id) ? (
-                        <EyeOff className="h-3 w-3" />
-                      ) : (
-                        <Eye className="h-3 w-3" />
-                      )}
-                    </Button>
-                  </div>
-                )}
-                {entry.url && (
-                  <div className="flex items-center gap-2">
-                    <span className="w-20 text-muted-foreground">URL:</span>
-                    <span className="truncate font-mono text-xs">{entry.url}</span>
-                  </div>
-                )}
-                {entry.notes && (
-                  <div className="flex gap-2">
-                    <span className="w-20 text-muted-foreground">{t("notes")}:</span>
-                    <span className="whitespace-pre-wrap text-xs">{entry.notes}</span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+        <div className="space-y-1">
+          {entries.map((entry) => {
+            const cb = entryCallbackMap.get(entry.card.id);
+            return (
+              <PasswordCard
+                key={entry.card.id}
+                entry={entry.card}
+                expanded={expandedId === entry.card.id}
+                onToggleFavorite={noop}
+                onToggleArchive={noop}
+                onDelete={noop}
+                onToggleExpand={(id) => setExpandedId((prev) => (prev === id ? null : id))}
+                onRefresh={noop}
+                getPassword={cb?.getPassword}
+                getDetail={cb?.getDetail}
+                getUrl={cb?.getUrl}
+                canEdit={false}
+                canDelete={false}
+                canShare={false}
+                readOnly
+              />
+            );
+          })}
         </div>
       </div>
     </div>

@@ -3,12 +3,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useSession } from "next-auth/react";
-import { HeartPulse, Users, Shield } from "lucide-react";
+import { HeartPulse, Users, Shield, ChevronDown } from "lucide-react";
 import { CreateGrantDialog } from "@/components/emergency-access/create-grant-dialog";
 import { GrantCard } from "@/components/emergency-access/grant-card";
 import { Card } from "@/components/ui/card";
 import type { EaStatusValue } from "@/lib/constants";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, EA_STATUS } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface Grant {
@@ -31,6 +31,8 @@ export default function EmergencyAccessPage() {
   const { data: session } = useSession();
   const [grants, setGrants] = useState<Grant[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showInactiveOwner, setShowInactiveOwner] = useState(false);
+  const [showInactiveGrantee, setShowInactiveGrantee] = useState(false);
 
   const fetchGrants = useCallback(async () => {
     try {
@@ -50,8 +52,16 @@ export default function EmergencyAccessPage() {
   if (!session?.user?.id) return null;
   const userId = session.user.id;
 
+  const isTerminal = (s: EaStatusValue) =>
+    s === EA_STATUS.REVOKED || s === EA_STATUS.REJECTED;
+
   const ownerGrants = grants.filter((g) => g.ownerId === userId);
   const granteeGrants = grants.filter((g) => g.ownerId !== userId);
+
+  const activeOwner = ownerGrants.filter((g) => !isTerminal(g.status));
+  const inactiveOwner = ownerGrants.filter((g) => isTerminal(g.status));
+  const activeGrantee = granteeGrants.filter((g) => !isTerminal(g.status));
+  const inactiveGrantee = granteeGrants.filter((g) => isTerminal(g.status));
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -86,7 +96,13 @@ export default function EmergencyAccessPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {ownerGrants.map((grant) => (
+                {activeOwner.length === 0 && inactiveOwner.length > 0 && (
+                  <div className="rounded-lg border border-dashed p-8 text-center">
+                    <p className="text-muted-foreground">{t("noGrants")}</p>
+                    <p className="text-xs text-muted-foreground">{t("noGrantsDesc")}</p>
+                  </div>
+                )}
+                {activeOwner.map((grant) => (
                   <GrantCard
                     key={grant.id}
                     grant={grant}
@@ -94,6 +110,32 @@ export default function EmergencyAccessPage() {
                     onRefresh={fetchGrants}
                   />
                 ))}
+                {inactiveOwner.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowInactiveOwner((v) => !v)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <ChevronDown
+                        className={`h-3 w-3 transition-transform ${showInactiveOwner ? "rotate-0" : "-rotate-90"}`}
+                      />
+                      {t("inactiveGrants", { count: String(inactiveOwner.length) })}
+                    </button>
+                    {showInactiveOwner && (
+                      <div className="mt-2 space-y-2">
+                        {inactiveOwner.map((grant) => (
+                          <GrantCard
+                            key={grant.id}
+                            grant={grant}
+                            currentUserId={userId}
+                            onRefresh={fetchGrants}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </section>
@@ -115,7 +157,12 @@ export default function EmergencyAccessPage() {
               </div>
             ) : (
               <div className="space-y-2">
-                {granteeGrants.map((grant) => (
+                {activeGrantee.length === 0 && inactiveGrantee.length > 0 && (
+                  <div className="rounded-lg border border-dashed p-8 text-center">
+                    <p className="text-muted-foreground">{t("noTrustedBy")}</p>
+                  </div>
+                )}
+                {activeGrantee.map((grant) => (
                   <GrantCard
                     key={grant.id}
                     grant={grant}
@@ -123,6 +170,32 @@ export default function EmergencyAccessPage() {
                     onRefresh={fetchGrants}
                   />
                 ))}
+                {inactiveGrantee.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      onClick={() => setShowInactiveGrantee((v) => !v)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <ChevronDown
+                        className={`h-3 w-3 transition-transform ${showInactiveGrantee ? "rotate-0" : "-rotate-90"}`}
+                      />
+                      {t("inactiveGrants", { count: String(inactiveGrantee.length) })}
+                    </button>
+                    {showInactiveGrantee && (
+                      <div className="mt-2 space-y-2">
+                        {inactiveGrantee.map((grant) => (
+                          <GrantCard
+                            key={grant.id}
+                            grant={grant}
+                            currentUserId={userId}
+                            onRefresh={fetchGrants}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </section>

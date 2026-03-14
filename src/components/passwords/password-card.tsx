@@ -87,6 +87,9 @@ interface PasswordCardProps {
   // Optional: RBAC permission control
   canEdit?: boolean;
   canDelete?: boolean;
+  canShare?: boolean;
+  /** When true, skip remote fetches in detail view (history, attachments) */
+  readOnly?: boolean;
   // Optional: additional info display
   createdBy?: string | null;
   // Optional: team context
@@ -183,6 +186,8 @@ export function PasswordCard({
   onEditClick,
   canEdit = true,
   canDelete = true,
+  canShare = true,
+  readOnly = false,
   createdBy,
   teamId,
 }: PasswordCardProps) {
@@ -314,10 +319,11 @@ export function PasswordCard({
     return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
   };
 
-  // Clear cached detail when collapsed so re-expand fetches fresh data
+  // Clear cached detail and loading state when collapsed
   useEffect(() => {
     if (!expanded) {
       setDetailData(null);
+      setDetailLoading(false);
     }
   }, [expanded]);
 
@@ -334,9 +340,11 @@ export function PasswordCard({
         .then((detail) => {
           if (!cancelled) setDetailData(detail);
         })
-        .catch(() => {})
+        .catch((err) => {
+          if (process.env.NODE_ENV === "development") console.error("[PasswordCard] getDetail error:", err);
+        })
         .finally(() => {
-          if (!cancelled) setDetailLoading(false);
+          setDetailLoading(false);
         });
     } else {
       // Personal mode: E2E decrypt
@@ -811,38 +819,42 @@ export function PasswordCard({
                   )}
                 </>
               )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onSelect={async () => {
-                  if (!isTeamMode) {
-                    // Personal: decrypt entry data, strip TOTP
-                    try {
-                      const { entry } = await fetchDecryptedEntry();
-                       
-                      const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = entry;
-                      setShareData(safe as Record<string, unknown>);
-                    } catch {
-                      toast.error(t("networkError"));
-                      return;
-                    }
-                  } else if (getDetailProp) {
-                    // Team: decrypt via getDetail, strip TOTP/internal fields
-                    try {
-                      const detail = await getDetailProp();
-                       
-                      const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
-                      setShareData(safe as Record<string, unknown>);
-                    } catch {
-                      toast.error(t("networkError"));
-                      return;
-                    }
-                  }
-                  setShareDialogOpen(true);
-                }}
-              >
-                <LinkIcon className="h-4 w-4" />
-                {t("share")}
-              </DropdownMenuItem>
+              {canShare && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={async () => {
+                      if (!isTeamMode) {
+                        // Personal: decrypt entry data, strip TOTP
+                        try {
+                          const { entry } = await fetchDecryptedEntry();
+
+                          const { totp: _t, passwordHistory: _ph, tags: _tags, ...safe } = entry;
+                          setShareData(safe as Record<string, unknown>);
+                        } catch {
+                          toast.error(t("networkError"));
+                          return;
+                        }
+                      } else if (getDetailProp) {
+                        // Team: decrypt via getDetail, strip TOTP/internal fields
+                        try {
+                          const detail = await getDetailProp();
+
+                          const { totp: _t, passwordHistory: _ph, id: _id, requireReprompt: _rp, ...safe } = detail;
+                          setShareData(safe as Record<string, unknown>);
+                        } catch {
+                          toast.error(t("networkError"));
+                          return;
+                        }
+                      }
+                      setShareDialogOpen(true);
+                    }}
+                  >
+                    <LinkIcon className="h-4 w-4" />
+                    {t("share")}
+                  </DropdownMenuItem>
+                </>
+              )}
               {canEdit && (
                 <>
                   <DropdownMenuSeparator />
@@ -913,6 +925,7 @@ export function PasswordCard({
                   onRefresh();
                 }}
                 teamId={scopedTeamId}
+                readOnly={readOnly}
               />
             </div>
           ) : null
