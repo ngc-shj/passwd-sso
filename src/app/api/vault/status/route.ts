@@ -4,8 +4,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { authOrToken } from "@/lib/auth-or-token";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { checkAuth } from "@/lib/check-auth";
 
 export const runtime = "nodejs";
 
@@ -15,22 +14,12 @@ export const runtime = "nodejs";
  * Supports both Auth.js session and extension token (Bearer).
  */
 async function handleGET(request: NextRequest) {
-  const result = await authOrToken(request, EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA);
-  if (!result) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
-  }
-  if (result.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 403 });
-  }
+  const result = await checkAuth(request, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
+  if (!result.ok) return result.response;
 
-  if (result.type !== "session") {
-    const denied = await enforceAccessRestriction(request, result.userId, result.type === "api_key" ? result.tenantId : undefined);
-    if (denied) return denied;
-  }
-
-  const user = await withUserTenantRls(result.userId, async () =>
+  const user = await withUserTenantRls(result.auth.userId, async () =>
     prisma.user.findUnique({
-      where: { id: result.userId },
+      where: { id: result.auth.userId },
       select: {
         vaultSetupAt: true,
         accountSalt: true,
