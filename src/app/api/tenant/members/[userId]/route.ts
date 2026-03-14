@@ -12,6 +12,7 @@ import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ type Params = { params: Promise<{ userId: string }> };
 async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { userId } = await params;
@@ -35,7 +36,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     );
   } catch (e) {
     if (e instanceof TenantAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -72,7 +73,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   );
 
   if (!target) {
-    return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
 
   // SCIM guard

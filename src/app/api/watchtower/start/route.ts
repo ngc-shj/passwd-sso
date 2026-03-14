@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
+import { unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ const scanLimiter = createRateLimiter({
 async function handlePOST() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { allowed } = await scanLimiter.check(`rl:watchtower:start:${session.user.id}`);

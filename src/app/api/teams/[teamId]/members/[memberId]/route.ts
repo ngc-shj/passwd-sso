@@ -15,6 +15,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -22,7 +23,7 @@ type Params = { params: Promise<{ teamId: string; memberId: string }> };
 async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, memberId } = await params;
@@ -36,7 +37,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       );
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -48,7 +49,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   );
 
   if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
-    return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
 
   const result = await parseBody(req, updateMemberRoleSchema);
@@ -57,10 +58,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   // Owner transfer: only OWNER can promote someone to OWNER
   if (result.data.role === TEAM_ROLE.OWNER) {
     if (actorMembership.role !== TEAM_ROLE.OWNER) {
-      return NextResponse.json(
-        { error: API_ERROR.OWNER_ONLY },
-        { status: 403 }
-      );
+      return errorResponse(API_ERROR.OWNER_ONLY, 403);
     }
 
     // Transfer: promote target to OWNER, demote self to ADMIN
@@ -102,10 +100,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   // Cannot change OWNER role (unless transferring ownership above)
   if (target.role === TEAM_ROLE.OWNER) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_CHANGE_OWNER_ROLE },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.CANNOT_CHANGE_OWNER_ROLE, 403);
   }
 
   // Cannot change role of someone at or above your level (except OWNER can do anything)
@@ -113,10 +108,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     actorMembership.role !== TEAM_ROLE.OWNER &&
     !isRoleAbove(actorMembership.role, target.role)
   ) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_CHANGE_HIGHER_ROLE },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.CANNOT_CHANGE_HIGHER_ROLE, 403);
   }
 
   const updated = await withTeamTenantRls(teamId, async () =>
@@ -154,7 +146,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, memberId } = await params;
@@ -168,7 +160,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       );
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -180,24 +172,18 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   if (!target || target.teamId !== teamId || target.deactivatedAt !== null) {
-    return NextResponse.json({ error: API_ERROR.MEMBER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
 
   if (target.role === TEAM_ROLE.OWNER) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_REMOVE_OWNER },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.CANNOT_REMOVE_OWNER, 403);
   }
 
   if (
     actorMembership.role !== TEAM_ROLE.OWNER &&
     !isRoleAbove(actorMembership.role, target.role)
   ) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_REMOVE_HIGHER_ROLE },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.CANNOT_REMOVE_HIGHER_ROLE, 403);
   }
 
   await withTeamTenantRls(teamId, async () =>

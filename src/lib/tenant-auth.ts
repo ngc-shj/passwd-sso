@@ -8,7 +8,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withBypassRls } from "@/lib/tenant-rls";
 import type { TenantRole } from "@prisma/client";
@@ -108,10 +108,12 @@ export async function requireTenantPermission(
 // ─── Error Class ────────────────────────────────────────────────
 
 export class TenantAuthError extends Error {
+  override message: ApiErrorCode;
   status: number;
 
-  constructor(message: string, status: number) {
-    super(message);
+  constructor(code: ApiErrorCode, status: number) {
+    super(code);
+    this.message = code;
     this.name = "TenantAuthError";
     this.status = status;
   }

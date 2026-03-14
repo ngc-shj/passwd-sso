@@ -20,6 +20,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -51,7 +52,7 @@ const createWebhookSchema = z.object({
 async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -60,7 +61,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -90,7 +91,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -99,7 +100,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }

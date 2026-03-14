@@ -1,8 +1,8 @@
-import { buildGeneratorSummary } from "@/lib/generator-summary";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
+import { buildLoginFormDerived, buildSnapshot } from "@/hooks/form/login-form-derived";
 
 interface BuildTeamLoginFormDerivedArgs {
   editData?: TeamEntryFormEditData | null;
@@ -43,43 +43,38 @@ export function buildTeamLoginFormDerived({
   generatorSettings,
   tGen,
 }: BuildTeamLoginFormDerivedArgs) {
-  const baselineSnapshot = JSON.stringify({
+  const initialSnapshot = buildSnapshot("team", {
     title: editData?.title ?? "",
     notes: editData?.notes ?? "",
     username: editData?.username ?? "",
     password: editData?.password ?? "",
     url: editData?.url ?? "",
-    customFields: JSON.stringify(editData?.customFields ?? []),
-    totp: JSON.stringify(editData?.totp ?? null),
-    selectedTagIds: (editData?.tags ?? defaultTags ?? []).map((tag) => tag.id).sort(),
-    teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
+    tags: editData?.tags ?? defaultTags ?? [],
+    customFields: editData?.customFields ?? [],
+    totp: editData?.totp ?? null,
+    folderId: editData?.teamFolderId ?? defaultFolderId ?? null,
     requireReprompt: editData?.requireReprompt ?? false,
     travelSafe: editData?.travelSafe ?? true,
     expiresAt: editData?.expiresAt ?? null,
+    generatorSettings,
   });
 
-  const currentSnapshot = JSON.stringify({
+  return buildLoginFormDerived({
+    scope: "team",
     title,
     notes,
     username,
     password,
     url,
-    customFields: JSON.stringify(customFields),
-    totp: JSON.stringify(totp),
-    selectedTagIds: selectedTags.map((tag) => tag.id).sort(),
-    teamFolderId,
+    tags: selectedTags,
+    customFields,
+    totp,
+    folderId: teamFolderId,
     requireReprompt,
     travelSafe,
     expiresAt,
+    generatorSettings,
+    tGen,
+    initialSnapshot,
   });
-
-  const generatorSummary = buildGeneratorSummary(generatorSettings, {
-    modePassphrase: tGen("modePassphrase"),
-    modePassword: tGen("modePassword"),
-  });
-
-  return {
-    hasChanges: currentSnapshot !== baselineSnapshot,
-    generatorSummary,
-  };
 }

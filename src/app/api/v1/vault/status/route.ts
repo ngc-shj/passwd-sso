@@ -7,6 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { unauthorized } from "@/lib/api-response";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
@@ -20,7 +21,7 @@ async function handleGET(req: NextRequest) {
         { status: 403 },
       );
     }
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { userId, tenantId, apiKeyId } = authResult.data;

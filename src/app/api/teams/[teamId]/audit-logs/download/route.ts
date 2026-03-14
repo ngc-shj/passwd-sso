@@ -16,6 +16,7 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -47,7 +48,7 @@ const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent"
 async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -56,7 +57,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -66,7 +67,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await assertPolicyAllowsExport(teamId);
   } catch (e) {
     if (e instanceof PolicyViolationError) {
-      return NextResponse.json({ error: API_ERROR.POLICY_EXPORT_DISABLED }, { status: 403 });
+      return errorResponse(API_ERROR.POLICY_EXPORT_DISABLED, 403);
     }
     throw e;
   }

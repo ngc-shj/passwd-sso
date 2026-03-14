@@ -15,6 +15,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -30,7 +31,7 @@ function getTeamParent(teamId: string, id: string): Promise<ParentNode | null> {
 async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -39,7 +40,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -77,7 +78,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -86,7 +87,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -158,7 +159,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
   if (!team) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const folder = await withTeamTenantRls(teamId, async () =>

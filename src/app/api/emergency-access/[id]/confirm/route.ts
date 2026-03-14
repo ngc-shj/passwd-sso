@@ -10,6 +10,7 @@ import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/c
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 // POST /api/emergency-access/[id]/confirm — Owner performs key escrow
 async function handlePOST(
@@ -18,7 +19,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -30,14 +31,11 @@ async function handlePOST(
   );
 
   if (!grant || grant.ownerId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (!canTransition(grant.status, EA_STATUS.IDLE)) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_STATUS },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.INVALID_STATUS, 400);
   }
 
   // Fetch owner's current keyVersion from DB (server-authoritative)
@@ -49,7 +47,7 @@ async function handlePOST(
   );
 
   if (!owner) {
-    return NextResponse.json({ error: API_ERROR.USER_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.USER_NOT_FOUND, 404);
   }
 
   const result = await parseBody(req, confirmEmergencyGrantSchema);
@@ -59,10 +57,7 @@ async function handlePOST(
   // Validate keyAlgorithm is compatible with wrapVersion
   const allowedAlgorithms = SUPPORTED_KEY_ALGORITHMS[wrapVersion];
   if (!allowedAlgorithms?.includes(grant.keyAlgorithm)) {
-    return NextResponse.json(
-      { error: API_ERROR.INCOMPATIBLE_KEY_ALGORITHM },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.INCOMPATIBLE_KEY_ALGORITHM, 400);
   }
 
   // Use server-fetched keyVersion, ignore client-sent value

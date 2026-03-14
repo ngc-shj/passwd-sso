@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, notFound, forbidden } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   validateParentFolder,
@@ -30,7 +31,7 @@ async function handlePUT(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -39,10 +40,10 @@ async function handlePUT(
     prisma.folder.findUnique({ where: { id } }),
   );
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const result = await parseBody(req, updateFolderSchema);
@@ -68,18 +69,12 @@ async function handlePUT(
             (parentId) => getPersonalParent(session.user.id, parentId),
           );
         } catch {
-          return NextResponse.json(
-            { error: API_ERROR.NOT_FOUND },
-            { status: 404 },
-          );
+          return notFound();
         }
 
         // Cannot set parent to self
         if (newParentId === id) {
-          return NextResponse.json(
-            { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
-            { status: 400 },
-          );
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
         }
 
         const isCircular = await checkCircularReference(
@@ -88,10 +83,7 @@ async function handlePUT(
           (parentId) => getPersonalParent(session.user.id, parentId),
         );
         if (isCircular) {
-          return NextResponse.json(
-            { error: API_ERROR.FOLDER_CIRCULAR_REFERENCE },
-            { status: 400 },
-          );
+          return errorResponse(API_ERROR.FOLDER_CIRCULAR_REFERENCE, 400);
         }
       }
 
@@ -102,10 +94,7 @@ async function handlePUT(
           (parentId) => getPersonalParent(session.user.id, parentId),
         );
       } catch {
-        return NextResponse.json(
-          { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
-          { status: 400 },
-        );
+        return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
       }
 
       updateData.parentId = newParentId;
@@ -133,10 +122,7 @@ async function handlePUT(
         }),
       );
       if (dup && dup.id !== id) {
-        return NextResponse.json(
-          { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-          { status: 409 },
-        );
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
       }
     } else {
       const rootDup = await withUserTenantRls(session.user.id, async () =>
@@ -145,10 +131,7 @@ async function handlePUT(
         }),
       );
       if (rootDup && rootDup.id !== id) {
-        return NextResponse.json(
-          { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-          { status: 409 },
-        );
+        return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
       }
     }
   }
@@ -186,7 +169,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -195,10 +178,10 @@ async function handleDELETE(
     prisma.folder.findUnique({ where: { id } }),
   );
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (existing.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   // Collect children and detect name conflicts at the target parent level.

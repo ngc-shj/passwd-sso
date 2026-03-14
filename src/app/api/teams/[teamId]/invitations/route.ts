@@ -10,6 +10,7 @@ import { parseBody } from "@/lib/parse-body";
 import { INVITATION_STATUS, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -17,7 +18,7 @@ type Params = { params: Promise<{ teamId: string }> };
 async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -26,7 +27,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -61,7 +62,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -70,7 +71,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -97,17 +98,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (existingMember) {
       // Active member → already a member
       if (existingMember.deactivatedAt === null) {
-        return NextResponse.json(
-          { error: API_ERROR.ALREADY_A_MEMBER },
-          { status: 409 }
-        );
+        return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
       }
       // Deactivated + scimManaged → must re-activate via IdP
       if (existingMember.scimManaged) {
-        return NextResponse.json(
-          { error: API_ERROR.SCIM_MANAGED_MEMBER },
-          { status: 409 }
-        );
+        return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
       }
       // Deactivated + !scimManaged → allow invitation (accept will re-activate)
     }
@@ -120,10 +115,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
   if (existingInv) {
-    return NextResponse.json(
-      { error: API_ERROR.INVITATION_ALREADY_SENT },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT, 409);
   }
 
   const token = randomBytes(32).toString("hex");
@@ -135,7 +127,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
   if (!team) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const invitation = await withTeamTenantRls(teamId, async () =>

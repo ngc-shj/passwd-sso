@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -21,14 +22,14 @@ const policyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 async function handleGET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   try {
     await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
   } catch (e) {
     if (e instanceof TenantAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -61,11 +62,11 @@ async function handleGET(_req: NextRequest) {
 async function handlePATCH(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await policyLimiter.check(`rl:tenant_policy:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   let membership;
@@ -73,7 +74,7 @@ async function handlePATCH(req: NextRequest) {
     membership = await requireTenantPermission(session.user.id, TENANT_PERMISSION.MEMBER_MANAGE);
   } catch (e) {
     if (e instanceof TenantAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -82,7 +83,7 @@ async function handlePATCH(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, confirmLockout } = body;
 
@@ -94,7 +95,7 @@ async function handlePATCH(req: NextRequest) {
       maxConcurrentSessions < 1 ||
       maxConcurrentSessions > 100
     ) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
   }
 
@@ -106,7 +107,7 @@ async function handlePATCH(req: NextRequest) {
       vaultAutoLockMinutes < 1 ||
       vaultAutoLockMinutes > 1440
     ) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
   }
 
@@ -118,29 +119,29 @@ async function handlePATCH(req: NextRequest) {
       sessionIdleTimeoutMinutes < 1 ||
       sessionIdleTimeoutMinutes > 1440
     ) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
   }
 
   // Validate allowedCidrs: null/[] or array of valid CIDR strings, max 50
   if (allowedCidrs !== null && allowedCidrs !== undefined) {
     if (!Array.isArray(allowedCidrs)) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
     if (allowedCidrs.length > MAX_CIDRS) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: `Maximum ${MAX_CIDRS} CIDRs allowed` }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: `Maximum ${MAX_CIDRS} CIDRs allowed` });
     }
     for (const cidr of allowedCidrs) {
       if (typeof cidr !== "string" || !isValidCidr(cidr)) {
         const truncated = typeof cidr === "string" ? cidr.slice(0, 45) : String(cidr).slice(0, 45);
-        return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: `Invalid CIDR: ${truncated}` }, { status: 400 });
+        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: `Invalid CIDR: ${truncated}` });
       }
     }
   }
 
   // Validate tailscaleEnabled: boolean
   if (tailscaleEnabled !== undefined && typeof tailscaleEnabled !== "boolean") {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate tailscaleTailnet: required when tailscaleEnabled is true
@@ -154,7 +155,7 @@ async function handlePATCH(req: NextRequest) {
         }),
       );
       if (!existing?.tailscaleTailnet) {
-        return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet is required when tailscaleEnabled is true" }, { status: 400 });
+        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
       }
     } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
       return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet is required when tailscaleEnabled is true" }, { status: 400 });
@@ -162,11 +163,11 @@ async function handlePATCH(req: NextRequest) {
   }
   if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {
     if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > TAILNET_NAME_MAX_LENGTH) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
     // DNS hostname characters only: alphanumeric, hyphens, dots
     if (tailscaleTailnet.length > 0 && !/^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$/.test(tailscaleTailnet)) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)" }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet must contain only valid DNS hostname characters (a-z, 0-9, hyphens, dots)" });
     }
   }
 

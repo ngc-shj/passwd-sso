@@ -9,6 +9,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -38,36 +39,24 @@ const changeLimiter = createRateLimiter({
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 }
-    );
+    return unauthorized();
   }
 
   const rateKey = `rl:vault_change_pass:${session.user.id}`;
   if (!(await changeLimiter.check(rateKey)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = changePassphraseSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return validationError(parsed.error.flatten());
   }
 
   const data = parsed.data;
@@ -84,26 +73,17 @@ async function handlePOST(request: Request) {
   );
 
   if (!user?.vaultSetupAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 404 }
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
   }
 
   // Verifier must be set (backfilled during unlock)
   if (!user.passphraseVerifierHmac) {
-    return NextResponse.json(
-      { error: API_ERROR.VERIFIER_NOT_SET },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.VERIFIER_NOT_SET, 409);
   }
 
   // Version check — reject if KDF version doesn't match
   if (user.passphraseVerifierVersion !== VERIFIER_VERSION) {
-    return NextResponse.json(
-      { error: API_ERROR.VERIFIER_VERSION_UNSUPPORTED },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.VERIFIER_VERSION_UNSUPPORTED, 409);
   }
 
   // Verify current passphrase via verifier
@@ -113,10 +93,7 @@ async function handlePOST(request: Request) {
       user.passphraseVerifierHmac
     )
   ) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_PASSPHRASE },
-      { status: 401 }
-    );
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
   }
 
   // Update: re-wrapped secret key + new verifier (keyVersion unchanged)

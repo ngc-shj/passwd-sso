@@ -8,6 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyInviteEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -20,12 +21,12 @@ const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const sessionEmail = session.user.email;
 
   if (!(await createLimiter.check(`rl:ea_create:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const result = await parseBody(req, createEmergencyGrantSchema);
@@ -34,10 +35,7 @@ async function handlePOST(req: NextRequest) {
 
   // Cannot grant to self
   if (granteeEmail.toLowerCase() === sessionEmail.toLowerCase()) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_GRANT_SELF },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.CANNOT_GRANT_SELF, 400);
   }
 
   // Check for duplicate active grant
@@ -52,10 +50,7 @@ async function handlePOST(req: NextRequest) {
   );
 
   if (existing) {
-    return NextResponse.json(
-      { error: API_ERROR.DUPLICATE_GRANT },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.DUPLICATE_GRANT, 409);
   }
 
   const token = generateShareToken();
@@ -67,7 +62,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (!operator) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const grant = await withUserTenantRls(session.user.id, async () =>
@@ -120,7 +115,7 @@ async function handlePOST(req: NextRequest) {
 async function handleGET() {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const sessionEmail = session.user.email;
 

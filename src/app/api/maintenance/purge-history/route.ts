@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { unauthorized } from "@/lib/api-response";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -21,7 +22,7 @@ const purgeLimiter = createRateLimiter({
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const rateKey = `rl:purge_history:${session.user.id}`;

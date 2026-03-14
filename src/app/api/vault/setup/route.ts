@@ -11,6 +11,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -58,14 +59,11 @@ const setupSchema = z.object({
 async function handlePOST(request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await setupLimiter.check(`rl:vault_setup:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   // Prevent re-setup
@@ -76,28 +74,22 @@ async function handlePOST(request: NextRequest) {
     }),
   );
   if (!existingUser) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   if (existingUser?.vaultSetupAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_ALREADY_SETUP },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.VAULT_ALREADY_SETUP, 409);
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = setupSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return validationError(parsed.error.flatten());
   }
 
   const data = parsed.data;
