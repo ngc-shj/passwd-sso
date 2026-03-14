@@ -58,7 +58,6 @@ import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import { EXPIRING_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
-import type { EntryTypeValue } from "@/lib/constants";
 import type {
   EntryCustomField,
   EntryPasswordHistory,

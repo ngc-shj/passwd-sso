@@ -7,7 +7,6 @@ import {
   requireTeamPermission,
   TeamAuthError,
 } from "@/lib/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
