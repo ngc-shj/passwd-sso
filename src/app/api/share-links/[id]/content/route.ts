@@ -6,13 +6,14 @@ import { verifyShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const contentLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 type Params = { params: Promise<{ id: string }> };
 
 // GET /api/share-links/[id]/content — Fetch content for a password-protected share
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   const ip = extractClientIp(req) ?? "unknown";
@@ -164,3 +165,5 @@ export async function GET(req: NextRequest, { params }: Params) {
     });
   });
 }
+
+export const GET = withRequestLog(handleGET);

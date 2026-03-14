@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -17,7 +18,7 @@ const rate = new Map<string, RateEntry>();
 
 // GET /api/watchtower/hibp?prefix=ABCDE
 // Proxies HIBP k-Anonymity range API. Requires auth.
-export async function GET(request: Request) {
+async function handleGET(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -75,3 +76,5 @@ export async function GET(request: Request) {
     },
   });
 }
+
+export const GET = withRequestLog(handleGET);

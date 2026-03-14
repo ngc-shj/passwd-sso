@@ -6,6 +6,7 @@ import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
@@ -69,22 +70,10 @@ async function handlePOST(req: NextRequest) {
   }
   const userId = authed.auth.userId;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, apiKeyCreateSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = apiKeyCreateSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { name, scope: scopes, expiresAt } = parsed.data;
+  const { name, scope: scopes, expiresAt } = result.data;
 
   // Check key limit
   const existingCount = await withUserTenantRls(userId, async () =>

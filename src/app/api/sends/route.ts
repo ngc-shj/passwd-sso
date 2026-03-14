@@ -12,6 +12,7 @@ import {
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
@@ -19,11 +20,12 @@ import {
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 // POST /api/sends — Create a text Send
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -36,22 +38,10 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, createSendTextSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = createSendTextSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
-
-  const { name, text, expiresIn, maxViews, requirePassword } = parsed.data;
+  const { name, text, expiresIn, maxViews, requirePassword } = result.data;
 
   // Encrypt text content with master key
   const encrypted = encryptShareData(JSON.stringify({ name, text }));
@@ -120,3 +110,5 @@ export async function POST(req: NextRequest) {
     ...(accessPassword ? { accessPassword } : {}),
   });
 }
+
+export const POST = withRequestLog(handlePOST);

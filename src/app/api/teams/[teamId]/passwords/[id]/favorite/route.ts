@@ -6,11 +6,12 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // POST /api/teams/[teamId]/passwords/[id]/favorite — Toggle per-user favorite
-export async function POST(_req: NextRequest, { params }: Params) {
+async function handlePOST(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -81,3 +82,5 @@ export async function POST(_req: NextRequest, { params }: Params) {
     return NextResponse.json({ isFavorite: true });
   }
 }
+
+export const POST = withRequestLog(handlePOST);

@@ -21,6 +21,7 @@ import { notificationTitle, notificationBody } from "@/lib/notification-messages
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { withRequestLog } from "@/lib/with-request-log";
 
 export const runtime = "nodejs";
 
@@ -39,7 +40,7 @@ const targetResetLimiter = createRateLimiter({
 
 // POST /api/tenant/members/[userId]/reset-vault
 // Initiate a vault reset for a tenant member. Tenant OWNER/ADMIN only.
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
 ) {
@@ -185,7 +186,7 @@ export async function POST(
 
 // GET /api/tenant/members/[userId]/reset-vault
 // Get reset history for a specific member. Tenant OWNER/ADMIN only.
-export async function GET(
+async function handleGET(
   req: NextRequest,
   { params }: { params: Promise<{ userId: string }> },
 ) {
@@ -249,3 +250,6 @@ export async function GET(
 
   return NextResponse.json(result);
 }
+
+export const POST = withRequestLog(handlePOST);
+export const GET = withRequestLog(handleGET);

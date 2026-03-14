@@ -6,6 +6,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000;
 
@@ -17,7 +18,7 @@ const purgeLimiter = createRateLimiter({
 // POST /api/maintenance/purge-history - Delete history entries older than 90 days
 // Auth: session only. Scope: user's own history only.
 // Rate limit: 1 request/minute per user.
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -54,3 +55,5 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({ purged: deleted.count });
 }
+
+export const POST = withRequestLog(handlePOST);

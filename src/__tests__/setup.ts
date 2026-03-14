@@ -1,5 +1,14 @@
 import { vi, beforeEach } from "vitest";
 
+// Passthrough mock for withRequestLog — prevents wrapper from accessing
+// request.headers when tests call handlers without arguments.
+// The dedicated with-request-log.test.ts tests the real implementation
+// via dynamic import and its own logger mock.
+vi.mock("@/lib/with-request-log", () => ({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  withRequestLog: <H extends (...args: any[]) => unknown>(handler: H): H => handler,
+}));
+
 // Reset all mocks between tests
 beforeEach(() => {
   vi.clearAllMocks();

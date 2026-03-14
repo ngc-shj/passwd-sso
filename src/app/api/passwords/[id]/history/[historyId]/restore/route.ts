@@ -5,9 +5,10 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // POST /api/passwords/[id]/history/[historyId]/restore - Restore a history version
-export async function POST(
+async function handlePOST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; historyId: string }> },
 ) {
@@ -98,3 +99,5 @@ export async function POST(
 
   return NextResponse.json({ success: true });
 }
+
+export const POST = withRequestLog(handlePOST);

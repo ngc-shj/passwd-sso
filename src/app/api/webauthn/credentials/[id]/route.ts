@@ -3,6 +3,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -77,23 +78,9 @@ async function handlePATCH(
   const userId = session.user.id;
   const { id } = await params;
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  const parsed = patchSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(req, patchSchema);
+  if (!result.ok) return result.response;
+  const { data } = result;
 
   const existing = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.findFirst({
@@ -112,7 +99,7 @@ async function handlePATCH(
   const updated = await withUserTenantRls(userId, async () =>
     prisma.webAuthnCredential.update({
       where: { id },
-      data: { nickname: parsed.data.nickname },
+      data: { nickname: data.nickname },
       select: {
         id: true,
         nickname: true,

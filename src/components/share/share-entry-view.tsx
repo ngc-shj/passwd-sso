@@ -21,8 +21,7 @@ import {
   Terminal,
 } from "lucide-react";
 import { formatDateTime, formatDate } from "@/lib/format-datetime";
-
-const REVEAL_TIMEOUT = 30_000;
+import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
 
 function isSafeHref(url: string): boolean {
   try {
@@ -66,7 +65,7 @@ export function ShareEntryView({
   // Auto-hide revealed fields after timeout
   useEffect(() => {
     if (revealedFields.size === 0) return;
-    const timer = setTimeout(() => setRevealedFields(new Set()), REVEAL_TIMEOUT);
+    const timer = setTimeout(() => setRevealedFields(new Set()), REVEAL_TIMEOUT_MS);
     return () => clearTimeout(timer);
   }, [revealedFields]);
 

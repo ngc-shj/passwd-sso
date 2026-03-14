@@ -6,18 +6,20 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createTeamE2EPasswordSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { parseBody } from "@/lib/parse-body";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 // GET /api/teams/[teamId]/passwords — List team passwords (encrypted overviews, optionally blobs)
-export async function GET(req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -130,7 +132,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 }
 
 // POST /api/teams/[teamId]/passwords — Create team password (E2E: client encrypts)
-export async function POST(req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -147,22 +149,10 @@ export async function POST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
-  }
+  const result = await parseBody(req, createTeamE2EPasswordSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = createTeamE2EPasswordSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, entryType, tagIds, teamFolderId, requireReprompt, expiresAt } = parsed.data;
+  const { id: clientId, encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, entryType, tagIds, teamFolderId, requireReprompt, expiresAt } = result.data;
 
   // Validate teamKeyVersion matches current team key version
   const team = await withTeamTenantRls(teamId, async () =>
@@ -257,3 +247,6 @@ export async function POST(req: NextRequest, { params }: Params) {
     { status: 201 }
   );
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

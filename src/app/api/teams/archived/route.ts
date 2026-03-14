@@ -5,9 +5,10 @@ import { hasTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/teams/archived — Get all archived team passwords across all teams
-export async function GET() {
+async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
@@ -90,3 +91,5 @@ export async function GET() {
 
   return NextResponse.json(entries);
 }
+
+export const GET = withRequestLog(handleGET);
