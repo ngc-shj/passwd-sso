@@ -552,6 +552,78 @@ describe("signIn callback", () => {
       }),
     );
   });
+
+  describe("nodemailer provider", () => {
+    it("returns true for new user (no existing DB record)", async () => {
+      // user.findUnique returns null twice: once for nodemailer check, once for userId lookup
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "newuser@example.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(true);
+      // ensureTenantMembershipForSignIn must NOT be called for new users
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("returns true for existing user in bootstrap tenant", async () => {
+      // First findUnique (nodemailer guard): existing user with bootstrap tenant
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({ id: "real-db-id", tenant: { isBootstrap: true } })
+        // Second findUnique (userId lookup via email): existing user
+        .mockResolvedValueOnce({ id: "real-db-id" });
+      mockPrisma.tenantMember.findMany.mockResolvedValue([]);
+      mockPrisma.tenantMember.upsert.mockResolvedValue({});
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "bootstrap@example.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(true);
+    });
+
+    it("returns false for existing user in SSO (non-bootstrap) tenant", async () => {
+      // nodemailer guard findUnique: user exists in a non-bootstrap (SSO) tenant
+      mockPrisma.user.findUnique.mockResolvedValueOnce({
+        id: "real-db-id",
+        tenant: { isBootstrap: false },
+      });
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "sso-user@corp.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      expect(result).toBe(false);
+      // Should bail out before reaching ensureTenantMembershipForSignIn
+      expect(mockPrisma.tenantMember.upsert).not.toHaveBeenCalled();
+    });
+
+    it("returns false when ensureTenantMembershipForSignIn throws unexpected error", async () => {
+      // First findUnique (nodemailer guard): bootstrap user — allowed through
+      mockPrisma.user.findUnique
+        .mockResolvedValueOnce({ id: "real-db-id", tenant: { isBootstrap: true } })
+        // Second findUnique (userId lookup): user exists
+        .mockResolvedValueOnce({ id: "real-db-id" });
+      // tenantMember.findMany throws an unexpected error inside ensureTenantMembershipForSignIn
+      mockPrisma.tenantMember.findMany.mockRejectedValueOnce(new Error("unexpected DB failure"));
+
+      const result = await signInCallback({
+        user: { id: "pre-gen-id", email: "bootstrap@example.com" },
+        account: { provider: "nodemailer" },
+        profile: null,
+      });
+
+      // The try-catch in signIn callback catches the error and returns false
+      expect(result).toBe(false);
+    });
+  });
 });
 
 describe("NextAuth basePath", () => {
