@@ -128,6 +128,7 @@ describe("GET /api/emergency-access/[id]/vault/entries", () => {
     expect(json[0].id).toBe("entry-1");
     expect(json[0].encryptedBlob).toBe("blob-data");
     expect(json[0].entryType).toBe(ENTRY_TYPE.LOGIN);
+    expect(mockWithBypassRls).toHaveBeenCalled();
   });
 
   it("queries only non-deleted entries for the owner", async () => {

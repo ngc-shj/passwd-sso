@@ -122,6 +122,9 @@ describe("POST /api/emergency-access", () => {
         }),
       })
     );
+    // withBypassRls used for cross-tenant grantee lookup; withUserTenantRls for owner-scoped ops
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockWithUserTenantRls).toHaveBeenCalled();
     // Sends invite email to grantee
     expect(mockSendEmail).toHaveBeenCalledWith(
       expect.objectContaining({

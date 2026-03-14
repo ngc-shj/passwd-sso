@@ -136,5 +136,6 @@ describe("GET /api/emergency-access/[id]/vault", () => {
     expect(json.wrapVersion).toBe(1);
     expect(json.keyVersion).toBe(1);
     expect(json.granteeKeyPair).toBeTruthy();
+    expect(mockWithBypassRls).toHaveBeenCalled();
   });
 });

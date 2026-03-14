@@ -95,6 +95,17 @@ describe("POST /api/emergency-access/[id]/approve", () => {
     expect(res.status).toBe(400);
   });
 
+  it("approves successfully even when grantee user not found (deleted account)", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue(null);
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(200);
+    expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
+    expect(mockSendEmail).not.toHaveBeenCalled();
+  });
+
   it("approves REQUESTED grant successfully", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/approve"),
