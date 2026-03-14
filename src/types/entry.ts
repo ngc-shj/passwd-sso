@@ -74,6 +74,8 @@ export interface FullEntryData {
   keyType?: string | null;
   keySize?: number | null;
   fingerprint?: string | null;
-  sshPassphrase?: string | null;
-  sshComment?: string | null;
+  /** Blob key is "passphrase"; UI display types (InlineDetailData) alias to "sshPassphrase" */
+  passphrase?: string | null;
+  /** Blob key is "comment"; UI display types (InlineDetailData) alias to "sshComment" */
+  comment?: string | null;
 }

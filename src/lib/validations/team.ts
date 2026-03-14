@@ -178,3 +178,4 @@ export type AddMemberInput = z.infer<typeof addMemberSchema>;
 export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 export type UpdateTenantMemberRoleInput = z.infer<typeof updateTenantMemberRoleSchema>;
 export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
+export type UpdateTeamTagInput = z.infer<typeof updateTeamTagSchema>;
