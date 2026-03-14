@@ -1,19 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { generatePassword, generatePassphrase } from "@/lib/password-generator";
-import { generatePasswordSchema, generatePassphraseSchema } from "@/lib/validations";
+import { generateRequestSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
-import { z } from "zod";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 
 const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
-
-const requestSchema = z.discriminatedUnion("mode", [
-  z.object({ mode: z.literal("password") }).merge(generatePasswordSchema),
-  z.object({ mode: z.literal("passphrase") }).merge(generatePassphraseSchema),
-]);
 
 // POST /api/passwords/generate - Generate a random password or passphrase
 async function handlePOST(req: NextRequest) {
@@ -26,24 +21,10 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
+  const result = await parseBody(req, generateRequestSchema);
+  if (!result.ok) return result.response;
 
-  // Support legacy requests without mode field
-  const input = typeof body === "object" && body !== null && !("mode" in body)
-    ? { mode: "password" as const, ...body }
-    : body;
-
-  const parsed = requestSchema.safeParse(input);
-  if (!parsed.success) {
-    return validationError(parsed.error.flatten());
-  }
-
-  const data = parsed.data;
+  const data = result.data;
   let password: string;
 
   try {

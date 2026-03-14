@@ -51,6 +51,27 @@ export const ALLOWED_CONTENT_TYPES = [
   "text/csv",
 ] as const;
 
+// ─── Hex String Validator ────────────────────────────────────
+
+/** Validates a hex string of the given byte length (e.g. 12 bytes = 24 hex chars). */
+export const hexString = (bytes: number) =>
+  z.string().length(bytes * 2).regex(/^[0-9a-f]+$/i);
+
+// ─── Bulk Operation Schemas ─────────────────────────────────
+
+export const bulkIdsSchema = z.object({
+  ids: z.array(z.string().min(1))
+    .transform(ids => [...new Set(ids)])
+    .pipe(z.array(z.string()).min(1).max(100)),
+});
+
+export const bulkArchiveSchema = z.object({
+  ids: z.array(z.string().min(1))
+    .transform(ids => [...new Set(ids)])
+    .pipe(z.array(z.string()).min(1).max(100)),
+  operation: z.enum(["archive", "unarchive"]).default("archive"),
+});
+
 // ─── E2E Encrypted Entry Schemas ─────────────────────────────
 
 export const encryptedFieldSchema = z.object({

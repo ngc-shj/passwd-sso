@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
-import { Building2, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, Building2, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -403,12 +403,18 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   if (loading) return null;
 
   if (sortedFiltered.length === 0) {
-    if (entries.length === 0) return null;
     return (
       <div className="mt-6">
         <Card className="rounded-xl border bg-card/80 p-10">
           <div className="flex flex-col items-center justify-center text-center">
-            <p className="text-muted-foreground">{tl("noMatch")}</p>
+            {entries.length === 0 ? (
+              <>
+                <Archive className="mb-4 h-12 w-12 text-muted-foreground/50" />
+                <p className="text-muted-foreground">{tl("noArchive")}</p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">{tl("noMatch")}</p>
+            )}
           </div>
         </Card>
       </div>

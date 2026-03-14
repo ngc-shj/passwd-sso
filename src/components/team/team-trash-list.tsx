@@ -267,12 +267,18 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   if (loading) return null;
 
   if (sortedFiltered.length === 0) {
-    if (entries.length === 0) return null;
     return (
       <div className="mt-6">
         <Card className="rounded-xl border bg-card/80 p-10">
           <div className="flex flex-col items-center justify-center text-center">
-            <p className="text-muted-foreground">{tl("noMatch")}</p>
+            {entries.length === 0 ? (
+              <>
+                <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
+                <p className="text-muted-foreground">{tl("noTrash")}</p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">{tl("noMatch")}</p>
+            )}
           </div>
         </Card>
       </div>

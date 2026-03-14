@@ -165,6 +165,10 @@ export const updateTeamTagSchema = z.object({
   parentId: z.string().cuid().optional().nullable(),
 });
 
+export const invitationAcceptSchema = z.object({
+  token: z.string().min(1),
+});
+
 // ─── Type Exports ──────────────────────────────────────────
 
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;

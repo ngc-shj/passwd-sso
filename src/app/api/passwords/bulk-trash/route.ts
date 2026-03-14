@@ -2,15 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, unauthorized } from "@/lib/api-response";
-
-interface BulkTrashBody {
-  ids: string[];
-}
+import { parseBody } from "@/lib/parse-body";
+import { bulkIdsSchema } from "@/lib/validations";
 
 // POST /api/passwords/bulk-trash - Soft delete multiple entries (move to trash)
 async function handlePOST(req: NextRequest) {
@@ -19,21 +16,10 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
+  const result = await parseBody(req, bulkIdsSchema);
+  if (!result.ok) return result.response;
 
-  const MAX_BULK_IDS = 100;
-  const ids = Array.isArray((body as BulkTrashBody)?.ids)
-    ? Array.from(new Set((body as BulkTrashBody).ids.filter((id) => typeof id === "string" && id.length > 0)))
-    : [];
-
-  if (ids.length === 0 || ids.length > MAX_BULK_IDS) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
+  const { ids } = result.data;
 
   const entriesToTrash = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordEntry.findMany({
@@ -48,7 +34,7 @@ async function handlePOST(req: NextRequest) {
   const entryIds = entriesToTrash.map((entry) => entry.id);
 
   const deletedAt = new Date();
-  const result = await withUserTenantRls(session.user.id, async () =>
+  const updateResult = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordEntry.updateMany({
       where: {
         userId: session.user.id,
@@ -82,7 +68,7 @@ async function handlePOST(req: NextRequest) {
     metadata: {
       bulk: true,
       requestedCount: ids.length,
-      movedCount: result.count,
+      movedCount: updateResult.count,
       entryIds: movedEntryIds,
     },
     ...requestMeta,
@@ -103,7 +89,7 @@ async function handlePOST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ success: true, movedCount: result.count });
+  return NextResponse.json({ success: true, movedCount: updateResult.count });
 }
 
 export const POST = withRequestLog(handlePOST);

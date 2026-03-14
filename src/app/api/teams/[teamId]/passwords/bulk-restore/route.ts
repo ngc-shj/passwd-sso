@@ -3,15 +3,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { errorResponse, unauthorized } from "@/lib/api-response";
-
-interface BulkRestoreBody {
-  ids: string[];
-}
+import { parseBody } from "@/lib/parse-body";
+import { bulkIdsSchema } from "@/lib/validations";
 
 // POST /api/teams/[teamId]/passwords/bulk-restore - Restore multiple team entries from trash
 async function handlePOST(
@@ -34,27 +31,10 @@ async function handlePOST(
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
+  const result = await parseBody(req, bulkIdsSchema);
+  if (!result.ok) return result.response;
 
-  const ids = Array.isArray((body as BulkRestoreBody)?.ids)
-    ? Array.from(
-        new Set(
-          (body as BulkRestoreBody).ids.filter(
-            (id) => typeof id === "string" && id.length > 0
-          )
-        )
-      )
-    : [];
-
-  const MAX_BULK_IDS = 100;
-  if (ids.length === 0 || ids.length > MAX_BULK_IDS) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
+  const { ids } = result.data;
 
   const entriesToRestore = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
@@ -68,7 +48,7 @@ async function handlePOST(
   );
   const entryIds = entriesToRestore.map((entry) => entry.id);
 
-  const result = await withTeamTenantRls(teamId, async () =>
+  const updateResult = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.updateMany({
       where: {
         teamId,
@@ -107,7 +87,7 @@ async function handlePOST(
       bulk: true,
       operation: "restore",
       requestedCount: ids.length,
-      restoredCount: result.count,
+      restoredCount: updateResult.count,
       entryIds: restoredEntryIds,
     },
     ...requestMeta,
@@ -129,7 +109,7 @@ async function handlePOST(
     });
   }
 
-  return NextResponse.json({ success: true, restoredCount: result.count });
+  return NextResponse.json({ success: true, restoredCount: updateResult.count });
 }
 
 export const POST = withRequestLog(handlePOST);
