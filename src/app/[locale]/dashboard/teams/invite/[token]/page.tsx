@@ -4,12 +4,19 @@ import { useEffect, useState, useRef, use } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
-import { VAULT_STATUS, API_PATH } from "@/lib/constants";
+import { VAULT_STATUS, API_PATH, TEAM_ROLE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Building2, CheckCircle2, XCircle, Loader2, Lock, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
+
+const ROLE_KEYS: Record<string, string> = {
+  [TEAM_ROLE.OWNER]: "roleOwner",
+  [TEAM_ROLE.ADMIN]: "roleAdmin",
+  [TEAM_ROLE.MEMBER]: "roleMember",
+  [TEAM_ROLE.VIEWER]: "roleViewer",
+};
 
 interface InviteInfo {
   team: { id: string; name: string; slug: string };
@@ -99,7 +106,7 @@ export default function AcceptInvitePage({
             ? t("alreadyMember")
             : t("acceptInviteDesc", {
                 teamName: result.team.name,
-                role: result.role ?? "",
+                role: t(ROLE_KEYS[result.role ?? ""] ?? "roleMember"),
               })}
         </p>
         <Button onClick={() => router.push(`/dashboard/teams/${result.team.id}`)}>

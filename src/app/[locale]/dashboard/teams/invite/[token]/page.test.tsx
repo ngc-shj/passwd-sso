@@ -51,6 +51,12 @@ vi.mock("@/lib/constants", () => ({
   API_PATH: {
     TEAMS_INVITATIONS_ACCEPT: "/api/teams/invitations/accept",
   },
+  TEAM_ROLE: {
+    OWNER: "OWNER",
+    ADMIN: "ADMIN",
+    MEMBER: "MEMBER",
+    VIEWER: "VIEWER",
+  },
 }));
 
 // Stub UI components
