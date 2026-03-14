@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { parseBody } from "@/lib/parse-body";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
@@ -72,22 +73,10 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Parse body
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
+  const result = await parseBody(req, bodySchema);
+  if (!result.ok) return result.response;
 
-  const parsed = bodySchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Validation error", details: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
-
-  const { targetVersion, operatorId, revokeShares } = parsed.data;
+  const { targetVersion, operatorId, revokeShares } = result.data;
 
   // Verify targetVersion matches current env config (prevent stale requests)
   const currentVersion = getCurrentMasterKeyVersion();

@@ -9,15 +9,12 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
+import { parseBody } from "@/lib/parse-body";
+import { historyReencryptSchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ id: string; historyId: string }> };
 
 const reencryptLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
-
-// Validate hex string of expected byte length
-function isValidHex(value: string, byteLength: number): boolean {
-  return value.length === byteLength * 2 && /^[0-9a-f]+$/i.test(value);
-}
 
 // GET /api/passwords/[id]/history/[historyId] — individual history entry
 async function handleGET(
@@ -85,30 +82,10 @@ async function handlePATCH(
 
   const { id, historyId } = await params;
 
-  const body = await req.json();
-  const { encryptedBlob, blobIv, blobAuthTag, keyVersion, oldBlobHash } = body;
+  const parsed = await parseBody(req, historyReencryptSchema);
+  if (!parsed.ok) return parsed.response;
 
-  // Validate required fields
-  if (!encryptedBlob || !blobIv || !blobAuthTag || keyVersion == null || !oldBlobHash) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-
-  // Validate blob format
-  if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0 || encryptedBlob.length > 1_000_000) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof blobIv !== "string" || !isValidHex(blobIv, 12)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof blobAuthTag !== "string" || !isValidHex(blobAuthTag, 16)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof keyVersion !== "number" || !Number.isInteger(keyVersion)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof oldBlobHash !== "string" || !isValidHex(oldBlobHash, 32)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
+  const { encryptedBlob, blobIv, blobAuthTag, keyVersion, oldBlobHash } = parsed.data;
 
   // Verify ownership
   const entry = await withUserTenantRls(session.user.id, async () =>

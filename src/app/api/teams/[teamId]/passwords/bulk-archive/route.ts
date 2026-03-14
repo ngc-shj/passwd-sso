@@ -3,16 +3,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { errorResponse, unauthorized } from "@/lib/api-response";
-
-interface BulkArchiveBody {
-  ids: string[];
-  operation?: "archive" | "unarchive";
-}
+import { parseBody } from "@/lib/parse-body";
+import { bulkArchiveSchema } from "@/lib/validations";
 
 // POST /api/teams/[teamId]/passwords/bulk-archive - Archive/unarchive multiple team entries
 async function handlePOST(
@@ -35,32 +31,11 @@ async function handlePOST(
     throw e;
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
+  const result = await parseBody(req, bulkArchiveSchema);
+  if (!result.ok) return result.response;
 
-  const ids = Array.isArray((body as BulkArchiveBody)?.ids)
-    ? Array.from(
-        new Set(
-          (body as BulkArchiveBody).ids.filter(
-            (id) => typeof id === "string" && id.length > 0
-          )
-        )
-      )
-    : [];
-  const operation =
-    (body as BulkArchiveBody)?.operation === "unarchive"
-      ? "unarchive"
-      : "archive";
+  const { ids, operation } = result.data;
   const toArchived = operation === "archive";
-
-  const MAX_BULK_IDS = 100;
-  if (ids.length === 0 || ids.length > MAX_BULK_IDS) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
 
   const entriesToProcess = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findMany({
@@ -75,7 +50,7 @@ async function handlePOST(
   );
   const entryIds = entriesToProcess.map((entry) => entry.id);
 
-  const result = await withTeamTenantRls(teamId, async () =>
+  const updateResult = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.updateMany({
       where: {
         teamId,
@@ -117,9 +92,9 @@ async function handlePOST(
       bulk: true,
       operation,
       requestedCount: ids.length,
-      processedCount: result.count,
-      archivedCount: toArchived ? result.count : 0,
-      unarchivedCount: toArchived ? 0 : result.count,
+      processedCount: updateResult.count,
+      archivedCount: toArchived ? updateResult.count : 0,
+      unarchivedCount: toArchived ? 0 : updateResult.count,
       entryIds: processedEntryIds,
     },
     ...requestMeta,
@@ -146,9 +121,9 @@ async function handlePOST(
   return NextResponse.json({
     success: true,
     operation,
-    processedCount: result.count,
-    archivedCount: toArchived ? result.count : 0,
-    unarchivedCount: toArchived ? 0 : result.count,
+    processedCount: updateResult.count,
+    archivedCount: toArchived ? updateResult.count : 0,
+    unarchivedCount: toArchived ? 0 : updateResult.count,
   });
 }
 

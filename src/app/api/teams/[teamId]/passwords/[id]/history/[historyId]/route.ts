@@ -10,14 +10,12 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
+import { teamHistoryReencryptSchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
 const reencryptLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
-
-function isValidHex(value: string, byteLength: number): boolean {
-  return value.length === byteLength * 2 && /^[0-9a-f]+$/i.test(value);
-}
 
 // GET /api/teams/[teamId]/passwords/[id]/history/[historyId] — Return encrypted history blob (client decrypts)
 async function handleGET(_req: NextRequest, { params }: Params) {
@@ -97,40 +95,15 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const body = await req.json();
+  const parsed = await parseBody(req, teamHistoryReencryptSchema);
+  if (!parsed.ok) return parsed.response;
+
   const {
     encryptedBlob, blobIv, blobAuthTag,
     teamKeyVersion, itemKeyVersion,
     encryptedItemKey, itemKeyIv, itemKeyAuthTag,
     oldBlobHash,
-  } = body;
-
-  // Validate required fields
-  if (!encryptedBlob || !blobIv || !blobAuthTag || teamKeyVersion == null || !oldBlobHash) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-
-  // Validate blob format
-  if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0 || encryptedBlob.length > 1_000_000) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof blobIv !== "string" || !isValidHex(blobIv, 12)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof blobAuthTag !== "string" || !isValidHex(blobAuthTag, 16)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-
-  // Validate optional itemKey fields when provided
-  if (itemKeyIv != null && (typeof itemKeyIv !== "string" || !isValidHex(itemKeyIv, 12))) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (itemKeyAuthTag != null && (typeof itemKeyAuthTag !== "string" || !isValidHex(itemKeyAuthTag, 16))) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
-  if (typeof oldBlobHash !== "string" || !isValidHex(oldBlobHash, 32)) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
-  }
+  } = parsed.data;
 
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
