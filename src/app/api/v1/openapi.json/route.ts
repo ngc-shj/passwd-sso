@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { buildOpenApiSpec } from "@/lib/openapi-spec";
 import { authOrToken } from "@/lib/auth-or-token";
 import { withRequestLog } from "@/lib/with-request-log";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { unauthorized } from "@/lib/api-response";
 
 const isPublic = process.env.OPENAPI_PUBLIC !== "false";

@@ -34,7 +34,7 @@ export default function AcceptInvitePage({
   const router = useRouter();
   const { status: vaultStatus } = useVault();
 
-  const [loading, setLoading] = useState(false);
+  const [, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteInfo | null>(null);
   const acceptedRef = useRef(false);

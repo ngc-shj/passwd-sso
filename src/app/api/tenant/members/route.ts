@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
