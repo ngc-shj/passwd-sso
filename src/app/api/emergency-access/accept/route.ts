@@ -11,7 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -33,7 +33,7 @@ async function handlePOST(req: NextRequest) {
   const { token, granteePublicKey, encryptedPrivateKey } = result.data;
 
   // Hash the token for DB lookup (DB stores only the hash)
-  const grant = await withUserTenantRls(session.user.id, async () =>
+  const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { tokenHash: hashToken(token) },
     }),
@@ -60,7 +60,7 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.CANNOT_GRANT_SELF, 400);
   }
 
-  await withUserTenantRls(session.user.id, async () =>
+  await withBypassRls(prisma, async () =>
     prisma.$transaction([
       prisma.emergencyAccessGrant.update({
         where: { id: grant.id },
@@ -92,7 +92,7 @@ async function handlePOST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
-  const owner = await withUserTenantRls(session.user.id, async () =>
+  const owner = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },

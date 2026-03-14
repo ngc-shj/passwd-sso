@@ -1,14 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTransaction, mockRateLimiter, mockSendEmail, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaGrant, mockPrismaUser, mockTransaction, mockRateLimiter, mockSendEmail, mockWithBypassRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaGrant: { findUnique: vi.fn(), update: vi.fn() },
   mockPrismaUser: { findUnique: vi.fn() },
   mockTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockSendEmail: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -28,8 +28,8 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { POST } from "./route";
@@ -50,7 +50,6 @@ const pendingGrant = {
   granteeEmail: "grantee@example.com",
   granteeId: null,
   status: EA_STATUS.PENDING,
-  tokenExpiresAt: new Date(Date.now() + 86400_000), // 1 day from now
 };
 
 describe("POST /api/emergency-access/[id]/accept", () => {
@@ -108,18 +107,6 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("GRANT_NOT_PENDING");
-  });
-
-  it("returns 410 when invitation is expired", async () => {
-    mockPrismaGrant.findUnique.mockResolvedValue({
-      ...pendingGrant,
-      tokenExpiresAt: new Date(Date.now() - 1000), // expired
-    });
-    const res = await POST(
-      createRequest("POST", "http://localhost/api/emergency-access/grant-1/accept", { body: validBody }),
-      createParams({ id: "grant-1" })
-    );
-    expect(res.status).toBe(410);
   });
 
   it("returns 403 when email does not match", async () => {

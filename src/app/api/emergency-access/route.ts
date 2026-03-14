@@ -12,6 +12,7 @@ import { errorResponse, unauthorized } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -88,8 +89,8 @@ async function handlePOST(req: NextRequest) {
     ...extractRequestMeta(req),
   });
 
-  // Best-effort: look up grantee's locale if they already have an account
-  const granteeUser = await withUserTenantRls(session.user.id, async () =>
+  // Best-effort: look up grantee's locale (bypass RLS — grantee may be in another tenant)
+  const granteeUser = await withBypassRls(prisma, async () =>
     prisma.user.findFirst({
       where: { email: { equals: granteeEmail, mode: "insensitive" } },
       select: { locale: true },
@@ -119,7 +120,8 @@ async function handleGET() {
   }
   const sessionEmail = session.user.email;
 
-  const grants = await withUserTenantRls(session.user.id, async () =>
+  // Bypass RLS: grants span owner/grantee tenants
+  const grants = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findMany({
       where: {
         OR: [
