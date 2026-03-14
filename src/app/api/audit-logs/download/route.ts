@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_ACTION,
   AUDIT_ACTION_VALUES,
@@ -41,15 +42,12 @@ const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent"
 async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const rateKey = `rl:audit_download:${session.user.id}`;
   if (!(await downloadLimiter.check(rateKey)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { searchParams } = new URL(req.url);
@@ -63,26 +61,17 @@ async function handleGET(req: NextRequest) {
     const fromDate = from ? new Date(from) : undefined;
     const toDate = to ? new Date(to) : undefined;
     if ((fromDate && isNaN(fromDate.getTime())) || (toDate && isNaN(toDate.getTime()))) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { date: "Invalid date format" } },
-        { status: 400 },
-      );
+      return validationError({ date: "Invalid date format" });
     }
     const now = new Date();
     const resolvedFrom = fromDate ?? new Date(now.getTime() - MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
     const resolvedTo = toDate ?? now;
     const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
     if (diffMs < 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { date: "'from' must be before 'to'" } },
-        { status: 400 },
-      );
+      return validationError({ date: "'from' must be before 'to'" });
     }
     if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${MAX_RANGE_DAYS} days` } },
-        { status: 400 },
-      );
+      return validationError({ range: `Maximum range is ${MAX_RANGE_DAYS} days` });
     }
   }
 
@@ -95,10 +84,7 @@ async function handleGET(req: NextRequest) {
     const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
     const invalid = requested.filter((a) => !VALID_ACTIONS.has(a));
     if (invalid.length > 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { actions: invalid } },
-        { status: 400 },
-      );
+      return validationError({ actions: invalid });
     }
     where.action = { in: requested as AuditAction[] };
   }

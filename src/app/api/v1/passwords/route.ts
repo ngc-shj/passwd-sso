@@ -13,6 +13,7 @@ import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from 
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import type { EntryType } from "@prisma/client";
+import { unauthorized } from "@/lib/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -32,7 +33,7 @@ async function handleGET(req: NextRequest) {
         { status: 403 },
       );
     }
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { userId, tenantId, apiKeyId } = authResult.data;
@@ -120,7 +121,7 @@ async function handlePOST(req: NextRequest) {
         { status: 403 },
       );
     }
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { userId, tenantId, apiKeyId } = authResult.data;

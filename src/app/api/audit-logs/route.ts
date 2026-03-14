@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import type { AuditAction, Prisma } from "@prisma/client";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_ACTION,
   AUDIT_ACTION_EMERGENCY_PREFIX,
@@ -20,7 +21,7 @@ const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { searchParams } = new URL(req.url);
@@ -50,10 +51,7 @@ async function handleGET(req: NextRequest) {
     const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
     const invalid = requested.filter((a) => !VALID_ACTIONS.has(a as AuditAction));
     if (invalid.length > 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { actions: invalid } },
-        { status: 400 }
-      );
+      return validationError({ actions: invalid });
     }
     where.action = { in: requested as AuditAction[] };
   } else if (action) {
@@ -85,7 +83,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = logs.length > limit;

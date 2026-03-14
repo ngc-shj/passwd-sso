@@ -19,6 +19,7 @@ import {
   TagTreeError,
 } from "@/lib/tag-tree";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -26,7 +27,7 @@ type Params = { params: Promise<{ teamId: string }> };
 async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -35,7 +36,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -88,7 +89,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -97,7 +98,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -113,7 +114,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
   if (!team) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Validate parent chain if parentId is provided
@@ -148,10 +149,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
   if (existing) {
-    return NextResponse.json(
-      { error: API_ERROR.TAG_ALREADY_EXISTS },
-      { status: 409 }
-    );
+    return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
   }
 
   const tag = await withTeamTenantRls(teamId, async () =>

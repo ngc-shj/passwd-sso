@@ -8,6 +8,7 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type RouteContext = {
   params: Promise<{ teamId: string; id: string; attachmentId: string }>;
@@ -20,7 +21,7 @@ async function handleGET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id, attachmentId } = await params;
@@ -29,7 +30,7 @@ async function handleGET(
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -42,7 +43,7 @@ async function handleGET(
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const attachment = await withTeamTenantRls(teamId, async () =>
@@ -52,7 +53,7 @@ async function handleGET(
   );
 
   if (!attachment) {
-    return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND, 404);
   }
 
   // Return encrypted data + crypto metadata for client-side decryption
@@ -84,7 +85,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id, attachmentId } = await params;
@@ -93,7 +94,7 @@ async function handleDELETE(
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -106,7 +107,7 @@ async function handleDELETE(
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const attachment = await withTeamTenantRls(teamId, async () =>
@@ -117,7 +118,7 @@ async function handleDELETE(
   );
 
   if (!attachment) {
-    return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND, 404);
   }
 
   const blobStore = getAttachmentBlobStore();

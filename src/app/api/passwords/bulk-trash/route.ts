@@ -6,6 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 interface BulkTrashBody {
   ids: string[];
@@ -15,14 +16,14 @@ interface BulkTrashBody {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const MAX_BULK_IDS = 100;
@@ -31,7 +32,7 @@ async function handlePOST(req: NextRequest) {
     : [];
 
   if (ids.length === 0 || ids.length > MAX_BULK_IDS) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   const entriesToTrash = await withUserTenantRls(session.user.id, async () =>

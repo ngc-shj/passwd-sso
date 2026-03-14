@@ -7,6 +7,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -22,11 +23,11 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await acceptLimiter.check(`rl:ea_accept:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { id } = await params;
@@ -38,26 +39,23 @@ async function handlePOST(
   );
 
   if (!grant) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (grant.status !== EA_STATUS.PENDING) {
-    return NextResponse.json({ error: API_ERROR.GRANT_NOT_PENDING }, { status: 400 });
+    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
   }
 
   if (grant.tokenExpiresAt < new Date()) {
-    return NextResponse.json({ error: API_ERROR.INVITATION_EXPIRED }, { status: 410 });
+    return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return NextResponse.json({ error: API_ERROR.NOT_AUTHORIZED_FOR_GRANT }, { status: 403 });
+    return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
   }
 
   if (grant.ownerId === session.user.id) {
-    return NextResponse.json(
-      { error: API_ERROR.CANNOT_GRANT_SELF },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.CANNOT_GRANT_SELF, 400);
   }
 
   const result = await parseBody(req, acceptEmergencyGrantByIdSchema);

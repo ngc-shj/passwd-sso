@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -13,7 +14,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { searchParams } = new URL(req.url);
@@ -31,7 +32,7 @@ async function handleGET(req: NextRequest) {
       membershipRole = membership.role;
     } catch (e) {
       if (e instanceof TeamAuthError) {
-        return NextResponse.json({ error: e.message }, { status: e.status });
+        return errorResponse(e.message, e.status);
       }
       throw e;
     }
@@ -91,7 +92,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = shares.length > limit;

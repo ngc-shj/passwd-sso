@@ -19,6 +19,7 @@ function retryAfterHeaders(ms: number): HeadersInit {
 }
 
 import type { ValidatedApiKey } from "@/lib/api-key";
+import { notFound, validationError } from "@/lib/api-response";
 
 type AuthCheckResult =
   | { ok: false; error: NextResponse }
@@ -71,7 +72,7 @@ async function handleGET(
   );
 
   if (!entry || entry.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   return NextResponse.json({
@@ -119,7 +120,7 @@ async function handlePUT(
   );
 
   if (!existing || existing.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const result = await parseBody(req, updateE2EPasswordSchema);
@@ -133,7 +134,7 @@ async function handlePUT(
       prisma.folder.findFirst({ where: { id: folderId, userId } }),
     );
     if (!folder) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+      return validationError("Invalid folderId");
     }
   }
 
@@ -143,7 +144,7 @@ async function handlePUT(
       prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
     );
     if (ownedCount !== tagIds.length) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+      return validationError("Invalid tagIds");
     }
   }
 
@@ -255,7 +256,7 @@ async function handleDELETE(
   );
 
   if (!existing || existing.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (permanent) {

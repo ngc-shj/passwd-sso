@@ -1,9 +1,9 @@
-import { buildGeneratorSummary } from "@/lib/generator-summary";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
 import type { TagData } from "@/components/tags/tag-input";
+import { buildLoginFormDerived, buildSnapshot } from "@/hooks/form/login-form-derived";
 
 type PersonalFormSnapshotInitialData = PersonalLoginFormInitialData;
 type BuildPersonalCurrentSnapshotArgs = PersonalLoginFormEntryValues;
@@ -12,7 +12,7 @@ export function buildPersonalInitialSnapshot(
   initialData?: PersonalFormSnapshotInitialData,
   defaults?: { defaultFolderId?: string | null; defaultTags?: TagData[] },
 ): string {
-  return JSON.stringify({
+  return buildSnapshot("personal", {
     title: initialData?.title ?? "",
     username: initialData?.username ?? "",
     password: initialData?.password ?? "",
@@ -44,7 +44,7 @@ export function buildPersonalCurrentSnapshot({
   expiresAt,
   folderId,
 }: BuildPersonalCurrentSnapshotArgs): string {
-  return JSON.stringify({
+  return buildSnapshot("personal", {
     title,
     username,
     password,
@@ -78,15 +78,23 @@ export function buildPersonalLoginFormDerived({
 }: PersonalLoginFormDerivedArgs) {
   const { tGen } = translations;
   const initialSnapshot = buildPersonalInitialSnapshot(initialData, { defaultFolderId, defaultTags });
-  const currentSnapshot = buildPersonalCurrentSnapshot({
-    ...values,
-  });
-  const hasChanges = currentSnapshot !== initialSnapshot;
 
-  const generatorSummary = buildGeneratorSummary(values.generatorSettings, {
-    modePassphrase: tGen("modePassphrase"),
-    modePassword: tGen("modePassword"),
+  return buildLoginFormDerived({
+    scope: "personal",
+    title: values.title,
+    username: values.username,
+    password: values.password,
+    url: values.url,
+    notes: values.notes,
+    tags: values.selectedTags,
+    generatorSettings: values.generatorSettings,
+    customFields: values.customFields,
+    totp: values.totp,
+    requireReprompt: values.requireReprompt,
+    travelSafe: values.travelSafe,
+    expiresAt: values.expiresAt,
+    folderId: values.folderId,
+    tGen,
+    initialSnapshot,
   });
-
-  return { hasChanges, generatorSummary };
 }

@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -14,7 +15,7 @@ type Params = { params: Promise<{ teamId: string; id: string; historyId: string 
 async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id, historyId } = await params;
@@ -23,7 +24,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -35,7 +36,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const history = await withTeamTenantRls(teamId, async () =>
@@ -45,7 +46,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   if (!history || history.entryId !== id) {
-    return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
   }
 
   await withTeamTenantRls(teamId, async () =>

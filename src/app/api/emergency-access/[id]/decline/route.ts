@@ -9,6 +9,7 @@ import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/c
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 // POST /api/emergency-access/[id]/decline — Decline a grant by ID (authenticated grantee)
 async function handlePOST(
@@ -17,7 +18,7 @@ async function handlePOST(
 ) {
   const session = await auth();
   if (!session?.user?.id || !session.user.email) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -29,15 +30,15 @@ async function handlePOST(
   );
 
   if (!grant) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (grant.status !== EA_STATUS.PENDING) {
-    return NextResponse.json({ error: API_ERROR.GRANT_NOT_PENDING }, { status: 400 });
+    return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
   }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
-    return NextResponse.json({ error: API_ERROR.NOT_AUTHORIZED_FOR_GRANT }, { status: 403 });
+    return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);
   }
 
   await withUserTenantRls(session.user.id, async () =>

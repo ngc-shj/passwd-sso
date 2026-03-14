@@ -9,7 +9,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import type { TeamRole } from "@prisma/client";
@@ -127,10 +127,12 @@ export async function requireTeamPermission(
 // ─── Error Class ────────────────────────────────────────────────
 
 export class TeamAuthError extends Error {
+  override message: ApiErrorCode;
   status: number;
 
-  constructor(message: string, status: number) {
-    super(message);
+  constructor(code: ApiErrorCode, status: number) {
+    super(code);
+    this.message = code;
     this.name = "TeamAuthError";
     this.status = status;
   }

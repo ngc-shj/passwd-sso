@@ -15,6 +15,7 @@ import {
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -30,7 +31,7 @@ function getTeamParent(teamId: string, id: string): Promise<ParentNode | null> {
 async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -39,7 +40,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -48,7 +49,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     prisma.teamFolder.findUnique({ where: { id } }),
   );
   if (!existing || existing.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const result = await parseBody(req, updateFolderSchema);
@@ -181,7 +182,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -190,7 +191,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -199,7 +200,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     prisma.teamFolder.findUnique({ where: { id } }),
   );
   if (!existing || existing.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Collect children and detect name conflicts at the target parent level.
