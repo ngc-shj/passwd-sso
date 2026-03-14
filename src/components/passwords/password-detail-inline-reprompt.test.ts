@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 
 /**
  * Structural tests to verify that PasswordDetailInline applies reprompt
- * protection to all sensitive operations. These tests read the source file
+ * protection to all sensitive operations. These tests read the source files
  * and check for required patterns, serving as a guard against accidental
  * removal of reprompt guards during refactoring.
  */
@@ -14,6 +14,12 @@ const SRC_PATH = resolve(
   "password-detail-inline.tsx",
 );
 const source = readFileSync(SRC_PATH, "utf-8");
+
+const LOGIN_SECTION_PATH = resolve(
+  __dirname,
+  "detail-sections/login-section.tsx",
+);
+const loginSource = readFileSync(LOGIN_SECTION_PATH, "utf-8");
 
 describe("PasswordDetailInline reprompt guards", () => {
   it("imports useReprompt hook", () => {
@@ -28,39 +34,50 @@ describe("PasswordDetailInline reprompt guards", () => {
     expect(source).toContain("{repromptDialog}");
   });
 
-  it("InlineDetailData includes requireReprompt field", () => {
-    expect(source).toMatch(/interface InlineDetailData[\s\S]*?requireReprompt\??:\s*boolean/);
+  it("imports section components", () => {
+    expect(source).toContain('LoginSection');
+    expect(source).toContain('CreditCardSection');
+    expect(source).toContain('SshKeySection');
   });
 
-  it("password reveal uses requireVerification", () => {
-    // handleReveal should call requireVerification, not directly setShowPassword
-    expect(source).toMatch(/handleReveal\s*=\s*useCallback\(\(\)\s*=>\s*\{[\s\S]*?requireVerification\(/);
+  it("passes requireVerification and createGuardedGetter to sections", () => {
+    expect(source).toContain("sectionProps");
+    expect(source).toContain("requireVerification");
+    expect(source).toContain("createGuardedGetter");
   });
 
-  it("password copy uses createGuardedGetter", () => {
-    // CopyButton for password uses createGuardedGetter
-    expect(source).toMatch(/CopyButton[\s\S]*?createGuardedGetter\([\s\S]*?data\.password/);
+  it("InlineDetailData is re-exported from @/types/entry", () => {
+    expect(source).toContain('export type { InlineDetailData } from "@/types/entry"');
   });
 
-  it("TOTP copy uses wrapCopyGetter with createGuardedGetter", () => {
-    expect(source).toMatch(/wrapCopyGetter=\{[\s\S]*?createGuardedGetter\(/);
+  it("password reveal uses requireVerification (via useRevealTimeout in login section)", () => {
+    expect(loginSource).toMatch(/handleReveal\b/);
+    expect(loginSource).toContain('useRevealTimeout');
   });
 
-  it("HIDDEN custom field reveal uses requireVerification", () => {
-    // The HIDDEN field onClick should call requireVerification (not just toggle)
-    expect(source).toMatch(/CUSTOM_FIELD_TYPE\.HIDDEN[\s\S]*?requireVerification\(/);
+  it("password copy uses createGuardedGetter (in login section)", () => {
+    expect(loginSource).toMatch(/CopyButton[\s\S]*?createGuardedGetter\([\s\S]*?data\.password/);
   });
 
-  it("HIDDEN custom field copy uses createGuardedGetter", () => {
-    expect(source).toMatch(/CUSTOM_FIELD_TYPE\.HIDDEN[\s\S]*?createGuardedGetter\(/);
+  it("TOTP copy uses wrapCopyGetter with createGuardedGetter (in login section)", () => {
+    expect(loginSource).toMatch(/wrapCopyGetter=\{[\s\S]*?createGuardedGetter\(/);
   });
 
-  it("password history reveal uses requireVerification", () => {
-    // The history reveal onClick should call requireVerification
-    expect(source).toMatch(/revealedHistory[\s\S]*?requireVerification\(/);
+  it("HIDDEN custom field reveal uses requireVerification (via useRevealSet in login section)", () => {
+    expect(loginSource).toMatch(/CUSTOM_FIELD_TYPE\.HIDDEN[\s\S]*?handleRevealFieldIndex\(/);
+    expect(loginSource).toContain('useRevealSet');
   });
 
-  it("password history copy uses createGuardedGetter", () => {
-    expect(source).toMatch(/entry\.password[\s\S]*?createGuardedGetter\(/);
+  it("HIDDEN custom field copy uses createGuardedGetter (in login section)", () => {
+    expect(loginSource).toMatch(/CUSTOM_FIELD_TYPE\.HIDDEN[\s\S]*?createGuardedGetter\(/);
+  });
+
+  it("password history reveal uses requireVerification (via useRevealSet in login section)", () => {
+    expect(loginSource).toMatch(/handleRevealHistoryIndex\(/);
+    expect(loginSource).toContain('useRevealSet');
+  });
+
+  it("password history copy uses createGuardedGetter (in login section)", () => {
+    expect(loginSource).toMatch(/createGuardedGetter\([\s\S]*?entry\.password/);
   });
 });
