@@ -9,6 +9,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -22,7 +23,7 @@ function isValidHex(value: string, byteLength: number): boolean {
 async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id, historyId } = await params;
@@ -31,7 +32,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -44,7 +45,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const history = await withTeamTenantRls(teamId, async () =>
@@ -54,7 +55,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   );
 
   if (!history || history.entryId !== id) {
-    return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
   }
 
   return NextResponse.json({
@@ -78,11 +79,11 @@ async function handleGET(_req: NextRequest, { params }: Params) {
 async function handlePATCH(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await reencryptLimiter.check(`rl:team_history_reencrypt:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { teamId, id, historyId } = await params;
@@ -91,7 +92,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
@@ -106,29 +107,29 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
 
   // Validate required fields
   if (!encryptedBlob || !blobIv || !blobAuthTag || teamKeyVersion == null || !oldBlobHash) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate blob format
   if (typeof encryptedBlob !== "string" || encryptedBlob.length === 0 || encryptedBlob.length > 1_000_000) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof blobIv !== "string" || !isValidHex(blobIv, 12)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof blobAuthTag !== "string" || !isValidHex(blobAuthTag, 16)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   // Validate optional itemKey fields when provided
   if (itemKeyIv != null && (typeof itemKeyIv !== "string" || !isValidHex(itemKeyIv, 12))) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (itemKeyAuthTag != null && (typeof itemKeyAuthTag !== "string" || !isValidHex(itemKeyAuthTag, 16))) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   if (typeof oldBlobHash !== "string" || !isValidHex(oldBlobHash, 32)) {
-    return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR }, { status: 400 });
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
   const entry = await withTeamTenantRls(teamId, async () =>
@@ -139,7 +140,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const history = await withTeamTenantRls(teamId, async () =>
@@ -149,7 +150,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   );
 
   if (!history || history.entryId !== id) {
-    return NextResponse.json({ error: API_ERROR.HISTORY_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
   }
 
   // Dual key version validation: at least one must be newer

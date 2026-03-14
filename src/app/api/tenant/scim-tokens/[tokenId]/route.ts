@@ -8,6 +8,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ tokenId: string }> };
 
@@ -17,7 +18,7 @@ export const runtime = "nodejs";
 async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   let actor;
@@ -28,7 +29,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     );
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -43,11 +44,11 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   if (!token || token.tenantId !== actor.tenantId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (token.revokedAt) {
-    return NextResponse.json({ error: API_ERROR.ALREADY_REVOKED }, { status: 409 });
+    return errorResponse(API_ERROR.ALREADY_REVOKED, 409);
   }
 
   await withTenantRls(prisma, actor.tenantId, async () =>

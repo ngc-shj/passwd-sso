@@ -438,20 +438,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
               />
               <div className="flex-1 min-w-0">
                 <PasswordCard
-                  id={entry.id}
-                  entryType={entry.entryType}
-                  title={entry.title}
-                  username={entry.username}
-                  urlHost={entry.urlHost}
-                  snippet={entry.snippet}
-                  brand={entry.brand}
-                  lastFour={entry.lastFour}
-                  cardholderName={entry.cardholderName}
-                  fullName={entry.fullName}
-                  idNumberLast4={entry.idNumberLast4}
-                  tags={entry.tags}
-                  isFavorite={entry.isFavorite}
-                  isArchived={entry.isArchived}
+                  entry={entry}
                   expanded={expandedId === entry.id}
                   onToggleFavorite={handleToggleFavorite}
                   onToggleArchive={handleToggleArchive}
@@ -477,20 +464,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           ) : (
             <PasswordCard
               key={entry.id}
-              id={entry.id}
-              entryType={entry.entryType}
-              title={entry.title}
-              username={entry.username}
-              urlHost={entry.urlHost}
-              snippet={entry.snippet}
-              brand={entry.brand}
-              lastFour={entry.lastFour}
-              cardholderName={entry.cardholderName}
-              fullName={entry.fullName}
-              idNumberLast4={entry.idNumberLast4}
-              tags={entry.tags}
-              isFavorite={entry.isFavorite}
-              isArchived={entry.isArchived}
+              entry={entry}
               expanded={expandedId === entry.id}
               onToggleFavorite={handleToggleFavorite}
               onToggleArchive={handleToggleArchive}

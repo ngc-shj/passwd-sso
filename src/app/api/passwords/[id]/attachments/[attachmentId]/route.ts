@@ -7,6 +7,7 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 
 type RouteContext = {
   params: Promise<{ id: string; attachmentId: string }>;
@@ -19,7 +20,7 @@ async function handleGET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id, attachmentId } = await params;
@@ -32,10 +33,10 @@ async function handleGET(
   );
 
   if (!entry) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const attachment = await withUserTenantRls(session.user.id, async () =>
@@ -45,7 +46,7 @@ async function handleGET(
   );
 
   if (!attachment) {
-    return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND, 404);
   }
 
   const blobStore = getAttachmentBlobStore();
@@ -74,7 +75,7 @@ async function handleDELETE(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id, attachmentId } = await params;
@@ -87,10 +88,10 @@ async function handleDELETE(
   );
 
   if (!entry) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (entry.userId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const attachment = await withUserTenantRls(session.user.id, async () =>
@@ -101,7 +102,7 @@ async function handleDELETE(
   );
 
   if (!attachment) {
-    return NextResponse.json({ error: API_ERROR.ATTACHMENT_NOT_FOUND }, { status: 404 });
+    return errorResponse(API_ERROR.ATTACHMENT_NOT_FOUND, 404);
   }
 
   const blobStore = getAttachmentBlobStore();

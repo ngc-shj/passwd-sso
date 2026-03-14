@@ -7,6 +7,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { routing } from "@/i18n/routing";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
+import { unauthorized } from "@/lib/api-response";
 
 const updateLocaleSchema = z.object({
   locale: z.enum(routing.locales as unknown as [string, ...string[]]),
@@ -16,7 +17,7 @@ const updateLocaleSchema = z.object({
 async function handlePUT(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const result = await parseBody(req, updateLocaleSchema);

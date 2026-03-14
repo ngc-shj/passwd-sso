@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -11,7 +12,7 @@ type Params = { params: Promise<{ id: string }> };
 async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { id } = await params;
@@ -25,7 +26,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   );
 
   if (!share || share.createdById !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const { searchParams } = new URL(req.url);
@@ -49,7 +50,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       }),
     );
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = logs.length > limit;

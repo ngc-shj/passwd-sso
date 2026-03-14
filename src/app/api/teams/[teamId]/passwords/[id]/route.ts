@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
 import { authOrToken } from "@/lib/auth-or-token";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
@@ -16,6 +15,9 @@ import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOP
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import * as teamPasswordService from "@/lib/services/team-password-service";
+import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -23,7 +25,7 @@ type Params = { params: Promise<{ teamId: string; id: string }> };
 async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
   if (!authResult || authResult.type === "scope_insufficient") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authResult.userId;
 
@@ -33,28 +35,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
     await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_READ);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
 
-  const entry = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findUnique({
-      where: { id },
-      include: {
-        tags: { select: { id: true, name: true, color: true } },
-        createdBy: { select: { id: true, name: true, email: true, image: true } },
-        updatedBy: { select: { id: true, name: true, email: true } },
-        favorites: {
-          where: { userId },
-          select: { id: true },
-        },
-      },
-    }),
+  const entry = await withTeamTenantRls(teamId, () =>
+    teamPasswordService.getTeamPassword(teamId, id, userId),
   );
 
   if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   return NextResponse.json({
@@ -91,7 +82,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -101,173 +92,60 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     membership = await requireTeamMember(session.user.id, teamId);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
 
-  const entry = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findUnique({
-      where: { id },
-      select: {
-        teamId: true,
-        tenantId: true,
-        createdById: true,
-        encryptedBlob: true,
-        blobIv: true,
-        blobAuthTag: true,
-        aadVersion: true,
-        teamKeyVersion: true,
-        itemKeyVersion: true,
-        encryptedItemKey: true,
-        itemKeyIv: true,
-        itemKeyAuthTag: true,
-      },
-    }),
+  const existingEntry = await withTeamTenantRls(teamId, () =>
+    teamPasswordService.getTeamPasswordForUpdate(teamId, id),
   );
 
-  if (!entry || entry.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+  if (!existingEntry || existingEntry.teamId !== teamId) {
+    return notFound();
   }
 
   // MEMBER can only update their own entries
   if (!hasTeamPermission(membership.role, TEAM_PERMISSION.PASSWORD_UPDATE)) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
   if (
     membership.role === TEAM_ROLE.MEMBER &&
-    entry.createdById !== session.user.id
+    existingEntry.createdById !== session.user.id
   ) {
-    return NextResponse.json(
-      { error: API_ERROR.ONLY_OWN_ENTRIES },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.ONLY_OWN_ENTRIES, 403);
   }
 
   const result = await parseBody(req, updateTeamE2EPasswordSchema);
   if (!result.ok) return result.response;
 
   const { encryptedBlob, encryptedOverview, aadVersion, teamKeyVersion, itemKeyVersion, encryptedItemKey, tagIds, teamFolderId, isArchived, requireReprompt, expiresAt } = result.data;
-  const isFullUpdate = encryptedBlob !== undefined;
 
-  // Prevent itemKeyVersion downgrade (v1→v0) — cryptographic downgrade attack
-  if (itemKeyVersion !== undefined && itemKeyVersion < (entry.itemKeyVersion ?? 0)) {
-    return NextResponse.json(
-      { error: API_ERROR.ITEM_KEY_VERSION_DOWNGRADE },
-      { status: 400 }
-    );
-  }
-
-  // Upgrading v0→v>=1 requires encryptedItemKey; reusing v>=1 does not
-  const existingVersion = entry.itemKeyVersion ?? 0;
-  if (itemKeyVersion !== undefined && itemKeyVersion >= 1 && existingVersion < 1 && !encryptedItemKey) {
-    return NextResponse.json(
-      { error: API_ERROR.ITEM_KEY_REQUIRED },
-      { status: 400 }
-    );
-  }
-
-  // Validate teamKeyVersion matches current team key version (F-13)
-  if (isFullUpdate) {
-    const team = await withTeamTenantRls(teamId, async () =>
-      prisma.team.findUnique({
-        where: { id: teamId },
-        select: { teamKeyVersion: true },
+  let updated;
+  try {
+    updated = await withTeamTenantRls(teamId, () =>
+      teamPasswordService.updateTeamPassword(teamId, id, {
+        encryptedBlob,
+        encryptedOverview,
+        aadVersion,
+        teamKeyVersion,
+        itemKeyVersion,
+        encryptedItemKey,
+        tagIds,
+        teamFolderId,
+        isArchived,
+        requireReprompt,
+        expiresAt,
+        userId: session.user.id,
+        existingEntry,
       }),
     );
-    if (!team || teamKeyVersion !== team.teamKeyVersion) {
-      return NextResponse.json(
-        { error: API_ERROR.TEAM_KEY_VERSION_MISMATCH },
-        { status: 409 }
-      );
+  } catch (e) {
+    if (e instanceof TeamPasswordServiceError) {
+      return errorResponse(e.code, e.statusHint);
     }
+    throw e;
   }
-
-  // Validate teamFolderId belongs to this team
-  if (teamFolderId) {
-    const folder = await withTeamTenantRls(teamId, async () =>
-      prisma.teamFolder.findUnique({
-        where: { id: teamFolderId },
-        select: { teamId: true },
-      }),
-    );
-    if (!folder || folder.teamId !== teamId) {
-      return NextResponse.json({ error: API_ERROR.FOLDER_NOT_FOUND }, { status: 400 });
-    }
-  }
-
-  const updateData: Record<string, unknown> = {
-    updatedById: session.user.id,
-  };
-
-  if (isFullUpdate) {
-    updateData.encryptedBlob = encryptedBlob!.ciphertext;
-    updateData.blobIv = encryptedBlob!.iv;
-    updateData.blobAuthTag = encryptedBlob!.authTag;
-    updateData.encryptedOverview = encryptedOverview!.ciphertext;
-    updateData.overviewIv = encryptedOverview!.iv;
-    updateData.overviewAuthTag = encryptedOverview!.authTag;
-    updateData.aadVersion = aadVersion;
-    updateData.teamKeyVersion = teamKeyVersion;
-    if (itemKeyVersion !== undefined) {
-      updateData.itemKeyVersion = itemKeyVersion;
-      if (encryptedItemKey) {
-        updateData.encryptedItemKey = encryptedItemKey.ciphertext;
-        updateData.itemKeyIv = encryptedItemKey.iv;
-        updateData.itemKeyAuthTag = encryptedItemKey.authTag;
-      }
-    }
-  }
-
-  if (teamFolderId !== undefined) updateData.teamFolderId = teamFolderId;
-  if (isArchived !== undefined) updateData.isArchived = isArchived;
-  if (requireReprompt !== undefined) updateData.requireReprompt = requireReprompt;
-  if (expiresAt !== undefined) updateData.expiresAt = expiresAt ? new Date(expiresAt) : null;
-  if (tagIds !== undefined) {
-    updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
-  }
-
-  // Snapshot + update in a single transaction for atomicity (F-9)
-  const updated = await withTeamTenantRls(teamId, async () =>
-    prisma.$transaction(async (tx) => {
-      if (isFullUpdate) {
-        await tx.teamPasswordEntryHistory.create({
-          data: {
-            entryId: id,
-            tenantId: entry.tenantId,
-            encryptedBlob: entry.encryptedBlob,
-            blobIv: entry.blobIv,
-            blobAuthTag: entry.blobAuthTag,
-            aadVersion: entry.aadVersion,
-            teamKeyVersion: entry.teamKeyVersion,
-            itemKeyVersion: entry.itemKeyVersion,
-            encryptedItemKey: entry.encryptedItemKey,
-            itemKeyIv: entry.itemKeyIv,
-            itemKeyAuthTag: entry.itemKeyAuthTag,
-            changedById: session.user.id,
-          },
-        });
-        const all = await tx.teamPasswordEntryHistory.findMany({
-          where: { entryId: id },
-          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-          select: { id: true },
-        });
-        if (all.length > 20) {
-          await tx.teamPasswordEntryHistory.deleteMany({
-            where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
-          });
-        }
-      }
-
-      return tx.teamPasswordEntry.update({
-        where: { id, teamId: teamId },
-        data: updateData,
-        include: {
-          tags: { select: { id: true, name: true, color: true } },
-        },
-      });
-    }),
-  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,
@@ -298,7 +176,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId, id } = await params;
@@ -307,36 +185,25 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
   } catch (e) {
     if (e instanceof TeamAuthError) {
-      return NextResponse.json({ error: e.message }, { status: e.status });
+      return errorResponse(e.message, e.status);
     }
     throw e;
   }
 
-  const existing = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findUnique({
-      where: { id },
-    }),
+  const existing = await withTeamTenantRls(teamId, () =>
+    teamPasswordService.getTeamPasswordForUpdate(teamId, id),
   );
 
   if (!existing || existing.teamId !== teamId) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   const { searchParams } = new URL(req.url);
   const permanent = searchParams.get("permanent") === "true";
 
-  if (permanent) {
-    await withTeamTenantRls(teamId, async () =>
-      prisma.teamPasswordEntry.delete({ where: { id } }),
-    );
-  } else {
-    await withTeamTenantRls(teamId, async () =>
-      prisma.teamPasswordEntry.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      }),
-    );
-  }
+  await withTeamTenantRls(teamId, () =>
+    teamPasswordService.deleteTeamPassword(teamId, id, permanent),
+  );
 
   logAudit({
     scope: AUDIT_SCOPE.TEAM,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { unauthorized, notFound, forbidden, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/check-auth";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -28,11 +28,11 @@ async function handleGET(
   );
 
   if (!entry) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (entry.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   return NextResponse.json({
@@ -79,11 +79,11 @@ async function handlePUT(
   );
 
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (existing.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   const result = await parseBody(req, updateE2EPasswordSchema);
@@ -97,7 +97,7 @@ async function handlePUT(
       prisma.folder.findFirst({ where: { id: folderId, userId } }),
     );
     if (!folder) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid folderId" }, { status: 400 });
+      return validationError("Invalid folderId");
     }
   }
 
@@ -107,7 +107,7 @@ async function handlePUT(
       prisma.tag.count({ where: { id: { in: tagIds }, userId } }),
     );
     if (ownedCount !== tagIds.length) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, details: "Invalid tagIds" }, { status: 400 });
+      return validationError("Invalid tagIds");
     }
   }
 
@@ -219,11 +219,11 @@ async function handleDELETE(
   );
 
   if (!existing) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   if (existing.userId !== userId) {
-    return NextResponse.json({ error: API_ERROR.FORBIDDEN }, { status: 403 });
+    return forbidden();
   }
 
   if (permanent) {

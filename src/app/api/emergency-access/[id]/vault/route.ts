@@ -7,6 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -17,11 +18,11 @@ async function handleGET(
 ) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await vaultLimiter.check(`rl:ea_vault:${session.user.id}`)).allowed) {
-    return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { id } = await params;
@@ -37,7 +38,7 @@ async function handleGET(
   );
 
   if (!grant || grant.granteeId !== session.user.id) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   // Auto-activate if wait period has expired
@@ -62,17 +63,11 @@ async function handleGET(
   }
 
   if (grant.status !== EA_STATUS.ACTIVATED) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_ACTIVATED },
-      { status: 403 }
-    );
+    return errorResponse(API_ERROR.NOT_ACTIVATED, 403);
   }
 
   if (!grant.encryptedSecretKey || !grant.granteeKeyPair) {
-    return NextResponse.json(
-      { error: API_ERROR.KEY_ESCROW_NOT_COMPLETED },
-      { status: 400 }
-    );
+    return errorResponse(API_ERROR.KEY_ESCROW_NOT_COMPLETED, 400);
   }
 
   return NextResponse.json({

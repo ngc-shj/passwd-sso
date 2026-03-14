@@ -18,6 +18,7 @@ import {
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
@@ -33,21 +34,18 @@ const sendFileLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await sendFileLimiter.check(`rl:send_file:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   let formData: FormData;
   try {
     formData = await req.formData();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_FORM_DATA }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_FORM_DATA, 400);
   }
 
   // Extract fields
@@ -57,10 +55,7 @@ async function handlePOST(req: NextRequest) {
   const maxViewsRaw = formData.get("maxViews");
 
   if (!(file instanceof File)) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { file: "File is required" } },
-      { status: 400 },
-    );
+    return validationError({ file: "File is required" });
   }
 
   // Validate metadata
@@ -72,10 +67,7 @@ async function handlePOST(req: NextRequest) {
     requirePassword: requirePasswordRaw != null ? requirePasswordRaw : undefined,
   });
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
+    return validationError(parsed.error.flatten());
   }
 
   const meta = parsed.data;
@@ -83,18 +75,12 @@ async function handlePOST(req: NextRequest) {
   // Validate filename
   const filename = file.name;
   if (!isValidSendFilename(filename)) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { file: "Invalid filename" } },
-      { status: 400 },
-    );
+    return validationError({ file: "Invalid filename" });
   }
 
   // Check file size
   if (file.size > SEND_MAX_FILE_SIZE) {
-    return NextResponse.json(
-      { error: API_ERROR.SEND_FILE_TOO_LARGE },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.SEND_FILE_TOO_LARGE, 400);
   }
 
   // Read file bytes
@@ -107,10 +93,7 @@ async function handlePOST(req: NextRequest) {
   if (detected) {
     const declaredType = file.type || "application/octet-stream";
     if (declaredType !== detected.mime && declaredType !== "application/octet-stream") {
-      return NextResponse.json(
-        { error: API_ERROR.SEND_FILE_TYPE_NOT_ALLOWED },
-        { status: 400 },
-      );
+      return errorResponse(API_ERROR.SEND_FILE_TYPE_NOT_ALLOWED, 400);
     }
   }
   // If detected is undefined (text files like .txt, .csv, .json), trust declared content type
@@ -131,10 +114,7 @@ async function handlePOST(req: NextRequest) {
   );
   const currentTotal = activeTotal._sum.sendSizeBytes ?? 0;
   if (currentTotal + file.size > SEND_MAX_ACTIVE_TOTAL_BYTES) {
-    return NextResponse.json(
-      { error: API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED, 400);
   }
 
   // Generate access password if requested
@@ -165,7 +145,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (!actor) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const share = await withUserTenantRls(session.user.id, async () =>

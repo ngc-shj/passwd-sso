@@ -9,6 +9,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -39,29 +40,23 @@ const rotateKeySchema = z.object({
 async function handlePOST(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   if (!(await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_JSON }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = rotateKeySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 }
-    );
+    return validationError(parsed.error.flatten());
   }
 
   const user = await withUserTenantRls(session.user.id, async () =>
@@ -78,10 +73,7 @@ async function handlePOST(request: Request) {
   );
 
   if (!user?.vaultSetupAt) {
-    return NextResponse.json(
-      { error: API_ERROR.VAULT_NOT_SETUP },
-      { status: 404 }
-    );
+    return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
   }
 
   // Verify current passphrase
@@ -90,10 +82,7 @@ async function handlePOST(request: Request) {
     .digest("hex");
 
   if (computedHash !== user.masterPasswordServerHash) {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_PASSPHRASE },
-      { status: 401 }
-    );
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
   }
 
   const newKeyVersion = user.keyVersion + 1;

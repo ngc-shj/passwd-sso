@@ -14,15 +14,16 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 function handleTeamTenantError(e: unknown): NextResponse | null {
   if (e instanceof Error && e.message === "TENANT_NOT_RESOLVED") {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
   if (e instanceof TeamAuthError) {
-    return NextResponse.json({ error: e.message }, { status: e.status });
+    return errorResponse(e.message, e.status);
   }
   return null;
 }
@@ -31,7 +32,7 @@ function handleTeamTenantError(e: unknown): NextResponse | null {
 async function handleGET(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -55,7 +56,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     );
 
     if (!team) {
-      return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+      return notFound();
     }
 
     return NextResponse.json({
@@ -76,7 +77,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
 async function handlePUT(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -125,7 +126,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 async function handleDELETE(_req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const { teamId } = await params;
@@ -152,7 +153,7 @@ async function handleDELETE(_req: NextRequest, { params }: Params) {
     throw e;
   }
   if (!team) {
-    return NextResponse.json({ error: API_ERROR.NOT_FOUND }, { status: 404 });
+    return notFound();
   }
 
   await withTenantRls(prisma, team.tenantId, async () =>

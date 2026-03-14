@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
@@ -21,7 +22,7 @@ function getPersonalParent(id: string): Promise<ParentNode | null> {
 async function handleGET() {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const folders = await withUserTenantRls(session.user.id, async () =>
@@ -57,7 +58,7 @@ async function handleGET() {
 async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const result = await parseBody(req, createFolderSchema);
@@ -71,7 +72,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (!actor) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   // Parent ownership + existence check
@@ -81,10 +82,7 @@ async function handlePOST(req: NextRequest) {
         validateParentFolder(parentId, session.user.id, getPersonalParent),
       );
     } catch {
-      return NextResponse.json(
-        { error: API_ERROR.NOT_FOUND },
-        { status: 404 },
-      );
+      return notFound();
     }
   }
 
@@ -94,10 +92,7 @@ async function handlePOST(req: NextRequest) {
       validateFolderDepth(parentId ?? null, session.user.id, getPersonalParent),
     );
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);
   }
 
   // Duplicate check — use Prisma unique constraint for non-null parentId,
@@ -111,10 +106,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (dup) {
-      return NextResponse.json(
-        { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
     }
   } else {
     const rootDup = await withUserTenantRls(session.user.id, async () =>
@@ -123,10 +115,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (rootDup) {
-      return NextResponse.json(
-        { error: API_ERROR.FOLDER_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
     }
   }
 

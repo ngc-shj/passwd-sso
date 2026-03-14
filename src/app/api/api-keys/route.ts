@@ -6,6 +6,7 @@ import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -23,7 +24,7 @@ async function handleGET(req: NextRequest) {
   if (!authed.ok) return authed.response;
   // API keys cannot manage API keys (only session or extension token)
   if (authed.auth.type === "api_key") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authed.auth.userId;
 
@@ -66,7 +67,7 @@ async function handlePOST(req: NextRequest) {
   if (!authed.ok) return authed.response;
   // API keys cannot create API keys
   if (authed.auth.type === "api_key") {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
   const userId = authed.auth.userId;
 
@@ -82,10 +83,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (existingCount >= MAX_API_KEYS_PER_USER) {
-    return NextResponse.json(
-      { error: API_ERROR.API_KEY_LIMIT_EXCEEDED },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.API_KEY_LIMIT_EXCEEDED, 400);
   }
 
   // Generate token: api_ + 43 chars base62 (256-bit entropy)
@@ -96,10 +94,7 @@ async function handlePOST(req: NextRequest) {
     .replace(/[_-]/g, "")
     .slice(0, 43);
   if (base62.length < 43) {
-    return NextResponse.json(
-      { error: API_ERROR.SERVICE_UNAVAILABLE },
-      { status: 500 },
-    );
+    return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 500);
   }
   const plaintext = `${API_KEY_PREFIX}${base62}`;
   const tokenHash = hashToken(plaintext);
@@ -112,7 +107,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
   if (!actor) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const key = await withUserTenantRls(userId, async () =>

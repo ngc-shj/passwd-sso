@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ const rate = new Map<string, RateEntry>();
 async function handleGET(request: Request) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: API_ERROR.UNAUTHORIZED }, { status: 401 });
+    return unauthorized();
   }
 
   const rateKey = session.user.id;
@@ -30,10 +31,7 @@ async function handleGET(request: Request) {
   if (!rateEntry || rateEntry.resetAt < now) {
     rate.set(rateKey, { resetAt: now + RATE_WINDOW_MS, count: 1 });
   } else if (rateEntry.count >= RATE_MAX) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 }
-    );
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   } else {
     rateEntry.count += 1;
   }
@@ -41,7 +39,7 @@ async function handleGET(request: Request) {
   const { searchParams } = new URL(request.url);
   const prefix = (searchParams.get("prefix") || "").toUpperCase();
   if (!PREFIX_REGEX.test(prefix)) {
-    return NextResponse.json({ error: API_ERROR.INVALID_PREFIX }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_PREFIX, 400);
   }
 
   const cached = cache.get(prefix);
@@ -63,7 +61,7 @@ async function handleGET(request: Request) {
   );
 
   if (!res.ok) {
-    return NextResponse.json({ error: API_ERROR.UPSTREAM_ERROR }, { status: 502 });
+    return errorResponse(API_ERROR.UPSTREAM_ERROR, 502);
   }
 
   const text = await res.text();
