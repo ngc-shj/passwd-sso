@@ -6,9 +6,17 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
-import { Loader2, ScrollText, Download, ChevronDown, ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, ScrollText, Download, ChevronDown, ShieldAlert, Users } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +45,7 @@ import { BreakGlassGrantList } from "@/components/breakglass/breakglass-grant-li
 
 interface AuditLogItem {
   id: string;
+  scope: string;
   action: string;
   targetType: string | null;
   targetId: string | null;
@@ -44,6 +53,7 @@ interface AuditLogItem {
   ip: string | null;
   createdAt: string;
   user?: { id: string; name: string | null; email: string | null } | null;
+  team?: { id: string; name: string } | null;
 }
 
 // Merge TENANT + TEAM action groups for filter UI (tenant logs show both scopes)
@@ -99,6 +109,18 @@ export function TenantAuditLogCard() {
   const [downloading, setDownloading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [grantRefreshTrigger, setGrantRefreshTrigger] = useState(0);
+  const [scopeFilter, setScopeFilter] = useState<"ALL" | "TENANT" | "TEAM">("ALL");
+  const [teamFilter, setTeamFilter] = useState<string>("");
+  const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+
+  // Fetch teams list once on mount
+  useEffect(() => {
+    fetchApi(API_PATH.TEAMS)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: { id: string; name: string }[]) => {
+        if (Array.isArray(data)) setTeams(data);
+      });
+  }, []);
 
   const actionLabel = (action: AuditActionValue | string) => {
     const key = normalizeAuditActionKey(String(action));
@@ -116,8 +138,10 @@ export function TenantAuditLogCard() {
       endOfDay.setHours(23, 59, 59, 999);
       params.set("to", endOfDay.toISOString());
     }
+    if (scopeFilter !== "ALL") params.set("scope", scopeFilter);
+    if (teamFilter) params.set("teamId", teamFilter);
     return params;
-  }, [selectedActions, dateFrom, dateTo]);
+  }, [selectedActions, dateFrom, dateTo, scopeFilter, teamFilter]);
 
   const fetchLogs = useCallback(
     async (cursor?: string) => {
@@ -244,6 +268,54 @@ export function TenantAuditLogCard() {
         <Card className="rounded-xl border bg-card/80 p-4">
           <div className="space-y-3">
             <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1">
+                <Label className="text-xs">{t("scopeLabel")}</Label>
+                <Select
+                  value={scopeFilter === "ALL" && teamFilter ? "TEAM" : scopeFilter}
+                  onValueChange={(v) => {
+                    if (v === "ALL") {
+                      setScopeFilter("ALL");
+                      setTeamFilter("");
+                    } else if (v === "TENANT") {
+                      setScopeFilter("TENANT");
+                      setTeamFilter("");
+                    } else {
+                      setScopeFilter("TEAM");
+                      setTeamFilter("");
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">{t("scopeAll")}</SelectItem>
+                    <SelectItem value="TENANT">{t("scopeTenant")}</SelectItem>
+                    <SelectItem value="TEAM">{t("scopeTeam")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {(scopeFilter === "TEAM" || scopeFilter === "ALL") && teams.length > 0 && (
+                <div className="space-y-1">
+                  <Label className="text-xs">{t("scopeTeam")}</Label>
+                  <Select
+                    value={teamFilter}
+                    onValueChange={setTeamFilter}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder={t("scopeAllTeams")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">{t("scopeAllTeams")}</SelectItem>
+                      {teams.map((team) => (
+                        <SelectItem key={team.id} value={team.id}>
+                          {team.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
               <div className="space-y-1">
                 <Label className="text-xs">{t("dateFrom")}</Label>
                 <Input
@@ -388,14 +460,28 @@ export function TenantAuditLogCard() {
                     <ScrollText className="h-4 w-4" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">
-                      {actionLabel(log.action as AuditActionValue)}
-                    </p>
-                    {log.user && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {formatUser(log.user)}
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium">
+                        {actionLabel(log.action as AuditActionValue)}
                       </p>
-                    )}
+                      <Badge variant={log.scope === "TEAM" ? "secondary" : "outline"} className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+                        {log.scope === "TEAM" ? t("scopeTeam") : t("scopeTenant")}
+                      </Badge>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      {log.user && (
+                        <span className="truncate">{formatUser(log.user)}</span>
+                      )}
+                      {log.team && (
+                        <>
+                          {log.user && <span>·</span>}
+                          <span className="flex items-center gap-0.5 shrink-0">
+                            <Users className="h-3 w-3" />
+                            {log.team.name}
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="text-right shrink-0">
                     <p className="text-xs text-muted-foreground whitespace-nowrap">

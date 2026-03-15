@@ -213,7 +213,7 @@ async function handlePOST(req: NextRequest) {
 }
 
 // GET /api/tenant/breakglass — List all break-glass grants for the tenant
-async function handleGET(req: NextRequest) {
+async function handleGET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

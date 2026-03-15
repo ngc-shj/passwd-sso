@@ -57,7 +57,7 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
           setMembers(data.filter((m: { deactivatedAt?: string | null }) => !m.deactivatedAt));
         }
       });
-  }, [open]);
+  }, [open, members.length]);
 
   const handleSubmit = async () => {
     if (reason.length < 10) {

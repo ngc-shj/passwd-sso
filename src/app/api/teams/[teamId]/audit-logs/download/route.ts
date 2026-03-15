@@ -17,7 +17,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS } from "@/lib/audit-query";
-import { escapeCsvValue, formatCsvRow } from "@/lib/audit-csv";
+import { formatCsvRow } from "@/lib/audit-csv";
 
 type Params = { params: Promise<{ teamId: string }> };
 

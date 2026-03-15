@@ -13,7 +13,7 @@ import type { AuditAction, Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { VALID_ACTIONS } from "@/lib/audit-query";
-import { escapeCsvValue, formatCsvRow } from "@/lib/audit-csv";
+import { formatCsvRow } from "@/lib/audit-csv";
 
 const BATCH_SIZE = 500;
 const MAX_RANGE_DAYS = 90;

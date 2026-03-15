@@ -62,7 +62,6 @@ vi.mock("@/lib/constants/tenant-permission", () => ({
 }));
 
 import { GET } from "@/app/api/tenant/breakglass/[id]/logs/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
 
 const GRANT_ID = "grant-abc123";
 const TARGET_USER_ID = "target-user-id";

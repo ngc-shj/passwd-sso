@@ -35,11 +35,23 @@ async function handleGET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
+  const scopeParam = searchParams.get("scope");
+  const teamIdParam = searchParams.get("teamId");
 
   const where: Record<string, unknown> = {
-    scope: { in: [AUDIT_SCOPE.TENANT, AUDIT_SCOPE.TEAM] },
     tenantId: actor.tenantId,
   };
+
+  // Scope filter: "TENANT" only, "TEAM" only (optionally with teamId), or both (default)
+  if (scopeParam === AUDIT_SCOPE.TENANT) {
+    where.scope = AUDIT_SCOPE.TENANT;
+  } else if (scopeParam === AUDIT_SCOPE.TEAM) {
+    where.scope = AUDIT_SCOPE.TEAM;
+    if (teamIdParam) where.teamId = teamIdParam;
+  } else {
+    where.scope = { in: [AUDIT_SCOPE.TENANT, AUDIT_SCOPE.TEAM] };
+    if (teamIdParam) where.teamId = teamIdParam;
+  }
 
   try {
     const actionFilter = buildAuditLogActionFilter(
@@ -62,6 +74,7 @@ async function handleGET(req: NextRequest) {
         where,
         include: {
           user: { select: { id: true, name: true, email: true, image: true } },
+          team: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: "desc" },
         take: limit + 1,
@@ -77,6 +90,7 @@ async function handleGET(req: NextRequest) {
   return NextResponse.json({
     items: items.map((log) => ({
       id: log.id,
+      scope: log.scope,
       action: log.action,
       targetType: log.targetType,
       targetId: log.targetId,
@@ -89,6 +103,10 @@ async function handleGET(req: NextRequest) {
         name: log.user.name,
         email: log.user.email,
         image: log.user.image,
+      } : null,
+      team: log.team ? {
+        id: log.team.id,
+        name: log.team.name,
       } : null,
     })),
     nextCursor,

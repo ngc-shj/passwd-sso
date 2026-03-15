@@ -162,5 +162,10 @@
   "PERSONAL_LOG_ACCESS_EXPIRE": "Break-glass access expired",
   "groupBreakglass": "Break-Glass Access",
   "subTabTenantLogs": "Tenant Logs",
-  "subTabBreakglass": "Break-Glass"
+  "subTabBreakglass": "Break-Glass",
+  "scopeLabel": "Scope",
+  "scopeAll": "All",
+  "scopeTenant": "Tenant",
+  "scopeTeam": "Team",
+  "scopeAllTeams": "All teams"
 }

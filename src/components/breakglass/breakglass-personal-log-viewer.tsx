@@ -56,14 +56,16 @@ export function BreakGlassPersonalLogViewer({
   );
 
   useEffect(() => {
-    setLoading(true);
+    let cancelled = false;
     fetchLogs().then((data) => {
+      if (cancelled) return;
       if (data) {
         setLogs(data.items ?? []);
         setNextCursor(data.nextCursor ?? null);
       }
       setLoading(false);
     });
+    return () => { cancelled = true; };
   }, [fetchLogs]);
 
   const handleLoadMore = async () => {

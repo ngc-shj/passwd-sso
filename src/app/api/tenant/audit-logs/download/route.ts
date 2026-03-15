@@ -11,7 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { VALID_ACTIONS } from "@/lib/audit-query";
-import { escapeCsvValue, formatCsvRow } from "@/lib/audit-csv";
+import { formatCsvRow } from "@/lib/audit-csv";
 import type { AuditAction } from "@prisma/client";
 
 const BATCH_SIZE = 500;

@@ -162,5 +162,10 @@
   "PERSONAL_LOG_ACCESS_EXPIRE": "Break-Glass アクセスが期限切れ",
   "groupBreakglass": "Break-Glass アクセス",
   "subTabTenantLogs": "テナントログ",
-  "subTabBreakglass": "Break-Glass"
+  "subTabBreakglass": "Break-Glass",
+  "scopeLabel": "スコープ",
+  "scopeAll": "すべて",
+  "scopeTenant": "テナント",
+  "scopeTeam": "チーム",
+  "scopeAllTeams": "すべてのチーム"
 }
