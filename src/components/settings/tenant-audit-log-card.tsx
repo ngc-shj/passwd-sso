@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -56,26 +56,38 @@ interface AuditLogItem {
   team?: { id: string; name: string } | null;
 }
 
-// Merge TENANT + TEAM action groups for filter UI (tenant logs show both scopes)
-const MERGED_GROUPS: Record<string, AuditActionValue[]> = {};
-for (const [group, actions] of Object.entries(AUDIT_ACTION_GROUPS_TENANT)) {
-  MERGED_GROUPS[group] = [...(actions as AuditActionValue[])];
-}
-for (const [group, actions] of Object.entries(AUDIT_ACTION_GROUPS_TEAM)) {
-  const existing = MERGED_GROUPS[group];
-  if (existing) {
-    const set = new Set(existing);
-    for (const a of actions as AuditActionValue[]) {
-      if (!set.has(a)) existing.push(a);
-    }
-  } else {
-    MERGED_GROUPS[group] = [...(actions as AuditActionValue[])];
+// Build scope-specific action groups
+function buildActionGroups(scope: "ALL" | "TENANT" | "TEAM") {
+  if (scope === "TENANT") {
+    return Object.entries(AUDIT_ACTION_GROUPS_TENANT).map(
+      ([value, actions]) => ({ value, actions: actions as AuditActionValue[] })
+    );
   }
+  if (scope === "TEAM") {
+    return Object.entries(AUDIT_ACTION_GROUPS_TEAM).map(
+      ([value, actions]) => ({ value, actions: actions as AuditActionValue[] })
+    );
+  }
+  // ALL: merge both
+  const merged: Record<string, AuditActionValue[]> = {};
+  for (const [group, actions] of Object.entries(AUDIT_ACTION_GROUPS_TENANT)) {
+    merged[group] = [...(actions as AuditActionValue[])];
+  }
+  for (const [group, actions] of Object.entries(AUDIT_ACTION_GROUPS_TEAM)) {
+    const existing = merged[group];
+    if (existing) {
+      const set = new Set(existing);
+      for (const a of actions as AuditActionValue[]) {
+        if (!set.has(a)) existing.push(a);
+      }
+    } else {
+      merged[group] = [...(actions as AuditActionValue[])];
+    }
+  }
+  return Object.entries(merged).map(
+    ([value, actions]) => ({ value, actions })
+  );
 }
-
-const ACTION_GROUPS = Object.entries(MERGED_GROUPS).map(
-  ([value, actions]) => ({ value, actions })
-);
 
 const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.ADMIN]: "groupAdmin",
@@ -112,6 +124,8 @@ export function TenantAuditLogCard() {
   const [scopeFilter, setScopeFilter] = useState<"ALL" | "TENANT" | "TEAM">("ALL");
   const [teamFilter, setTeamFilter] = useState<string>("");
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
+
+  const actionGroups = useMemo(() => buildActionGroups(scopeFilter), [scopeFilter]);
 
   // Fetch teams list once on mount
   useEffect(() => {
@@ -273,16 +287,10 @@ export function TenantAuditLogCard() {
                 <Select
                   value={scopeFilter === "ALL" && teamFilter ? "TEAM" : scopeFilter}
                   onValueChange={(v) => {
-                    if (v === "ALL") {
-                      setScopeFilter("ALL");
-                      setTeamFilter("");
-                    } else if (v === "TENANT") {
-                      setScopeFilter("TENANT");
-                      setTeamFilter("");
-                    } else {
-                      setScopeFilter("TEAM");
-                      setTeamFilter("");
-                    }
+                    const scope = v as "ALL" | "TENANT" | "TEAM";
+                    setScopeFilter(scope);
+                    setTeamFilter("");
+                    setSelectedActions(new Set());
                   }}
                 >
                   <SelectTrigger className="w-[140px]">
@@ -390,7 +398,7 @@ export function TenantAuditLogCard() {
                     onChange={(e) => setActionSearch(e.target.value)}
                   />
                   <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
-                    {ACTION_GROUPS.map((group) => {
+                    {actionGroups.map((group) => {
                       const actions = filteredActions(group.actions);
                       if (actions.length === 0) return null;
                       const allSelected = group.actions.every((a) =>
