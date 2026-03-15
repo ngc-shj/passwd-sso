@@ -113,6 +113,11 @@ export default function TeamSettingsPage({
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [memberSearch, setMemberSearch] = useState("");
   const filteredMembers = filterMembers(members, memberSearch);
+  const [transferSearch, setTransferSearch] = useState("");
+  const transferCandidates = filterMembers(
+    members.filter((m) => m.role !== TEAM_ROLE.OWNER),
+    transferSearch,
+  );
 
   // Add from tenant
   const [addSearch, setAddSearch] = useState("");
@@ -631,10 +636,24 @@ export default function TeamSettingsPage({
                   <Card className="rounded-xl border bg-card/80 p-4">
                     <section className="space-y-4">
                       <p className="text-sm text-muted-foreground">{t("transferOwnershipDesc")}</p>
+                      {members.length > 1 && (
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                          <Input
+                            placeholder={t("searchMembers")}
+                            value={transferSearch}
+                            onChange={(e) => setTransferSearch(e.target.value)}
+                            className="pl-9"
+                          />
+                        </div>
+                      )}
+                      {transferCandidates.length === 0 ? (
+                        <p className="py-4 text-center text-sm text-muted-foreground">
+                          {t("noMatchingMembers")}
+                        </p>
+                      ) : (
                       <div className="max-h-96 space-y-2 overflow-y-auto">
-                        {members
-                          .filter((m) => m.role !== TEAM_ROLE.OWNER)
-                          .map((m) => (
+                        {transferCandidates.map((m) => (
                             <div
                               key={m.id}
                               className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
@@ -674,6 +693,7 @@ export default function TeamSettingsPage({
                             </div>
                           ))}
                       </div>
+                      )}
                     </section>
                   </Card>
                 </TabsContent>
