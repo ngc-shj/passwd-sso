@@ -22,5 +22,8 @@
   "urlRequired": "URL is required",
   "urlInvalid": "Please enter a valid URL",
   "urlHttpsRequired": "URL must use HTTPS",
-  "validationError": "Invalid input"
+  "validationError": "Invalid input",
+  "inactiveWebhooks": "Inactive webhooks ({count})",
+  "noActiveWebhooks": "No active webhooks",
+  "registeredWebhooks": "Registered webhooks"
 }

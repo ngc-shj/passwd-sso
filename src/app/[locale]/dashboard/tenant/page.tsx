@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Building2, Link2, FolderSync, Webhook } from "lucide-react";
+import { Building2, Link2, FolderSync, Webhook, Users, Shield, ScrollText } from "lucide-react";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -13,6 +13,7 @@ import { TenantAccessRestrictionCard } from "@/components/settings/tenant-access
 import { TenantAuditLogCard } from "@/components/settings/tenant-audit-log-card";
 import { TenantWebhookCard } from "@/components/settings/tenant-webhook-card";
 import { Loader2 } from "lucide-react";
+import { TabDescription } from "@/components/settings/tab-description";
 
 export default function TenantSettingsPage() {
   const t = useTranslations("Dashboard");
@@ -57,23 +58,23 @@ export default function TenantSettingsPage() {
 
         <Tabs defaultValue="members" className="space-y-4">
           <TabsList className="grid w-full grid-cols-2 md:grid-cols-5">
-            <TabsTrigger value="members">{t("tenantTabMembers")}</TabsTrigger>
-            <TabsTrigger value="security">{t("tenantTabSecurity")}</TabsTrigger>
-            <TabsTrigger value="provisioning">{t("tenantTabProvisioning")}</TabsTrigger>
-            <TabsTrigger value="audit-log">{t("tenantTabAuditLog")}</TabsTrigger>
-            <TabsTrigger value="webhooks">
-              <Webhook className="h-4 w-4 mr-2" />
-              {t("tenantTabWebhooks")}
-            </TabsTrigger>
+            <TabsTrigger value="members"><Users className="h-4 w-4 mr-2" />{t("tenantTabMembers")}</TabsTrigger>
+            <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />{t("tenantTabSecurity")}</TabsTrigger>
+            <TabsTrigger value="provisioning"><Link2 className="h-4 w-4 mr-2" />{t("tenantTabProvisioning")}</TabsTrigger>
+            <TabsTrigger value="audit-log"><ScrollText className="h-4 w-4 mr-2" />{t("tenantTabAuditLog")}</TabsTrigger>
+            <TabsTrigger value="webhooks"><Webhook className="h-4 w-4 mr-2" />{t("tenantTabWebhooks")}</TabsTrigger>
           </TabsList>
           <TabsContent value="members" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabMembersDesc")}</TabDescription>
             <TenantMembersCard />
           </TabsContent>
           <TabsContent value="security" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabSecurityDesc")}</TabDescription>
             <TenantSessionPolicyCard />
             <TenantAccessRestrictionCard />
           </TabsContent>
           <TabsContent value="provisioning" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabProvisioningDesc")}</TabDescription>
             <Tabs defaultValue="scim" className="space-y-4">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="scim">
@@ -94,9 +95,11 @@ export default function TenantSettingsPage() {
             </Tabs>
           </TabsContent>
           <TabsContent value="audit-log" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabAuditLogDesc")}</TabDescription>
             <TenantAuditLogCard />
           </TabsContent>
           <TabsContent value="webhooks" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabWebhooksDesc")}</TabDescription>
             <TenantWebhookCard />
           </TabsContent>
         </Tabs>
