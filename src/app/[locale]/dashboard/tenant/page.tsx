@@ -10,6 +10,7 @@ import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-ca
 import { DirectorySyncCard } from "@/components/settings/directory-sync-card";
 import { TenantSessionPolicyCard } from "@/components/settings/tenant-session-policy-card";
 import { TenantAccessRestrictionCard } from "@/components/settings/tenant-access-restriction-card";
+import { TenantAuditLogCard } from "@/components/settings/tenant-audit-log-card";
 import { Loader2 } from "lucide-react";
 
 export default function TenantSettingsPage() {
@@ -54,11 +55,12 @@ export default function TenantSettingsPage() {
         </Card>
 
         <Tabs defaultValue="members" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-5">
             <TabsTrigger value="members">{t("tenantTabMembers")}</TabsTrigger>
             <TabsTrigger value="security">{t("tenantTabSecurity")}</TabsTrigger>
             <TabsTrigger value="scim">{t("tenantTabScim")}</TabsTrigger>
             <TabsTrigger value="directory-sync">{t("tenantTabDirectorySync")}</TabsTrigger>
+            <TabsTrigger value="audit-log">{t("tenantTabAuditLog")}</TabsTrigger>
           </TabsList>
           <TabsContent value="members" className="mt-0 space-y-4">
             <TenantMembersCard />
@@ -72,6 +74,9 @@ export default function TenantSettingsPage() {
           </TabsContent>
           <TabsContent value="directory-sync" className="mt-0 space-y-4">
             <DirectorySyncCard />
+          </TabsContent>
+          <TabsContent value="audit-log" className="mt-0 space-y-4">
+            <TenantAuditLogCard />
           </TabsContent>
         </Tabs>
       </div>

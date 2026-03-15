@@ -69,6 +69,7 @@
   "tenantTabScim": "SCIM",
   "tenantTabDirectorySync": "Directory Sync",
   "tenantTabSecurity": "Security",
+  "tenantTabAuditLog": "Audit Log",
   "select": "Select",
   "close": "Close",
   "selectAll": "Select All",

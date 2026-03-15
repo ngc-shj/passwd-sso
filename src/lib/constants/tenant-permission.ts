@@ -3,6 +3,8 @@ export const TENANT_PERMISSION = {
   MEMBER_VAULT_RESET: "tenant:member:vaultReset",
   TEAM_CREATE: "tenant:team:create",
   SCIM_MANAGE: "tenant:scim:manage",
+  AUDIT_LOG_VIEW: "tenant:auditLog:view",
+  BREAKGLASS_REQUEST: "tenant:breakglass:request",
 } as const;
 
 export type TenantPermissionValue =

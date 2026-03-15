@@ -56,6 +56,8 @@ export const API_PATH = {
   DIRECTORY_SYNC: "/api/directory-sync",
   TENANT_POLICY: "/api/tenant/policy",
   TENANT_ROLE: "/api/tenant/role",
+  TENANT_AUDIT_LOGS: "/api/tenant/audit-logs",
+  TENANT_BREAKGLASS: "/api/tenant/breakglass",
   TRAVEL_MODE: "/api/travel-mode",
   WEBAUTHN: "/api/webauthn",
   WEBAUTHN_REGISTER_OPTIONS: "/api/webauthn/register/options",
@@ -159,4 +161,11 @@ export const apiPath = {
     `${API_PATH.DIRECTORY_SYNC}/${configId}/logs`,
   webauthnCredentialById: (credentialId: string) =>
     `${API_PATH.WEBAUTHN_CREDENTIALS}/${credentialId}`,
+  tenantAuditLogs: () => API_PATH.TENANT_AUDIT_LOGS,
+  tenantAuditLogsDownload: () => `${API_PATH.TENANT_AUDIT_LOGS}/download`,
+  tenantBreakglass: () => API_PATH.TENANT_BREAKGLASS,
+  tenantBreakglassById: (grantId: string) =>
+    `${API_PATH.TENANT_BREAKGLASS}/${grantId}`,
+  tenantBreakglassLogs: (grantId: string) =>
+    `${API_PATH.TENANT_BREAKGLASS}/${grantId}/logs`,
 } as const;
