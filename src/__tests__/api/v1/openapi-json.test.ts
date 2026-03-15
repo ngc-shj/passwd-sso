@@ -19,6 +19,10 @@ const URL = "http://localhost:3000/api/v1/openapi.json";
 describe("GET /api/v1/openapi.json", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
     vi.unstubAllEnvs();
   });
 
