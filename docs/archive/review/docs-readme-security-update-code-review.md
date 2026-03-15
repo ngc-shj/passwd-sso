@@ -104,3 +104,33 @@ None.
 ### S6 [Minor] OPENAPI_PUBLIC evaluated at module scope (out of scope)
 - Action: Out of scope for docs update — code change required
 - Note: Environment variable evaluated once at module init, requires redeploy to take effect
+
+## Round 3: S5/S6 Code Fix Review
+
+### S5 [Minor] Cache-Control: public when OPENAPI_PUBLIC=false
+- Action: Fixed — use `private, no-store` when auth required, `public, max-age=3600` when public
+- Modified file: src/app/api/v1/openapi.json/route.ts
+
+### S6 [Minor] Module-scope isPublic evaluation
+- Action: Fixed — moved into handler function for per-request evaluation
+- Modified file: src/app/api/v1/openapi.json/route.ts
+
+### S1-new [Minor] Missing Vary: Authorization on public responses
+- Action: Fixed — added `Vary: Authorization` header when isPublic=true
+- Modified file: src/app/api/v1/openapi.json/route.ts
+
+### S2-new [Minor] 401 response missing Cache-Control
+- Action: Fixed — added `Cache-Control: no-store` to 401 response, removed unused unauthorized import
+- Modified file: src/app/api/v1/openapi.json/route.ts
+
+### T1-new [Critical] No tests for OpenAPI route
+- Action: Fixed — created openapi-json.test.ts with 4 tests (public 200, private 401, private 200, headers)
+- Modified file: src/__tests__/api/v1/openapi-json.test.ts
+
+### TF1 [Major] Missing vi.resetModules() in test
+- Action: Fixed — added vi.resetModules() to beforeEach, moved vi.unstubAllEnvs() to afterEach
+- Modified file: src/__tests__/api/v1/openapi-json.test.ts
+
+### TF2 [Minor] vi.unstubAllEnvs() in beforeEach instead of afterEach
+- Action: Fixed — moved to afterEach per project convention
+- Modified file: src/__tests__/api/v1/openapi-json.test.ts
