@@ -7,17 +7,20 @@ import {
   TEAM_PERMISSION,
   AUDIT_SCOPE,
   AUDIT_ACTION_GROUPS_TEAM,
-  AUDIT_ACTION_VALUES,
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
-import type { AuditAction } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import {
+  VALID_ACTIONS,
+  parseAuditLogParams,
+  buildAuditLogActionFilter,
+  buildAuditLogDateFilter,
+  paginateResult,
+} from "@/lib/audit-query";
 
 type Params = { params: Promise<{ teamId: string }> };
-
-const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 // GET /api/teams/[teamId]/audit-logs — Team audit logs (ADMIN/OWNER only)
 async function handleGET(req: NextRequest, { params }: Params) {
@@ -38,43 +41,29 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   const { searchParams } = new URL(req.url);
-  const action = searchParams.get("action");
-  const actionsParam = searchParams.get("actions");
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
-  const cursor = searchParams.get("cursor");
-  const limitParam = searchParams.get("limit");
-  const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
+  const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
 
   const where: Record<string, unknown> = {
     teamId: teamId,
     scope: AUDIT_SCOPE.TEAM,
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a as AuditAction));
-    if (invalid.length > 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { actions: invalid } },
-        { status: 400 }
-      );
-    }
-    where.action = { in: requested };
-  } else if (action) {
-    if (AUDIT_ACTION_GROUPS_TEAM[action]) {
-      where.action = { in: AUDIT_ACTION_GROUPS_TEAM[action] };
-    } else if (VALID_ACTIONS.has(action as AuditAction)) {
-      where.action = action;
-    }
+  try {
+    const actionFilter = buildAuditLogActionFilter(
+      { action, actions: actionsParam },
+      VALID_ACTIONS,
+      AUDIT_ACTION_GROUPS_TEAM,
+    );
+    if (actionFilter !== undefined) where.action = actionFilter;
+  } catch (err) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR, details: err },
+      { status: 400 }
+    );
   }
 
-  if (from || to) {
-    const createdAt: Record<string, Date> = {};
-    if (from) createdAt.gte = new Date(from);
-    if (to) createdAt.lte = new Date(to);
-    where.createdAt = createdAt;
-  }
+  const dateFilter = buildAuditLogDateFilter(from, to);
+  if (dateFilter) where.createdAt = dateFilter;
 
   let logs;
   try {
@@ -93,9 +82,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
-  const hasMore = logs.length > limit;
-  const items = hasMore ? logs.slice(0, limit) : logs;
-  const nextCursor = hasMore ? items[items.length - 1].id : null;
+  const { items, nextCursor } = paginateResult(logs, limit);
 
   // Collect encrypted overviews for entry targets (client decrypts to get titles)
   const entryIds = [

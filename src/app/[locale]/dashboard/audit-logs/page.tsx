@@ -58,6 +58,8 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
+import { formatUserName } from "@/lib/format-user";
+import { downloadBlob } from "@/lib/download-blob";
 
 interface AuditLogItem {
   id: string;
@@ -239,21 +241,15 @@ export default function AuditLogsPage() {
   };
 
   const formatDate = (iso: string) => formatDateTime(iso, locale);
-  const formatUser = (user?: { name: string | null; email: string | null } | null) => {
-    if (!user) return null;
-    const name = user.name?.trim();
-    if (name) return name;
-    return user.email ?? null;
-  };
 
   const formatViewer = (log: AuditLogItem) => {
     if (!log.user) return null;
-    return formatUser(log.user);
+    return formatUserName(log.user, "") || null;
   };
 
   const resolveUser = (id?: string, fallbackEmail?: string | null) => {
     if (id && relatedUsers[id]) {
-      return formatUser(relatedUsers[id]);
+      return formatUserName(relatedUsers[id], "") || null;
     }
     if (fallbackEmail) return fallbackEmail;
     return null;
@@ -521,13 +517,7 @@ export default function AuditLogsPage() {
       }
       const res = await fetchApi(`/api/audit-logs/download?${params.toString()}`);
       if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `audit-logs.${format === "csv" ? "csv" : "jsonl"}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await downloadBlob(res, `audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
     } finally {
       setDownloading(false);
     }

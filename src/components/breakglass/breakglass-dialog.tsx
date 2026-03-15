@@ -49,6 +49,7 @@ export function BreakGlassDialog({ onGrantCreated }: BreakGlassDialogProps) {
 
   useEffect(() => {
     if (!open) return;
+    if (members.length > 0) return;
     fetchApi(API_PATH.TENANT_MEMBERS)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {

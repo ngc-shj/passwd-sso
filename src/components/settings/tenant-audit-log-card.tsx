@@ -104,24 +104,29 @@ export function TenantAuditLogCard() {
     return t.has(key as never) ? t(key as never) : String(action);
   };
 
+  const buildFilterParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (selectedActions.size > 0) {
+      params.set("actions", Array.from(selectedActions).join(","));
+    }
+    if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
+    if (dateTo) {
+      const endOfDay = new Date(dateTo);
+      endOfDay.setHours(23, 59, 59, 999);
+      params.set("to", endOfDay.toISOString());
+    }
+    return params;
+  }, [selectedActions, dateFrom, dateTo]);
+
   const fetchLogs = useCallback(
     async (cursor?: string) => {
-      const params = new URLSearchParams();
-      if (selectedActions.size > 0) {
-        params.set("actions", Array.from(selectedActions).join(","));
-      }
-      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-      if (dateTo) {
-        const endOfDay = new Date(dateTo);
-        endOfDay.setHours(23, 59, 59, 999);
-        params.set("to", endOfDay.toISOString());
-      }
+      const params = buildFilterParams();
       if (cursor) params.set("cursor", cursor);
       const res = await fetchApi(`${API_PATH.TENANT_AUDIT_LOGS}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
-    [selectedActions, dateFrom, dateTo]
+    [buildFilterParams]
   );
 
   useEffect(() => {
@@ -149,17 +154,8 @@ export function TenantAuditLogCard() {
   const handleDownload = async (format: "jsonl" | "csv") => {
     setDownloading(true);
     try {
-      const params = new URLSearchParams();
+      const params = buildFilterParams();
       params.set("format", format);
-      if (selectedActions.size > 0) {
-        params.set("actions", Array.from(selectedActions).join(","));
-      }
-      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-      if (dateTo) {
-        const endOfDay = new Date(dateTo);
-        endOfDay.setHours(23, 59, 59, 999);
-        params.set("to", endOfDay.toISOString());
-      }
       const res = await fetchApi(`${apiPath.tenantAuditLogsDownload()}?${params.toString()}`);
       if (!res.ok) return;
       const blob = await res.blob();

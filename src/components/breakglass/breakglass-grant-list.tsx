@@ -20,6 +20,7 @@ import { apiPath, GRANT_STATUS } from "@/lib/constants";
 import type { GrantStatus } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format-datetime";
+import { formatUserName } from "@/lib/format-user";
 import { toast } from "sonner";
 import { BreakGlassPersonalLogViewer } from "./breakglass-personal-log-viewer";
 
@@ -88,13 +89,6 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
     }
   };
 
-  const formatUser = (
-    user: { name: string | null; email: string | null } | null
-  ) => {
-    if (!user) return "—";
-    return user.name?.trim() || user.email || "—";
-  };
-
   const statusLabel = (status: string) => {
     if (status === GRANT_STATUS.ACTIVE) return t("statusActive");
     if (status === GRANT_STATUS.EXPIRED) return t("statusExpired");
@@ -113,7 +107,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
     return (
       <BreakGlassPersonalLogViewer
         grantId={viewingGrant.id}
-        targetUserName={formatUser(viewingGrant.targetUser)}
+        targetUserName={formatUserName(viewingGrant.targetUser)}
         expiresAt={viewingGrant.expiresAt}
         onBack={() => setViewingLogGrantId(null)}
       />
@@ -135,13 +129,13 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
     >
       <div className="flex-1 min-w-0 space-y-0.5">
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium">{formatUser(grant.targetUser)}</span>
+          <span className="text-sm font-medium">{formatUserName(grant.targetUser)}</span>
           <Badge variant={STATUS_VARIANT[grant.status] ?? "outline"} className="text-xs">
             {statusLabel(grant.status)}
           </Badge>
         </div>
         <p className="text-xs text-muted-foreground truncate">
-          {t("requester")}: {formatUser(grant.requester)}
+          {t("requester")}: {formatUserName(grant.requester)}
         </p>
         <p className="text-xs text-muted-foreground truncate" title={grant.reason}>
           {grant.reason.length > 80 ? `${grant.reason.slice(0, 80)}…` : grant.reason}

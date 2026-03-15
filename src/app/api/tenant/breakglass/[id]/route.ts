@@ -9,7 +9,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, TENANT_ROLE } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
@@ -57,7 +57,7 @@ async function handleDELETE(
   }
 
   // Only the requester or an OWNER can revoke
-  if (grant.requesterId !== userId && actor.role !== "OWNER") {
+  if (grant.requesterId !== userId && actor.role !== TENANT_ROLE.OWNER) {
     return errorResponse(API_ERROR.FORBIDDEN, 403);
   }
 

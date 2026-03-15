@@ -242,6 +242,7 @@ async function handleGET(req: NextRequest) {
         targetUser: { select: { id: true, name: true, email: true, image: true } },
       },
       orderBy: { createdAt: "desc" },
+      take: 200,
     }),
   );
 

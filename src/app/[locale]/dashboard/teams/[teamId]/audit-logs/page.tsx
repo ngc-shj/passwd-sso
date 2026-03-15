@@ -50,6 +50,7 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
+import { downloadBlob } from "@/lib/download-blob";
 import { useTeamVaultOptional } from "@/lib/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
@@ -458,13 +459,7 @@ export default function TeamAuditLogsPage({
         `${apiPath.teamAuditLogs(teamId)}/download?${params.toString()}`
       );
       if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      await downloadBlob(res, `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
     } finally {
       setDownloading(false);
     }

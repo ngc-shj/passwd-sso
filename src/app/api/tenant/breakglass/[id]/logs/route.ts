@@ -8,17 +8,17 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { AUDIT_ACTION, AUDIT_ACTION_GROUPS_PERSONAL, AUDIT_SCOPE } from "@/lib/constants";
 import {
-  AUDIT_ACTION,
-  AUDIT_ACTION_GROUPS_PERSONAL,
-  AUDIT_ACTION_VALUES,
-  AUDIT_SCOPE,
-} from "@/lib/constants";
-import type { AuditAction, Prisma } from "@prisma/client";
+  VALID_ACTIONS,
+  parseAuditLogParams,
+  buildAuditLogDateFilter,
+  buildAuditLogActionFilter,
+  paginateResult,
+} from "@/lib/audit-query";
+import type { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
-
-const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 // In-memory dedup maps (per-process, resets on restart — acceptable)
 const viewAuditCache = new Map<string, number>(); // grantId -> last VIEW audit ts
@@ -163,42 +163,29 @@ async function handleGET(
 
   // Parse pagination/filter query params (same shape as personal audit log API)
   const { searchParams } = new URL(req.url);
-  const action = searchParams.get("action");
-  const actionsParam = searchParams.get("actions");
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
-  const cursor = searchParams.get("cursor");
-  const limitParam = searchParams.get("limit");
-  const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
+  const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
 
   const where: Prisma.AuditLogWhereInput = {
     userId: grant.targetUserId,
     scope: AUDIT_SCOPE.PERSONAL,
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a as AuditAction));
-    if (invalid.length > 0) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-        details: { actions: invalid },
-      });
-    }
-    where.action = { in: requested as AuditAction[] };
-  } else if (action) {
-    if (AUDIT_ACTION_GROUPS_PERSONAL[action]) {
-      where.action = { in: AUDIT_ACTION_GROUPS_PERSONAL[action] };
-    } else if (VALID_ACTIONS.has(action)) {
-      where.action = action as AuditAction;
-    }
+  try {
+    const actionFilter = buildAuditLogActionFilter(
+      { action, actions },
+      VALID_ACTIONS,
+      AUDIT_ACTION_GROUPS_PERSONAL,
+    );
+    if (actionFilter !== undefined) where.action = actionFilter;
+  } catch (e) {
+    const err = e as { actions?: string[] };
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      details: { actions: err.actions },
+    });
   }
 
-  if (from || to) {
-    const createdAt: Record<string, Date> = {};
-    if (from) createdAt.gte = new Date(from);
-    if (to) createdAt.lte = new Date(to);
-    where.createdAt = createdAt;
-  }
+  const dateFilter = buildAuditLogDateFilter(from, to);
+  if (dateFilter) where.createdAt = dateFilter;
 
   let logs;
   try {
@@ -217,9 +204,7 @@ async function handleGET(
     return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
-  const hasMore = logs.length > limit;
-  const items = hasMore ? logs.slice(0, limit) : logs;
-  const nextCursor = hasMore ? items[items.length - 1].id : null;
+  const { items, nextCursor } = paginateResult(logs, limit);
 
   return NextResponse.json({
     items: items.map((log) => ({
