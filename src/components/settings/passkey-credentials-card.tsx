@@ -420,8 +420,30 @@ export function PasskeyCredentialsCard() {
                       </div>
                     )}
 
-                    {/* Badges */}
+                    {/* Badges — ordered by user relevance:
+                         1. Sign-in capability (discoverable vs email-only)
+                         2. Vault unlock (PRF)
+                         3. Device type */}
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* Discoverable vs non-discoverable credential indicator.
+                         Heuristic: singleDevice + not backed up strongly indicates
+                         a non-discoverable credential. WebAuthn L2 does not expose
+                         the resident key (rk) bit directly, so this is an approximation. */}
+                      {cred.deviceType === "singleDevice" && !cred.backedUp ? (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
+                          title={t("notDiscoverableDescription")}
+                        >
+                          {t("notDiscoverable")}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                          title={t("discoverableDescription")}
+                        >
+                          {t("discoverable")}
+                        </span>
+                      )}
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
                           cred.prfSupported
@@ -444,18 +466,6 @@ export function PasskeyCredentialsCard() {
                           ? t("deviceTypeSingleDevice")
                           : t("deviceTypeMultiDevice")}
                       </span>
-                      {/* Non-discoverable credential warning.
-                         Heuristic: singleDevice + not backed up strongly indicates
-                         a non-discoverable credential. WebAuthn L2 does not expose
-                         the resident key (rk) bit directly, so this is an approximation. */}
-                      {cred.deviceType === "singleDevice" && !cred.backedUp && (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
-                          title={t("notDiscoverableDescription")}
-                        >
-                          {t("notDiscoverable")}
-                        </span>
-                      )}
                     </div>
 
                     {/* Metadata */}
