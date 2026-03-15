@@ -225,9 +225,7 @@ export function VaultLockScreen() {
           <CardDescription>{t("lockedDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="mb-4">
-            <ExtConnectBanner />
-          </div>
+          <ExtConnectBanner className="mb-4" />
           <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="unlock-passphrase">{t("passphrase")}</Label>
