@@ -290,62 +290,7 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
         </p>
       </section>
 
-      {/* Webhook list */}
-      <section className="space-y-3 border-t pt-4">
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : webhooks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
-        ) : (
-          <div className="max-h-80 space-y-3 overflow-y-auto">
-            {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
-              <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
-            )}
-            {activeWebhooks.map(renderWebhookItem)}
-            {inactiveWebhooks.length > 0 && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowInactive((v) => !v)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ChevronDown
-                    className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
-                  />
-                  {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
-                </button>
-                {showInactive && (
-                  <div className="mt-2 space-y-3">
-                    {inactiveWebhooks.map(renderWebhookItem)}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </section>
-
-      {/* Secret display (shown once after creation) */}
-      {newSecret && (
-        <section className="border rounded-md p-4 bg-muted/50 space-y-2">
-          <p className="text-sm font-medium">{t("secret")}</p>
-          <div className="flex items-center gap-2">
-            <Input
-              value={newSecret}
-              readOnly
-              autoComplete="off"
-              className="font-mono text-xs"
-            />
-            <CopyButton getValue={() => newSecret} />
-          </div>
-          <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
-          <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
-            OK
-          </Button>
-        </section>
-      )}
-
-      {/* Create webhook form */}
+      {/* Create webhook form (fixed) */}
       <section className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
 
@@ -420,6 +365,61 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
               {t("addWebhook")}
             </Button>
           </>
+        )}
+      </section>
+
+      {/* Secret display (shown once after creation) */}
+      {newSecret && (
+        <section className="border rounded-md p-4 bg-muted/50 space-y-2">
+          <p className="text-sm font-medium">{t("secret")}</p>
+          <div className="flex items-center gap-2">
+            <Input
+              value={newSecret}
+              readOnly
+              autoComplete="off"
+              className="font-mono text-xs"
+            />
+            <CopyButton getValue={() => newSecret} />
+          </div>
+          <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
+          <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
+            OK
+          </Button>
+        </section>
+      )}
+
+      {/* Webhook list (dynamic) */}
+      <section className="space-y-3 border-t pt-4">
+        {loading ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : webhooks.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
+        ) : (
+          <div className="max-h-80 space-y-3 overflow-y-auto">
+            {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
+              <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
+            )}
+            {activeWebhooks.map(renderWebhookItem)}
+            {inactiveWebhooks.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowInactive((v) => !v)}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronDown
+                    className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
+                  />
+                  {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
+                </button>
+                {showInactive && (
+                  <div className="mt-2 space-y-3">
+                    {inactiveWebhooks.map(renderWebhookItem)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         )}
       </section>
     </Card>
