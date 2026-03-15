@@ -78,7 +78,9 @@ passwd-sso uses a **zero-knowledge** architecture:
 - Always use HTTPS in production
 - Do **not** expose PostgreSQL (port 5432) or SAML Jackson (port 5225) to the public internet
 - Use strong, unique values for `AUTH_SECRET`, `SHARE_MASTER_KEY`, `VERIFIER_PEPPER_KEY`, and database credentials
-- Set `DIRECTORY_SYNC_MASTER_KEY` in production (falls back to `SHARE_MASTER_KEY` in dev)
+- Set `DIRECTORY_SYNC_MASTER_KEY` in production (mandatory; dev-only fallback to `SHARE_MASTER_KEY` is not available in production)
+- Set `WEBAUTHN_RP_ID` and `WEBAUTHN_RP_ORIGIN` to your production domain; set `WEBAUTHN_PRF_SECRET` if using passkey vault unlock
+- Set `OPENAPI_PUBLIC=false` in production to restrict OpenAPI spec access
 - Keep Docker images up to date
 - Restrict Google sign-in to your Workspace domain via `GOOGLE_WORKSPACE_DOMAINS`
 - Configure tenant-level network access restrictions in production environments

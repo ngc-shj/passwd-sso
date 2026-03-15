@@ -315,8 +315,8 @@ docs/                     # Documentation (architecture, security, operations, s
 | `npm run test:cli` | Run CLI tests |
 | `npm run test:load:smoke` | Load-test seed smoke checks |
 | `npm run test:load:seed` | Seed load-test users/sessions |
-| `npm run test:load` | k6 mixed-workload scenario |
-| `npm run test:load:health` | k6 health endpoint scenario |
+| `npm run test:load` | k6 mixed-workload scenario (requires k6) |
+| `npm run test:load:health` | k6 health endpoint scenario (requires k6) |
 | `npm run test:load:cleanup` | Cleanup load-test data |
 | `npm run scim:smoke` | SCIM smoke checks (requires `SCIM_TOKEN`) |
 

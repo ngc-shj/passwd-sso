@@ -44,7 +44,9 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Passkey sign-in: discoverable (passwordless) + email-based (non-discoverable security keys)
 - PRF extension support for vault auto-unlock after passkey sign-in
 - Route protection: `proxy.ts` (root, entry point + CSP) → `src/proxy.ts` (Next.js 16 proxy pattern)
-- Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/folders/*`, `/api/api-keys/*`, `/api/v1/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`, `/api/teams/*`, `/api/tenant/*`, `/api/sessions/*`, `/api/notifications/*`, `/api/audit-logs/*`, `/api/emergency-access/*`, `/api/share-links/*`, `/api/sends/*`, `/api/watchtower/*`, `/api/extension/*`, `/api/vault/*`
+- Protected routes (proxy middleware session check): `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/api-keys/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`, `/api/teams/*`, `/api/tenant/*`, `/api/sessions/*`, `/api/notifications/*`, `/api/audit-logs/*`, `/api/emergency-access/*`, `/api/share-links/*`, `/api/sends/*`, `/api/watchtower/*`, `/api/extension/*`
+- Route-handler auth (not middleware): `/api/vault/*`, `/api/folders/*`, `/api/admin/*`, `/api/maintenance/*`, `/api/scim/*`
+- API key auth (no session): `/api/v1/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
 
 ### E2E Encryption Architecture
@@ -123,7 +125,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/share-links/[id]/access-logs` | GET | Share link access logs |
 | `/api/share-links/mine` | GET | List own share links |
 | `/api/share-links/verify-access` | POST | Verify share link access |
-| `/api/sends` | GET, POST | List/create text sends |
+| `/api/sends` | POST | Create text send (list via `/api/share-links/mine?shareType=send`) |
 | `/api/sends/file` | POST | Create file send |
 
 #### Emergency Access
@@ -299,7 +301,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/health/ready` | GET | Readiness probe (DB + Redis, 503 if unhealthy) |
 | `/api/csp-report` | POST | CSP violation report endpoint |
 | `/api/user/locale` | PUT | Update user locale preference |
-| `/api/admin/rotate-master-key` | POST | Rotate server master key |
+| `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
 | `/api/maintenance/purge-history` | POST | Purge old entry history records |
 
 ### i18n
