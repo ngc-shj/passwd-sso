@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { resolveCallbackUrl, callbackUrlToHref } from "./callback-url";
 
 const ORIGIN = "https://example.com";
