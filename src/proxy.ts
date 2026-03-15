@@ -127,7 +127,9 @@ async function handleApiAuth(request: NextRequest) {
   // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
   // Route handlers handle all auth via validateApiKeyOnly().
   if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
-    return NextResponse.next();
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "private, no-store");
+    return res;
   }
 
   const hasBearer = request.headers
@@ -135,7 +137,9 @@ async function handleApiAuth(request: NextRequest) {
     ?.startsWith("Bearer ");
 
   if (hasBearer && isBearerRoute) {
-    return applyCorsHeaders(request, NextResponse.next(), { allowExtension: true });
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "private, no-store");
+    return applyCorsHeaders(request, res, { allowExtension: true });
   }
 
   // Public share-link endpoints for unauthenticated share viewers.
@@ -144,7 +148,9 @@ async function handleApiAuth(request: NextRequest) {
     pathname === `${API_PATH.SHARE_LINKS}/verify-access` ||
     /^\/api\/share-links\/[^/]+\/content$/.test(pathname)
   ) {
-    return NextResponse.next();
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "no-store");
+    return res;
   }
 
   // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
@@ -172,7 +178,10 @@ async function handleApiAuth(request: NextRequest) {
     if (!session.valid) {
       return applyCorsHeaders(
         request,
-        NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 }),
+        NextResponse.json(
+          { error: "UNAUTHORIZED" },
+          { status: 401, headers: { "Cache-Control": "no-store" } },
+        ),
       );
     }
 
@@ -188,13 +197,20 @@ async function handleApiAuth(request: NextRequest) {
       if (!accessResult.allowed) {
         return applyCorsHeaders(
           request,
-          NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 }),
+          NextResponse.json(
+            { error: "ACCESS_DENIED" },
+            { status: 403, headers: { "Cache-Control": "no-store" } },
+          ),
         );
       }
     }
   }
 
-  return applyCorsHeaders(request, NextResponse.next());
+  // Default: prevent CDN/proxy from caching authenticated API responses.
+  // Route handlers may override with explicit Cache-Control headers.
+  const res = NextResponse.next();
+  res.headers.set("Cache-Control", "private, no-store");
+  return applyCorsHeaders(request, res);
 }
 
 async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
