@@ -71,6 +71,7 @@
   "tenantTabProvisioning": "プロビジョニング",
   "tenantTabSecurity": "セキュリティ",
   "tenantTabAuditLog": "監査ログ",
+  "tenantTabWebhooks": "Webhook",
   "select": "選択",
   "close": "閉じる",
   "selectAll": "すべて選択",

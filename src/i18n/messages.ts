@@ -54,6 +54,7 @@ export const NAMESPACES = [
   "Notifications",
   "TeamPolicy",
   "TeamWebhook",
+  "TenantWebhook",
   "AuditDownload",
   "CliToken",
   "TenantAdmin",

@@ -15,6 +15,7 @@ const {
   mockPersonalLogAccessGrantCreate,
   mockPersonalLogAccessGrantFindMany,
   mockPersonalLogAccessGrantUpdateMany,
+  mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockPersonalLogAccessGrantCreate: vi.fn(),
   mockPersonalLogAccessGrantFindMany: vi.fn(),
   mockPersonalLogAccessGrantUpdateMany: vi.fn(),
+  mockDispatchTenantWebhook: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -73,6 +75,9 @@ vi.mock("@/lib/csrf", () => ({
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
+}));
+vi.mock("@/lib/webhook-dispatcher", () => ({
+  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 vi.mock("@/lib/constants/tenant-permission", () => ({
   TENANT_PERMISSION: {
@@ -226,6 +231,39 @@ describe("POST /api/tenant/breakglass", () => {
     const res = await POST(req);
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
+  });
+
+  it("dispatches PERSONAL_LOG_ACCESS_REQUEST tenant webhook with correct tenantId on success", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockTenantMemberFindFirst.mockResolvedValue(makeMember());
+    mockPersonalLogAccessGrantFindFirst.mockResolvedValue(null);
+    const grant = makeGrant();
+    mockPersonalLogAccessGrantCreate.mockResolvedValue(grant);
+
+    const req = createRequest("POST", "http://localhost/api/tenant/breakglass", {
+      body: { targetUserId: TARGET_USER_ID, reason: "Valid reason for incident" },
+    });
+    await POST(req);
+
+    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PERSONAL_LOG_ACCESS_REQUEST",
+        tenantId: "tenant1",
+      }),
+    );
+  });
+
+  it("does not dispatch tenant webhook when request fails validation", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    // Reason too short — fails schema validation
+    const req = createRequest("POST", "http://localhost/api/tenant/breakglass", {
+      body: { targetUserId: TARGET_USER_ID, reason: "short" },
+    });
+    await POST(req);
+
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
   });
 });
 
@@ -391,5 +429,35 @@ describe("DELETE /api/tenant/breakglass/[id]", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
+  });
+
+  it("dispatches PERSONAL_LOG_ACCESS_REVOKE tenant webhook with correct tenantId on successful revoke", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockPersonalLogAccessGrantFindFirst.mockResolvedValue(makeGrant());
+    mockPersonalLogAccessGrantUpdateMany.mockResolvedValue({ count: 1 });
+
+    const req = createRequest("DELETE", `http://localhost/api/tenant/breakglass/${GRANT_ID}`);
+    await DELETE(req, createParams({ id: GRANT_ID }));
+
+    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "PERSONAL_LOG_ACCESS_REVOKE",
+        tenantId: "tenant1",
+      }),
+    );
+  });
+
+  it("does not dispatch tenant webhook when grant is already revoked", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockPersonalLogAccessGrantFindFirst.mockResolvedValue(
+      makeGrant({ revokedAt: new Date(Date.now() - 10000) }),
+    );
+
+    const req = createRequest("DELETE", `http://localhost/api/tenant/breakglass/${GRANT_ID}`);
+    await DELETE(req, createParams({ id: GRANT_ID }));
+
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
   });
 });

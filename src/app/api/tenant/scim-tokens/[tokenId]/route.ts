@@ -6,6 +6,7 @@ import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
@@ -66,6 +67,12 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     targetType: AUDIT_TARGET_TYPE.SCIM_TOKEN,
     targetId: tokenId,
     ...extractRequestMeta(req),
+  });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.SCIM_TOKEN_REVOKE,
+    tenantId: actor.tenantId,
+    timestamp: new Date().toISOString(),
+    data: { tokenId },
   });
 
   return NextResponse.json({ success: true });
