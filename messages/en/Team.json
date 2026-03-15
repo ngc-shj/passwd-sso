@@ -146,5 +146,10 @@
   "memberAdded": "Member added",
   "addMemberFailed": "Failed to add member",
   "scimManagedCannotAdd": "SCIM-managed members must be reactivated through your IdP",
-  "noTenantMembersFound": "No matching members found"
+  "noTenantMembersFound": "No matching members found",
+  "teamSettingsDescription": "Manage your team configuration, members, and integrations.",
+  "tabGeneralDesc": "Update team name, description, or delete the team.",
+  "tabMembersDesc": "Manage team members, transfer ownership, or invite new members.",
+  "tabPolicyDesc": "Set password requirements and security policies for the team.",
+  "tabWebhookDesc": "Configure webhook endpoints to receive team event notifications."
 }

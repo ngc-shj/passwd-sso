@@ -205,6 +205,78 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
 
   const limitReached = webhooks.length >= MAX_WEBHOOKS;
 
+  const activeWebhooks = webhooks.filter((w) => w.isActive);
+  const inactiveWebhooks = webhooks.filter((w) => !w.isActive);
+  const [showInactive, setShowInactive] = useState(false);
+
+  // Auto-expand inactive section when limit is reached so users can delete inactive webhooks
+  useEffect(() => {
+    if (limitReached && inactiveWebhooks.length > 0) {
+      setShowInactive(true);
+    }
+  }, [limitReached, inactiveWebhooks.length]);
+
+  const renderWebhookItem = (w: WebhookItem) => (
+    <div
+      key={w.id}
+      className="flex items-center justify-between border rounded-md p-3"
+    >
+      <div className="space-y-1 min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium truncate">
+            {w.url}
+          </span>
+          <Badge
+            variant={w.isActive ? "default" : "destructive"}
+            className="shrink-0"
+          >
+            {w.isActive ? t("active") : t("inactive")}
+          </Badge>
+        </div>
+        <div className="flex flex-wrap gap-1 mt-1">
+          {w.events.map((e) => (
+            <Badge key={e} variant="outline" className="text-xs font-normal">
+              {tAudit(e)}
+            </Badge>
+          ))}
+        </div>
+        <div className="text-xs text-muted-foreground space-x-3">
+          {w.failCount > 0 && (
+            <span className="text-amber-600 dark:text-amber-400">
+              {t("failCount", { count: w.failCount })}
+            </span>
+          )}
+          {w.lastDeliveredAt && (
+            <span>
+              {t("lastDelivered")}: {formatDateTime(w.lastDeliveredAt, locale)}
+            </span>
+          )}
+        </div>
+      </div>
+      <AlertDialog>
+        <AlertDialogTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+            <Trash2 className="h-4 w-4 text-destructive" />
+          </Button>
+        </AlertDialogTrigger>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("deleteConfirm")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {w.url}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleDelete(w.id)}>
+              {tCommon("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+
   return (
     <Card className="p-6 space-y-6">
       {/* Header */}
@@ -226,66 +298,29 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
           <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
         ) : (
           <div className="max-h-80 space-y-3 overflow-y-auto">
-            {webhooks.map((w) => (
-              <div
-                key={w.id}
-                className="flex items-center justify-between border rounded-md p-3"
-              >
-                <div className="space-y-1 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">
-                      {w.url}
-                    </span>
-                    <Badge
-                      variant={w.isActive ? "default" : "destructive"}
-                      className="shrink-0"
-                    >
-                      {w.isActive ? t("active") : t("inactive")}
-                    </Badge>
+            {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
+              <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
+            )}
+            {activeWebhooks.map(renderWebhookItem)}
+            {inactiveWebhooks.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  onClick={() => setShowInactive((v) => !v)}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ChevronDown
+                    className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
+                  />
+                  {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
+                </button>
+                {showInactive && (
+                  <div className="mt-2 space-y-3">
+                    {inactiveWebhooks.map(renderWebhookItem)}
                   </div>
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {w.events.map((e) => (
-                      <Badge key={e} variant="outline" className="text-xs font-normal">
-                        {tAudit(e)}
-                      </Badge>
-                    ))}
-                  </div>
-                  <div className="text-xs text-muted-foreground space-x-3">
-                    {w.failCount > 0 && (
-                      <span className="text-amber-600 dark:text-amber-400">
-                        {t("failCount", { count: w.failCount })}
-                      </span>
-                    )}
-                    {w.lastDeliveredAt && (
-                      <span>
-                        {t("lastDelivered")}: {formatDateTime(w.lastDeliveredAt, locale)}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("deleteConfirm")}</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {w.url}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => handleDelete(w.id)}>
-                        {tCommon("delete")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                )}
               </div>
-            ))}
+            )}
           </div>
         )}
       </section>

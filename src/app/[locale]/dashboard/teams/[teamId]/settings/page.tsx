@@ -36,8 +36,9 @@ import {
 import { CopyButton } from "@/components/passwords/copy-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
 import { TeamWebhookCard } from "@/components/team/team-webhook-card";
+import { TabDescription } from "@/components/settings/tab-description";
 import { Link } from "@/i18n/navigation";
-import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe, Search } from "lucide-react";
+import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe, Search, Shield, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -395,21 +396,27 @@ export default function TeamSettingsPage({
         <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
           <div className="flex items-center gap-3">
             <Users className="h-6 w-6" />
-            <h1 className="truncate text-2xl font-bold">
-              {t("teamSettings")}
-            </h1>
+            <div>
+              <h1 className="truncate text-2xl font-bold">
+                {t("teamSettings")}
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                {t("teamSettingsDescription")}
+              </p>
+            </div>
           </div>
         </Card>
 
         <Tabs defaultValue={isAdmin ? "general" : "members"} className="space-y-4">
           <TabsList className={`grid w-full ${isAdmin ? "grid-cols-4" : "grid-cols-2"}`}>
-            <TabsTrigger value="general">{t("generalSettings")}</TabsTrigger>
-            <TabsTrigger value="members">{t("members")}</TabsTrigger>
-            {isAdmin && <TabsTrigger value="policy">{t("securityPolicy")}</TabsTrigger>}
-            {isAdmin && <TabsTrigger value="webhook">{tWebhook("title")}</TabsTrigger>}
+            <TabsTrigger value="general"><Settings2 className="h-4 w-4 mr-2" />{t("generalSettings")}</TabsTrigger>
+            <TabsTrigger value="members"><Users className="h-4 w-4 mr-2" />{t("members")}</TabsTrigger>
+            {isAdmin && <TabsTrigger value="policy"><Shield className="h-4 w-4 mr-2" />{t("securityPolicy")}</TabsTrigger>}
+            {isAdmin && <TabsTrigger value="webhook"><Webhook className="h-4 w-4 mr-2" />{tWebhook("title")}</TabsTrigger>}
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-0">
+            <TabDescription>{t("tabGeneralDesc")}</TabDescription>
             {isAdmin ? (
               <Card className="rounded-xl border bg-card/80 p-4">
                 <section className="space-y-4">
@@ -506,6 +513,7 @@ export default function TeamSettingsPage({
           </TabsContent>
 
           <TabsContent value="members" className="space-y-4 mt-0">
+            <TabDescription>{t("tabMembersDesc")}</TabDescription>
             <Tabs defaultValue="list" className="space-y-4">
               <TabsList className={`grid w-full ${isOwner ? "grid-cols-4" : isAdmin ? "grid-cols-3" : "grid-cols-1"}`}>
                 <TabsTrigger value="list">
@@ -844,12 +852,14 @@ export default function TeamSettingsPage({
 
           {isAdmin && (
             <TabsContent value="policy" className="space-y-4 mt-0">
+              <TabDescription>{t("tabPolicyDesc")}</TabDescription>
               <TeamPolicySettings teamId={teamId} />
             </TabsContent>
           )}
 
           {isAdmin && (
             <TabsContent value="webhook" className="space-y-4 mt-0">
+              <TabDescription>{t("tabWebhookDesc")}</TabDescription>
               <TeamWebhookCard teamId={teamId} locale={locale} />
             </TabsContent>
           )}

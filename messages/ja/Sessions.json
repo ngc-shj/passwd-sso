@@ -23,5 +23,8 @@
   "noOtherSessions": "他のアクティブなセッションはありません。",
   "unknownDevice": "不明なデバイス",
   "unknownBrowser": "不明なブラウザ",
-  "loading": "セッションを読み込み中..."
+  "loading": "セッションを読み込み中...",
+  "tabAccountDesc": "アクティブなセッションとサインインデバイスを管理します。",
+  "tabSecurityDesc": "パスキーとトラベルモードを管理して、ボールトを保護します。",
+  "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。"
 }

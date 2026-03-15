@@ -23,5 +23,8 @@
   "noOtherSessions": "No other active sessions.",
   "unknownDevice": "Unknown device",
   "unknownBrowser": "Unknown browser",
-  "loading": "Loading sessions..."
+  "loading": "Loading sessions...",
+  "tabAccountDesc": "Manage your active sessions and sign-in devices.",
+  "tabSecurityDesc": "Manage passkeys and travel mode to protect your vault.",
+  "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access."
 }

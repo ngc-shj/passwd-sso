@@ -224,19 +224,30 @@ describe("TenantWebhookCard", () => {
 
     await waitFor(() => {
       expect(screen.getAllByText("https://example.com/tenant-hook1").length).toBeGreaterThanOrEqual(1);
-      expect(screen.getAllByText("https://example.com/tenant-hook2").length).toBeGreaterThanOrEqual(1);
     });
+
+    // Inactive webhook is hidden by default behind the toggle
+    expect(screen.queryByText("https://example.com/tenant-hook2")).not.toBeInTheDocument();
 
     const badges = screen.getAllByTestId("badge");
     expect(badges.some((b) => b.textContent === "active")).toBe(true);
-    expect(badges.some((b) => b.textContent === "inactive")).toBe(true);
   });
 
-  it("shows failCount for webhooks with failures", async () => {
+  it("shows failCount for webhooks with failures after expanding inactive", async () => {
     setupFetchWebhooks();
 
     await act(async () => {
       render(<TenantWebhookCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/tenant-hook1").length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Expand inactive section
+    const toggleButton = screen.getByText(/inactiveWebhooks/);
+    await act(async () => {
+      fireEvent.click(toggleButton);
     });
 
     await waitFor(() => {
@@ -659,5 +670,55 @@ describe("TenantWebhookCard", () => {
     await waitFor(() => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
+  });
+
+  it("shows active webhooks and hides inactive by default", async () => {
+    setupFetchWebhooks(sampleWebhooks);
+
+    await act(async () => {
+      render(<TenantWebhookCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/tenant-hook1").length).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(screen.queryByText("https://example.com/tenant-hook2")).not.toBeInTheDocument();
+  });
+
+  it("shows inactive webhooks after clicking toggle", async () => {
+    setupFetchWebhooks(sampleWebhooks);
+
+    await act(async () => {
+      render(<TenantWebhookCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/tenant-hook1").length).toBeGreaterThanOrEqual(1);
+    });
+
+    const toggleButton = screen.getByText(/inactiveWebhooks/);
+    await act(async () => {
+      fireEvent.click(toggleButton);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/tenant-hook2").length).toBeGreaterThanOrEqual(1);
+    });
+  });
+
+  it("does not show inactive toggle when all webhooks are active", async () => {
+    const allActiveWebhooks = sampleWebhooks.map((w) => ({ ...w, isActive: true }));
+    setupFetchWebhooks(allActiveWebhooks);
+
+    await act(async () => {
+      render(<TenantWebhookCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/tenant-hook1").length).toBeGreaterThanOrEqual(1);
+    });
+
+    expect(screen.queryByText(/inactiveWebhooks/)).not.toBeInTheDocument();
   });
 });

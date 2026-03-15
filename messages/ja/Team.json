@@ -146,5 +146,10 @@
   "memberAdded": "メンバーを追加しました",
   "addMemberFailed": "メンバーの追加に失敗しました",
   "scimManagedCannotAdd": "SCIM管理のメンバーはIdP経由で再有効化してください",
-  "noTenantMembersFound": "該当するメンバーが見つかりません"
+  "noTenantMembersFound": "該当するメンバーが見つかりません",
+  "teamSettingsDescription": "チームの設定、メンバー、連携を管理します。",
+  "tabGeneralDesc": "チーム名、説明の変更、またはチームの削除ができます。",
+  "tabMembersDesc": "チームメンバーの管理、オーナー権限の委譲、新規メンバーの招待ができます。",
+  "tabPolicyDesc": "チームのパスワード要件とセキュリティポリシーを設定します。",
+  "tabWebhookDesc": "Webhookエンドポイントを設定して、チームイベントの通知を受信します。"
 }
