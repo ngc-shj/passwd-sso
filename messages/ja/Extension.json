@@ -11,5 +11,6 @@
   "connectFailedDescription": "拡張機能との接続に失敗しました。もう一度お試しください。",
   "closeTab": "タブを閉じる",
   "goToDashboard": "ダッシュボードへ",
-  "retry": "再試行"
+  "retry": "再試行",
+  "connectingBanner": "ブラウザ拡張機能の接続中..."
 }

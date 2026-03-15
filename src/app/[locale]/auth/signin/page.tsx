@@ -2,6 +2,8 @@ import { redirect } from "@/i18n/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
+import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/callback-url";
+import { getAppOrigin } from "@/lib/url-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { SignInButton } from "@/components/auth/signin-button";
@@ -10,13 +12,17 @@ import { PasskeySignInButton } from "@/components/auth/passkey-signin-button";
 import { SecurityKeySignInForm } from "@/components/auth/security-key-signin-form";
 import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
+import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
 
 export default async function SignInPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ callbackUrl?: string }>;
 }) {
   const { locale } = await params;
+  const { callbackUrl: rawCallbackUrl } = await searchParams;
   setRequestLocale(locale);
 
   const t = await getTranslations("Auth");
@@ -30,7 +36,18 @@ export default async function SignInPage({
   }
 
   if (session?.user) {
-    redirect({ href: "/dashboard", locale });
+    // Resolve callbackUrl using env-based origin (never from request headers)
+    let origin = "";
+    try {
+      const appOrigin = getAppOrigin();
+      if (appOrigin) origin = new URL(appOrigin).origin;
+    } catch {
+      // Malformed env var — fall back to empty origin (relative paths only)
+    }
+    const resolved = resolveCallbackUrl(rawCallbackUrl ?? null, origin);
+    // Strip basePath + locale: next-intl redirect() re-adds both
+    const href = callbackUrlToHref(resolved);
+    redirect({ href, locale });
   }
 
   const hasGoogle = !!(
@@ -64,6 +81,7 @@ export default async function SignInPage({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <ExtConnectBanner />
           {/* SSO buttons (enterprise mode) */}
           {hasGoogle && (
             <SignInButton

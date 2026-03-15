@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
 import { Fingerprint, Loader2, Lock, LogIn, Eye, EyeOff } from "lucide-react";
+import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
 
 /** @internal Exported for testing */
 export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
@@ -224,6 +225,7 @@ export function VaultLockScreen() {
           <CardDescription>{t("lockedDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
+          <ExtConnectBanner className="mb-4" />
           <form onSubmit={handleSubmit} onKeyDown={preventIMESubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="unlock-passphrase">{t("passphrase")}</Label>

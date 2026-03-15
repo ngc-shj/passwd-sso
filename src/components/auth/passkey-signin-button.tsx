@@ -8,6 +8,8 @@ import { Loader2, Fingerprint } from "lucide-react";
 import { isWebAuthnSupported, startPasskeyAuthentication, hexEncode } from "@/lib/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { useCallbackUrl } from "@/hooks/use-callback-url";
+import { callbackUrlToHref } from "@/lib/callback-url";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";
@@ -16,6 +18,7 @@ const SS_PRF_DATA = "psso:prf-data";
 export function PasskeySignInButton() {
   const t = useTranslations("Auth");
   const router = useRouter();
+  const callbackUrl = useCallbackUrl();
   const [loading, setLoading] = useState(false);
   const [supported, setSupported] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -85,8 +88,8 @@ export function PasskeySignInButton() {
       // 5. Set flag for vault auto-unlock after dashboard navigation
       sessionStorage.setItem("psso:webauthn-signin", "1");
 
-      // 6. Navigate to dashboard
-      router.push("/dashboard");
+      // 6. Navigate to callback destination (preserves ext_connect for extension)
+      router.push(callbackUrlToHref(callbackUrl));
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         setError(t("passkeySignInCancelled"));

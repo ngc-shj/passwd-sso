@@ -6,9 +6,11 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Loader2, Mail, CheckCircle2 } from "lucide-react";
+import { useCallbackUrl } from "@/hooks/use-callback-url";
 
 export function EmailSignInForm() {
   const t = useTranslations("Auth");
+  const callbackUrl = useCallbackUrl();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
@@ -29,8 +31,12 @@ export function EmailSignInForm() {
       // Always show "sent" regardless of whether the email exists or the
       // signIn callback rejects it. This prevents user enumeration — an
       // attacker cannot distinguish valid from invalid addresses.
+      // callbackUrl is pre-validated by useCallbackUrl (open-redirect safe).
+      // redirect: false MUST be preserved — removing it would redirect
+      // before the email is sent, breaking the Magic Link flow.
       await signIn("nodemailer", {
         email: trimmed,
+        callbackUrl,
         redirect: false,
       });
       setSent(true);

@@ -65,10 +65,6 @@ export function AutoExtensionConnect() {
     connect();
   };
 
-  const handleCloseTab = () => {
-    window.close();
-  };
-
   // No ext_connect param — render nothing, let dashboard show
   if (status === CONNECT_STATUS.IDLE) return null;
 
@@ -126,13 +122,6 @@ export function AutoExtensionConnect() {
           {status === CONNECT_STATUS.CONNECTED && (
             <div className="flex flex-col gap-3 w-full max-w-xs">
               <Button
-                onClick={handleCloseTab}
-                className="w-full"
-              >
-                {t("closeTab")}
-              </Button>
-              <Button
-                variant="ghost"
                 onClick={() => setStatus(CONNECT_STATUS.IDLE)}
                 className="w-full"
               >
