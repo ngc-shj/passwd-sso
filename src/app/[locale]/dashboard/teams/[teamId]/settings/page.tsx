@@ -645,7 +645,9 @@ export default function TeamSettingsPage({
                       )}
                       {transferCandidates.length === 0 ? (
                         <p className="py-4 text-center text-sm text-muted-foreground">
-                          {t("noMatchingMembers")}
+                          {transferSearch.trim()
+                            ? t("noMatchingMembers")
+                            : t("noTransferCandidates")}
                         </p>
                       ) : (
                       <div className="max-h-96 space-y-2 overflow-y-auto">

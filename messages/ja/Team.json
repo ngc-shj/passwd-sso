@@ -99,6 +99,7 @@
   "forbidden": "この操作を行う権限がありません",
   "transferOwnership": "オーナー権限の譲渡",
   "transferOwnershipDesc": "オーナー権限を他のメンバーに譲渡します。あなたは管理者に降格されます。",
+  "noTransferCandidates": "譲渡先のメンバーがいません。",
   "transferOwnershipConfirm": "{name} にオーナー権限を譲渡しますか？あなたは管理者になり、この操作は自分で元に戻せません。",
   "transferButton": "譲渡",
   "ownershipTransferred": "オーナー権限を譲渡しました",

@@ -668,6 +668,46 @@ describe("TeamWebhookCard", () => {
     });
   });
 
+  it("auto-expands inactive section when webhook limit is reached", async () => {
+    // 5 webhooks total (MAX_WEBHOOKS=5): 4 active + 1 inactive
+    const limitWebhooks = [
+      ...Array.from({ length: 4 }, (_, i) => ({
+        id: `wh-a${i}`,
+        url: `https://example.com/active-${i}`,
+        events: ["ENTRY_CREATE"],
+        isActive: true,
+        failCount: 0,
+        lastDeliveredAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        createdAt: "2025-01-01T00:00:00Z",
+      })),
+      {
+        id: "wh-inactive",
+        url: "https://example.com/inactive",
+        events: ["ENTRY_CREATE"],
+        isActive: false,
+        failCount: 0,
+        lastDeliveredAt: null,
+        lastFailedAt: null,
+        lastError: null,
+        createdAt: "2025-01-01T00:00:00Z",
+      },
+    ];
+    setupFetchWebhooks(limitWebhooks);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByText("https://example.com/active-0").length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Inactive webhook should be auto-expanded because limit is reached
+    expect(screen.getAllByText("https://example.com/inactive").length).toBeGreaterThanOrEqual(1);
+  });
+
   it("does not show inactive toggle when all webhooks are active", async () => {
     const allActiveWebhooks = sampleWebhooks.map((w) => ({ ...w, isActive: true }));
     setupFetchWebhooks(allActiveWebhooks);

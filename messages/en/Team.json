@@ -99,6 +99,7 @@
   "forbidden": "You do not have permission to perform this action",
   "transferOwnership": "Transfer Ownership",
   "transferOwnershipDesc": "Transfer the owner role to another member. You will be demoted to Admin.",
+  "noTransferCandidates": "No other members to transfer ownership to.",
   "transferOwnershipConfirm": "Transfer ownership to {name}? You will become an Admin and cannot undo this action yourself.",
   "transferButton": "Transfer",
   "ownershipTransferred": "Ownership transferred",
