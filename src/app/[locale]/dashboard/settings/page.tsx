@@ -1,14 +1,16 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { UserRound } from "lucide-react";
+import { UserRound, Monitor, Shield, Code } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionsCard } from "@/components/sessions/sessions-card";
 import { CliTokenCard } from "@/components/settings/cli-token-card";
 import { ApiKeyManager } from "@/components/settings/api-key-manager";
 import { TravelModeCard } from "@/components/settings/travel-mode-card";
 import { PasskeyCredentialsCard } from "@/components/settings/passkey-credentials-card";
+import { TabDescription } from "@/components/settings/tab-description";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
@@ -30,19 +32,24 @@ export default function SettingsPage() {
 
         <Tabs defaultValue="account" className="space-y-4">
           <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="account">{t("tabAccount")}</TabsTrigger>
-            <TabsTrigger value="security">{t("tabSecurity")}</TabsTrigger>
-            <TabsTrigger value="developer">{t("tabDeveloper")}</TabsTrigger>
+            <TabsTrigger value="account"><Monitor className="h-4 w-4 mr-2" />{t("tabAccount")}</TabsTrigger>
+            <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />{t("tabSecurity")}</TabsTrigger>
+            <TabsTrigger value="developer"><Code className="h-4 w-4 mr-2" />{t("tabDeveloper")}</TabsTrigger>
           </TabsList>
           <TabsContent value="account" className="mt-0 space-y-4">
+            <TabDescription>{t("tabAccountDesc")}</TabDescription>
             <SessionsCard />
           </TabsContent>
           <TabsContent value="security" className="mt-0 space-y-4">
-            <PasskeyCredentialsCard />
+            <TabDescription>{t("tabSecurityDesc")}</TabDescription>
             <TravelModeCard />
+            <Separator />
+            <PasskeyCredentialsCard />
           </TabsContent>
           <TabsContent value="developer" className="mt-0 space-y-4">
+            <TabDescription>{t("tabDeveloperDesc")}</TabDescription>
             <CliTokenCard />
+            <Separator />
             <ApiKeyManager />
           </TabsContent>
         </Tabs>

@@ -49,6 +49,8 @@
   "vaultUnlockDisabled": "Not available",
   "tryIt": "Try it",
   "tryItSuccess": "Passkey verified successfully!",
+  "discoverable": "Passkey sign-in",
+  "discoverableDescription": "This passkey supports passwordless sign-in. You can sign in by selecting it directly, without entering your email.",
   "notDiscoverable": "Email sign-in only",
   "notDiscoverableDescription": "This passkey is not a discoverable credential. Use the email + security key option to sign in. It can also be used for vault unlock if PRF is supported.",
   "nonDiscoverableNonPrfWarning": "This passkey cannot be used for passkey sign-in or vault unlock. Use the email + security key option to sign in. Consider registering a different authenticator."

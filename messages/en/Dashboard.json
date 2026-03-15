@@ -77,5 +77,10 @@
   "selectAll": "Select All",
   "externalTenant": "External tenant",
   "travelMode": "Travel Mode",
-  "installExtension": "Install Extension"
+  "installExtension": "Install Extension",
+  "tenantTabMembersDesc": "View and manage organization members, roles, and access.",
+  "tenantTabSecurityDesc": "Configure session policies and access restrictions for the organization.",
+  "tenantTabProvisioningDesc": "Set up SCIM provisioning and directory sync for automated user management.",
+  "tenantTabAuditLogDesc": "Review organization activity and security events.",
+  "tenantTabWebhooksDesc": "Configure webhook endpoints to receive real-time event notifications."
 }

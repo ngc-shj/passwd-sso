@@ -77,5 +77,10 @@
   "selectAll": "すべて選択",
   "externalTenant": "外部テナント",
   "travelMode": "トラベルモード",
-  "installExtension": "拡張機能をインストール"
+  "installExtension": "拡張機能をインストール",
+  "tenantTabMembersDesc": "組織のメンバー、ロール、アクセス権を表示・管理します。",
+  "tenantTabSecurityDesc": "組織のセッションポリシーとアクセス制限を設定します。",
+  "tenantTabProvisioningDesc": "SCIMプロビジョニングとディレクトリ同期を設定して、ユーザー管理を自動化します。",
+  "tenantTabAuditLogDesc": "組織のアクティビティとセキュリティイベントを確認します。",
+  "tenantTabWebhooksDesc": "Webhookエンドポイントを設定して、リアルタイムのイベント通知を受信します。"
 }
