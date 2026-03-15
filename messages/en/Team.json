@@ -9,6 +9,7 @@
   "slug": "Slug",
   "slugPlaceholder": "e.g., engineering-team",
   "slugHelp": "A unique identifier for the team. Lowercase letters, numbers, and hyphens only.",
+  "slugReadOnly": "The slug cannot be changed after creation.",
   "description": "Description",
   "descriptionPlaceholder": "Optional description...",
   "createButton": "Create",
@@ -153,7 +154,7 @@
   "scimManagedCannotAdd": "SCIM-managed members must be reactivated through your IdP",
   "noTenantMembersFound": "No matching members found",
   "teamSettingsDescription": "Manage your team configuration, members, and integrations.",
-  "tabGeneralDesc": "Update team name, description, or delete the team.",
+  "tabGeneralDesc": "Update team name and description.",
   "tabMembersDesc": "Manage team members, transfer ownership, or invite new members.",
   "tabPolicyDesc": "Set password requirements and security policies for the team.",
   "tabWebhookDesc": "Configure webhook endpoints to receive team event notifications."

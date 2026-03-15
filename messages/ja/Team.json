@@ -9,6 +9,7 @@
   "slug": "スラッグ",
   "slugPlaceholder": "例: engineering-team",
   "slugHelp": "チームの一意な識別子です。小文字英数字とハイフンのみ。",
+  "slugReadOnly": "スラッグは作成後に変更できません。",
   "description": "説明",
   "descriptionPlaceholder": "任意の説明...",
   "createButton": "作成",
@@ -153,7 +154,7 @@
   "scimManagedCannotAdd": "SCIM管理のメンバーはIdP経由で再有効化してください",
   "noTenantMembersFound": "該当するメンバーが見つかりません",
   "teamSettingsDescription": "チームの設定、メンバー、連携を管理します。",
-  "tabGeneralDesc": "チーム名、説明の変更、またはチームの削除ができます。",
+  "tabGeneralDesc": "チーム名と説明を変更します。",
   "tabMembersDesc": "チームメンバーの管理、オーナー権限の委譲、新規メンバーの招待ができます。",
   "tabPolicyDesc": "チームのパスワード要件とセキュリティポリシーを設定します。",
   "tabWebhookDesc": "Webhookエンドポイントを設定して、チームイベントの通知を受信します。"

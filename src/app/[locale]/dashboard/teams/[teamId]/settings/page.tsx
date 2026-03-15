@@ -426,10 +426,6 @@ export default function TeamSettingsPage({
             {isAdmin ? (
               <Card className="rounded-xl border bg-card/80 p-4">
                 <section className="space-y-4">
-                  <h2 className="flex items-center gap-2 text-lg font-semibold">
-                    <Settings2 className="h-5 w-5 text-muted-foreground" />
-                    {t("generalSettings")}
-                  </h2>
                   <div className="grid gap-3 md:grid-cols-2">
                     <div className="space-y-2">
                       <Label>{t("teamName")}</Label>
@@ -438,10 +434,10 @@ export default function TeamSettingsPage({
                     <div className="space-y-2">
                       <Label>{t("slug")}</Label>
                       <div className="flex items-center gap-2">
-                        <Input value={team.slug} readOnly />
+                        <Input value={team.slug} readOnly className="bg-muted text-muted-foreground cursor-default" />
                         <CopyButton getValue={() => team.slug} />
                       </div>
-                      <p className="text-xs text-muted-foreground">{t("slugHelp")}</p>
+                      <p className="text-xs text-muted-foreground">{t("slugReadOnly")}</p>
                     </div>
                   </div>
                   <div className="space-y-2">
