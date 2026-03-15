@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { fetchApi } from "@/lib/url-helpers";
 import {
@@ -145,7 +146,9 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
         </h2>
         <p className="text-sm text-muted-foreground">{t("description")}</p>
 
-        <div className="space-y-4">
+        {/* Password Requirements */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">{t("passwordRequirements")}</h3>
           <div className="space-y-2">
             <Label>{t("minPasswordLength")}</Label>
             <Input
@@ -168,7 +171,6 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               <p className="text-sm text-destructive">{fieldErrors.minPasswordLength}</p>
             )}
           </div>
-
           <div className="grid gap-3 md:grid-cols-2">
             <SwitchField
               label={t("requireUppercase")}
@@ -191,7 +193,55 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               onChange={(v) => setPolicy((p) => ({ ...p, requireSymbols: v }))}
             />
           </div>
+        </div>
 
+        <Separator />
+
+        {/* Access Control */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">{t("accessControl")}</h3>
+          <SwitchField
+            label={t("allowExport")}
+            checked={policy.allowExport}
+            onChange={(v) => setPolicy((p) => ({ ...p, allowExport: v }))}
+          />
+          <div className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="cursor-pointer">{t("allowSharing")}</Label>
+              <Switch
+                checked={policy.allowSharing}
+                onCheckedChange={(v) =>
+                  setPolicy((p) => ({
+                    ...p,
+                    allowSharing: v,
+                    ...(v ? {} : { requireSharePassword: false }),
+                  }))
+                }
+              />
+            </div>
+            {policy.allowSharing && (
+              <div className="ml-4 border-l-2 border-muted pl-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label className="cursor-pointer text-sm">
+                    {t("requireSharePassword")}
+                  </Label>
+                  <Switch
+                    checked={policy.requireSharePassword}
+                    onCheckedChange={(v) =>
+                      setPolicy((p) => ({ ...p, requireSharePassword: v }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Advanced */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">{t("advanced")}</h3>
           <div className="space-y-2">
             <Label>{t("maxSessionDurationMinutes")}</Label>
             <Input
@@ -223,7 +273,6 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               <p className="text-sm text-destructive">{fieldErrors.maxSessionDurationMinutes}</p>
             )}
           </div>
-
           <SwitchField
             label={t("requireRepromptForAll")}
             checked={policy.requireRepromptForAll}
@@ -231,43 +280,6 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               setPolicy((p) => ({ ...p, requireRepromptForAll: v }))
             }
           />
-
-          <SwitchField
-            label={t("allowExport")}
-            checked={policy.allowExport}
-            onChange={(v) => setPolicy((p) => ({ ...p, allowExport: v }))}
-          />
-
-          <div className="rounded-lg border p-3 space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <Label className="cursor-pointer">{t("allowSharing")}</Label>
-              <Switch
-                checked={policy.allowSharing}
-                onCheckedChange={(v) =>
-                  setPolicy((p) => ({
-                    ...p,
-                    allowSharing: v,
-                    ...(v ? {} : { requireSharePassword: false }),
-                  }))
-                }
-              />
-            </div>
-            {policy.allowSharing && (
-              <div className="ml-4 border-l-2 border-muted pl-3">
-                <div className="flex items-center justify-between gap-2">
-                  <Label className="cursor-pointer text-sm">
-                    {t("requireSharePassword")}
-                  </Label>
-                  <Switch
-                    checked={policy.requireSharePassword}
-                    onCheckedChange={(v) =>
-                      setPolicy((p) => ({ ...p, requireSharePassword: v }))
-                    }
-                  />
-                </div>
-              </div>
-            )}
-          </div>
         </div>
 
         <div className="flex justify-end pt-1">
