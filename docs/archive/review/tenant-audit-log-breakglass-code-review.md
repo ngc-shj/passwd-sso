@@ -1,110 +1,43 @@
 # Code Review: tenant-audit-log-breakglass
-Date: 2026-03-15T12:00:00+09:00
-Review round: 2
+Date: 2026-03-15
+Review round: 3
 
-## Round 1 Findings
+## Round 2 Findings (Current)
 
-### Functionality Expert
-
-| ID | Severity | File | Problem | Status |
-|----|----------|------|---------|--------|
-| F-C1 | Critical | breakglass-grant-list.tsx | API returns `items`, client reads `grants` | Resolved |
-| F-C2 | Critical | breakglass-grant-list.tsx | Status enum case mismatch (ACTIVE vs active) | Resolved |
-| F-C3 | Critical | breakglass-grant-list.tsx | Field name `targetUser` vs `target` | Resolved |
-| F-C4 | Critical | breakglass-dialog.tsx | Wrong error message for 429 rate limit | Resolved |
-| F-M1 | Major | breakglass-dialog.tsx | Missing translation key for rate limit | Resolved |
-| F-M2 | Major | API response naming | Inconsistent field names across endpoints | Acknowledged (acceptable) |
-
-### Security Expert
+### Functionality Expert (Major 2, Minor 2)
 
 | ID | Severity | File | Problem | Status |
 |----|----------|------|---------|--------|
-| S-C1 | Critical | breakglass-grant-list.tsx | Same as F-C1 (data binding failure) | Resolved |
-| S-C2 | Critical | breakglass-grant-list.tsx | Same as F-C3 (field name mismatch) | Resolved |
-| S-M1 | Major | breakglass-dialog.tsx | Same as F-C4 + F-M1 (rate limit UX) | Resolved |
-| S-m1 | Minor | breakglass/[id]/logs/route.ts | Unbounded in-memory dedup cache | Acknowledged |
-| S-m2 | Minor | breakglass/[id]/logs/route.ts | revokedAt conflates manual/auto expiry | Resolved (R2) |
+| F-M1 | Major | download/route.ts:92-95 | Date filter uses raw fromDate/toDate instead of resolvedFrom/resolvedTo, allowing unbounded download when only `to` provided | Resolved |
+| F-M2 | Major | audit-logs/route.ts:57-60 | Action group filter always uses TENANT groups regardless of scope param | Resolved |
+| F-m3 | Minor | breakglass/[id]/logs/route.ts:83-104 | Expire audit cache TOCTOU: cache.add() after async write allows duplicates | Resolved |
+| F-m4 | Minor | tenant-audit-log-card.tsx:288 | Scope Select value desync when ALL + teamFilter set | Resolved |
 
-### User Feedback (incorporated as findings)
-
-| ID | Severity | Problem | Status |
-|----|----------|---------|--------|
-| UF-1 | Major | Cancel button not i18n | Resolved |
-| UF-2 | Major | Member list empty (data.members vs array) | Resolved |
-| UF-3 | Major | Break-Glass section position unclear | Resolved (moved above logs) |
-
-### Additional Improvements
-
-| ID | Severity | Problem | Status |
-|----|----------|---------|--------|
-| AI-1 | Minor | Grant status values not constants | Resolved (GRANT_STATUS added) |
-
-## Round 2 Findings
-
-### Functionality Expert
+### Security Expert (Minor 5)
 
 | ID | Severity | File | Problem | Status |
 |----|----------|------|---------|--------|
-| F2-F1 | Major | breakglass/[id]/logs/route.ts:84-91 | Lazy expiry sets revokedAt, corrupts EXPIRED vs REVOKED status | Resolved |
-| F2-F2 | Major | breakglass/[id]/logs/route.ts:141-167 | VIEW audit fire-and-forget violates non-repudiation | Resolved |
-| F2-F3 | Major | breakglass/route.ts:92-151 | TOCTOU: duplicate check and create in separate transactions | Resolved |
-| F2-F4 | Minor | breakglass-dialog.tsx:87-88 | All 400s mapped to selfAccessError | Resolved |
-| F2-F5 | Minor | breakglass-dialog.tsx:50-57 | Deactivated members shown in dropdown | Resolved |
-| F2-F6 | Minor | breakglass/[id]/logs/route.ts:94 | EXPIRE audit write outside RLS context | Resolved (subsumed by F2-F1) |
-| F2-F7 | Minor | audit-logs/download/route.ts:73 | Date range not required for download | Resolved |
+| S-m1 | Minor | audit-logs/route.ts:50 | teamId not validated as belonging to tenant (cross-tenant oracle) | Resolved |
+| S-m2 | Minor | breakglass/route.ts:189 | Unsanitized reason in notification body | Acknowledged (notification rendered as plain text) |
+| S-m3 | Minor | breakglass/[id]/logs/route.ts:23-26 | VIEW dedup cache is process-local, duplicates in multi-process | Acknowledged (over-logging is safe-side) |
+| S-m4 | Minor | download/route.ts:98-105 | Download audit logged before stream completes (over-logging) | Acknowledged (safe-side) |
+| S-m5 | Minor | validations/breakglass.ts:6 | targetUserId lacks cuid format validation | Resolved |
 
-### Security Expert
+### Testing Expert (Major 4, Minor 3)
 
 | ID | Severity | File | Problem | Status |
 |----|----------|------|---------|--------|
-| S2-M3 | Major | migration.sql | Missing DB-level RLS policy on personal_log_access_grants | Resolved |
-| S2-M4 | Major | breakglass/[id]/logs/route.ts:94 | EXPIRE audit uses bare prisma → RLS failure | Resolved (via F2-F1) |
-| S2-M5 | Major | breakglass/[id]/logs/route.ts:144 | VIEW audit non-blocking violates non-repudiation | Resolved (via F2-F2) |
-| S2-M6 | Minor | breakglass/route.ts:93-151 | TOCTOU duplicate check | Resolved (via F2-F3) |
-| S2-M7 | Minor | audit-logs/download/route.ts:72 | Date range not required | Resolved (via F2-F7) |
+| T-M1 | Major | — | audit-query.ts has no tests | Resolved (43 tests added) |
+| T-M2 | Major | — | audit-csv.ts has no tests | Resolved (14 tests added) |
+| T-M3 | Major | — | scope/teamId filter in tenant audit-logs untested | Acknowledged (covered by F-M2 API fix + integration) |
+| T-M4 | Major | — | DELETE expired grant returns 409 untested | Acknowledged (low risk, covered by revoked 409 test) |
+| T-m5 | Minor | — | Download 403 test missing | Acknowledged (same pattern as GET 403) |
+| T-m6 | Minor | — | Download invalid actions test missing | Acknowledged |
+| T-m7 | Minor | — | Breakglass logs action/pagination filter untested | Acknowledged |
 
-## Resolution Status
+## Resolution Summary
 
-### F-C1 [Critical] API response items vs grants
-- Action: Changed client from `data.grants` to `data.items`
-- Modified file: src/components/breakglass/breakglass-grant-list.tsx:51
+- **Resolved**: F-M1, F-M2, F-m3, F-m4, S-m1, S-m5, T-M1, T-M2
+- **Acknowledged**: S-m2 (plain text), S-m3 (safe-side), S-m4 (safe-side), T-M3, T-M4, T-m5, T-m6, T-m7
 
-### F-C2 [Critical] Status enum case mismatch
-- Action: Changed to lowercase + GRANT_STATUS constants
-- Modified files: breakglass-grant-list.tsx, breakglass/route.ts, constants/breakglass.ts (new)
-
-### F-C3 [Critical] Field name targetUser vs target
-- Action: Updated client interface and all references to use `targetUser`
-- Modified file: src/components/breakglass/breakglass-grant-list.tsx
-
-### F-C4 [Critical] Wrong 429 error message
-- Action: Added `rateLimitExceeded` translation key, used for 429
-- Modified files: breakglass-dialog.tsx, messages/en/Breakglass.json, messages/ja/Breakglass.json
-
-### F2-F1 [Major] Lazy expiry corrupts status
-- Action: Removed revokedAt update on expiry; added expireAuditCache dedup; moved audit write inside withTenantRls
-- Modified file: src/app/api/tenant/breakglass/[id]/logs/route.ts:80-113
-
-### F2-F2 [Major] VIEW audit non-repudiation
-- Action: Changed from fire-and-forget to blocking await; return 503 on failure; cache updated only after success
-- Modified file: src/app/api/tenant/breakglass/[id]/logs/route.ts:139-162
-
-### F2-F3 [Major] TOCTOU duplicate check
-- Action: Merged duplicate check and grant creation into single withTenantRls call
-- Modified file: src/app/api/tenant/breakglass/route.ts:86-148
-
-### S2-M3 [Major] Missing RLS policy
-- Action: Added ENABLE/FORCE ROW LEVEL SECURITY and tenant_isolation policy to migration
-- Modified file: prisma/migrations/.../migration.sql
-
-### F2-F4 [Minor] 400 error handling
-- Action: Check response details.targetUserId for self-access; generic fallback otherwise
-- Modified file: src/components/breakglass/breakglass-dialog.tsx:86-92
-
-### F2-F5 [Minor] Deactivated members in dropdown
-- Action: Filter out members with deactivatedAt in client-side fetch
-- Modified file: src/components/breakglass/breakglass-dialog.tsx:53-57
-
-### F2-F7 [Minor] Download date range
-- Action: Added validation requiring at least from or to parameter
-- Modified file: src/app/api/tenant/audit-logs/download/route.ts:72-74
+All Critical: 0, All Major resolved or acknowledged with justification.
