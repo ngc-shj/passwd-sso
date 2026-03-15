@@ -285,7 +285,7 @@ export function TenantAuditLogCard() {
               <div className="space-y-1">
                 <Label className="text-xs">{t("scopeLabel")}</Label>
                 <Select
-                  value={scopeFilter === "ALL" && teamFilter ? "TEAM" : scopeFilter}
+                  value={scopeFilter}
                   onValueChange={(v) => {
                     const scope = v as "ALL" | "TENANT" | "TEAM";
                     setScopeFilter(scope);

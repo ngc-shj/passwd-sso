@@ -64,7 +64,7 @@ vi.mock("@/lib/constants/tenant-permission", () => ({
 import { GET } from "@/app/api/tenant/breakglass/[id]/logs/route";
 
 const GRANT_ID = "grant-abc123";
-const TARGET_USER_ID = "target-user-id";
+const TARGET_USER_ID = "cmmtargetuserid00001";
 
 function makeActiveGrant(overrides: Record<string, unknown> = {}) {
   return {

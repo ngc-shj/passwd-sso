@@ -90,8 +90,8 @@ async function handleGET(req: NextRequest) {
   }
 
   where.createdAt = {
-    ...(fromDate ? { gte: resolvedFrom } : {}),
-    ...(toDate ? { lte: resolvedTo } : {}),
+    gte: resolvedFrom,
+    lte: resolvedTo,
   };
 
   // Record the download itself

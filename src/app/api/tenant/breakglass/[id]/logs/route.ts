@@ -81,6 +81,7 @@ async function handleGET(
   if (grant.expiresAt <= now) {
     // Lazily record PERSONAL_LOG_ACCESS_EXPIRE (once per grant, non-blocking)
     if (!expireAuditCache.has(grantId)) {
+      expireAuditCache.add(grantId); // Mark immediately to prevent duplicate dispatch
       void (async () => {
         try {
           await withTenantRls(prisma, actor.tenantId, async () =>
@@ -101,9 +102,8 @@ async function handleGET(
               },
             }),
           );
-          expireAuditCache.add(grantId);
         } catch {
-          // Non-blocking — expiry is informational
+          expireAuditCache.delete(grantId); // Roll back so next request retries
         }
       })();
     }
