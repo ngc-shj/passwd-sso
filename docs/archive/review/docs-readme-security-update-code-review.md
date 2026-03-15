@@ -134,3 +134,15 @@ None.
 ### TF2 [Minor] vi.unstubAllEnvs() in beforeEach instead of afterEach
 - Action: Fixed — moved to afterEach per project convention
 - Modified file: src/__tests__/api/v1/openapi-json.test.ts
+
+## Round 4: Proxy Cache-Control Horizontal Rollout Review
+
+### PF1 [Minor] 401/403 uses `no-store` vs default `private, no-store` inconsistency
+- Action: Skipped — both prevent caching; `no-store` alone is correct for error responses
+
+### PF2 [Minor] `/api/v1/*` has `private` but uses API key auth (non-browser)
+- Action: Skipped — `private` is harmless, provides consistent defense-in-depth
+
+### PT1 [Major] Proxy tests lack Cache-Control assertions
+- Action: Fixed — added 7 Cache-Control assertions covering all return paths
+- Modified file: src/__tests__/proxy.test.ts
