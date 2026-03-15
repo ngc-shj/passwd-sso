@@ -512,47 +512,6 @@ export default function TeamAuditLogsPage({
                 className="w-[160px]"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs invisible">&#8203;</Label>
-              {exportAllowed ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" disabled={downloading}>
-                      {downloading ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4 mr-2" />
-                      )}
-                      {downloading ? td("downloading") : td("download")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                      {td("formatCsv")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                      {td("formatJsonl")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0}>
-                        <Button variant="outline" disabled>
-                          <Download className="h-4 w-4 mr-2" />
-                          {td("download")}
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{td("exportDisabled")}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
-            </div>
           </div>
 
           <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
@@ -613,6 +572,48 @@ export default function TeamAuditLogsPage({
           </Collapsible>
         </div>
       </Card>
+
+      {/* Download */}
+      <div className="flex justify-end">
+        {exportAllowed ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={downloading}>
+                {downloading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                {downloading ? td("downloading") : td("download")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleDownload("csv")}>
+                {td("formatCsv")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+                {td("formatJsonl")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0}>
+                  <Button variant="outline" size="sm" disabled>
+                    <Download className="h-4 w-4 mr-2" />
+                    {td("download")}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{td("exportDisabled")}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
 
       {loading ? (
         <Card className="rounded-xl border bg-card/80 p-10">

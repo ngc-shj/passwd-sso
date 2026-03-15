@@ -568,29 +568,6 @@ export default function AuditLogsPage() {
                 className="w-[160px]"
               />
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs invisible">&#8203;</Label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" disabled={downloading}>
-                    {downloading ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Download className="h-4 w-4 mr-2" />
-                    )}
-                    {downloading ? td("downloading") : td("download")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                    {td("formatCsv")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                    {td("formatJsonl")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
           </div>
 
           <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
@@ -651,6 +628,30 @@ export default function AuditLogsPage() {
           </Collapsible>
         </div>
       </Card>
+
+      {/* Download */}
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" disabled={downloading}>
+              {downloading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              {downloading ? td("downloading") : td("download")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleDownload("csv")}>
+              {td("formatCsv")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+              {td("formatJsonl")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {loading ? (
         <Card className="rounded-xl border bg-card/80 p-10">
