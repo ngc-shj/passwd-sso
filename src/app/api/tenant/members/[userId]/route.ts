@@ -10,6 +10,7 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
@@ -128,6 +129,12 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       metadata: { newRole: TENANT_ROLE.OWNER, previousRole: target.role, transfer: true },
       ...extractRequestMeta(req),
     });
+    void dispatchTenantWebhook({
+      type: AUDIT_ACTION.TENANT_ROLE_UPDATE,
+      tenantId: actor.tenantId,
+      timestamp: new Date().toISOString(),
+      data: { targetMemberId: target.id, targetUserId: target.userId },
+    });
 
     return NextResponse.json({
       id: updated.id,
@@ -167,6 +174,12 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     targetId: target.id,
     metadata: { newRole: result.data.role, previousRole: target.role },
     ...extractRequestMeta(req),
+  });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.TENANT_ROLE_UPDATE,
+    tenantId: actor.tenantId,
+    timestamp: new Date().toISOString(),
+    data: { targetMemberId: target.id, targetUserId: target.userId },
   });
 
   return NextResponse.json({

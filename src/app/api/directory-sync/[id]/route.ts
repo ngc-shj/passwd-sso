@@ -14,6 +14,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -198,6 +199,12 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
     },
     ...extractRequestMeta(req),
   });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_UPDATE,
+    tenantId,
+    timestamp: new Date().toISOString(),
+    data: { configId: config.id },
+  });
 
   return NextResponse.json(updated);
 }
@@ -255,6 +262,12 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
       displayName: config.displayName,
     },
     ...extractRequestMeta(req),
+  });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_DELETE,
+    tenantId,
+    timestamp: new Date().toISOString(),
+    data: { configId: config.id },
   });
 
   return NextResponse.json({ success: true });

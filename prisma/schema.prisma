@@ -427,6 +427,7 @@ model Tenant {
   notifications              Notification[]
   teamPolicies               TeamPolicy[]
   teamWebhooks               TeamWebhook[]
+  tenantWebhooks             TenantWebhook[]
   adminVaultResets           AdminVaultReset[]
   personalLogAccessGrants    PersonalLogAccessGrant[]
 
@@ -795,6 +796,9 @@ enum AuditAction {
   PERSONAL_LOG_ACCESS_VIEW
   PERSONAL_LOG_ACCESS_REVOKE
   PERSONAL_LOG_ACCESS_EXPIRE
+  TENANT_WEBHOOK_CREATE
+  TENANT_WEBHOOK_DELETE
+  TENANT_WEBHOOK_DELIVERY_FAILED
 }
 
 enum AuditScope {
@@ -1116,6 +1120,29 @@ model TeamWebhook {
   @@index([teamId])
   @@index([tenantId])
   @@map("team_webhooks")
+}
+
+model TenantWebhook {
+  id               String    @id @default(cuid())
+  tenantId         String    @map("tenant_id")
+  url              String    @db.VarChar(2048)
+  secretEncrypted  String    @map("secret_encrypted") @db.Text
+  secretIv         String    @map("secret_iv") @db.VarChar(24)
+  secretAuthTag    String    @map("secret_auth_tag") @db.VarChar(32)
+  masterKeyVersion Int       @default(1) @map("master_key_version")
+  events           String[]
+  isActive         Boolean   @default(true) @map("is_active")
+  lastError        String?   @map("last_error") @db.Text
+  failCount        Int       @default(0) @map("fail_count")
+  lastDeliveredAt  DateTime? @map("last_delivered_at")
+  lastFailedAt     DateTime? @map("last_failed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_webhooks")
 }
 
 // ─── Admin Vault Reset ──────────────────────────────────────────

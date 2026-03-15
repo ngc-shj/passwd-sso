@@ -58,6 +58,7 @@ export const API_PATH = {
   TENANT_ROLE: "/api/tenant/role",
   TENANT_AUDIT_LOGS: "/api/tenant/audit-logs",
   TENANT_BREAKGLASS: "/api/tenant/breakglass",
+  TENANT_WEBHOOKS: "/api/tenant/webhooks",
   TRAVEL_MODE: "/api/travel-mode",
   WEBAUTHN: "/api/webauthn",
   WEBAUTHN_REGISTER_OPTIONS: "/api/webauthn/register/options",
@@ -168,4 +169,7 @@ export const apiPath = {
     `${API_PATH.TENANT_BREAKGLASS}/${grantId}`,
   tenantBreakglassLogs: (grantId: string) =>
     `${API_PATH.TENANT_BREAKGLASS}/${grantId}/logs`,
+  tenantWebhooks: () => API_PATH.TENANT_WEBHOOKS,
+  tenantWebhookById: (webhookId: string) =>
+    `${API_PATH.TENANT_WEBHOOKS}/${webhookId}`,
 } as const;

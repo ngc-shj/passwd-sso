@@ -15,6 +15,7 @@ import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, forbidden } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 
 export const runtime = "nodejs";
@@ -177,6 +178,12 @@ async function handlePOST(req: NextRequest) {
     },
     ip,
     userAgent,
+  });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
+    tenantId: actor.tenantId,
+    timestamp: new Date().toISOString(),
+    data: { grantId: grant.id, targetUserId },
   });
 
   // Notify target user (non-blocking)
