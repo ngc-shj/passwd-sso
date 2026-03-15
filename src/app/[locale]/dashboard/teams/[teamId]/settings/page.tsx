@@ -37,6 +37,7 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
 import { TeamWebhookCard } from "@/components/team/team-webhook-card";
 import { TabDescription } from "@/components/settings/tab-description";
+import { Separator } from "@/components/ui/separator";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe, Search, Shield, Webhook } from "lucide-react";
 import { toast } from "sonner";
@@ -515,27 +516,21 @@ export default function TeamSettingsPage({
           <TabsContent value="members" className="space-y-4 mt-0">
             <TabDescription>{t("tabMembersDesc")}</TabDescription>
             <Tabs defaultValue="list" className="space-y-4">
-              <TabsList className={`grid w-full ${isOwner ? "grid-cols-4" : isAdmin ? "grid-cols-3" : "grid-cols-1"}`}>
+              <TabsList className={`grid w-full ${isOwner ? "grid-cols-3" : isAdmin ? "grid-cols-2" : "grid-cols-1"}`}>
                 <TabsTrigger value="list">
                   <Users className="h-4 w-4 mr-1.5" />
                   {t("members")}
                 </TabsTrigger>
+                {isAdmin && (
+                  <TabsTrigger value="add">
+                    <UserPlus className="h-4 w-4 mr-1.5" />
+                    {t("addMember")}
+                  </TabsTrigger>
+                )}
                 {isOwner && (
                   <TabsTrigger value="transfer">
                     <Crown className="h-4 w-4 mr-1.5" />
                     {t("transferOwnership")}
-                  </TabsTrigger>
-                )}
-                {isAdmin && (
-                  <TabsTrigger value="add">
-                    <UserPlus className="h-4 w-4 mr-1.5" />
-                    {t("addFromTenant")}
-                  </TabsTrigger>
-                )}
-                {isAdmin && (
-                  <TabsTrigger value="invite">
-                    <Mail className="h-4 w-4 mr-1.5" />
-                    {t("inviteMember")}
                   </TabsTrigger>
                 )}
               </TabsList>
@@ -685,9 +680,14 @@ export default function TeamSettingsPage({
               )}
 
               {isAdmin && (
-                <TabsContent value="add" className="mt-0">
+                <TabsContent value="add" className="space-y-4 mt-0">
+                  {/* Add from organization */}
                   <Card className="rounded-xl border bg-card/80 p-4">
                     <section className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-medium">{t("addFromTenantLabel")}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("addFromTenantDesc")}</p>
+                      </div>
                       <div className="flex flex-col gap-3 md:flex-row md:items-end">
                         <div className="flex-1 space-y-2">
                           <div className="relative">
@@ -760,13 +760,14 @@ export default function TeamSettingsPage({
                       )}
                     </section>
                   </Card>
-                </TabsContent>
-              )}
 
-              {isAdmin && (
-                <TabsContent value="invite" className="space-y-4 mt-0">
+                  {/* Invite by email */}
                   <Card className="rounded-xl border bg-card/80 p-4">
                     <section className="space-y-4">
+                      <div>
+                        <h3 className="text-sm font-medium">{t("inviteByEmailLabel")}</h3>
+                        <p className="text-xs text-muted-foreground mt-0.5">{t("inviteByEmailDesc")}</p>
+                      </div>
                       <div className="flex flex-col gap-3 md:flex-row md:items-end">
                         <div className="flex-1 space-y-2">
                           <Label>{t("inviteEmail")}</Label>
@@ -798,7 +799,7 @@ export default function TeamSettingsPage({
                           {inviting ? (
                             <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                           ) : (
-                            <UserPlus className="h-4 w-4 mr-2" />
+                            <Mail className="h-4 w-4 mr-2" />
                           )}
                           {t("inviteSend")}
                         </Button>
@@ -806,13 +807,14 @@ export default function TeamSettingsPage({
                     </section>
                   </Card>
 
+                  {/* Pending invitations */}
                   {invitations.length > 0 && (
                     <Card className="rounded-xl border bg-card/80 p-4">
                       <section className="space-y-4">
-                        <h2 className="flex items-center gap-2 text-lg font-semibold">
-                          <LinkIcon className="h-5 w-5 text-muted-foreground" />
+                        <h3 className="flex items-center gap-2 text-sm font-medium">
+                          <LinkIcon className="h-4 w-4 text-muted-foreground" />
                           {t("pendingInvitations")}
-                        </h2>
+                        </h3>
                         <div className="space-y-2">
                           {invitations.map((inv) => (
                             <div
