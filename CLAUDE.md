@@ -44,7 +44,7 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Passkey sign-in: discoverable (passwordless) + email-based (non-discoverable security keys)
 - PRF extension support for vault auto-unlock after passkey sign-in
 - Route protection: `proxy.ts` (root, entry point + CSP) → `src/proxy.ts` (Next.js 16 proxy pattern)
-- Protected routes (proxy middleware session check): `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/api-keys/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`, `/api/teams/*`, `/api/tenant/*`, `/api/sessions/*`, `/api/notifications/*`, `/api/audit-logs/*`, `/api/emergency-access/*`, `/api/share-links/*`, `/api/sends/*`, `/api/watchtower/*`, `/api/extension/*`
+- Protected routes (proxy middleware session check): `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/api-keys/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`, `/api/teams/*`, `/api/tenant/*`, `/api/sessions/*`, `/api/notifications/*`, `/api/audit-logs/*`, `/api/emergency-access/*`, `/api/share-links/*`, `/api/sends/*`, `/api/watchtower/*`, `/api/extension/*`, `/api/user/*`
 - Route-handler auth (not middleware): `/api/vault/*`, `/api/folders/*`, `/api/admin/*`, `/api/maintenance/*`, `/api/scim/*`
 - API key auth (no session): `/api/v1/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
