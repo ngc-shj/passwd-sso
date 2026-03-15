@@ -24,5 +24,6 @@
   "urlHttpsRequired": "URL は HTTPS でなければなりません",
   "validationError": "入力内容に誤りがあります",
   "inactiveWebhooks": "無効な Webhook ({count})",
-  "noActiveWebhooks": "有効な Webhook がありません"
+  "noActiveWebhooks": "有効な Webhook がありません",
+  "registeredWebhooks": "登録済み Webhook"
 }

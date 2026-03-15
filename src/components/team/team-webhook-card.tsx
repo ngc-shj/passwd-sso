@@ -278,20 +278,9 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
   );
 
   return (
-    <Card className="p-6 space-y-6">
-      {/* Header */}
-      <section>
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Webhook className="h-5 w-5 text-muted-foreground" />
-          {t("title")}
-        </h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("description")}
-        </p>
-      </section>
-
+    <div className="space-y-4">
       {/* Create webhook form (fixed) */}
-      <section className="space-y-3 border-t pt-4">
+      <Card className="p-6 space-y-4">
         <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
 
         {limitReached ? (
@@ -366,30 +355,31 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
             </Button>
           </>
         )}
-      </section>
 
-      {/* Secret display (shown once after creation) */}
-      {newSecret && (
-        <section className="border rounded-md p-4 bg-muted/50 space-y-2">
-          <p className="text-sm font-medium">{t("secret")}</p>
-          <div className="flex items-center gap-2">
-            <Input
-              value={newSecret}
-              readOnly
-              autoComplete="off"
-              className="font-mono text-xs"
-            />
-            <CopyButton getValue={() => newSecret} />
+        {/* Secret display (shown once after creation) */}
+        {newSecret && (
+          <div className="border rounded-md p-4 bg-muted/50 space-y-2">
+            <p className="text-sm font-medium">{t("secret")}</p>
+            <div className="flex items-center gap-2">
+              <Input
+                value={newSecret}
+                readOnly
+                autoComplete="off"
+                className="font-mono text-xs"
+              />
+              <CopyButton getValue={() => newSecret} />
+            </div>
+            <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
+            <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
+              OK
+            </Button>
           </div>
-          <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
-          <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
-            OK
-          </Button>
-        </section>
-      )}
+        )}
+      </Card>
 
       {/* Webhook list (dynamic) */}
-      <section className="space-y-3 border-t pt-4">
+      <Card className="p-6 space-y-3">
+        <h3 className="text-sm font-medium">{t("registeredWebhooks")}</h3>
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin" />
         ) : webhooks.length === 0 ? (
@@ -421,7 +411,7 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
             )}
           </div>
         )}
-      </section>
-    </Card>
+      </Card>
+    </div>
   );
 }
