@@ -58,11 +58,14 @@ passwd-sso uses a **zero-knowledge** architecture:
 
 - All password data is encrypted **client-side** using AES-256-GCM before being sent to the server
 - The server stores only ciphertext and cannot decrypt user data
-- Key derivation: Master passphrase → PBKDF2 (600k iterations) → HKDF → AES-256-GCM key
+- Key derivation: Master passphrase → PBKDF2 (600k iterations) or Argon2id (64 MB) → HKDF → AES-256-GCM key
 - An additional **Secret Key** (account salt) provides defense against server-side compromise
+- **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs
 - Database sessions (not JWT) with 8-hour timeout
 - Vault auto-locks after 15 minutes idle or 5 minutes tab hidden
 - Clipboard auto-clears after 30 seconds
+- Progressive account lockout (5→15 min, 10→1 h, 15→24 h)
+- Tenant-level network access restriction (CIDR allowlist, Tailscale integration)
 
 ## Supported Versions
 
@@ -74,6 +77,9 @@ passwd-sso uses a **zero-knowledge** architecture:
 
 - Always use HTTPS in production
 - Do **not** expose PostgreSQL (port 5432) or SAML Jackson (port 5225) to the public internet
-- Use strong, unique values for `AUTH_SECRET` and database credentials
+- Use strong, unique values for `AUTH_SECRET`, `SHARE_MASTER_KEY`, `VERIFIER_PEPPER_KEY`, and database credentials
+- Set `DIRECTORY_SYNC_MASTER_KEY` in production (falls back to `SHARE_MASTER_KEY` in dev)
 - Keep Docker images up to date
 - Restrict Google sign-in to your Workspace domain via `GOOGLE_WORKSPACE_DOMAINS`
+- Configure tenant-level network access restrictions in production environments
+- Enable audit log forwarding (`AUDIT_LOG_FORWARD=true`) for centralized security monitoring

@@ -44,7 +44,7 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Passkey sign-in: discoverable (passwordless) + email-based (non-discoverable security keys)
 - PRF extension support for vault auto-unlock after passkey sign-in
 - Route protection: `proxy.ts` (root, entry point + CSP) → `src/proxy.ts` (Next.js 16 proxy pattern)
-- Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/api-keys/*`, `/api/v1/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`
+- Protected routes: `/dashboard/*`, `/api/passwords/*`, `/api/tags/*`, `/api/folders/*`, `/api/api-keys/*`, `/api/v1/*`, `/api/travel-mode/*`, `/api/directory-sync/*`, `/api/webauthn/*`, `/api/teams/*`, `/api/tenant/*`, `/api/sessions/*`, `/api/notifications/*`, `/api/audit-logs/*`, `/api/emergency-access/*`, `/api/share-links/*`, `/api/sends/*`, `/api/watchtower/*`, `/api/extension/*`, `/api/vault/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
 
 ### E2E Encryption Architecture
@@ -62,23 +62,227 @@ All password data is encrypted **client-side** before reaching the server. The s
 
 ### API Endpoints
 
+#### Auth & Passkey
+
 | Endpoint | Methods | Purpose |
 |----------|---------|---------|
 | `/api/auth/[...nextauth]` | GET, POST | Auth.js handlers |
+| `/api/auth/passkey/options` | POST | Passkey discoverable auth options |
+| `/api/auth/passkey/options/email` | POST | Email-based passkey auth options (non-discoverable) |
+| `/api/auth/passkey/verify` | POST | Passkey authentication verify + session creation |
+
+#### Vault
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
 | `/api/vault/setup` | POST | Initial master passphrase setup |
 | `/api/vault/unlock` | POST | Verify passphrase, return encrypted key |
 | `/api/vault/unlock/data` | POST | Return encrypted key data |
 | `/api/vault/status` | GET | Check vault initialization status |
+| `/api/vault/change-passphrase` | POST | Change master passphrase |
+| `/api/vault/rotate-key` | POST | Rotate encryption key |
+| `/api/vault/admin-reset` | POST | Tenant admin vault reset |
 | `/api/vault/recovery-key/generate` | POST | Save recovery key encrypted data |
 | `/api/vault/recovery-key/recover` | POST | Recover vault with recovery key (2-step: verify/reset) |
 | `/api/vault/reset` | POST | Full vault deletion (last resort) |
+
+#### Passwords & Entries
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
 | `/api/passwords` | GET, POST | List/create password entries |
 | `/api/passwords/[id]` | GET, PUT, DELETE | CRUD single entry |
+| `/api/passwords/[id]/restore` | POST | Restore from trash |
+| `/api/passwords/[id]/attachments` | GET, POST | List/upload attachments |
+| `/api/passwords/[id]/attachments/[attachmentId]` | GET, DELETE | Download/delete attachment |
+| `/api/passwords/[id]/history` | GET | Entry version history |
+| `/api/passwords/[id]/history/[historyId]` | GET | Single history record |
+| `/api/passwords/[id]/history/[historyId]/restore` | POST | Restore from history |
 | `/api/passwords/generate` | POST | Server-side secure password generation |
+| `/api/passwords/bulk-archive` | POST | Bulk archive entries |
+| `/api/passwords/bulk-restore` | POST | Bulk restore entries |
+| `/api/passwords/bulk-trash` | POST | Bulk soft-delete entries |
+| `/api/passwords/empty-trash` | POST | Permanently delete all trashed entries |
+
+#### Tags & Folders
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
 | `/api/tags` | GET, POST | List/create tags |
 | `/api/tags/[id]` | PUT, DELETE | Update/delete tag |
-| `/api/health/live` | GET | Liveness probe (always 200) |
-| `/api/health/ready` | GET | Readiness probe (DB + Redis, 503 if unhealthy) |
+| `/api/folders` | GET, POST | List/create folders |
+| `/api/folders/[id]` | PUT, DELETE | Update/delete folder |
+
+#### Share Links & Sends
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/share-links` | GET, POST | List/create share links |
+| `/api/share-links/[id]` | GET, DELETE | Get/revoke share link |
+| `/api/share-links/[id]/content` | GET | Get shared content |
+| `/api/share-links/[id]/access-logs` | GET | Share link access logs |
+| `/api/share-links/mine` | GET | List own share links |
+| `/api/share-links/verify-access` | POST | Verify share link access |
+| `/api/sends` | GET, POST | List/create text sends |
+| `/api/sends/file` | POST | Create file send |
+
+#### Emergency Access
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/emergency-access` | GET, POST | List/create emergency access grants |
+| `/api/emergency-access/[id]/accept` | POST | Accept grant invitation |
+| `/api/emergency-access/[id]/approve` | POST | Approve access request |
+| `/api/emergency-access/[id]/confirm` | POST | Confirm key exchange |
+| `/api/emergency-access/[id]/decline` | POST | Decline access request |
+| `/api/emergency-access/[id]/request` | POST | Request emergency access |
+| `/api/emergency-access/[id]/revoke` | POST | Revoke grant |
+| `/api/emergency-access/[id]/vault` | GET | Access grantor's vault |
+| `/api/emergency-access/[id]/vault/entries` | GET | List grantor's vault entries |
+| `/api/emergency-access/accept` | POST | Accept by token |
+| `/api/emergency-access/pending-confirmations` | GET | List pending key confirmations |
+| `/api/emergency-access/reject` | POST | Reject by token |
+
+#### Teams
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/teams` | GET, POST | List/create teams |
+| `/api/teams/[teamId]` | GET, PUT, DELETE | CRUD single team |
+| `/api/teams/[teamId]/members` | GET, POST | List/add team members |
+| `/api/teams/[teamId]/members/search` | GET | Search users for invitation |
+| `/api/teams/[teamId]/members/[memberId]` | PUT, DELETE | Update role/remove member |
+| `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | Confirm member key distribution |
+| `/api/teams/[teamId]/member-key` | GET, POST | Get/submit member encryption key |
+| `/api/teams/[teamId]/rotate-key` | POST | Rotate team encryption key |
+| `/api/teams/[teamId]/invitations` | GET, POST | List/create team invitations |
+| `/api/teams/[teamId]/invitations/[invId]` | DELETE | Cancel invitation |
+| `/api/teams/[teamId]/policy` | GET, PUT | Team security policy |
+| `/api/teams/[teamId]/passwords` | GET, POST | List/create team password entries |
+| `/api/teams/[teamId]/passwords/[id]` | GET, PUT, DELETE | CRUD single team entry |
+| `/api/teams/[teamId]/passwords/[id]/restore` | POST | Restore team entry from trash |
+| `/api/teams/[teamId]/passwords/[id]/favorite` | PUT, DELETE | Toggle team entry favorite |
+| `/api/teams/[teamId]/passwords/[id]/attachments` | GET, POST | Team entry attachments |
+| `/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]` | GET, DELETE | Team attachment download/delete |
+| `/api/teams/[teamId]/passwords/[id]/history` | GET | Team entry version history |
+| `/api/teams/[teamId]/passwords/[id]/history/[historyId]` | GET | Team history record |
+| `/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore` | POST | Restore team entry from history |
+| `/api/teams/[teamId]/passwords/bulk-archive` | POST | Bulk archive team entries |
+| `/api/teams/[teamId]/passwords/bulk-restore` | POST | Bulk restore team entries |
+| `/api/teams/[teamId]/passwords/bulk-trash` | POST | Bulk soft-delete team entries |
+| `/api/teams/[teamId]/passwords/empty-trash` | POST | Empty team trash |
+| `/api/teams/[teamId]/tags` | GET, POST | Team tags |
+| `/api/teams/[teamId]/tags/[id]` | PUT, DELETE | Update/delete team tag |
+| `/api/teams/[teamId]/folders` | GET, POST | Team folders |
+| `/api/teams/[teamId]/folders/[id]` | PUT, DELETE | Update/delete team folder |
+| `/api/teams/[teamId]/audit-logs` | GET | Team audit logs |
+| `/api/teams/[teamId]/audit-logs/download` | GET | Download team audit logs |
+| `/api/teams/[teamId]/webhooks` | GET, POST | Team webhooks |
+| `/api/teams/[teamId]/webhooks/[webhookId]` | PUT, DELETE | Update/delete team webhook |
+| `/api/teams/archived` | GET | List archived teams |
+| `/api/teams/favorites` | GET | List favorite teams |
+| `/api/teams/trash` | GET | List trashed teams |
+| `/api/teams/invitations/accept` | POST | Accept team invitation |
+| `/api/teams/pending-key-distributions` | GET | Pending key distributions |
+
+#### Tenant Admin
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/tenant/members` | GET | List tenant members |
+| `/api/tenant/members/[userId]` | GET, PUT, DELETE | Manage tenant member |
+| `/api/tenant/members/[userId]/reset-vault` | POST | Admin vault reset |
+| `/api/tenant/members/[userId]/reset-vault/[resetId]/revoke` | POST | Revoke vault reset |
+| `/api/tenant/role` | GET | Get current user's tenant role |
+| `/api/tenant/policy` | GET, PUT | Tenant security policy |
+| `/api/tenant/scim-tokens` | GET, POST | SCIM token management |
+| `/api/tenant/scim-tokens/[tokenId]` | DELETE | Delete SCIM token |
+| `/api/tenant/audit-logs` | GET | Tenant audit logs |
+| `/api/tenant/audit-logs/download` | GET | Download tenant audit logs |
+| `/api/tenant/breakglass` | GET, POST | Break Glass grant management |
+| `/api/tenant/breakglass/[id]` | DELETE | Revoke Break Glass grant |
+| `/api/tenant/breakglass/[id]/logs` | GET | Break Glass personal logs |
+| `/api/tenant/webhooks` | GET, POST | Tenant webhooks |
+| `/api/tenant/webhooks/[webhookId]` | PUT, DELETE | Update/delete tenant webhook |
+
+#### Sessions & Notifications
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/sessions` | GET | List active sessions |
+| `/api/sessions/[id]` | DELETE | Revoke session |
+| `/api/notifications` | GET | List notifications |
+| `/api/notifications/[id]` | DELETE | Dismiss notification |
+| `/api/notifications/count` | GET | Unread notification count |
+
+#### Audit Logs (Personal)
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/audit-logs` | GET | List personal audit logs |
+| `/api/audit-logs/download` | GET | Download audit logs (CSV/JSONL) |
+| `/api/audit-logs/export` | POST | Export audit log data |
+| `/api/audit-logs/import` | POST | Import audit log data |
+
+#### Watchtower (Security Audit)
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/watchtower/start` | POST | Start security scan |
+| `/api/watchtower/hibp` | POST | Check password against HIBP |
+| `/api/watchtower/alert` | GET, POST | Manage security alerts |
+
+#### WebAuthn
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/webauthn/register/options` | POST | WebAuthn registration options |
+| `/api/webauthn/register/verify` | POST | WebAuthn registration verify |
+| `/api/webauthn/authenticate/options` | POST | WebAuthn auth options |
+| `/api/webauthn/authenticate/verify` | POST | WebAuthn auth verify |
+| `/api/webauthn/credentials` | GET | List WebAuthn credentials |
+| `/api/webauthn/credentials/[id]` | DELETE | Delete WebAuthn credential |
+
+#### SCIM 2.0
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/scim/v2/Users` | GET, POST | SCIM user provisioning |
+| `/api/scim/v2/Users/[id]` | GET, PUT, PATCH, DELETE | SCIM single user |
+| `/api/scim/v2/Groups` | GET, POST | SCIM group provisioning |
+| `/api/scim/v2/Groups/[id]` | GET, PUT, PATCH, DELETE | SCIM single group |
+| `/api/scim/v2/ServiceProviderConfig` | GET | SCIM service provider config |
+| `/api/scim/v2/ResourceTypes` | GET | SCIM resource types |
+| `/api/scim/v2/Schemas` | GET | SCIM schemas |
+
+#### Directory Sync
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/directory-sync` | GET, POST | Directory sync config CRUD |
+| `/api/directory-sync/[id]` | GET, PUT, DELETE | Single sync config |
+| `/api/directory-sync/[id]/run` | POST | Trigger sync |
+| `/api/directory-sync/[id]/logs` | GET | Sync logs |
+
+#### Extension
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/extension/token` | POST | Issue extension token |
+| `/api/extension/token/refresh` | POST | Refresh extension token |
+
+#### Travel Mode
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/travel-mode` | GET | Travel mode status |
+| `/api/travel-mode/enable` | POST | Enable travel mode |
+| `/api/travel-mode/disable` | POST | Disable travel mode |
+
+#### API Keys & REST API v1
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
 | `/api/api-keys` | GET, POST | API key management |
 | `/api/api-keys/[id]` | DELETE | Delete API key |
 | `/api/v1/passwords` | GET, POST | REST API v1 password CRUD |
@@ -86,22 +290,17 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/v1/tags` | GET | REST API v1 tag list |
 | `/api/v1/vault/status` | GET | REST API v1 vault status |
 | `/api/v1/openapi.json` | GET | OpenAPI 3.1 spec |
-| `/api/travel-mode` | GET | Travel mode status |
-| `/api/travel-mode/enable` | POST | Enable travel mode |
-| `/api/travel-mode/disable` | POST | Disable travel mode |
-| `/api/directory-sync` | GET, POST | Directory sync config CRUD |
-| `/api/directory-sync/[id]` | GET, PUT, DELETE | Single sync config |
-| `/api/directory-sync/[id]/run` | POST | Trigger sync |
-| `/api/directory-sync/[id]/logs` | GET | Sync logs |
-| `/api/webauthn/register/options` | POST | WebAuthn registration options |
-| `/api/webauthn/register/verify` | POST | WebAuthn registration verify |
-| `/api/webauthn/authenticate/options` | POST | WebAuthn auth options |
-| `/api/webauthn/authenticate/verify` | POST | WebAuthn auth verify |
-| `/api/webauthn/credentials` | GET | List WebAuthn credentials |
-| `/api/webauthn/credentials/[id]` | DELETE | Delete WebAuthn credential |
-| `/api/auth/passkey/options` | POST | Passkey discoverable auth options |
-| `/api/auth/passkey/options/email` | POST | Email-based passkey auth options (non-discoverable) |
-| `/api/auth/passkey/verify` | POST | Passkey authentication verify + session creation |
+
+#### Health & Infrastructure
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/health/live` | GET | Liveness probe (always 200) |
+| `/api/health/ready` | GET | Readiness probe (DB + Redis, 503 if unhealthy) |
+| `/api/csp-report` | POST | CSP violation report endpoint |
+| `/api/user/locale` | PUT | Update user locale preference |
+| `/api/admin/rotate-master-key` | POST | Rotate server master key |
+| `/api/maintenance/purge-history` | POST | Purge old entry history records |
 
 ### i18n
 
@@ -139,4 +338,6 @@ All password data is encrypted **client-side** before reaching the server. The s
 
 ### Docker Services
 
-Four containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7)
+Five containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration)
+
+Dev override adds: `mailpit` (local email testing on port 8025)
