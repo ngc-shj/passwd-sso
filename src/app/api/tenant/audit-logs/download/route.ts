@@ -20,7 +20,7 @@ const MAX_ROWS = 100_000;
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
-  max: 1,
+  max: 3,
 });
 
 const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail", "metadata"];

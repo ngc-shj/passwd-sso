@@ -2,6 +2,7 @@
 
 import { use, useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -458,7 +459,10 @@ export default function TeamAuditLogsPage({
       const res = await fetchApi(
         `${apiPath.teamAuditLogs(teamId)}/download?${params.toString()}`
       );
-      if (!res.ok) return;
+      if (!res.ok) {
+        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
+        return;
+      }
       await downloadBlob(res, `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
     } finally {
       setDownloading(false);

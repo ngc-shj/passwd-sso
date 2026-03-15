@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -516,7 +517,10 @@ export default function AuditLogsPage() {
         params.set("to", endOfDay.toISOString());
       }
       const res = await fetchApi(`/api/audit-logs/download?${params.toString()}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
+        return;
+      }
       await downloadBlob(res, `audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
     } finally {
       setDownloading(false);

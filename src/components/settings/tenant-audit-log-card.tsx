@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
 import { Loader2, ScrollText, Download, ChevronDown, ShieldAlert } from "lucide-react";
 import {
   DropdownMenu,
@@ -157,7 +158,14 @@ export function TenantAuditLogCard() {
       const params = buildFilterParams();
       params.set("format", format);
       const res = await fetchApi(`${apiPath.tenantAuditLogsDownload()}?${params.toString()}`);
-      if (!res.ok) return;
+      if (!res.ok) {
+        if (res.status === 429) {
+          toast.error(td("rateLimited"));
+        } else {
+          toast.error(td("downloadError"));
+        }
+        return;
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
