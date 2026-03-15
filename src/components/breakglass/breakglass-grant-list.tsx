@@ -5,6 +5,16 @@ import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Loader2, Eye, X, ChevronDown, ChevronUp } from "lucide-react";
 import { apiPath, GRANT_STATUS } from "@/lib/constants";
 import type { GrantStatus } from "@/lib/constants";
@@ -37,12 +47,14 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "
 
 export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps) {
   const t = useTranslations("Breakglass");
+  const tc = useTranslations("Common");
   const locale = useLocale();
   const [grants, setGrants] = useState<BreakGlassGrant[]>([]);
   const [loading, setLoading] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [viewingLogGrantId, setViewingLogGrantId] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<string | null>(null);
+  const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null);
 
   const fetchGrants = useCallback(async () => {
     setLoading(true);
@@ -59,7 +71,6 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
   }, [fetchGrants, refreshTrigger]);
 
   const handleRevoke = async (grantId: string) => {
-    if (!confirm(t("revokeConfirm"))) return;
     setRevoking(grantId);
     try {
       const res = await fetchApi(apiPath.tenantBreakglassById(grantId), {
@@ -153,7 +164,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleRevoke(grant.id)}
+            onClick={() => setRevokeTargetId(grant.id)}
             disabled={revoking === grant.id}
           >
             {revoking === grant.id ? (
@@ -169,49 +180,71 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
   );
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1">
-        <p className="text-sm font-medium">{t("activeGrants")}</p>
-        {activeGrants.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noActiveGrants")}</p>
-        ) : (
-          <Card className="rounded-xl border bg-card/80 divide-y">
-            {activeGrants.map(renderGrantRow)}
-          </Card>
-        )}
-      </div>
-
-      {historyGrants.length > 0 && (
+    <>
+      <div className="space-y-3">
         <div className="space-y-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs gap-1"
-            onClick={() => setShowHistory((v) => !v)}
-          >
-            {showHistory ? (
-              <>
-                <ChevronUp className="h-3.5 w-3.5" />
-                {t("hideHistory")}
-              </>
-            ) : (
-              <>
-                <ChevronDown className="h-3.5 w-3.5" />
-                {t("showHistory")}
-              </>
-            )}
-          </Button>
-          {showHistory && (
+          <p className="text-sm font-medium">{t("activeGrants")}</p>
+          {activeGrants.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("noActiveGrants")}</p>
+          ) : (
             <Card className="rounded-xl border bg-card/80 divide-y">
-              {historyGrants.map(renderGrantRow)}
+              {activeGrants.map(renderGrantRow)}
             </Card>
           )}
         </div>
-      )}
 
-      {grants.length === 0 && (
-        <p className="text-sm text-muted-foreground">{t("noGrants")}</p>
-      )}
-    </div>
+        {historyGrants.length > 0 && (
+          <div className="space-y-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs gap-1"
+              onClick={() => setShowHistory((v) => !v)}
+            >
+              {showHistory ? (
+                <>
+                  <ChevronUp className="h-3.5 w-3.5" />
+                  {t("hideHistory")}
+                </>
+              ) : (
+                <>
+                  <ChevronDown className="h-3.5 w-3.5" />
+                  {t("showHistory")}
+                </>
+              )}
+            </Button>
+            {showHistory && (
+              <Card className="rounded-xl border bg-card/80 divide-y">
+                {historyGrants.map(renderGrantRow)}
+              </Card>
+            )}
+          </div>
+        )}
+
+        {grants.length === 0 && (
+          <p className="text-sm text-muted-foreground">{t("noGrants")}</p>
+        )}
+      </div>
+
+      <AlertDialog open={!!revokeTargetId} onOpenChange={(open) => { if (!open) setRevokeTargetId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("revoke")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("revokeConfirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tc("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (revokeTargetId) handleRevoke(revokeTargetId);
+                setRevokeTargetId(null);
+              }}
+            >
+              {t("revoke")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }

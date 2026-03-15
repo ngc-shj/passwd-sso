@@ -68,6 +68,7 @@
   "tenantTabMembers": "メンバー",
   "tenantTabScim": "SCIM",
   "tenantTabDirectorySync": "ディレクトリ同期",
+  "tenantTabProvisioning": "プロビジョニング",
   "tenantTabSecurity": "セキュリティ",
   "tenantTabAuditLog": "監査ログ",
   "select": "選択",

@@ -160,5 +160,7 @@
   "PERSONAL_LOG_ACCESS_VIEW": "Viewed personal logs (break-glass)",
   "PERSONAL_LOG_ACCESS_REVOKE": "Break-glass access revoked",
   "PERSONAL_LOG_ACCESS_EXPIRE": "Break-glass access expired",
-  "groupBreakglass": "Break-Glass Access"
+  "groupBreakglass": "Break-Glass Access",
+  "subTabTenantLogs": "Tenant Logs",
+  "subTabBreakglass": "Break-Glass"
 }

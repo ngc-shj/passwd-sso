@@ -160,5 +160,7 @@
   "PERSONAL_LOG_ACCESS_VIEW": "個人ログを参照（Break-Glass）",
   "PERSONAL_LOG_ACCESS_REVOKE": "Break-Glass アクセスを取り消し",
   "PERSONAL_LOG_ACCESS_EXPIRE": "Break-Glass アクセスが期限切れ",
-  "groupBreakglass": "Break-Glass アクセス"
+  "groupBreakglass": "Break-Glass アクセス",
+  "subTabTenantLogs": "テナントログ",
+  "subTabBreakglass": "Break-Glass"
 }

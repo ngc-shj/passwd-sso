@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Building2 } from "lucide-react";
+import { Building2, Link2, FolderSync } from "lucide-react";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -55,11 +55,10 @@ export default function TenantSettingsPage() {
         </Card>
 
         <Tabs defaultValue="members" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
             <TabsTrigger value="members">{t("tenantTabMembers")}</TabsTrigger>
             <TabsTrigger value="security">{t("tenantTabSecurity")}</TabsTrigger>
-            <TabsTrigger value="scim">{t("tenantTabScim")}</TabsTrigger>
-            <TabsTrigger value="directory-sync">{t("tenantTabDirectorySync")}</TabsTrigger>
+            <TabsTrigger value="provisioning">{t("tenantTabProvisioning")}</TabsTrigger>
             <TabsTrigger value="audit-log">{t("tenantTabAuditLog")}</TabsTrigger>
           </TabsList>
           <TabsContent value="members" className="mt-0 space-y-4">
@@ -69,11 +68,25 @@ export default function TenantSettingsPage() {
             <TenantSessionPolicyCard />
             <TenantAccessRestrictionCard />
           </TabsContent>
-          <TabsContent value="scim" className="mt-0 space-y-4">
-            <ScimProvisioningCard />
-          </TabsContent>
-          <TabsContent value="directory-sync" className="mt-0 space-y-4">
-            <DirectorySyncCard />
+          <TabsContent value="provisioning" className="mt-0 space-y-4">
+            <Tabs defaultValue="scim" className="space-y-4">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="scim">
+                  <Link2 className="h-4 w-4 mr-2" />
+                  {t("tenantTabScim")}
+                </TabsTrigger>
+                <TabsTrigger value="directory-sync">
+                  <FolderSync className="h-4 w-4 mr-2" />
+                  {t("tenantTabDirectorySync")}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="scim" className="mt-0 space-y-4">
+                <ScimProvisioningCard />
+              </TabsContent>
+              <TabsContent value="directory-sync" className="mt-0 space-y-4">
+                <DirectorySyncCard />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
           <TabsContent value="audit-log" className="mt-0 space-y-4">
             <TenantAuditLogCard />

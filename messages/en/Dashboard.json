@@ -68,6 +68,7 @@
   "tenantTabMembers": "Members",
   "tenantTabScim": "SCIM",
   "tenantTabDirectorySync": "Directory Sync",
+  "tenantTabProvisioning": "Provisioning",
   "tenantTabSecurity": "Security",
   "tenantTabAuditLog": "Audit Log",
   "select": "Select",

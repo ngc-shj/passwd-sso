@@ -130,6 +130,7 @@
   "scimTokenActive": "Active",
   "scimTokenExpired": "Expired",
   "scimTokenRevokedStatus": "Revoked",
+  "scimInactiveTokens": "Inactive tokens ({count})",
   "scimManagedBadge": "SCIM",
   "scimCreatedBy": "Created by {name}",
   "scimLastUsed": "Last used {date}",
