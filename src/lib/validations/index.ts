@@ -7,3 +7,4 @@ export * from "./send";
 export * from "./share";
 export * from "./emergency-access";
 export * from "./api-key";
+export * from "./breakglass";

@@ -12,6 +12,7 @@ export const NOTIFICATION_TYPE = {
   ADMIN_VAULT_RESET: "ADMIN_VAULT_RESET",
   ADMIN_VAULT_RESET_REVOKED: "ADMIN_VAULT_RESET_REVOKED",
   SESSION_EVICTED: "SESSION_EVICTED",
+  PERSONAL_LOG_ACCESSED: "PERSONAL_LOG_ACCESSED",
 } as const satisfies Record<NotificationType, NotificationType>;
 
 export type NotificationTypeValue =

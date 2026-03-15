@@ -160,6 +160,8 @@ model User {
   teamPasswordHistories TeamPasswordEntryHistory[]
   teamMemberKeys        TeamMemberKey[]
   notifications         Notification[]
+  breakGlassRequested PersonalLogAccessGrant[] @relation("BreakGlassRequester")
+  breakGlassTargeted  PersonalLogAccessGrant[] @relation("BreakGlassTarget")
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -426,6 +428,7 @@ model Tenant {
   teamPolicies               TeamPolicy[]
   teamWebhooks               TeamWebhook[]
   adminVaultResets           AdminVaultReset[]
+  personalLogAccessGrants    PersonalLogAccessGrant[]
 
   @@map("tenants")
 }
@@ -788,6 +791,10 @@ enum AuditAction {
   ENTRY_HISTORY_REENCRYPT
   ACCESS_DENIED
   TENANT_ROLE_UPDATE
+  PERSONAL_LOG_ACCESS_REQUEST
+  PERSONAL_LOG_ACCESS_VIEW
+  PERSONAL_LOG_ACCESS_REVOKE
+  PERSONAL_LOG_ACCESS_EXPIRE
 }
 
 enum AuditScope {
@@ -1036,6 +1043,7 @@ enum NotificationType {
   ADMIN_VAULT_RESET
   ADMIN_VAULT_RESET_REVOKED
   SESSION_EVICTED
+  PERSONAL_LOG_ACCESSED
 }
 
 model Notification {
@@ -1247,4 +1255,28 @@ model DirectorySyncLog {
 
   @@index([configId, startedAt(sort: Desc)])
   @@map("directory_sync_logs")
+}
+
+// ─── Break-Glass Personal Log Access ─────────────────────────────────
+
+model PersonalLogAccessGrant {
+  id           String    @id @default(cuid())
+  tenantId     String    @map("tenant_id")
+  requesterId  String    @map("requester_id")
+  targetUserId String    @map("target_user_id")
+  reason       String    @db.Text
+  incidentRef  String?   @map("incident_ref") @db.VarChar(500)
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  requester  User   @relation("BreakGlassRequester", fields: [requesterId], references: [id], onDelete: Restrict)
+  targetUser User   @relation("BreakGlassTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, targetUserId])
+  @@index([requesterId])
+  @@index([expiresAt])
+  @@index([requesterId, targetUserId, tenantId])
+  @@map("personal_log_access_grants")
 }

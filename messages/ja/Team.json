@@ -130,6 +130,7 @@
   "scimTokenActive": "有効",
   "scimTokenExpired": "期限切れ",
   "scimTokenRevokedStatus": "無効化済み",
+  "scimInactiveTokens": "無効なトークン ({count})",
   "scimManagedBadge": "SCIM",
   "scimCreatedBy": "{name} が作成",
   "scimLastUsed": "最終使用: {date}",

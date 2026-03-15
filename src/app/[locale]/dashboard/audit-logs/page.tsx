@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useSession } from "next-auth/react";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -58,6 +59,8 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
+import { formatUserName } from "@/lib/format-user";
+import { downloadBlob } from "@/lib/download-blob";
 
 interface AuditLogItem {
   id: string;
@@ -239,21 +242,15 @@ export default function AuditLogsPage() {
   };
 
   const formatDate = (iso: string) => formatDateTime(iso, locale);
-  const formatUser = (user?: { name: string | null; email: string | null } | null) => {
-    if (!user) return null;
-    const name = user.name?.trim();
-    if (name) return name;
-    return user.email ?? null;
-  };
 
   const formatViewer = (log: AuditLogItem) => {
     if (!log.user) return null;
-    return formatUser(log.user);
+    return formatUserName(log.user, "") || null;
   };
 
   const resolveUser = (id?: string, fallbackEmail?: string | null) => {
     if (id && relatedUsers[id]) {
-      return formatUser(relatedUsers[id]);
+      return formatUserName(relatedUsers[id], "") || null;
     }
     if (fallbackEmail) return fallbackEmail;
     return null;
@@ -520,14 +517,11 @@ export default function AuditLogsPage() {
         params.set("to", endOfDay.toISOString());
       }
       const res = await fetchApi(`/api/audit-logs/download?${params.toString()}`);
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `audit-logs.${format === "csv" ? "csv" : "jsonl"}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      if (!res.ok) {
+        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
+        return;
+      }
+      await downloadBlob(res, `audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
     } finally {
       setDownloading(false);
     }
@@ -573,29 +567,6 @@ export default function AuditLogsPage() {
                 onChange={(e) => setDateTo(e.target.value)}
                 className="w-[160px]"
               />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs invisible">&#8203;</Label>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" disabled={downloading}>
-                    {downloading ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Download className="h-4 w-4 mr-2" />
-                    )}
-                    {downloading ? td("downloading") : td("download")}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                    {td("formatCsv")}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                    {td("formatJsonl")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
             </div>
           </div>
 
@@ -657,6 +628,30 @@ export default function AuditLogsPage() {
           </Collapsible>
         </div>
       </Card>
+
+      {/* Download */}
+      <div className="flex justify-end">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" disabled={downloading}>
+              {downloading ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              {downloading ? td("downloading") : td("download")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleDownload("csv")}>
+              {td("formatCsv")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+              {td("formatJsonl")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {loading ? (
         <Card className="rounded-xl border bg-card/80 p-10">

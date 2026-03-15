@@ -61,6 +61,7 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "TravelMode",
   "WebAuthn",
   "DirectorySync",
+  "Breakglass",
 ];
 
 /** Union of all dashboard namespaces (must be a superset of NS_GLOBAL). */

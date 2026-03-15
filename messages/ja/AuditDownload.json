@@ -11,5 +11,7 @@
   "downloading": "ダウンロード中...",
   "maxRange": "最大期間は90日です",
   "rateLimited": "リクエストが多すぎます。しばらくしてからお試しください。",
-  "exportDisabled": "チームポリシーによりエクスポートが無効です"
+  "exportDisabled": "チームポリシーによりエクスポートが無効です",
+  "downloadError": "ダウンロードに失敗しました",
+  "dateRequired": "日付範囲を指定してください"
 }

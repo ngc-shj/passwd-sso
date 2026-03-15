@@ -25,12 +25,24 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Link2, Loader2, Plus, ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Link2, Loader2, Plus, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
+
+const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
+  active: "default",
+  expired: "secondary",
+  revoked: "destructive",
+};
 
 interface ScimToken {
   id: string;
@@ -129,6 +141,87 @@ export function ScimTokenManager({ locale }: Props) {
     return "active";
   };
 
+  const activeTokens = tokens.filter((t) => getTokenStatus(t) === "active");
+  const inactiveTokens = tokens.filter((t) => getTokenStatus(t) !== "active");
+  const [showInactive, setShowInactive] = useState(false);
+
+  const tokenStatusLabel = (status: string) => {
+    if (status === "active") return t("scimTokenActive");
+    if (status === "expired") return t("scimTokenExpired");
+    return t("scimTokenRevokedStatus");
+  };
+
+  const renderTokenRow = (token: ScimToken) => {
+    const status = getTokenStatus(token);
+    return (
+      <div
+        key={token.id}
+        className="flex items-center justify-between border rounded-md p-3"
+      >
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">
+              {token.description || token.id.slice(0, 8)}
+            </span>
+            <Badge variant={TOKEN_STATUS_VARIANT[status] ?? "outline"} className="text-xs">
+              {tokenStatusLabel(status)}
+            </Badge>
+          </div>
+          <div className="text-xs text-muted-foreground space-x-3">
+            {token.createdBy && (
+              <span>
+                {t("scimCreatedBy", {
+                  name: token.createdBy.name ?? token.createdBy.email ?? "—",
+                })}
+              </span>
+            )}
+            <span>
+              {token.lastUsedAt
+                ? t("scimLastUsed", {
+                    date: formatDate(token.lastUsedAt, locale),
+                  })
+                : t("scimNeverUsed")}
+            </span>
+            {token.expiresAt && (
+              <span>
+                {t("scimExpiresAt", {
+                  date: formatDate(token.expiresAt, locale),
+                })}
+              </span>
+            )}
+          </div>
+        </div>
+        {status === "active" && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="destructive" size="sm">
+                {t("scimTokenRevoke")}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {t("scimTokenRevoke")}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("scimTokenRevokeConfirm")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => handleRevoke(token.id)}
+                >
+                  {t("scimTokenRevoke")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+    );
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -210,7 +303,7 @@ export function ScimTokenManager({ locale }: Props) {
         </section>
       )}
 
-      {/* Token List */}
+      {/* Token List — Active */}
       <section className="space-y-3 border-t pt-4">
         <h3 className="text-sm font-medium">{t("scimTokens")}</h3>
         {loading ? (
@@ -219,88 +312,29 @@ export function ScimTokenManager({ locale }: Props) {
           <p className="text-sm text-muted-foreground">{t("scimNoTokens")}</p>
         ) : (
           <div className="space-y-3">
-            {tokens.map((token) => {
-              const status = getTokenStatus(token);
-              return (
-                <div
-                  key={token.id}
-                  className="flex items-center justify-between border rounded-md p-3"
-                >
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">
-                        {token.description || token.id.slice(0, 8)}
-                      </span>
-                      <span
-                        className={`text-xs px-1.5 py-0.5 rounded ${
-                          status === "active"
-                            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                            : status === "expired"
-                              ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                              : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                        }`}
-                      >
-                        {status === "active"
-                          ? t("scimTokenActive")
-                          : status === "expired"
-                            ? t("scimTokenExpired")
-                            : t("scimTokenRevokedStatus")}
-                      </span>
-                    </div>
-                    <div className="text-xs text-muted-foreground space-x-3">
-                      {token.createdBy && (
-                        <span>
-                          {t("scimCreatedBy", {
-                            name: token.createdBy.name ?? token.createdBy.email ?? "—",
-                          })}
-                        </span>
-                      )}
-                      <span>
-                        {token.lastUsedAt
-                          ? t("scimLastUsed", {
-                              date: formatDate(token.lastUsedAt, locale),
-                            })
-                          : t("scimNeverUsed")}
-                      </span>
-                      {token.expiresAt && (
-                        <span>
-                          {t("scimExpiresAt", {
-                            date: formatDate(token.expiresAt, locale),
-                          })}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {status === "active" && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="destructive" size="sm">
-                          {t("scimTokenRevoke")}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>
-                            {t("scimTokenRevoke")}
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            {t("scimTokenRevokeConfirm")}
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                          <AlertDialogAction
-                            onClick={() => handleRevoke(token.id)}
-                          >
-                            {t("scimTokenRevoke")}
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  )}
-                </div>
-              );
-            })}
+            {activeTokens.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("scimNoTokens")}</p>
+            ) : (
+              activeTokens.map(renderTokenRow)
+            )}
+
+            {inactiveTokens.length > 0 && (
+              <Collapsible open={showInactive} onOpenChange={setShowInactive}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
+                    {showInactive ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                    {t("scimInactiveTokens", { count: inactiveTokens.length })}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-3 pt-2">
+                  {inactiveTokens.map(renderTokenRow)}
+                </CollapsibleContent>
+              </Collapsible>
+            )}
           </div>
         )}
       </section>

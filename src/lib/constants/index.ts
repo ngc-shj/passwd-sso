@@ -97,3 +97,6 @@ export { EXPORT_FORMAT_VALUES } from "./export-format";
 export type { ExportFormat } from "./export-format";
 
 export { REVEAL_TIMEOUT_MS, CLIPBOARD_CLEAR_TIMEOUT_MS } from "./timing";
+
+export { GRANT_STATUS } from "./breakglass";
+export type { GrantStatus } from "./breakglass";

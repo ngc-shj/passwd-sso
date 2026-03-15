@@ -10,17 +10,17 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
-  AUDIT_ACTION_VALUES,
   AUDIT_SCOPE,
 } from "@/lib/constants";
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { VALID_ACTIONS } from "@/lib/audit-query";
+import { formatCsvRow } from "@/lib/audit-csv";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 const BATCH_SIZE = 500;
 const MAX_RANGE_DAYS = 90;
 
@@ -28,19 +28,6 @@ const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 2,
 });
-
-function escapeCsvValue(v: string): string {
-  // Prevent CSV injection: escape values starting with formula-triggering characters
-  const escaped = v.replace(/"/g, '""');
-  if (/^[=+\-@\t\r]/.test(escaped)) {
-    return `"'${escaped}"`;
-  }
-  return `"${escaped}"`;
-}
-
-function formatCsvRow(values: string[]): string {
-  return values.map(escapeCsvValue).join(",");
-}
 
 const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail", "metadata"];
 

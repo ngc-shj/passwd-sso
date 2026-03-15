@@ -155,5 +155,17 @@
   "lockoutMeta": "Failed attempts: {attempts} / Locked for: {lockMinutes} min",
   "revokedSessionsMeta": "Revoked sessions: {revokedCount}",
   "vaultResetMeta": "Deleted entries: {deletedEntries} / Deleted attachments: {deletedAttachments}",
-  "eaVaultAccessMeta": "Entries accessed: {entryCount}"
+  "eaVaultAccessMeta": "Entries accessed: {entryCount}",
+  "PERSONAL_LOG_ACCESS_REQUEST": "Break-glass access requested",
+  "PERSONAL_LOG_ACCESS_VIEW": "Viewed personal logs (break-glass)",
+  "PERSONAL_LOG_ACCESS_REVOKE": "Break-glass access revoked",
+  "PERSONAL_LOG_ACCESS_EXPIRE": "Break-glass access expired",
+  "groupBreakglass": "Break-Glass Access",
+  "subTabTenantLogs": "Tenant Logs",
+  "subTabBreakglass": "Break-Glass",
+  "scopeLabel": "Scope",
+  "scopeAll": "All",
+  "scopeTenant": "Tenant",
+  "scopeTeam": "Team",
+  "scopeAllTeams": "All teams"
 }

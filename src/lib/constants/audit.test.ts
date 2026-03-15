@@ -89,4 +89,13 @@ describe("audit constants", () => {
       expect(action.startsWith("EMERGENCY_")).toBe(true);
     }
   });
+
+  it("defines BREAKGLASS group with expected actions", () => {
+    expect(AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.BREAKGLASS]).toEqual([
+      AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
+      AUDIT_ACTION.PERSONAL_LOG_ACCESS_VIEW,
+      AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
+      AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE,
+    ]);
+  });
 });
