@@ -1,5 +1,5 @@
 # Code Review: unify-callback-url
-Date: 2026-03-15
+Date: 2026-03-16
 Review round: 1
 
 ## Changes from Previous Round
@@ -7,43 +7,48 @@ Initial review
 
 ## Functionality Findings
 
-### F1 [Major] Origin empty string behavior not documented
-- **Status:** Resolved — added comment in resolveCallbackUrl JSDoc
-
-### F2 [Minor] Backslash encoded variant
-- **Status:** Resolved — URL normalization via `new URL(raw, placeholder)` handles variants
-
-### F3 [Minor] SSR window guard
-- **Status:** Rejected — "use client" directive prevents server execution
+### F1 [Minor] Wrapper div produces 16px gap when banner is absent
+- **Status:** Resolved — ExtConnectBanner now accepts className prop; wrapper div removed
 
 ## Security Findings
 
-### S1 [Major] Path normalization bypass (/.//evil.com)
-- **Status:** Resolved — relative paths now normalized through `new URL(raw, placeholder)` constructor, verifying origin stays same after normalization
+### S1 [Minor] callbackUrlToHref input constraint not documented
+- **Status:** Skipped — JSDoc already describes the function's purpose and expected input
 
-### S2 [Minor] Environment variable unset logging
-- **Status:** Deferred — operational improvement, out of scope
-
-### S3 [Minor] Fragment stripping
-- **Status:** Resolved — `pathname + search` from URL constructor excludes fragment; test added
+### S2 [Minor] ExtConnectBanner includes() is UI-only
+- **Status:** Skipped — no security impact (UI display only, no auth/authz effect)
 
 ## Testing Findings
 
-### T1 [Minor] Misleading test name "malformed URL"
-- **Status:** Resolved — renamed to "rejects bare word without leading slash"
+### T1 [Major] callbackUrlToHref missing BASE_PATH non-empty tests
+- **Status:** Resolved — added callback-url-basepath.test.ts with mocked BASE_PATH="/passwd-sso"
 
-### T3 [Major] Missing javascript: URI test
-- **Status:** Resolved — added test + implementation rejection for non-HTTP schemes
+### T2 [Major] ExtConnectBanner has no tests
+- **Status:** Resolved — added ext-connect-banner.test.tsx (4 test cases)
 
-### T4 [Minor] Missing fragment test
-- **Status:** Resolved — added "strips fragment from relative path" test
+### T3 [Minor] auto-extension-connect.test.tsx stale comment
+- **Status:** Resolved — updated comment to reflect removed Close tab button
 
-### T5 [Major] Mock inconsistency in hook test
-- **Status:** Rejected — hook does not use getAppOrigin; uses window.location.origin directly
+### T4 [Minor] jsdom origin implicit dependency
+- **Status:** Skipped — standard jsdom testing pattern, consistent with other hook tests
 
-### T8 [Major] searchParams Promise shape
-- **Status:** Rejected — makeSearchParams already uses Promise.resolve()
+## Adjacent Findings
+None
 
 ## Resolution Status
-All Critical/Major findings resolved or rejected with justification.
-No second review round needed.
+
+### F1 [Minor] Wrapper div gap
+- Action: Added className prop to ExtConnectBanner, removed wrapper div
+- Modified file: src/components/extension/ext-connect-banner.tsx, src/components/vault/vault-lock-screen.tsx
+
+### T1 [Major] BASE_PATH non-empty test coverage
+- Action: Created separate test file with vi.mock for BASE_PATH="/passwd-sso"
+- Modified file: src/lib/callback-url-basepath.test.ts
+
+### T2 [Major] ExtConnectBanner test coverage
+- Action: Created test file with 4 cases (direct, indirect, absent, className)
+- Modified file: src/components/extension/ext-connect-banner.test.tsx
+
+### T3 [Minor] Stale comment
+- Action: Updated comment to remove "Close tab" reference
+- Modified file: src/components/extension/auto-extension-connect.test.tsx
