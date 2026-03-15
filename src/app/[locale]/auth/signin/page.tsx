@@ -2,6 +2,8 @@ import { redirect } from "@/i18n/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
+import { resolveCallbackUrl } from "@/lib/callback-url";
+import { getAppOrigin } from "@/lib/url-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { SignInButton } from "@/components/auth/signin-button";
@@ -13,10 +15,13 @@ import { AppIcon } from "@/components/ui/app-icon";
 
 export default async function SignInPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ locale: string }>;
+  searchParams: Promise<{ callbackUrl?: string }>;
 }) {
   const { locale } = await params;
+  const { callbackUrl: rawCallbackUrl } = await searchParams;
   setRequestLocale(locale);
 
   const t = await getTranslations("Auth");
@@ -30,7 +35,16 @@ export default async function SignInPage({
   }
 
   if (session?.user) {
-    redirect({ href: "/dashboard", locale });
+    // Resolve callbackUrl using env-based origin (never from request headers)
+    let origin = "";
+    try {
+      const appOrigin = getAppOrigin();
+      if (appOrigin) origin = new URL(appOrigin).origin;
+    } catch {
+      // Malformed env var — fall back to empty origin (relative paths only)
+    }
+    const href = resolveCallbackUrl(rawCallbackUrl ?? null, origin);
+    redirect({ href, locale });
   }
 
   const hasGoogle = !!(

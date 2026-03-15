@@ -24,6 +24,10 @@ vi.mock("next-intl/server", () => ({
   getTranslations: mockGetTranslations,
   setRequestLocale: mockSetRequestLocale,
 }));
+vi.mock("@/lib/url-helpers", () => ({
+  BASE_PATH: "",
+  getAppOrigin: () => "https://example.com",
+}));
 
 // Mock UI components to avoid React DOM rendering in node env
 vi.mock("@/components/ui/card", () => ({
@@ -57,6 +61,8 @@ import SignInPage from "./page";
 
 // ── Helpers ────────────────────────────────────────────────
 const makeParams = (locale = "en") => Promise.resolve({ locale });
+const makeSearchParams = (callbackUrl?: string) =>
+  Promise.resolve(callbackUrl !== undefined ? { callbackUrl } : {});
 const fakeT = (key: string) => key;
 
 /** Walk a React element tree and return true if any node matches */
@@ -84,7 +90,7 @@ describe("SignInPage", () => {
   it("redirects to /dashboard when user is authenticated", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1", name: "Test" } });
 
-    await SignInPage({ params: makeParams("en") });
+    await SignInPage({ params: makeParams("en"), searchParams: makeSearchParams() });
 
     expect(mockRedirect).toHaveBeenCalledWith({
       href: "/dashboard",
@@ -95,7 +101,7 @@ describe("SignInPage", () => {
   it("passes correct locale to redirect", async () => {
     mockAuth.mockResolvedValue({ user: { id: "u1" } });
 
-    await SignInPage({ params: makeParams("ja") });
+    await SignInPage({ params: makeParams("ja"), searchParams: makeSearchParams() });
 
     expect(mockRedirect).toHaveBeenCalledWith({
       href: "/dashboard",
@@ -106,7 +112,7 @@ describe("SignInPage", () => {
   it("renders sign-in page when auth() throws (DB unavailable)", async () => {
     mockAuth.mockRejectedValue(new Error("connection refused"));
 
-    const result = await SignInPage({ params: makeParams() });
+    const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(result).toBeDefined();
@@ -115,7 +121,7 @@ describe("SignInPage", () => {
   it("renders sign-in page when user is not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
 
-    const result = await SignInPage({ params: makeParams() });
+    const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(result).toBeDefined();
@@ -124,16 +130,44 @@ describe("SignInPage", () => {
   it("renders sign-in page when session has no user", async () => {
     mockAuth.mockResolvedValue({});
 
-    const result = await SignInPage({ params: makeParams() });
+    const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
     expect(mockRedirect).not.toHaveBeenCalled();
     expect(result).toBeDefined();
   });
 
+  it("redirects to callbackUrl when authenticated and callbackUrl is present", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1" } });
+
+    await SignInPage({
+      params: makeParams("ja"),
+      searchParams: makeSearchParams("/ja/dashboard?ext_connect=1"),
+    });
+
+    expect(mockRedirect).toHaveBeenCalledWith({
+      href: "/ja/dashboard?ext_connect=1",
+      locale: "ja",
+    });
+  });
+
+  it("rejects cross-origin callbackUrl when authenticated", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "u1" } });
+
+    await SignInPage({
+      params: makeParams("en"),
+      searchParams: makeSearchParams("https://evil.com/phish"),
+    });
+
+    expect(mockRedirect).toHaveBeenCalledWith({
+      href: "/dashboard",
+      locale: "en",
+    });
+  });
+
   it("calls setRequestLocale with the correct locale", async () => {
     mockAuth.mockResolvedValue(null);
 
-    await SignInPage({ params: makeParams("ja") });
+    await SignInPage({ params: makeParams("ja"), searchParams: makeSearchParams() });
 
     expect(mockSetRequestLocale).toHaveBeenCalledWith("ja");
   });
@@ -194,7 +228,7 @@ describe("SignInPage", () => {
       setSaml(false);
       mockAuth.mockResolvedValue(null);
 
-      const result = await SignInPage({ params: makeParams() });
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "google")).toBe(true);
       expect(hasProvider(result, "saml-jackson")).toBe(false);
@@ -205,7 +239,7 @@ describe("SignInPage", () => {
       setSaml(true);
       mockAuth.mockResolvedValue(null);
 
-      const result = await SignInPage({ params: makeParams() });
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "google")).toBe(false);
       expect(hasProvider(result, "saml-jackson")).toBe(true);
@@ -216,7 +250,7 @@ describe("SignInPage", () => {
       setSaml(true);
       mockAuth.mockResolvedValue(null);
 
-      const result = await SignInPage({ params: makeParams() });
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "google")).toBe(true);
       expect(hasProvider(result, "saml-jackson")).toBe(true);
@@ -227,7 +261,7 @@ describe("SignInPage", () => {
       setSaml(false);
       mockAuth.mockResolvedValue(null);
 
-      const result = await SignInPage({ params: makeParams() });
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "google")).toBe(false);
       expect(hasProvider(result, "saml-jackson")).toBe(false);
@@ -239,7 +273,7 @@ describe("SignInPage", () => {
       setSaml(false);
       mockAuth.mockResolvedValue(null);
 
-      const result = await SignInPage({ params: makeParams() });
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "google")).toBe(false);
     });
@@ -251,7 +285,7 @@ describe("SignInPage", () => {
       delete process.env.AUTH_JACKSON_SECRET;
       mockAuth.mockResolvedValue(null);
 
-      const result = await SignInPage({ params: makeParams() });
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "saml-jackson")).toBe(false);
     });
