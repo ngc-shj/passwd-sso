@@ -54,6 +54,7 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "Notifications",
   "TeamPolicy",
   "TeamWebhook",
+  "TenantWebhook",
   "AuditDownload",
   "CliToken",
   "TenantAdmin",

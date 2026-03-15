@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Building2, Link2, FolderSync } from "lucide-react";
+import { Building2, Link2, FolderSync, Webhook } from "lucide-react";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -11,6 +11,7 @@ import { DirectorySyncCard } from "@/components/settings/directory-sync-card";
 import { TenantSessionPolicyCard } from "@/components/settings/tenant-session-policy-card";
 import { TenantAccessRestrictionCard } from "@/components/settings/tenant-access-restriction-card";
 import { TenantAuditLogCard } from "@/components/settings/tenant-audit-log-card";
+import { TenantWebhookCard } from "@/components/settings/tenant-webhook-card";
 import { Loader2 } from "lucide-react";
 
 export default function TenantSettingsPage() {
@@ -55,11 +56,15 @@ export default function TenantSettingsPage() {
         </Card>
 
         <Tabs defaultValue="members" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-4">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-5">
             <TabsTrigger value="members">{t("tenantTabMembers")}</TabsTrigger>
             <TabsTrigger value="security">{t("tenantTabSecurity")}</TabsTrigger>
             <TabsTrigger value="provisioning">{t("tenantTabProvisioning")}</TabsTrigger>
             <TabsTrigger value="audit-log">{t("tenantTabAuditLog")}</TabsTrigger>
+            <TabsTrigger value="webhooks">
+              <Webhook className="h-4 w-4 mr-2" />
+              {t("tenantTabWebhooks")}
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="members" className="mt-0 space-y-4">
             <TenantMembersCard />
@@ -90,6 +95,9 @@ export default function TenantSettingsPage() {
           </TabsContent>
           <TabsContent value="audit-log" className="mt-0 space-y-4">
             <TenantAuditLogCard />
+          </TabsContent>
+          <TabsContent value="webhooks" className="mt-0 space-y-4">
+            <TenantWebhookCard />
           </TabsContent>
         </Tabs>
       </div>

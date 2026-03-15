@@ -37,7 +37,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
   ["src/lib/new-device-detection.ts", ["session", "user"]],
   ["src/lib/notification.ts", ["user", "notification"]],
-  ["src/lib/webhook-dispatcher.ts", ["teamWebhook"]],
+  ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
   ["src/lib/tenant-auth.ts", ["tenantMember"]],
   ["src/lib/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],

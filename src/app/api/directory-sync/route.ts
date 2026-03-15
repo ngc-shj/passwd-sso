@@ -13,6 +13,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 
 // ─── Validation ──────────────────────────────────────────────
@@ -176,6 +177,12 @@ async function handlePOST(req: NextRequest) {
     targetId: config.id,
     metadata: { provider, displayName },
     ...extractRequestMeta(req),
+  });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_CREATE,
+    tenantId,
+    timestamp: new Date().toISOString(),
+    data: { configId: config.id },
   });
 
   return NextResponse.json(config, { status: 201 });

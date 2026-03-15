@@ -13,6 +13,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { logAudit } from "@/lib/audit";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { decryptCredentials } from "./credentials";
 import { sanitizeSyncError } from "./sanitize";
@@ -206,6 +207,12 @@ export async function runDirectorySync(
         targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
         targetId: configId,
         metadata: { staleSince: preCheck.lastSyncAt },
+      });
+      void dispatchTenantWebhook({
+        type: AUDIT_ACTION.DIRECTORY_SYNC_STALE_RESET,
+        tenantId,
+        timestamp: new Date().toISOString(),
+        data: { configId },
       });
     }
   } catch (err) {

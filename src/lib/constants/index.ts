@@ -51,6 +51,7 @@ export {
   AUDIT_ACTION_GROUPS_TENANT,
   AUDIT_ACTION_EMERGENCY_PREFIX,
   AUDIT_METADATA_KEY,
+  TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
 } from "./audit";
 export type { AuditScopeValue, AuditActionValue } from "./audit";
 

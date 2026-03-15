@@ -8,6 +8,7 @@ import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -117,6 +118,12 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     },
     ...extractRequestMeta(req),
   });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.SCIM_GROUP_UPDATE,
+    tenantId,
+    timestamp: new Date().toISOString(),
+    data: { groupId: id, teamId: serviceResult.teamId },
+  });
 
   return scimResponse(serviceResult.resource);
 }
@@ -191,6 +198,12 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
       operations: actions.map((a) => ({ op: a.op, userId: a.userId })),
     },
     ...extractRequestMeta(req),
+  });
+  void dispatchTenantWebhook({
+    type: AUDIT_ACTION.SCIM_GROUP_UPDATE,
+    tenantId,
+    timestamp: new Date().toISOString(),
+    data: { groupId: id, teamId: serviceResult.teamId },
   });
 
   return scimResponse(serviceResult.resource);

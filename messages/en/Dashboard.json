@@ -71,6 +71,7 @@
   "tenantTabProvisioning": "Provisioning",
   "tenantTabSecurity": "Security",
   "tenantTabAuditLog": "Audit Log",
+  "tenantTabWebhooks": "Webhooks",
   "select": "Select",
   "close": "Close",
   "selectAll": "Select All",
