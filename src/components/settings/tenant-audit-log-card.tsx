@@ -299,14 +299,14 @@ export function TenantAuditLogCard() {
                 <div className="space-y-1">
                   <Label className="text-xs">{t("scopeTeam")}</Label>
                   <Select
-                    value={teamFilter}
-                    onValueChange={setTeamFilter}
+                    value={teamFilter || "__all__"}
+                    onValueChange={(v) => setTeamFilter(v === "__all__" ? "" : v)}
                   >
                     <SelectTrigger className="w-[180px]">
-                      <SelectValue placeholder={t("scopeAllTeams")} />
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">{t("scopeAllTeams")}</SelectItem>
+                      <SelectItem value="__all__">{t("scopeAllTeams")}</SelectItem>
                       {teams.map((team) => (
                         <SelectItem key={team.id} value={team.id}>
                           {team.name}
