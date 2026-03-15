@@ -12,6 +12,7 @@ import { PasskeySignInButton } from "@/components/auth/passkey-signin-button";
 import { SecurityKeySignInForm } from "@/components/auth/security-key-signin-form";
 import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
+import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
 
 export default async function SignInPage({
   params,
@@ -80,6 +81,7 @@ export default async function SignInPage({
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          <ExtConnectBanner />
           {/* SSO buttons (enterprise mode) */}
           {hasGoogle && (
             <SignInButton

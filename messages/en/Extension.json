@@ -11,5 +11,6 @@
   "connectFailedDescription": "Failed to connect to the extension. Please try again.",
   "closeTab": "Close tab",
   "goToDashboard": "Go to dashboard",
-  "retry": "Retry"
+  "retry": "Retry",
+  "connectingBanner": "Connecting browser extension..."
 }
