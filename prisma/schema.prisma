@@ -45,7 +45,7 @@ model Session {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  @@index([userId])
+  @@index([userId, expires])
   @@index([tenantId])
   @@map("sessions")
 }
@@ -297,7 +297,7 @@ model PasswordEntry {
   attachments Attachment[]
   histories   PasswordEntryHistory[]
 
-  @@index([userId])
+  @@index([userId, deletedAt, isArchived])
   @@index([tenantId])
   @@map("password_entries")
 }
@@ -564,7 +564,7 @@ model TeamPasswordEntry {
   attachments Attachment[]
   histories   TeamPasswordEntryHistory[]
 
-  @@index([teamId])
+  @@index([teamId, deletedAt])
   @@index([tenantId])
   @@map("team_password_entries")
 }
@@ -681,8 +681,7 @@ model PasswordShare {
   @@index([passwordEntryId])
   @@index([teamPasswordEntryId])
   @@index([expiresAt])
-  @@index([shareType])
-  @@index([createdById])
+  @@index([createdById, createdAt(sort: Desc)])
   @@index([tenantId])
   @@map("password_shares")
 }
@@ -825,9 +824,9 @@ model AuditLog {
   team   Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
-  @@index([userId, createdAt])
-  @@index([teamId, createdAt])
-  @@index([tenantId])
+  @@index([userId, scope, createdAt(sort: Desc)])
+  @@index([teamId, scope, createdAt(sort: Desc)])
+  @@index([tenantId, scope, createdAt(sort: Desc)])
   @@index([action])
   @@map("audit_logs")
 }
@@ -917,10 +916,9 @@ model EmergencyAccessGrant {
   tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   granteeKeyPair EmergencyAccessKeyPair?
 
-  @@index([ownerId])
+  @@index([ownerId, status])
   @@index([granteeId])
   @@index([tenantId])
-  @@index([status])
   @@map("emergency_access_grants")
 }
 
