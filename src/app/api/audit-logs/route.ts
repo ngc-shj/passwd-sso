@@ -1,21 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import type { AuditAction, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_ACTION,
   AUDIT_ACTION_EMERGENCY_PREFIX,
   AUDIT_ACTION_GROUPS_PERSONAL,
-  AUDIT_ACTION_VALUES,
   AUDIT_SCOPE,
   AUDIT_TARGET_TYPE,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-
-const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
+import {
+  VALID_ACTIONS,
+  parseAuditLogParams,
+  buildAuditLogActionFilter,
+  buildAuditLogDateFilter,
+  paginateResult,
+} from "@/lib/audit-query";
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)
 async function handleGET(req: NextRequest) {
@@ -25,13 +29,7 @@ async function handleGET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const action = searchParams.get("action");
-  const actionsParam = searchParams.get("actions");
-  const from = searchParams.get("from");
-  const to = searchParams.get("to");
-  const cursor = searchParams.get("cursor");
-  const limitParam = searchParams.get("limit");
-  const limit = Math.min(Math.max(parseInt(limitParam ?? "50", 10) || 50, 1), 100);
+  const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
 
   const where: Prisma.AuditLogWhereInput = {
     scope: AUDIT_SCOPE.PERSONAL,
@@ -47,27 +45,19 @@ async function handleGET(req: NextRequest) {
     ],
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a as AuditAction));
-    if (invalid.length > 0) {
-      return validationError({ actions: invalid });
-    }
-    where.action = { in: requested as AuditAction[] };
-  } else if (action) {
-    if (AUDIT_ACTION_GROUPS_PERSONAL[action]) {
-      where.action = { in: AUDIT_ACTION_GROUPS_PERSONAL[action] };
-    } else if (VALID_ACTIONS.has(action)) {
-      where.action = action as AuditAction;
-    }
+  try {
+    const actionFilter = buildAuditLogActionFilter(
+      { action, actions: actionsParam },
+      VALID_ACTIONS,
+      AUDIT_ACTION_GROUPS_PERSONAL,
+    );
+    if (actionFilter !== undefined) where.action = actionFilter;
+  } catch (err) {
+    return validationError(err as Record<string, unknown>);
   }
 
-  if (from || to) {
-    const createdAt: Record<string, Date> = {};
-    if (from) createdAt.gte = new Date(from);
-    if (to) createdAt.lte = new Date(to);
-    where.createdAt = createdAt;
-  }
+  const dateFilter = buildAuditLogDateFilter(from, to);
+  if (dateFilter) where.createdAt = dateFilter;
 
   let logs;
   try {
@@ -86,9 +76,7 @@ async function handleGET(req: NextRequest) {
     return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
-  const hasMore = logs.length > limit;
-  const items = hasMore ? logs.slice(0, limit) : logs;
-  const nextCursor = hasMore ? items[items.length - 1].id : null;
+  const { items, nextCursor } = paginateResult(logs, limit);
 
   // Resolve encrypted overviews for PasswordEntry targets
   const entryIds = [

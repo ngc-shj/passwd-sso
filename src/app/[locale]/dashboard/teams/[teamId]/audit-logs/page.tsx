@@ -2,6 +2,7 @@
 
 import { use, useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -50,6 +51,7 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
+import { downloadBlob } from "@/lib/download-blob";
 import { useTeamVaultOptional } from "@/lib/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
@@ -457,14 +459,11 @@ export default function TeamAuditLogsPage({
       const res = await fetchApi(
         `${apiPath.teamAuditLogs(teamId)}/download?${params.toString()}`
       );
-      if (!res.ok) return;
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`;
-      a.click();
-      URL.revokeObjectURL(url);
+      if (!res.ok) {
+        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
+        return;
+      }
+      await downloadBlob(res, `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
     } finally {
       setDownloading(false);
     }
@@ -512,47 +511,6 @@ export default function TeamAuditLogsPage({
                 onChange={(e) => setDateTo(e.target.value)}
                 className="w-[160px]"
               />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs invisible">&#8203;</Label>
-              {exportAllowed ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" disabled={downloading}>
-                      {downloading ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4 mr-2" />
-                      )}
-                      {downloading ? td("downloading") : td("download")}
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start">
-                    <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                      {td("formatCsv")}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                      {td("formatJsonl")}
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : (
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span tabIndex={0}>
-                        <Button variant="outline" disabled>
-                          <Download className="h-4 w-4 mr-2" />
-                          {td("download")}
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <p>{td("exportDisabled")}</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-              )}
             </div>
           </div>
 
@@ -614,6 +572,48 @@ export default function TeamAuditLogsPage({
           </Collapsible>
         </div>
       </Card>
+
+      {/* Download */}
+      <div className="flex justify-end">
+        {exportAllowed ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" disabled={downloading}>
+                {downloading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                {downloading ? td("downloading") : td("download")}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => handleDownload("csv")}>
+                {td("formatCsv")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
+                {td("formatJsonl")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={0}>
+                  <Button variant="outline" size="sm" disabled>
+                    <Download className="h-4 w-4 mr-2" />
+                    {td("download")}
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p>{td("exportDisabled")}</p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+      </div>
 
       {loading ? (
         <Card className="rounded-xl border bg-card/80 p-10">
