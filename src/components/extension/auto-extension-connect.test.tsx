@@ -5,7 +5,7 @@
  * Covers:
  *   - No ?ext_connect → renders nothing (IDLE)
  *   - ?ext_connect=1 → initiates connection, removes param from URL
- *   - Fetch success → CONNECTED state, "Close tab" + "Go to dashboard" buttons
+ *   - Fetch success → CONNECTED state, "Go to dashboard" button
  *   - Fetch failure → FAILED state, "Retry" + "Go to dashboard" buttons
  *   - Retry triggers new connection attempt
  *   - APP_NAME is displayed

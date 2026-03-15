@@ -13,6 +13,8 @@ import {
 } from "@/lib/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { useCallbackUrl } from "@/hooks/use-callback-url";
+import { callbackUrlToHref } from "@/lib/callback-url";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";
@@ -21,6 +23,7 @@ const SS_PRF_DATA = "psso:prf-data";
 export function SecurityKeySignInForm() {
   const t = useTranslations("Auth");
   const router = useRouter();
+  const callbackUrl = useCallbackUrl();
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [supported, setSupported] = useState(true);
@@ -94,7 +97,7 @@ export function SecurityKeySignInForm() {
       }
 
       sessionStorage.setItem("psso:webauthn-signin", "1");
-      router.push("/dashboard");
+      router.push(callbackUrlToHref(callbackUrl));
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         setError(t("securityKeySignInCancelled"));
