@@ -1,6 +1,7 @@
 import { BASE_PATH } from "./url-helpers";
 
 const DEFAULT_PATH = `${BASE_PATH}/dashboard`;
+const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
 /**
  * Validate and resolve a callbackUrl parameter to a safe redirect target.
@@ -22,7 +23,7 @@ export function resolveCallbackUrl(
   if (!raw) return DEFAULT_PATH;
 
   // Reject non-HTTP(S) schemes (e.g. javascript:, data:, vbscript:)
-  if (/^[a-z][a-z0-9+.-]*:/i.test(raw) && !raw.startsWith("http")) {
+  if (SCHEME_RE.test(raw) && !raw.startsWith("http")) {
     return DEFAULT_PATH;
   }
 
