@@ -10,5 +10,6 @@ import { resolveCallbackUrl } from "@/lib/callback-url";
 export function useCallbackUrl(): string {
   const searchParams = useSearchParams();
   const raw = searchParams.get("callbackUrl");
-  return resolveCallbackUrl(raw, window.location.origin);
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  return resolveCallbackUrl(raw, origin);
 }
