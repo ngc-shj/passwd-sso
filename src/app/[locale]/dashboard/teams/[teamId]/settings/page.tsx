@@ -37,7 +37,6 @@ import { CopyButton } from "@/components/passwords/copy-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
 import { TeamWebhookCard } from "@/components/team/team-webhook-card";
 import { TabDescription } from "@/components/settings/tab-description";
-import { Separator } from "@/components/ui/separator";
 import { Link } from "@/i18n/navigation";
 import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe, Search, Shield, Webhook } from "lucide-react";
 import { toast } from "sonner";

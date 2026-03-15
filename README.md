@@ -36,8 +36,10 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Password Generator** — Random (8-128 chars) and diceware passphrases (3-10 words)
 - **TOTP Authenticator** — Store/generate 2FA codes with camera QR capture
 - **Attachments** — Encrypted file attachments (personal and team E2E)
-- **Tags & Organization** — Nested color-coded tags, favorites, archive, soft-delete trash (30-day auto-purge)
-- **Import / Export** — Bitwarden, 1Password, Chrome CSV import; CSV/JSON export with optional AES-256-GCM encryption
+- **Folders & Tags** — Nested color-coded tags, hierarchical folders, favorites, archive, soft-delete trash (30-day auto-purge)
+- **Entry History** — Version history with comparison and restore
+- **Bulk Operations** — Batch archive, trash, restore across multiple entries
+- **Import / Export** — Bitwarden, 1Password, KeePassXC, Chrome CSV import; CSV/JSON export with optional AES-256-GCM encryption
 
 ### Authentication
 
@@ -58,7 +60,10 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Vault Reset** — Last-resort full deletion with explicit confirmation
 - **Key Rotation** — Rotate encryption key with passphrase verification
 - **Travel Mode** — Hide sensitive entries when crossing borders; remote disable restores access
-- **Audit Logs & Webhooks** — Personal/team logs with filters, CSV/JSONL download, webhook delivery
+- **Network Access Restriction** — CIDR allowlist and Tailscale integration per tenant
+- **Audit Logs & Webhooks** — Personal/team/tenant logs with filters, CSV/JSONL download, webhook delivery
+- **Audit Log Forwarding** — Structured JSON output via Fluent Bit sidecar for external collection
+- **Break Glass** — Tenant admin emergency access to personal audit logs with time-limited grants
 - **Error Tracking** — Sentry with recursive sensitive data scrubbing
 - **CI Security** — CodeQL SAST, Trivy container scan, crypto domain ledger, npm audit
 - **Reproducible Builds** — Docker base image digest pinning with build metadata verification
@@ -72,6 +77,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Directory Sync** — Azure AD, Google Workspace, Okta member sync
 - **Tenant Admin** — Member management, SCIM tokens, admin vault reset, tenant settings
 - **Share Links** — Time-limited sharing with access logs and visibility controls
+- **Sends** — Ephemeral text/file sharing with automatic expiration
 - **Emergency Access** — Request/approve temporary vault access with key exchange
 - **Session Management** — Active session list, single/all revoke, auto-invalidation on member removal
 - **Notifications** — In-app and email for emergency-access events and new-device logins
@@ -166,8 +172,11 @@ Edit `.env.local` — key variables:
 
 | Variable | Description |
 | --- | --- |
+| `NEXT_PUBLIC_APP_NAME` | (Optional) Display name shown in the UI |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy (e.g., `/passwd-sso`). Set before build |
+| `APP_URL` | (Optional) External URL when behind reverse proxy/CDN (origin only) |
 | `DATABASE_URL` | PostgreSQL connection string |
+| `AUTH_URL` | Application origin (e.g., `http://localhost:3000`) |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
 | `AUTH_GOOGLE_SECRET` | Google OAuth client secret |
@@ -179,6 +188,12 @@ Edit `.env.local` — key variables:
 | `SAML_PROVIDER_NAME` | Sign-in page display name (e.g., "HENNGE") |
 | `SHARE_MASTER_KEY` | `openssl rand -hex 32` — for server-encrypted share links/sends |
 | `VERIFIER_PEPPER_KEY` | `openssl rand -hex 32` — passphrase verifier pepper (**required in prod**) |
+| `DIRECTORY_SYNC_MASTER_KEY` | `openssl rand -hex 32` — directory sync credential encryption (**required in prod**) |
+| `WEBAUTHN_RP_ID` | (Optional) Relying Party ID (your domain) |
+| `WEBAUTHN_RP_NAME` | (Optional) Relying Party display name |
+| `WEBAUTHN_RP_ORIGIN` | (Optional) RP origin for verification (e.g., `http://localhost:3000`) |
+| `WEBAUTHN_PRF_SECRET` | `openssl rand -hex 32` — PRF salt derivation for passkey vault unlock |
+| `OPENAPI_PUBLIC` | (Optional) Set to `false` to require auth for OpenAPI spec |
 | `REDIS_URL` | Redis URL for rate limiting (**required in prod**) |
 | `BLOB_BACKEND` | Attachment backend (`db` / `s3` / `azure` / `gcs`) |
 | `AWS_REGION`, `S3_ATTACHMENTS_BUCKET` | Required when `BLOB_BACKEND=s3` |
@@ -186,6 +201,16 @@ Edit `.env.local` — key variables:
 | `AZURE_STORAGE_CONNECTION_STRING` or `AZURE_STORAGE_SAS_TOKEN` | Required when `BLOB_BACKEND=azure` |
 | `GCS_ATTACHMENTS_BUCKET` | Required when `BLOB_BACKEND=gcs` |
 | `BLOB_OBJECT_PREFIX` | Optional key prefix for cloud object paths |
+| `AUDIT_LOG_FORWARD` | (Optional) Emit structured JSON audit logs to stdout |
+| `AUDIT_LOG_APP_NAME` | (Optional) App name for audit log forwarding |
+| `EMAIL_PROVIDER` | (Optional) `resend` or `smtp` — leave empty to disable email |
+| `EMAIL_FROM` | Sender address for emails |
+| `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Required when `EMAIL_PROVIDER=smtp` |
+| `DB_POOL_MAX`, `DB_POOL_*` | (Optional) PostgreSQL connection pool tuning |
+| `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |
+| `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | (Optional) Sentry DSN for error tracking |
+| `SENTRY_AUTH_TOKEN` | (Optional) Sentry auth token for source map upload |
 
 </details>
 
@@ -271,20 +296,27 @@ docs/                     # Documentation (architecture, security, operations, s
 | `npm run db:seed` | Seed data |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | Generate 256-bit hex key |
+| `npm run generate:icons` | Generate app icons |
 
 <details>
-<summary>CI / load-test / license scripts</summary>
+<summary>CI / security / load-test / license scripts</summary>
 
 | Command | Description |
 | --- | --- |
+| `npm run check:team-auth-rls` | Verify team auth + RLS patterns |
+| `npm run check:bypass-rls` | Detect RLS bypass in queries |
+| `npm run check:crypto-domains` | Validate crypto domain separation |
 | `npm run licenses:check` | Check app dependency licenses |
 | `npm run licenses:check:strict` | Strict license check (CI) |
 | `npm run licenses:check:ext` | Check extension dependency licenses |
 | `npm run licenses:check:ext:strict` | Strict extension license check (CI) |
+| `npm run licenses:check:cli` | Check CLI dependency licenses |
+| `npm run licenses:check:cli:strict` | Strict CLI license check (CI) |
+| `npm run test:cli` | Run CLI tests |
 | `npm run test:load:smoke` | Load-test seed smoke checks |
 | `npm run test:load:seed` | Seed load-test users/sessions |
-| `npm run test:load` | k6 mixed-workload scenario |
-| `npm run test:load:health` | k6 health endpoint scenario |
+| `npm run test:load` | k6 mixed-workload scenario (requires k6) |
+| `npm run test:load:health` | k6 health endpoint scenario (requires k6) |
 | `npm run test:load:cleanup` | Cleanup load-test data |
 | `npm run scim:smoke` | SCIM smoke checks (requires `SCIM_TOKEN`) |
 
@@ -304,6 +336,10 @@ docs/                     # Documentation (architecture, security, operations, s
 - [Docker Setup](docs/setup/docker/en.md) · [AWS](docs/setup/aws/en.md) · [Vercel](docs/setup/vercel/en.md) · [Azure](docs/setup/azure/en.md) · [GCP](docs/setup/gcp/en.md)
 - [Terraform (AWS)](infra/terraform/README.md) / [日本語](infra/terraform/README.ja.md)
 - [Deployment Operations](docs/operations/deployment.md)
+- [Backup & Recovery](docs/operations/backup-recovery/en.md) / [日本語](docs/operations/backup-recovery/ja.md)
+- [Redis HA](docs/operations/redis-ha.md) — Redis Sentinel/Cluster configuration
+- [Audit Log Reference](docs/operations/audit-log-reference.md)
+- [Incident Runbook](docs/operations/incident-runbook.md)
 - [All docs](docs/README.md)
 
 ## License
