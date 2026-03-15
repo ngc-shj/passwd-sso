@@ -1,49 +1,61 @@
 # Code Review: unify-settings-page
 Date: 2026-03-15T00:00:00+09:00
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
-Initial review
+Round 1 fixes applied:
+- F1 (autoExpandInactive toggle) → resolved via useEffect pattern
+- F2 (String() wrap) → resolved
+
+Additional user-driven changes since round 1:
+- Webhook cards split into separate form + list Cards
+- Team policy categorized into sections
+- Sub-tabs merged (Add from Tenant + Invite → Add Member)
+- Transfer ownership search added
+- Passkey discoverable badge added
+- Delete team placement fixed
+- Slug read-only styling + 保管庫 terminology fix
 
 ## Functionality Findings
 
-### F1 (Major): autoExpandInactive prevents toggle from closing inactive section
-- **File**: tenant-webhook-card.tsx, team-webhook-card.tsx
-- **Problem**: `(showInactive || autoExpandInactive)` condition means user cannot close section when limitReached
-- **Fix**: Replaced with useEffect that sets showInactive=true when limitReached, then uses showInactive only
+### F1 (Minor) Unused Webhook import — RESOLVED
+- Both webhook card components imported Webhook icon but no longer used it
+- Action: Removed from imports
 
-### F2 (Minor): Unnecessary String() wrap for i18n count parameter
-- **File**: tenant-webhook-card.tsx L307, team-webhook-card.tsx L309
-- **Fix**: Removed String() wrapper
+### F2 (Minor) Transfer empty state message — RESOLVED
+- When no transfer candidates exist, showed "no matching members" (search message)
+- Action: Added conditional: show "noTransferCandidates" when search is empty
+
+### F3 (Minor) tabGeneralDesc omits delete mention — SKIPPED
+- Intentional: Owner-only feature should not be advertised in general tab description
 
 ## Security Findings
-
-All findings (S1-S5) relate to pre-existing code not modified by this PR:
-- S1-S2: Missing assertOrigin on webhook API routes (existing code)
-- S3: SSRF via DNS rebinding in webhook delivery (existing API code, not UI)
-- S4: Webhook secret rendered as plaintext input (existing behavior)
-- S5: Client-only admin gate for tenant settings (existing architecture)
-
-No security issues introduced by this change.
+No findings (UI-only refactoring, no auth/data changes)
 
 ## Testing Findings
 
-All findings (T1-T7) relate to pre-existing test patterns not changed by this PR:
-- T1: Collapsible mock always renders (existing mock for event group checkboxes)
-- T2-T4: Missing assertions in existing tests (form reset, toast.success negation, delete refresh)
-- T5-T7: Minor existing test quality issues
+### T1 (Major) autoExpand behavior untested — RESOLVED
+- Added test in both webhook card test files: 5 webhooks (4 active + 1 inactive) at limit → inactive auto-expanded
 
-No testing issues introduced by this change.
+### T2 (Minor) validationError branch untested — SKIPPED
+- Pre-existing untested branch, not introduced by this change
+
+### T3 (Minor) Test naming inaccuracy — SKIPPED
+- Pre-existing test, not modified by this change
 
 ## Adjacent Findings
 None
 
 ## Resolution Status
 
-### F1 (Major) autoExpandInactive toggle fix
-- Action: Replaced autoExpandInactive computed value with useEffect that sets showInactive state; display condition now uses showInactive only
-- Modified files: tenant-webhook-card.tsx, team-webhook-card.tsx
+### F1 Unused Webhook import
+- Action: Removed `Webhook` from import in both files
+- Modified: tenant-webhook-card.tsx:29, team-webhook-card.tsx:28
 
-### F2 (Minor) String() removal
-- Action: Removed String() wrapper from inactiveWebhooks count parameter
-- Modified files: tenant-webhook-card.tsx, team-webhook-card.tsx
+### F2 Transfer empty state
+- Action: Conditional message based on transferSearch.trim()
+- Modified: teams/[teamId]/settings/page.tsx, Team.json (en/ja)
+
+### T1 autoExpand test
+- Action: Added test case to both webhook test files
+- Modified: tenant-webhook-card.test.tsx, team-webhook-card.test.tsx
