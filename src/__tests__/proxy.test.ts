@@ -49,6 +49,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -112,6 +113,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -167,6 +169,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(401);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("does NOT bypass for Bearer + unknown child of /api/extension/token", async () => {
@@ -206,6 +209,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -215,6 +219,7 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
       dummyOptions,
     );
     expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -432,6 +437,7 @@ describe("proxy — access restriction", () => {
     const res = await proxy(req, dummyOptions);
 
     expect(res.status).toBe(403);
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
     const body = await res.json();
     expect(body.error).toBe("ACCESS_DENIED");
   });
@@ -447,6 +453,7 @@ describe("proxy — access restriction", () => {
     const res = await proxy(req, dummyOptions);
 
     expect(res.status).toBe(200);
+    expect(res.headers.get("Cache-Control")).toBe("private, no-store");
   });
 
   it("skips access restriction when tenant is null", async () => {
