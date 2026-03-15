@@ -432,8 +432,9 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 - Export can be disabled by team policy (`allowExport`)
 - Entry names decrypted client-side using team key
 
-### Tenant Audit Log (`/dashboard/tenant/audit-logs`)
+### Tenant Audit Log (`/dashboard/tenant` — audit-logs tab)
 
+- Embedded as `TenantAuditLogCard` within the tenant settings page (no standalone route)
 - Accessible to tenant admins only
 - Shows TENANT-scoped actions (admin resets, SCIM, directory sync, break-glass, tenant webhooks)
 
@@ -520,5 +521,6 @@ Changes across two feature branches that standardize audit log output:
 | Tenant webhooks | `src/app/api/tenant/webhooks/route.ts`, `src/app/api/tenant/webhooks/[webhookId]/route.ts` |
 | Personal UI | `src/app/[locale]/dashboard/audit-logs/page.tsx` |
 | Team UI | `src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx` |
+| Tenant UI (tab) | `src/components/settings/tenant-audit-log-card.tsx` (embedded in `src/app/[locale]/dashboard/tenant/page.tsx`) |
 | i18n (en) | `messages/en/AuditLog.json` |
 | i18n (ja) | `messages/ja/AuditLog.json` |
