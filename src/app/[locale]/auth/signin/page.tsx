@@ -2,7 +2,7 @@ import { redirect } from "@/i18n/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
-import { resolveCallbackUrl } from "@/lib/callback-url";
+import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/callback-url";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -43,7 +43,9 @@ export default async function SignInPage({
     } catch {
       // Malformed env var — fall back to empty origin (relative paths only)
     }
-    const href = resolveCallbackUrl(rawCallbackUrl ?? null, origin);
+    const resolved = resolveCallbackUrl(rawCallbackUrl ?? null, origin);
+    // Strip basePath + locale: next-intl redirect() re-adds both
+    const href = callbackUrlToHref(resolved);
     redirect({ href, locale });
   }
 

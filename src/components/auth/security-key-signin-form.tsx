@@ -14,7 +14,7 @@ import {
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
-import { stripLocalePrefix } from "@/i18n/locale-utils";
+import { callbackUrlToHref } from "@/lib/callback-url";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";
@@ -97,7 +97,7 @@ export function SecurityKeySignInForm() {
       }
 
       sessionStorage.setItem("psso:webauthn-signin", "1");
-      router.push(stripLocalePrefix(callbackUrl));
+      router.push(callbackUrlToHref(callbackUrl));
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         setError(t("securityKeySignInCancelled"));

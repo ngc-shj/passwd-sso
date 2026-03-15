@@ -9,7 +9,7 @@ import { isWebAuthnSupported, startPasskeyAuthentication, hexEncode } from "@/li
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
-import { stripLocalePrefix } from "@/i18n/locale-utils";
+import { callbackUrlToHref } from "@/lib/callback-url";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";
@@ -89,7 +89,7 @@ export function PasskeySignInButton() {
       sessionStorage.setItem("psso:webauthn-signin", "1");
 
       // 6. Navigate to callback destination (preserves ext_connect for extension)
-      router.push(stripLocalePrefix(callbackUrl));
+      router.push(callbackUrlToHref(callbackUrl));
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         setError(t("passkeySignInCancelled"));

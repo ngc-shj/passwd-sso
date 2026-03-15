@@ -1,4 +1,5 @@
 import { BASE_PATH } from "./url-helpers";
+import { stripLocalePrefix } from "@/i18n/locale-utils";
 
 const DEFAULT_PATH = `${BASE_PATH}/dashboard`;
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
@@ -53,4 +54,21 @@ export function resolveCallbackUrl(
   }
 
   return DEFAULT_PATH;
+}
+
+/**
+ * Convert a resolved callbackUrl to a href suitable for next-intl navigation
+ * (router.push / redirect). Strips basePath and locale prefix because
+ * next-intl re-adds both automatically.
+ *
+ * The proxy generates callbackUrl as `${basePath}${pathname}${search}`,
+ * so the basePath is already embedded. Passing it directly to router.push()
+ * would double the basePath.
+ */
+export function callbackUrlToHref(callbackUrl: string): string {
+  let path = callbackUrl;
+  if (BASE_PATH && path.startsWith(BASE_PATH)) {
+    path = path.slice(BASE_PATH.length) || "/";
+  }
+  return stripLocalePrefix(path);
 }

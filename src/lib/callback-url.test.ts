@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { resolveCallbackUrl } from "./callback-url";
+import { describe, it, expect, vi } from "vitest";
+import { resolveCallbackUrl, callbackUrlToHref } from "./callback-url";
 
 const ORIGIN = "https://example.com";
 const DEFAULT = "/dashboard";
@@ -80,5 +80,23 @@ describe("resolveCallbackUrl", () => {
 
   it("normalizes path traversal in relative URL", () => {
     expect(resolveCallbackUrl("/./dashboard", ORIGIN)).toBe("/dashboard");
+  });
+});
+
+describe("callbackUrlToHref", () => {
+  it("strips basePath and locale prefix", () => {
+    // BASE_PATH is "" in test env (mocked by url-helpers)
+    // so only locale stripping applies
+    expect(callbackUrlToHref("/ja/dashboard?ext_connect=1")).toBe(
+      "/dashboard?ext_connect=1",
+    );
+  });
+
+  it("returns path unchanged when no locale prefix", () => {
+    expect(callbackUrlToHref("/dashboard")).toBe("/dashboard");
+  });
+
+  it("returns / for root path", () => {
+    expect(callbackUrlToHref("/")).toBe("/");
   });
 });

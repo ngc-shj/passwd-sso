@@ -144,8 +144,9 @@ describe("SignInPage", () => {
       searchParams: makeSearchParams("/ja/dashboard?ext_connect=1"),
     });
 
+    // callbackUrlToHref strips locale prefix (next-intl redirect re-adds it)
     expect(mockRedirect).toHaveBeenCalledWith({
-      href: "/ja/dashboard?ext_connect=1",
+      href: "/dashboard?ext_connect=1",
       locale: "ja",
     });
   });
