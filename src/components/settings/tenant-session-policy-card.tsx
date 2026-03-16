@@ -29,6 +29,8 @@ export function TenantSessionPolicyCard() {
   const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState<string>("");
   const [vaultAutoLockEnabled, setVaultAutoLockEnabled] = useState(false);
   const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState<string>("");
+  const [minPinEnabled, setMinPinEnabled] = useState(false);
+  const [minPinLength, setMinPinLength] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
 
   const fetchPolicy = useCallback(async () => {
@@ -60,6 +62,14 @@ export function TenantSessionPolicyCard() {
           setVaultAutoLockEnabled(true);
           setVaultAutoLockMinutes(String(autoLockVal));
         }
+        const minPinVal = data.requireMinPinLength;
+        if (minPinVal === null || minPinVal === undefined) {
+          setMinPinEnabled(false);
+          setMinPinLength("");
+        } else {
+          setMinPinEnabled(true);
+          setMinPinLength(String(minPinVal));
+        }
       }
     } finally {
       setLoading(false);
@@ -86,6 +96,11 @@ export function TenantSessionPolicyCard() {
       if (!Number.isInteger(num) || num < 1) return t("vaultAutoLockValidationMin");
       if (num > 1440) return t("vaultAutoLockValidationMax");
     }
+    if (minPinEnabled) {
+      const num = Number(minPinLength);
+      if (!Number.isInteger(num) || num < 4) return t("minPinValidationMin");
+      if (num > 63) return t("minPinValidationMax");
+    }
     return null;
   };
 
@@ -102,6 +117,7 @@ export function TenantSessionPolicyCard() {
         maxConcurrentSessions: unlimited ? null : Number(maxSessions),
         sessionIdleTimeoutMinutes: idleTimeoutEnabled ? Number(idleTimeoutMinutes) : null,
         vaultAutoLockMinutes: vaultAutoLockEnabled ? Number(vaultAutoLockMinutes) : null,
+        requireMinPinLength: minPinEnabled ? Number(minPinLength) : null,
       };
       const res = await fetchApi(API_PATH.TENANT_POLICY, {
         method: "PATCH",
@@ -263,6 +279,49 @@ export function TenantSessionPolicyCard() {
             />
             <p className="text-xs text-muted-foreground">
               {t("vaultAutoLockHelp")}
+            </p>
+          </div>
+        )}
+
+        <Separator />
+
+        {/* Minimum PIN length for security keys */}
+        <div className="flex items-center justify-between">
+          <Label htmlFor="min-pin-toggle">{t("minPinEnabled")}</Label>
+          <Switch
+            id="min-pin-toggle"
+            checked={minPinEnabled}
+            onCheckedChange={(checked) => {
+              setMinPinEnabled(checked);
+              setError(null);
+              if (!checked) setMinPinLength("");
+            }}
+          />
+        </div>
+
+        {minPinEnabled && (
+          <div className="space-y-2">
+            <Label htmlFor="min-pin-length">{t("minPinLengthLabel")}</Label>
+            <Input
+              id="min-pin-length"
+              type="number"
+              min={4}
+              max={63}
+              value={minPinLength}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (!raw) { setMinPinLength(""); } else {
+                  const n = parseInt(raw, 10);
+                  if (Number.isNaN(n) || n < 4) { setMinPinLength(""); } else {
+                    setMinPinLength(String(Math.min(n, 63)));
+                  }
+                }
+                setError(null);
+              }}
+              placeholder="6"
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("minPinHelp")}
             </p>
           </div>
         )}
