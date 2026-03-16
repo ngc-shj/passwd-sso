@@ -150,6 +150,8 @@ function makeCreatedCredential(discoverable: boolean | null) {
     backedUp: true,
     discoverable,
     prfSupported: false,
+    minPinLength: null,
+    largeBlobSupported: null,
     createdAt: now,
   };
 }
@@ -170,7 +172,7 @@ describe("POST /api/webauthn/register/verify", () => {
       verified: true,
       registrationInfo: mockRegistrationInfo,
     });
-    mockPrismaUserFindUnique.mockResolvedValue({ tenantId: "tenant-1", locale: "ja" });
+    mockPrismaUserFindUnique.mockResolvedValue({ tenantId: "tenant-1", locale: "ja", tenant: null });
     mockParseDeviceFromUserAgent.mockReturnValue("Chrome on macOS");
     // withUserTenantRls: execute the callback directly
     mockWithUserTenantRls.mockImplementation(
@@ -441,5 +443,191 @@ describe("POST /api/webauthn/register/verify", () => {
         }),
       }),
     );
+  });
+
+  // ── minPinLength extraction tests ───────────────────────────
+
+  describe("minPinLength extraction", () => {
+    it("passes minPinLength=6 to Prisma when valid integer", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 6 }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ minPinLength: 6 }),
+        }),
+      );
+    });
+
+    it("passes minPinLength=null when value is out of range (2)", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 2 }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ minPinLength: null }),
+        }),
+      );
+    });
+
+    it("passes minPinLength=null when value is non-integer string", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: "4" }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ minPinLength: null }),
+        }),
+      );
+    });
+
+    it("passes minPinLength=null when not reported", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({}),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ minPinLength: null }),
+        }),
+      );
+    });
+  });
+
+  // ── largeBlob extraction tests ───────────────────────────────
+
+  describe("largeBlob extraction", () => {
+    it("passes largeBlobSupported=true when supported", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ largeBlob: { supported: true } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ largeBlobSupported: true }),
+        }),
+      );
+    });
+
+    it("passes largeBlobSupported=false when not supported", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ largeBlob: { supported: false } }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ largeBlobSupported: false }),
+        }),
+      );
+    });
+
+    it("passes largeBlobSupported=null when not reported", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({}),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ largeBlobSupported: null }),
+        }),
+      );
+    });
+  });
+
+  // ── Tenant PIN policy tests ──────────────────────────────────
+
+  describe("tenant PIN policy", () => {
+    it("rejects registration when minPinLength < requireMinPinLength", async () => {
+      mockPrismaUserFindUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        locale: "ja",
+        tenant: { requireMinPinLength: 6 },
+      });
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 4 }),
+      });
+      const { status, json } = await parseResponse(await POST(req));
+
+      expect(status).toBe(400);
+      expect(json.error).toBe("VALIDATION_ERROR");
+    });
+
+    it("allows registration when minPinLength not reported (platform authenticator)", async () => {
+      mockPrismaUserFindUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        locale: "ja",
+        tenant: { requireMinPinLength: 6 },
+      });
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({}),
+      });
+      const res = await POST(req);
+
+      expect(res.status).toBe(201);
+    });
+
+    it("allows registration when minPinLength equals requireMinPinLength", async () => {
+      mockPrismaUserFindUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        locale: "ja",
+        tenant: { requireMinPinLength: 6 },
+      });
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 6 }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+    });
+
+    it("allows registration when no policy set", async () => {
+      mockPrismaUserFindUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        locale: "ja",
+        tenant: { requireMinPinLength: null },
+      });
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 4 }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+    });
   });
 });

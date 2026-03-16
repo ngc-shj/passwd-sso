@@ -28,6 +28,8 @@ async function handleGET(_req: NextRequest) {
         deviceType: true,
         backedUp: true,
         discoverable: true,
+        minPinLength: true,
+        largeBlobSupported: true,
         transports: true,
         prfSupported: true,
         registeredDevice: true,

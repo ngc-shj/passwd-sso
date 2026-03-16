@@ -107,7 +107,12 @@ export async function generateRegistrationOpts(
       residentKey: "preferred",
       userVerification: "preferred",
     },
-    extensions: { credProps: true },
+    extensions: {
+      credProps: true,
+      minPinLength: true,
+      largeBlob: { support: "preferred" },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any,
   };
 
   return generateRegistrationOptions(opts);

@@ -46,6 +46,8 @@ interface Credential {
   deviceType: string;
   backedUp: boolean;
   discoverable: boolean | null;
+  minPinLength: number | null;
+  largeBlobSupported: boolean | null;
   transports: string[];
   prfSupported: boolean;
   registeredDevice: string | null;
@@ -460,6 +462,24 @@ export function PasskeyCredentialsCard() {
                           ? t("deviceTypeSingleDevice")
                           : t("deviceTypeMultiDevice")}
                       </span>
+                      {cred.minPinLength !== null && (
+                        <span
+                          className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          {t("pinLength", { length: cred.minPinLength })}
+                        </span>
+                      )}
+                      {cred.largeBlobSupported !== null && (
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded ${
+                            cred.largeBlobSupported
+                              ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+                              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                          }`}
+                        >
+                          {cred.largeBlobSupported ? t("largeBlobSupported") : t("largeBlobNotSupported")}
+                        </span>
+                      )}
                     </div>
 
                     {/* Metadata */}

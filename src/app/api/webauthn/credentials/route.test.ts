@@ -50,6 +50,8 @@ const mockCredentials = [
     discoverable: true,
     transports: ["internal", "hybrid"],
     prfSupported: true,
+    minPinLength: 6,
+    largeBlobSupported: true,
     registeredDevice: "Chrome on macOS",
     lastUsedDevice: null,
     createdAt: new Date("2026-03-15T00:00:00Z"),
@@ -64,6 +66,8 @@ const mockCredentials = [
     discoverable: null,
     transports: ["usb"],
     prfSupported: false,
+    minPinLength: null,
+    largeBlobSupported: null,
     registeredDevice: null,
     lastUsedDevice: null,
     createdAt: new Date("2026-03-14T00:00:00Z"),
@@ -91,11 +95,15 @@ describe("GET /api/webauthn/credentials", () => {
     expect(status).toBe(200);
     expect(json).toHaveLength(2);
 
-    // First credential: discoverable = true
+    // First credential: all extension fields populated
     expect(json[0]).toHaveProperty("discoverable", true);
+    expect(json[0]).toHaveProperty("minPinLength", 6);
+    expect(json[0]).toHaveProperty("largeBlobSupported", true);
 
-    // Second credential: discoverable = null (legacy, no credProps)
+    // Second credential: legacy, no extension data
     expect(json[1]).toHaveProperty("discoverable", null);
+    expect(json[1]).toHaveProperty("minPinLength", null);
+    expect(json[1]).toHaveProperty("largeBlobSupported", null);
   });
 
   it("queries Prisma with discoverable in select", async () => {
@@ -105,6 +113,20 @@ describe("GET /api/webauthn/credentials", () => {
     expect(mockPrismaFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         select: expect.objectContaining({ discoverable: true }),
+      }),
+    );
+  });
+
+  it("queries Prisma with minPinLength and largeBlobSupported in select", async () => {
+    const req = createRequest("GET", ROUTE_URL);
+    await GET(req);
+
+    expect(mockPrismaFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.objectContaining({
+          minPinLength: true,
+          largeBlobSupported: true,
+        }),
       }),
     );
   });
