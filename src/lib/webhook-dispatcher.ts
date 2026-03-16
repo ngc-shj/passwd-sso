@@ -99,27 +99,41 @@ function sanitizeWebhookData(value: unknown): unknown {
  * Blocks RFC 1918, loopback, link-local, and cloud metadata IPs.
  */
 function isPrivateIp(ip: string): boolean {
-  // IPv4
+  const parts = ip.split(".");
+  const first = parts.length === 4 ? parseInt(parts[0], 10) : NaN;
+  const second = parts.length === 4 ? parseInt(parts[1], 10) : NaN;
+
+  // IPv4 reserved ranges
   if (
-    ip.startsWith("10.") ||
-    ip.startsWith("127.") ||
-    ip.startsWith("0.") ||
+    ip.startsWith("10.") ||         // RFC 1918
+    ip.startsWith("127.") ||        // loopback
+    ip.startsWith("0.") ||          // "this" network
     ip === "0.0.0.0" ||
-    ip.startsWith("169.254.") || // link-local + cloud metadata
-    ip.startsWith("192.168.")
+    ip === "255.255.255.255" ||      // broadcast
+    ip.startsWith("169.254.") ||     // link-local + cloud metadata
+    ip.startsWith("192.168.") ||     // RFC 1918
+    ip.startsWith("192.0.0.") ||     // RFC 6890 IETF protocol assignments
+    first >= 240                     // RFC 1112 reserved + broadcast
   ) return true;
 
-  // 172.16.0.0/12
-  if (ip.startsWith("172.")) {
-    const second = parseInt(ip.split(".")[1], 10);
-    if (second >= 16 && second <= 31) return true;
-  }
+  // 172.16.0.0/12 — RFC 1918
+  if (first === 172 && second >= 16 && second <= 31) return true;
 
-  // IPv6 loopback / link-local / unique local
+  // 100.64.0.0/10 — RFC 6598 CGNAT (also used by Tailscale)
+  if (first === 100 && second >= 64 && second <= 127) return true;
+
+  // 198.18.0.0/15 — RFC 2544 benchmarking
+  if (first === 198 && (second === 18 || second === 19)) return true;
+
+  // IPv6 loopback / unspecified / link-local / unique local
   const lower = ip.toLowerCase();
-  if (lower === "::1" || lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd")) {
-    return true;
-  }
+  if (
+    lower === "::1" ||
+    lower === "::" ||
+    lower.startsWith("fe80:") ||
+    lower.startsWith("fc") ||
+    lower.startsWith("fd")
+  ) return true;
 
   return false;
 }
