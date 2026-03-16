@@ -1,30 +1,24 @@
-# Code Review: webauthn-l3-minpin-largeblob
+# Code Review: webauthn-l3-minpin-largeblob (Final)
 Date: 2026-03-16
-Review round: 1
+Review rounds: 2
 
-## Functionality Findings
+## Round 1 Findings
 
-### F-1 (Major) — RESOLVED
-- **File:** src/app/api/webauthn/register/verify/route.ts:165
-- **Problem:** `minPinLength === null` を policy violation として 400 を返すため、PIN を報告しないプラットフォーム認証器（Touch ID, Face ID, Windows Hello）がテナントポリシー設定時に一律ブロックされる
-- **Fix:** 条件を `minPinLength !== null && minPinLength < requireMinPin` に変更。未報告時は許可（ベストエフォート強制）
+### Functionality
+- F1 (Minor) RESOLVED: largeBlob badge displayed with line-through for null (unknown) — hid when null
+- F2 (Minor) RESOLVED: fetchPolicy silently swallowed errors — added catch + toast
 
-## Security Findings
-No findings.
+### Security
+- S1 (Minor) RESOLVED: transports stored without allowlist — added VALID_TRANSPORTS filter
 
-## Testing Findings
+### Testing
+- T1 (Major) RESOLVED: minPinLength boundary test used 2 instead of 3/4
+- T2 (Major) SKIPPED: parseBody mock bypasses schema — documented limitation
+- T3 (Major) RESOLVED: mockWithBypassRls lost after clearAllMocks — moved to beforeEach
+- T4 (Major) RESOLVED: self-lockout tests missing — added 409/confirmLockout tests
+- T5 (Minor) RESOLVED: credentialId length boundary — added 256/257 tests
 
-### T-1 (Major) — RESOLVED
-- **Problem:** tenant/policy 境界値テスト（4, 63）欠落
-- **Fix:** `requireMinPinLength=4` と `63` の accept テストを追加
-
-### T-2 (Minor) — RESOLVED
-- **Problem:** credentials レスポンスの minPinLength/largeBlobSupported 値確認なし
-- **Fix:** json[0]/json[1] のフィールド値アサーション追加
-
-### T-3 (Minor) — RESOLVED
-- **Problem:** register/verify ポリシーテスト「未報告時は 400」→ 仕様変更で 201 に
-- **Fix:** テストを「allows registration when minPinLength not reported」に変更
+## Round 2 — No new findings
 
 ## Resolution Status
-All findings resolved in round 1. Total tests: 4801 (all pass).
+All Critical/Major findings resolved. Total tests: 4806 (all pass).
