@@ -600,7 +600,7 @@ describe("POST /api/webauthn/register/verify", () => {
       const { status, json } = await parseResponse(await POST(req));
 
       expect(status).toBe(400);
-      expect(json.error).toBe("VALIDATION_ERROR");
+      expect(json.error).toBe("PIN_LENGTH_POLICY_NOT_SATISFIED");
     });
 
     it("allows registration when minPinLength not reported (platform authenticator)", async () => {

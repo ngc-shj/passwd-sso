@@ -172,7 +172,7 @@ async function handlePOST(req: NextRequest) {
   const requireMinPin = userInfo.tenant?.requireMinPinLength ?? null;
   if (requireMinPin !== null && minPinLength !== null && minPinLength < requireMinPin) {
     return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: "PIN length policy not satisfied" },
+      { error: "PIN_LENGTH_POLICY_NOT_SATISFIED" },
       { status: 400 },
     );
   }

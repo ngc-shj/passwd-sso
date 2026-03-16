@@ -190,7 +190,12 @@ export function PasskeyCredentialsCard() {
         setNickname("");
         fetchCredentials();
       } else {
-        toast.error(t("registerError"));
+        const err = await verifyRes.json().catch(() => ({}));
+        if (err.error === "PIN_LENGTH_POLICY_NOT_SATISFIED") {
+          toast.error(t("pinPolicyError"));
+        } else {
+          toast.error(t("registerError"));
+        }
       }
     } catch (err) {
       if (err instanceof Error) {
