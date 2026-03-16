@@ -21,10 +21,22 @@ import type { Prisma } from "@prisma/client";
 
 export const runtime = "nodejs";
 
-// In-memory dedup maps (per-process, resets on restart — acceptable)
+// In-memory dedup maps with bounded size (per-process, resets on restart)
+const MAX_CACHE_ENTRIES = 10_000;
 const viewAuditCache = new Map<string, number>(); // grantId -> last VIEW audit ts
 const expireAuditCache = new Set<string>(); // grantId set — recorded once per grant
 const VIEW_AUDIT_DEDUP_MS = 60 * 60 * 1000; // 1 hour
+
+function evictStaleCacheEntries(): void {
+  if (viewAuditCache.size >= MAX_CACHE_ENTRIES) {
+    const now = Date.now();
+    for (const [k, ts] of viewAuditCache) {
+      if (now - ts > VIEW_AUDIT_DEDUP_MS) viewAuditCache.delete(k);
+    }
+    if (viewAuditCache.size >= MAX_CACHE_ENTRIES) viewAuditCache.clear();
+  }
+  if (expireAuditCache.size >= MAX_CACHE_ENTRIES) expireAuditCache.clear();
+}
 
 // GET /api/tenant/breakglass/[id]/logs — View target user's personal logs via active grant
 async function handleGET(
@@ -156,6 +168,7 @@ async function handleGET(
           },
         }),
       );
+      evictStaleCacheEntries();
       viewAuditCache.set(grantId, Date.now());
     } catch {
       return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 503);

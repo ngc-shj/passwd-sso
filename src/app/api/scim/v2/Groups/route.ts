@@ -222,7 +222,7 @@ async function handlePOST(req: NextRequest) {
         members,
         getScimBaseUrl(),
       ),
-      201,
+      existing ? 200 : 201,
     );
   });
 }

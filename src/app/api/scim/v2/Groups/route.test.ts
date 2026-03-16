@@ -345,7 +345,7 @@ describe("POST /api/scim/v2/Groups", () => {
       }),
     );
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(200);
     expect(mockScimGroupMapping.create).not.toHaveBeenCalled();
   });
 });

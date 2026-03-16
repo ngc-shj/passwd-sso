@@ -147,7 +147,7 @@ describe("replaceScimGroup", () => {
     expect(mockTeamMemberUpdateMany).toHaveBeenCalledOnce();
     const updateCall = mockTeamMemberUpdateMany.mock.calls[0][0];
     expect(updateCall.where.id.in).toEqual(expect.arrayContaining(["m-1", "m-2"]));
-    expect(updateCall.data.role).toBe("MEMBER");
+    expect(updateCall.data.deactivatedAt).toBeInstanceOf(Date);
     expect(result.removed).toBe(2);
     expect(result.added).toBe(0);
   });
@@ -417,7 +417,7 @@ describe("patchScimGroup", () => {
     expect(mockTeamMemberUpdateMany).toHaveBeenCalledOnce();
     const updateCall = mockTeamMemberUpdateMany.mock.calls[0][0];
     expect(updateCall.where.id.in).toEqual(expect.arrayContaining(["m-1", "m-2"]));
-    expect(updateCall.data.role).toBe("MEMBER");
+    expect(updateCall.data.deactivatedAt).toBeInstanceOf(Date);
   });
 
   it("throws ScimOwnerProtectedError when adding a user with OWNER role", async () => {
