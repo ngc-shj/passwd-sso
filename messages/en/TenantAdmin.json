@@ -35,6 +35,7 @@
   "unlimited": "Unlimited",
   "sessionPolicySave": "Save",
   "sessionPolicySaved": "Session policy updated.",
+  "sessionPolicyLoadFailed": "Failed to load session policy.",
   "sessionPolicySaveFailed": "Failed to update session policy.",
   "sessionPolicyValidationMin": "Must be at least 1.",
   "sessionPolicyValidationMax": "Must be 100 or less.",

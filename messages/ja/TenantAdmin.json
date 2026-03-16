@@ -35,6 +35,7 @@
   "unlimited": "無制限",
   "sessionPolicySave": "保存",
   "sessionPolicySaved": "セッションポリシーを更新しました。",
+  "sessionPolicyLoadFailed": "セッションポリシーの読み込みに失敗しました。",
   "sessionPolicySaveFailed": "セッションポリシーの更新に失敗しました。",
   "sessionPolicyValidationMin": "1以上で入力してください。",
   "sessionPolicyValidationMax": "100以下で入力してください。",

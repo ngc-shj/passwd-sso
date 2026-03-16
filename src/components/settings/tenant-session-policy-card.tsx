@@ -72,10 +72,10 @@ export function TenantSessionPolicyCard() {
           setMinPinLength(String(minPinVal));
         }
       } else {
-        toast.error(t("sessionPolicySaveFailed"));
+        toast.error(t("sessionPolicyLoadFailed"));
       }
     } catch {
-      toast.error(t("sessionPolicySaveFailed"));
+      toast.error(t("sessionPolicyLoadFailed"));
     } finally {
       setLoading(false);
     }

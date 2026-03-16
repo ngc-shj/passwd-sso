@@ -94,6 +94,7 @@ vi.mock("@/lib/api-error-codes", () => ({
     RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
     SERVICE_UNAVAILABLE: "SERVICE_UNAVAILABLE",
     VALIDATION_ERROR: "VALIDATION_ERROR",
+    PIN_LENGTH_POLICY_NOT_SATISFIED: "PIN_LENGTH_POLICY_NOT_SATISFIED",
   },
 }));
 
@@ -368,6 +369,44 @@ describe("POST /api/webauthn/register/verify", () => {
 
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  // ── Transport allowlist ──────────────────────────────────
+
+  describe("transport allowlist", () => {
+    it("filters out invalid transport values", async () => {
+      const response = makeResponse();
+      response.response.transports = ["internal", "invalid-transport", "usb"];
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { response, nickname: "Test" },
+      });
+      await POST(req);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ transports: ["internal", "usb"] }),
+        }),
+      );
+    });
+
+    it("returns empty array when no transports reported", async () => {
+      const response = makeResponse();
+      delete response.response.transports;
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { response, nickname: "Test" },
+      });
+      await POST(req);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ transports: [] }),
+        }),
+      );
+    });
   });
 
   it("returns 400 with VALIDATION_ERROR when challenge has expired", async () => {
