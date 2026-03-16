@@ -4,11 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { MemberInfo } from "@/components/member-info";
 import {
   Select,
   SelectContent,
@@ -49,18 +45,6 @@ const ROLE_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
   ADMIN: "secondary",
   MEMBER: "outline",
 };
-
-function initials(name: string | null, email: string | null): string {
-  if (name) {
-    return name
-      .split(/\s+/)
-      .slice(0, 2)
-      .map((w) => w[0])
-      .join("")
-      .toUpperCase();
-  }
-  return (email?.[0] ?? "?").toUpperCase();
-}
 
 /** ROLE_LEVEL mirrors tenant-auth.ts hierarchy. */
 const ROLE_LEVEL: Record<string, number> = {
@@ -194,34 +178,25 @@ export function TenantMembersCard() {
                   }`}
                 >
                   <div className="flex items-center gap-3">
-                    <Avatar className="h-8 w-8">
-                      <AvatarImage src={m.image ?? undefined} />
-                      <AvatarFallback className="text-xs">
-                        {initials(m.name, m.email)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {m.name ?? m.email ?? "—"}
-                        </span>
-                        {!canChangeRole && (
-                          <Badge variant={ROLE_VARIANT[m.role] ?? "outline"}>
-                            {t(ROLE_LABEL[m.role] ?? "roleMember")}
-                          </Badge>
-                        )}
-                        {isDeactivated && (
-                          <Badge variant="outline" className="text-muted-foreground">
-                            {t("deactivated")}
-                          </Badge>
-                        )}
-                      </div>
-                      {m.email && m.name && (
-                        <p className="text-xs text-muted-foreground truncate">
-                          {m.email}
-                        </p>
-                      )}
-                    </div>
+                    <MemberInfo
+                      name={m.name}
+                      email={m.email}
+                      image={m.image}
+                      nameExtra={
+                        <>
+                          {!canChangeRole && (
+                            <Badge variant={ROLE_VARIANT[m.role] ?? "outline"}>
+                              {t(ROLE_LABEL[m.role] ?? "roleMember")}
+                            </Badge>
+                          )}
+                          {isDeactivated && (
+                            <Badge variant="outline" className="text-muted-foreground">
+                              {t("deactivated")}
+                            </Badge>
+                          )}
+                        </>
+                      }
+                    />
                   </div>
 
                   <div className="flex items-center gap-1">
