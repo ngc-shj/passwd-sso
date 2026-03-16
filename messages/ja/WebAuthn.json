@@ -51,7 +51,7 @@
   "testSuccess": "認証を確認しました。",
   "testSuccessWithPrf": "認証と保管庫の自動アンロックを確認しました。",
   "testError": "認証テストに失敗しました。",
-  "discoverable": "パスキーログイン対応",
+  "discoverable": "パスキーログイン",
   "discoverableDescription": "このパスキーはパスワードレスサインインに対応しています。メールアドレスを入力せずに直接サインインできます。",
   "notDiscoverable": "メール認証のみ",
   "notDiscoverableDescription": "このパスキーはDiscoverable Credentialではありません。メール + セキュリティキーオプションでサインインできます。PRF対応の場合は保管庫のロック解除にも使用できます。",
