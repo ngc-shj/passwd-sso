@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Fingerprint, KeyRound, Loader2, Monitor, Plus, ShieldCheck, ShieldOff, Smartphone } from "lucide-react";
+import { Fingerprint, KeyRound, Loader2, Monitor, Plus, Smartphone } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -425,59 +425,51 @@ export function PasskeyCredentialsCard() {
                       {/* Discoverable vs non-discoverable credential indicator.
                          Uses credProps.rk (WebAuthn L3) when available,
                          falls back to heuristic (singleDevice + not backed up). */}
-                      {isNonDiscoverable(cred) ? (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
-                          title={t("notDiscoverableDescription")}
-                        >
-                          {t("notDiscoverable")}
-                        </span>
-                      ) : (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                          title={t("discoverableDescription")}
-                        >
-                          {t("discoverable")}
-                        </span>
-                      )}
+                      {/* Discoverable (passkey sign-in) */}
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded ${
+                          isNonDiscoverable(cred)
+                            ? "text-muted-foreground/50 line-through"
+                            : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
+                        }`}
+                        title={isNonDiscoverable(cred) ? t("notDiscoverableDescription") : t("discoverableDescription")}
+                      >
+                        {t("discoverable")}
+                      </span>
+
+                      {/* Vault unlock (PRF) */}
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded inline-flex items-center gap-1 ${
                           cred.prfSupported
                             ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                            : "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+                            : "text-muted-foreground/50 line-through"
                         }`}
                       >
-                        {cred.prfSupported ? (
-                          <ShieldCheck className="h-3 w-3" />
-                        ) : (
-                          <ShieldOff className="h-3 w-3" />
-                        )}
-                        {t("vaultUnlock")}:{" "}
-                        {cred.prfSupported
-                          ? t("vaultUnlockEnabled")
-                          : t("vaultUnlockDisabled")}
+                        {t("vaultUnlock")}
                       </span>
+
+                      {/* Offline backup (largeBlob) */}
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded ${
+                          cred.largeBlobSupported
+                            ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+                            : "text-muted-foreground/50 line-through"
+                        }`}
+                      >
+                        {t("largeBlobLabel")}
+                      </span>
+
+                      {/* Device type */}
                       <span className="text-xs px-1.5 py-0.5 rounded bg-muted">
                         {cred.deviceType === "singleDevice"
                           ? t("deviceTypeSingleDevice")
                           : t("deviceTypeMultiDevice")}
                       </span>
+
+                      {/* PIN length (only shown when reported) */}
                       {cred.minPinLength !== null && (
-                        <span
-                          className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200"
-                        >
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-200">
                           {t("pinLength", { length: cred.minPinLength })}
-                        </span>
-                      )}
-                      {cred.largeBlobSupported !== null && (
-                        <span
-                          className={`text-xs px-1.5 py-0.5 rounded ${
-                            cred.largeBlobSupported
-                              ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
-                              : "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-                          }`}
-                        >
-                          {cred.largeBlobSupported ? t("largeBlobSupported") : t("largeBlobNotSupported")}
                         </span>
                       )}
                     </div>

@@ -57,6 +57,6 @@
   "notDiscoverableDescription": "このパスキーはDiscoverable Credentialではありません。メール + セキュリティキーオプションでサインインできます。PRF対応の場合は保管庫のロック解除にも使用できます。",
   "nonDiscoverableNonPrfWarning": "このパスキーはパスキーサインインにも保管庫のロック解除にも使用できません。サインインにはメール + セキュリティキーオプションをご利用ください。別の認証器の登録をお勧めします。",
   "pinLength": "PIN: {length}桁",
-  "largeBlobSupported": "オフラインバックアップ対応",
-  "largeBlobNotSupported": "オフラインバックアップ非対応"
+  "largeBlobLabel": "オフラインバックアップ",
+  "largeBlobSupported": "オフラインバックアップ対応"
 }

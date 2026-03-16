@@ -57,6 +57,6 @@
   "notDiscoverableDescription": "This passkey is not a discoverable credential. Use the email + security key option to sign in. It can also be used for vault unlock if PRF is supported.",
   "nonDiscoverableNonPrfWarning": "This passkey cannot be used for passkey sign-in or vault unlock. Use the email + security key option to sign in. Consider registering a different authenticator.",
   "pinLength": "PIN: {length} digits",
-  "largeBlobSupported": "Offline backup capable",
-  "largeBlobNotSupported": "No offline backup"
+  "largeBlobLabel": "Offline backup",
+  "largeBlobSupported": "Offline backup capable"
 }
