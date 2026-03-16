@@ -168,14 +168,14 @@ async function applyAddOperations(
 
 async function applyRemoveOperations(
   tx: TxClient,
-  _teamId: string,
+  teamId: string,
   role: TeamRole,
   memberIds: string[],
 ): Promise<void> {
   if (memberIds.length === 0) return;
 
   const freshMembers = await tx.teamMember.findMany({
-    where: { id: { in: memberIds } },
+    where: { id: { in: memberIds }, teamId },
     select: { id: true, role: true },
   });
 
