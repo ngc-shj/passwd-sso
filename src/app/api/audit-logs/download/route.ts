@@ -14,9 +14,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { VALID_ACTIONS } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
-
-const BATCH_SIZE = 500;
-const MAX_RANGE_DAYS = 90;
+import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -51,14 +49,14 @@ async function handleGET(req: NextRequest) {
       return validationError({ date: "Invalid date format" });
     }
     const now = new Date();
-    const resolvedFrom = fromDate ?? new Date(now.getTime() - MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
     const resolvedTo = toDate ?? now;
     const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
     if (diffMs < 0) {
       return validationError({ date: "'from' must be before 'to'" });
     }
-    if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
-      return validationError({ range: `Maximum range is ${MAX_RANGE_DAYS} days` });
+    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+      return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
     }
   }
 
@@ -113,7 +111,7 @@ async function handleGET(req: NextRequest) {
                 user: { select: { id: true, name: true, email: true } },
               },
               orderBy: { createdAt: "asc" },
-              take: BATCH_SIZE,
+              take: AUDIT_LOG_BATCH_SIZE,
               ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
             }),
           );
@@ -158,7 +156,7 @@ async function handleGET(req: NextRequest) {
             }
           }
 
-          if (batch.length < BATCH_SIZE) {
+          if (batch.length < AUDIT_LOG_BATCH_SIZE) {
             hasMore = false;
           } else {
             cursor = batch[batch.length - 1].id;

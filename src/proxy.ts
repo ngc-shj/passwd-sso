@@ -9,6 +9,7 @@ import { isHttps } from "./lib/url-helpers";
 import { extractClientIp } from "./lib/ip-access";
 import { checkAccessRestrictionWithAudit } from "./lib/access-restriction";
 import { resolveUserTenantId } from "./lib/tenant-context";
+import { SESSION_CACHE_MAX } from "./lib/validations/common.server";
 
 const intlMiddleware = createIntlMiddleware(routing);
 
@@ -18,7 +19,6 @@ type ProxyOptions = {
 };
 
 const SESSION_CACHE_TTL_MS = 30_000;
-const SESSION_CACHE_MAX = 500;
 
 interface SessionInfo {
   valid: boolean;

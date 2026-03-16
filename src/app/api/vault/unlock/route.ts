@@ -12,12 +12,13 @@ import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
 const unlockSchema = z.object({
-  authHash: z.string().regex(/^[0-9a-f]{64}$/),
-  verifierHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  authHash: hexHash,
+  verifierHash: hexHash.optional(),
 });
 
 const unlockLimiter = createRateLimiter({

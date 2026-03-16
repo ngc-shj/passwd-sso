@@ -13,6 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import type { NotificationType } from "@prisma/client";
 import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { NOTIFICATION_TITLE_MAX, NOTIFICATION_BODY_MAX } from "@/lib/validations/common";
 
 export interface CreateNotificationParams {
   userId: string;
@@ -70,8 +71,8 @@ export function createNotification(params: CreateNotificationParams): void {
           userId,
           tenantId: resolvedTenantId,
           type,
-          title: title.slice(0, 200),
-          body: body.slice(0, 2000),
+          title: title.slice(0, NOTIFICATION_TITLE_MAX),
+          body: body.slice(0, NOTIFICATION_BODY_MAX),
           metadata: (safeMetadata ?? undefined) as Parameters<typeof prisma.notification.create>[0]["data"]["metadata"],
         },
       });

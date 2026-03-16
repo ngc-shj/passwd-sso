@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
+import { DISPLAY_INITIALS_LENGTH } from "@/lib/validations/common";
 
 export function UserAvatar() {
   const { data: session } = useSession();
@@ -20,7 +21,7 @@ export function UserAvatar() {
     .map((n) => n[0])
     .join("")
     .toUpperCase()
-    .slice(0, 2) || "?";
+    .slice(0, DISPLAY_INITIALS_LENGTH) || "?";
 
   return (
     <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">

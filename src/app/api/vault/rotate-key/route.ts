@@ -10,6 +10,7 @@ import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
@@ -17,17 +18,17 @@ const rotateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
 
 const rotateKeySchema = z.object({
   // Current passphrase verification
-  currentAuthHash: z.string().length(64),
+  currentAuthHash: hexHash,
   // New vault wrapping data
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: z.string().length(24),
-  secretKeyAuthTag: z.string().length(32),
-  accountSalt: z.string().length(64),
-  newAuthHash: z.string().length(64),
+  secretKeyIv: hexIv,
+  secretKeyAuthTag: hexAuthTag,
+  accountSalt: hexSalt,
+  newAuthHash: hexHash,
   verificationArtifact: z.object({
     ciphertext: z.string().min(1),
-    iv: z.string().length(24),
-    authTag: z.string().length(32),
+    iv: hexIv,
+    authTag: hexAuthTag,
   }),
 });
 

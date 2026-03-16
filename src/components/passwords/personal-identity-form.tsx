@@ -21,6 +21,7 @@ import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { toISODateString } from "@/lib/format-datetime";
 import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
@@ -219,7 +220,7 @@ export function IdentityForm({
     e.preventDefault();
 
     let hasError = false;
-    if (dateOfBirth && dateOfBirth > new Date().toISOString().slice(0, 10)) {
+    if (dateOfBirth && dateOfBirth > toISODateString()) {
       setDobError(t("dobFuture"));
       hasError = true;
     } else {

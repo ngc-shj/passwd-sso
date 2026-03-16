@@ -19,6 +19,7 @@ import { Loader2, Eye, X, ChevronDown, ChevronUp } from "lucide-react";
 import { apiPath, GRANT_STATUS } from "@/lib/constants";
 import type { GrantStatus } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { DISPLAY_REASON_PREVIEW } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format-datetime";
 import { formatUserName } from "@/lib/format-user";
 import { toast } from "sonner";
@@ -138,7 +139,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
           {t("requester")}: {formatUserName(grant.requester)}
         </p>
         <p className="text-xs text-muted-foreground truncate" title={grant.reason}>
-          {grant.reason.length > 80 ? `${grant.reason.slice(0, 80)}…` : grant.reason}
+          {grant.reason.length > DISPLAY_REASON_PREVIEW ? `${grant.reason.slice(0, DISPLAY_REASON_PREVIEW)}…` : grant.reason}
         </p>
         <p className="text-xs text-muted-foreground">
           {t("createdAt")}: {formatDateTime(grant.createdAt, locale)} /{" "}

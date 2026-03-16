@@ -1,5 +1,6 @@
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
 import { fetchApi } from "@/lib/url-helpers";
+import { MAX_IMPORT_FOLDERS } from "@/lib/validations/common";
 
 interface ExistingFolder {
   id: string;
@@ -10,7 +11,6 @@ interface ExistingFolder {
 type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;
 
 const PATH_SEPARATOR = " / ";
-const MAX_IMPORT_FOLDERS = 200;
 
 /**
  * Split a folder path string ("Parent / Child / Grandchild") into trimmed segments.

@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
+import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
-
-const RATE_WINDOW_MS = 60_000;
-const RATE_MAX = 60;
 const rate = new Map<string, { resetAt: number; count: number }>();
 
 /**
@@ -71,7 +69,7 @@ async function handlePOST(request: Request) {
   const entry = rate.get(ip);
   if (!entry || entry.resetAt < now) {
     rate.set(ip, { resetAt: now + RATE_WINDOW_MS, count: 1 });
-  } else if (entry.count >= RATE_MAX) {
+  } else if (entry.count >= CSP_REPORT_RATE_MAX) {
     return new NextResponse(null, { status: 204 });
   } else {
     entry.count += 1;

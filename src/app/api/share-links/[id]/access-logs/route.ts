@@ -5,6 +5,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { SHARE_ACCESS_LOG_LIMIT } from "@/lib/validations/common.server";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -31,7 +32,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
-  const limit = 50;
+  const limit = SHARE_ACCESS_LOG_LIMIT;
 
   let logs;
   try {

@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
 import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
@@ -178,7 +179,7 @@ export function SecureNoteForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const tags = toTagPayload(base.selectedTags);
-    const snippet = content.slice(0, 100);
+    const snippet = content.slice(0, ENTRY_SNIPPET_MAX);
 
     await base.submitEntry({
       t: tPw,

@@ -1,5 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
 
 export function buildPersonalImportBlobs(entry: ParsedEntry): {
   fullBlob: string;
@@ -182,7 +183,7 @@ export function buildPersonalImportBlobs(entry: ParsedEntry): {
       }),
       overviewBlob: JSON.stringify({
         title: entry.title,
-        snippet: (entry.content || "").slice(0, 100),
+        snippet: (entry.content || "").slice(0, ENTRY_SNIPPET_MAX),
         tags: entry.tags,
         requireReprompt: entry.requireReprompt,
         travelSafe: entry.travelSafe,

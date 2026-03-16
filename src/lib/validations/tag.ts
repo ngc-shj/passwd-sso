@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TAG_NAME_MAX_LENGTH } from "./common";
+import { TAG_NAME_MAX_LENGTH, HEX_COLOR_REGEX } from "./common";
 
 // ─── Tag Schemas ────────────────────────────────────────────
 
@@ -7,7 +7,7 @@ export const createTagSchema = z.object({
   name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim(),
   color: z
     .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
+    .regex(HEX_COLOR_REGEX)
     .optional()
     .or(z.literal(""))
     .or(z.null().transform(() => undefined)),
@@ -18,7 +18,7 @@ export const updateTagSchema = z.object({
   name: z.string().min(1).max(TAG_NAME_MAX_LENGTH).trim().optional(),
   color: z
     .string()
-    .regex(/^#[0-9a-fA-F]{6}$/)
+    .regex(HEX_COLOR_REGEX)
     .nullable()
     .optional()
     .or(z.literal("")),

@@ -16,6 +16,7 @@ import {
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -48,7 +49,6 @@ interface WebhookRecord {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const MAX_RETRIES = 3;
 const RETRY_DELAYS = [1_000, 5_000, 25_000];
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
@@ -98,7 +98,7 @@ async function deliverWithRetry(
   payload: string,
   signature: string,
 ): Promise<boolean> {
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+  for (let attempt = 0; attempt < WEBHOOK_MAX_RETRIES; attempt++) {
     try {
       const res = await fetch(url, {
         method: "POST",
@@ -116,14 +116,12 @@ async function deliverWithRetry(
       // Network or timeout error
     }
 
-    if (attempt < MAX_RETRIES - 1) {
+    if (attempt < WEBHOOK_MAX_RETRIES - 1) {
       await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
     }
   }
   return false;
 }
-
-const WEBHOOK_CONCURRENCY = 5;
 
 async function deliverSingleWebhook(
   webhook: WebhookRecord,
@@ -237,7 +235,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
             data: {
               failCount: newFailCount,
               lastFailedAt: new Date(),
-              lastError: `Delivery failed after ${MAX_RETRIES} attempts`,
+              lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
@@ -307,7 +305,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
             data: {
               failCount: newFailCount,
               lastFailedAt: new Date(),
-              lastError: `Delivery failed after ${MAX_RETRIES} attempts`,
+              lastError: `Delivery failed after ${WEBHOOK_MAX_RETRIES} attempts`,
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });

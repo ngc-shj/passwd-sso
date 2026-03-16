@@ -1,5 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import { toISODateString } from "@/lib/format-datetime";
 
 interface ValidateTeamEntryInput {
   entryType: EntryTypeValue;
@@ -25,7 +26,7 @@ interface ValidateTeamEntryResult {
 export function validateTeamEntryBeforeSubmit(
   input: ValidateTeamEntryInput
 ): ValidateTeamEntryResult {
-  const today = input.todayIsoDate ?? new Date().toISOString().slice(0, 10);
+  const today = input.todayIsoDate ?? toISODateString();
   const title = input.title.trim();
 
   if (input.entryType === ENTRY_TYPE.PASSKEY) {

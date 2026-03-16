@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { unauthorized, notFound, forbidden } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
 
 // GET /api/passwords/[id]/history - List entry history (encrypted blobs)
 async function handleGET(
@@ -35,7 +36,7 @@ async function handleGET(
     prisma.passwordEntryHistory.findMany({
       where: { entryId: id },
       orderBy: { changedAt: "desc" },
-      take: 20,
+      take: HISTORY_PAGE_SIZE,
     }),
   );
 

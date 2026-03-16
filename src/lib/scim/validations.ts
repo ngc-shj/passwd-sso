@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SCIM_PATCH_OPERATIONS_MAX, SCIM_GROUP_MEMBERS_MAX, SCIM_FIELD_MAX_LENGTH } from "@/lib/validations/common";
 
 /**
  * SCIM User creation / PUT schema.
@@ -14,13 +15,13 @@ export const scimUserSchema = z
         (s) => s.includes("urn:ietf:params:scim:schemas:core:2.0:User"),
         "Missing User schema URN",
       ),
-    userName: z.string().email().max(255),
-    externalId: z.string().max(255).optional(),
+    userName: z.string().email().max(SCIM_FIELD_MAX_LENGTH),
+    externalId: z.string().max(SCIM_FIELD_MAX_LENGTH).optional(),
     name: z
       .object({
-        formatted: z.string().max(255).optional(),
-        givenName: z.string().max(255).optional(),
-        familyName: z.string().max(255).optional(),
+        formatted: z.string().max(SCIM_FIELD_MAX_LENGTH).optional(),
+        givenName: z.string().max(SCIM_FIELD_MAX_LENGTH).optional(),
+        familyName: z.string().max(SCIM_FIELD_MAX_LENGTH).optional(),
       })
       .optional(),
     active: z.boolean().optional().default(true),
@@ -52,7 +53,7 @@ export const scimPatchOpSchema = z.object({
       }),
     )
     .min(1)
-    .max(100),
+    .max(SCIM_PATCH_OPERATIONS_MAX),
 });
 
 export type ScimPatchOpInput = z.infer<typeof scimPatchOpSchema>;
@@ -67,15 +68,15 @@ export const scimGroupSchema = z.object({
       (s) => s.includes("urn:ietf:params:scim:schemas:core:2.0:Group"),
       "Missing Group schema URN",
     ),
-  displayName: z.string().min(1).max(255),
-  externalId: z.string().max(255).optional(),
+  displayName: z.string().min(1).max(SCIM_FIELD_MAX_LENGTH),
+  externalId: z.string().max(SCIM_FIELD_MAX_LENGTH).optional(),
   members: z
     .array(
       z.object({
-        value: z.string().min(1).max(255),
+        value: z.string().min(1).max(SCIM_FIELD_MAX_LENGTH),
       }),
     )
-    .max(1000)
+    .max(SCIM_GROUP_MEMBERS_MAX)
     .optional()
     .default([]),
 });

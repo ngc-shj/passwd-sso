@@ -1,3 +1,5 @@
+import { TAG_TREE_MAX_DEPTH } from "@/lib/validations/common";
+
 export interface FlatTag {
   id: string;
   name: string;
@@ -9,8 +11,6 @@ export interface TagTreeNode extends FlatTag {
   children: TagTreeNode[];
   depth: number;
 }
-
-const MAX_DEPTH = 3;
 
 /**
  * Build a tree from a flat array of tags.
@@ -135,7 +135,7 @@ export class TagTreeError extends Error {
 
 /**
  * Validate that setting newParentId for tagId does not create a cycle
- * and does not exceed MAX_DEPTH.
+ * and does not exceed TAG_TREE_MAX_DEPTH.
  *
  * @param tagId - The tag being moved (or null for a new tag)
  * @param newParentId - The proposed parent (null = root)
@@ -178,12 +178,12 @@ export function validateParentChain(
   // We also need to account for the deepest descendant of tagId
   if (tagId) {
     const maxDescendantDepth = getMaxDescendantDepth(tagId, allTags);
-    if (depth + maxDescendantDepth - 1 > MAX_DEPTH) {
-      throw new TagTreeError(`Maximum nesting depth of ${MAX_DEPTH} exceeded`);
+    if (depth + maxDescendantDepth - 1 > TAG_TREE_MAX_DEPTH) {
+      throw new TagTreeError(`Maximum nesting depth of ${TAG_TREE_MAX_DEPTH} exceeded`);
     }
   } else {
-    if (depth > MAX_DEPTH) {
-      throw new TagTreeError(`Maximum nesting depth of ${MAX_DEPTH} exceeded`);
+    if (depth > TAG_TREE_MAX_DEPTH) {
+      throw new TagTreeError(`Maximum nesting depth of ${TAG_TREE_MAX_DEPTH} exceeded`);
     }
   }
 }

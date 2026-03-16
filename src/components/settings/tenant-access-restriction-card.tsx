@@ -29,9 +29,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
-
-const MAX_CIDRS = 50;
+import { TAILNET_NAME_MAX_LENGTH, MAX_CIDRS } from "@/lib/validations";
 const CIDR_REGEX = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
 const CIDR_V6_REGEX = /^[0-9a-fA-F:]*:[0-9a-fA-F:]*\/\d{1,3}$/;
 

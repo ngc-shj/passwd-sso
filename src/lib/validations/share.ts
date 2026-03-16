@@ -13,7 +13,10 @@ import {
   NAME_MAX_LENGTH,
   MAX_VIEWS_MIN,
   MAX_VIEWS_MAX,
+  EXPIRY_PERIODS,
+  SHARE_ACCESS_PASSWORD_MAX,
   encryptedFieldSchema,
+  hexHash,
 } from "./common";
 import { entryTypeSchema } from "./entry";
 
@@ -87,7 +90,7 @@ export const createShareLinkSchema = z.object({
   data: shareDataSchema.optional(),
   encryptedShareData: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional(),
-  expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
+  expiresIn: z.enum(EXPIRY_PERIODS),
   maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
   permissions: z.array(z.enum(SHARE_PERMISSION_VALUES)).optional(),
   requirePassword: z.boolean().optional(),
@@ -108,8 +111,8 @@ export const createShareLinkSchema = z.object({
 // ─── Share Access Password Schemas ────────────────────────
 
 export const verifyShareAccessSchema = z.object({
-  token: z.string().regex(/^[0-9a-f]{64}$/),
-  password: z.string().min(1).max(43),
+  token: hexHash,
+  password: z.string().min(1).max(SHARE_ACCESS_PASSWORD_MAX),
 });
 
 // ─── Type Exports ──────────────────────────────────────────

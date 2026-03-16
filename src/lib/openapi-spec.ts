@@ -4,6 +4,8 @@
  * All data endpoints return E2E encrypted blobs — the server never sees plaintext.
  */
 
+import { HEX_IV_LENGTH, HEX_AUTH_TAG_LENGTH } from "@/lib/validations/common";
+
 export function buildOpenApiSpec(baseUrl: string) {
   return {
     openapi: "3.1.0",
@@ -161,8 +163,8 @@ export function buildOpenApiSpec(baseUrl: string) {
           required: ["ciphertext", "iv", "authTag"],
           properties: {
             ciphertext: { type: "string", description: "Hex-encoded AES-256-GCM ciphertext" },
-            iv: { type: "string", description: "Hex-encoded 12-byte IV", minLength: 24, maxLength: 24 },
-            authTag: { type: "string", description: "Hex-encoded 16-byte auth tag", minLength: 32, maxLength: 32 },
+            iv: { type: "string", description: "Hex-encoded 12-byte IV", minLength: HEX_IV_LENGTH, maxLength: HEX_IV_LENGTH },
+            authTag: { type: "string", description: "Hex-encoded 16-byte auth tag", minLength: HEX_AUTH_TAG_LENGTH, maxLength: HEX_AUTH_TAG_LENGTH },
           },
         },
         PasswordEntry: {

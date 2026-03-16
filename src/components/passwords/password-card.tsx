@@ -151,6 +151,7 @@ interface VaultEntryFull {
 }
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { DISPLAY_FINGERPRINT_SHORT } from "@/lib/validations/common";
 
 function scheduleClearClipboard(copiedValue: string) {
   setTimeout(async () => {
@@ -645,7 +646,7 @@ export function PasswordCard({
               {isSshKey ? (
                 <>
                   {keyType && <span className="truncate font-mono">{keyType}</span>}
-                  {fingerprint && <span className="truncate font-mono text-xs">{fingerprint.slice(0, 16)}…</span>}
+                  {fingerprint && <span className="truncate font-mono text-xs">{fingerprint.slice(0, DISPLAY_FINGERPRINT_SHORT)}…</span>}
                 </>
               ) : isBankAccount ? (
                 <>

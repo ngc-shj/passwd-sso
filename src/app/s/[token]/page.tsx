@@ -8,6 +8,7 @@ import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
@@ -106,7 +107,7 @@ export default async function SharePage({ params }: Props) {
           shareId: share.id,
           tenantId: share.tenantId,
           ip,
-          userAgent: ua?.slice(0, 512) ?? null,
+          userAgent: ua?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         },
       })
       .catch(() => {});

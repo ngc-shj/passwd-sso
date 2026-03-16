@@ -7,7 +7,7 @@
  * - Truncates to 1 000 characters
  */
 
-const MAX_LENGTH = 1_000;
+import { DIRECTORY_SYNC_SANITIZE_MAX_LENGTH } from "@/lib/validations/common.server";
 
 /** Patterns that may leak credentials in error messages. */
 const SENSITIVE_PATTERNS: [RegExp, string][] = [
@@ -70,8 +70,8 @@ export function sanitizeSyncError(error: unknown): string {
   }
 
   // 3. Truncate
-  if (message.length > MAX_LENGTH) {
-    message = message.slice(0, MAX_LENGTH - 3) + "...";
+  if (message.length > DIRECTORY_SYNC_SANITIZE_MAX_LENGTH) {
+    message = message.slice(0, DIRECTORY_SYNC_SANITIZE_MAX_LENGTH - 3) + "...";
   }
 
   return message;

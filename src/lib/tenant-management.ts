@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { slugifyTenant } from "@/lib/tenant-claim";
 import { randomBytes } from "node:crypto";
+import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 
 /**
  * Find or create an SSO tenant by externalId (tenant claim value).
@@ -48,7 +49,7 @@ export async function findOrCreateSsoTenant(
               data: {
                 externalId: tenantClaim,
                 name: tenantClaim,
-                slug: `${tenantSlug.slice(0, 41)}-${suffix}`,
+                slug: `${tenantSlug.slice(0, SLUG_MAX_LENGTH - suffix.length - 1)}-${suffix}`,
               },
               select: { id: true },
             });
