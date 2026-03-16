@@ -1,6 +1,6 @@
 # Code Review: full-codebase-review
 Date: 2026-03-17
-Review round: 2
+Review round: 3
 
 ## Changes from Previous Round
 Initial review — full codebase review of ~180k lines, 1100 files.
@@ -163,3 +163,41 @@ None — all findings were within scope boundaries.
 
 #### Finding 5 [Minor] IPv6 literal test coverage — ACKNOWLEDGED
 - Test coverage improvement deferred to testing task.
+
+### Round 3 — Full Codebase Review (including test code)
+
+#### Test additions (T-C1, T-C2, T-M1–M5) — COMPLETED
+- wrapSecretKey/unwrapSecretKey/computeAuthHash/verifyKey tests (13 cases)
+- Travel Mode route tests (17 cases)
+- WebAuthn authenticate/verify route tests (15 cases)
+- Directory-sync route tests (12 cases)
+- Dead createMockPrisma function removed, type kept
+- Coverage include list expanded, CI test:coverage step added
+
+#### F1 [Major] rotate-key not updating passphraseVerifierHmac — FIXED
+- **Action:** Added optional `newVerifierHash` field to rotate-key schema; update `passphraseVerifierHmac` + `passphraseVerifierVersion` when provided
+- **Modified file:** `src/app/api/vault/rotate-key/route.ts`
+
+#### F2 [Major] Owner transfer non-transactional — FIXED
+- **Action:** Wrapped two sequential `teamMember.update` calls in `prisma.$transaction`
+- **Modified file:** `src/app/api/teams/[teamId]/members/[memberId]/route.ts`
+
+#### S1 [Major] SCIM cross-tenant user provisioning DoS — FIXED
+- **Action:** Added guard to reject SCIM provisioning when user has active membership in different tenant
+- **Modified file:** `src/app/api/scim/v2/Users/route.ts`
+
+#### S2 [Major] Master key rotation share revocation single-tenant scope — FIXED
+- **Action:** Changed `withTenantRls` to `withBypassRls` and removed `tenantId` filter (master key is system-wide)
+- **Modified file:** `src/app/api/admin/rotate-master-key/route.ts`
+
+#### S3 [Minor] EA validation schemas missing upper bounds — FIXED
+- **Modified file:** `src/lib/validations/emergency-access.ts`
+
+#### S4 [Minor] EA vault/entries missing rate limiter — FIXED
+- **Modified file:** `src/app/api/emergency-access/[id]/vault/entries/route.ts`
+
+#### S5 [Minor] EA accept skips tokenExpiresAt — FIXED
+- **Modified file:** `src/app/api/emergency-access/[id]/accept/route.ts`
+
+#### T-M2 [Major] No global coverage threshold — FIXED
+- **Action:** Added `lines: 60` global threshold to vitest.config.ts
