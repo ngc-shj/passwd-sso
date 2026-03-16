@@ -118,4 +118,14 @@ describe("GET /api/webauthn/credentials", () => {
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
   });
+
+  it("returns 200 with empty array when no credentials exist", async () => {
+    mockPrismaFindMany.mockResolvedValue([]);
+
+    const req = createRequest("GET", ROUTE_URL);
+    const { status, json } = await parseResponse(await GET(req));
+
+    expect(status).toBe(200);
+    expect(json).toEqual([]);
+  });
 });

@@ -364,4 +364,82 @@ describe("POST /api/webauthn/register/verify", () => {
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
+
+  it("returns 400 with VALIDATION_ERROR when challenge has expired", async () => {
+    mockRedisGetdel.mockResolvedValue(null);
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: makeBody(),
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 503 with SERVICE_UNAVAILABLE when WEBAUTHN_RP_ID is not set", async () => {
+    delete process.env.WEBAUTHN_RP_ID;
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: makeBody(),
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+  });
+
+  it("returns 400 with VALIDATION_ERROR when verifyRegistration throws", async () => {
+    mockVerifyRegistration.mockRejectedValue(new Error("fail"));
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: makeBody(),
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 400 with VALIDATION_ERROR when verified is false", async () => {
+    mockVerifyRegistration.mockResolvedValue({ verified: false });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: makeBody(),
+    });
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("persists PRF data when prfSupported credential is registered", async () => {
+    const prfCredential = {
+      ...makeCreatedCredential(true),
+      prfSupported: true,
+    };
+    mockPrismaCredentialCreate.mockResolvedValue(prfCredential);
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: {
+        ...makeBody({ credProps: { rk: true } }),
+        prfEncryptedSecretKey: "encrypted-secret-key",
+        prfSecretKeyIv: "prf-iv",
+        prfSecretKeyAuthTag: "prf-auth-tag",
+      },
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(201);
+
+    expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          prfSupported: true,
+          prfEncryptedSecretKey: "encrypted-secret-key",
+          prfSecretKeyIv: "prf-iv",
+          prfSecretKeyAuthTag: "prf-auth-tag",
+        }),
+      }),
+    );
+  });
 });

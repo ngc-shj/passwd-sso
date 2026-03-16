@@ -182,4 +182,36 @@ describe("POST /api/webauthn/authenticate/options", () => {
     expect(json.options).toBeDefined();
     expect(json.prfSalt).toBe("prf-salt-hex");
   });
+
+  it("returns 429 with RATE_LIMIT_EXCEEDED when rate limit is exceeded", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false });
+
+    const req = createRequest("POST", ROUTE_URL);
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(429);
+    expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+  });
+
+  it("returns 503 with SERVICE_UNAVAILABLE when Redis is unavailable", async () => {
+    mockGetRedis.mockReturnValue(null);
+
+    const req = createRequest("POST", ROUTE_URL);
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+  });
+
+  it("returns 200 with prfSalt: null when derivePrfSalt throws", async () => {
+    mockDerivePrfSalt.mockImplementation(() => {
+      throw new Error("not configured");
+    });
+
+    const req = createRequest("POST", ROUTE_URL);
+    const { status, json } = await parseResponse(await POST(req));
+
+    expect(status).toBe(200);
+    expect(json.prfSalt).toBeNull();
+  });
 });
