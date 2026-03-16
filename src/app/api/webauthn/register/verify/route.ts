@@ -10,6 +10,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { PIN_LENGTH_MIN, PIN_LENGTH_MAX } from "@/lib/validations/common";
 import {
   verifyRegistration,
   uint8ArrayToBase64url,
@@ -120,32 +121,76 @@ async function handlePOST(req: NextRequest) {
   const deviceType = registrationInfo.credentialDeviceType;
   const backedUp = registrationInfo.credentialBackedUp;
 
-  // Extract transports from the response if available
+  // Extract transports from the response if available (allowlisted per WebAuthn spec)
+  const VALID_TRANSPORTS = new Set(["usb", "nfc", "ble", "internal", "hybrid", "smart-card"]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const transports: string[] = (response as any).response?.transports ?? [];
+  const rawTransports: unknown[] = (response as any).response?.transports ?? [];
+  const transports: string[] = rawTransports.filter(
+    (t): t is string => typeof t === "string" && VALID_TRANSPORTS.has(t),
+  );
+
+  // credProps.rk is a client-supplied value (not authenticator-signed).
+  // It is used ONLY for UI display. Never use it for auth/authz decisions.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawRk = (response as any).clientExtensionResults?.credProps?.rk;
+  const discoverable: boolean | null = typeof rawRk === "boolean" ? rawRk : null;
+
+  // minPinLength is a client-supplied value (not authenticator-signed).
+  // Policy enforcement is best-effort; compromised browsers can spoof this value.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawMinPin = (response as any).clientExtensionResults?.minPinLength;
+  const minPinLength: number | null =
+    typeof rawMinPin === "number" && Number.isInteger(rawMinPin) && rawMinPin >= PIN_LENGTH_MIN && rawMinPin <= PIN_LENGTH_MAX
+      ? rawMinPin : null;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawLargeBlob = (response as any).clientExtensionResults?.largeBlob?.supported;
+  const largeBlobSupported: boolean | null =
+    typeof rawLargeBlob === "boolean" ? rawLargeBlob : null;
 
   const hasPrf = !!(prfEncryptedSecretKey && prfSecretKeyIv && prfSecretKeyAuthTag);
   const registeredDevice = parseDeviceFromUserAgent(req.headers.get("user-agent"));
 
-  let userLocale: string | null = null;
-  const credential = await withUserTenantRls(userId, async () => {
+  // First: get user info and check tenant PIN policy
+  const userInfo = await withUserTenantRls(userId, async () => {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { tenantId: true, locale: true },
+      select: {
+        tenantId: true,
+        locale: true,
+        tenant: { select: { requireMinPinLength: true } },
+      },
     });
     if (!user) throw new Error("USER_NOT_FOUND");
-    userLocale = user.locale;
+    return user;
+  });
 
+  // Tenant policy: minimum PIN length enforcement.
+  // Only enforced when the authenticator explicitly reports minPinLength.
+  // Platform authenticators (Touch ID, Face ID, Windows Hello) do not report
+  // this value — they are always allowed regardless of policy.
+  const requireMinPin = userInfo.tenant?.requireMinPinLength ?? null;
+  if (requireMinPin !== null && minPinLength !== null && minPinLength < requireMinPin) {
+    return NextResponse.json(
+      { error: API_ERROR.PIN_LENGTH_POLICY_NOT_SATISFIED },
+      { status: 400 },
+    );
+  }
+
+  const credential = await withUserTenantRls(userId, async () => {
     return prisma.webAuthnCredential.create({
       data: {
         userId,
-        tenantId: user.tenantId,
+        tenantId: userInfo.tenantId,
         credentialId,
         publicKey,
         counter: BigInt(counter),
         transports,
         deviceType,
         backedUp,
+        discoverable,
+        minPinLength,
+        largeBlobSupported,
         nickname: nickname ?? null,
         prfSupported: hasPrf,
         registeredDevice,
@@ -171,6 +216,9 @@ async function handlePOST(req: NextRequest) {
       deviceType,
       backedUp,
       prfSupported: hasPrf,
+      discoverable,
+      minPinLength,
+      largeBlobSupported,
     },
     ...extractRequestMeta(req),
   });
@@ -181,7 +229,7 @@ async function handlePOST(req: NextRequest) {
     const { subject, html, text } = passkeyRegisteredEmail(
       deviceName,
       new Date(),
-      userLocale ?? "ja",
+      userInfo.locale ?? "ja",
     );
     sendEmail({ to: session.user.email, subject, html, text });
   }
@@ -193,6 +241,9 @@ async function handlePOST(req: NextRequest) {
       nickname: credential.nickname,
       deviceType: credential.deviceType,
       backedUp: credential.backedUp,
+      discoverable: credential.discoverable,
+      minPinLength: credential.minPinLength,
+      largeBlobSupported: credential.largeBlobSupported,
       prfSupported: credential.prfSupported,
       createdAt: credential.createdAt,
     },

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRequest, createMultipartRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { createMultipartRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 import { DEFAULT_SESSION } from "@/__tests__/helpers/mock-auth";
 
 const {
