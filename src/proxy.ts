@@ -345,6 +345,9 @@ function applySecurityHeaders(
 
 // Exported for testing
 export { applySecurityHeaders as _applySecurityHeaders };
+export { extractSessionToken as _extractSessionToken };
+export { setSessionCache as _setSessionCache };
+export { sessionCache as _sessionCache };
 
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
   const authSessionCookieNames = [

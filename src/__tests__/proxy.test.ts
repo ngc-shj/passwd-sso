@@ -17,7 +17,13 @@ vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: mockResolveUserTenantId,
 }));
 
-import { proxy, _applySecurityHeaders } from "../proxy";
+import {
+  proxy,
+  _applySecurityHeaders,
+  _extractSessionToken,
+  _setSessionCache,
+  _sessionCache,
+} from "../proxy";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
@@ -405,6 +411,123 @@ describe("proxy — applySecurityHeaders basePath", () => {
     expect(response.headers.get("Permissions-Policy")).toBe(
       "camera=(), microphone=(), geolocation=(), payment=()",
     );
+  });
+});
+
+describe("extractSessionToken", () => {
+  it("extracts authjs.session-token value from cookie string", () => {
+    const cookie = "authjs.session-token=abc123def456";
+    expect(_extractSessionToken(cookie)).toBe("abc123def456");
+  });
+
+  it("extracts __Secure-authjs.session-token value preferentially", () => {
+    const cookie = "__Secure-authjs.session-token=secure-token-xyz; authjs.session-token=plain-token";
+    // __Secure- prefix takes priority (listed first in the names array)
+    expect(_extractSessionToken(cookie)).toBe("secure-token-xyz");
+  });
+
+  it("extracts authjs.session-token when __Secure- variant is absent", () => {
+    const cookie = "other-cookie=value; authjs.session-token=my-session; another=thing";
+    expect(_extractSessionToken(cookie)).toBe("my-session");
+  });
+
+  it("returns empty string when no session cookie exists", () => {
+    const cookie = "some-cookie=value; another-cookie=other";
+    expect(_extractSessionToken(cookie)).toBe("");
+  });
+
+  it("returns empty string for an empty cookie string", () => {
+    expect(_extractSessionToken("")).toBe("");
+  });
+
+  it("handles token value at end of cookie string without trailing semicolon", () => {
+    const cookie = "foo=bar; authjs.session-token=last-token-value";
+    expect(_extractSessionToken(cookie)).toBe("last-token-value");
+  });
+
+  it("handles cookies with special characters in token value", () => {
+    const cookie = "authjs.session-token=tok%2Fwith%3Dspecial%2Bchars; other=x";
+    expect(_extractSessionToken(cookie)).toBe("tok%2Fwith%3Dspecial%2Bchars");
+  });
+});
+
+describe("session cache eviction (setSessionCache)", () => {
+  const SESSION_CACHE_MAX = 500; // must match proxy.ts SESSION_CACHE_MAX
+
+  beforeEach(() => {
+    _sessionCache.clear();
+  });
+
+  afterEach(() => {
+    _sessionCache.clear();
+  });
+
+  it("evicts expired entries first when cache is full", () => {
+    const now = Date.now();
+
+    // Fill cache to SESSION_CACHE_MAX - 1 with already-expired entries
+    for (let i = 0; i < SESSION_CACHE_MAX - 1; i++) {
+      _sessionCache.set(`expired-${i}`, {
+        expiresAt: now - 1000, // already expired
+        valid: true,
+        userId: `user-${i}`,
+      });
+    }
+    // Add one live entry that will be at index SESSION_CACHE_MAX - 1
+    _sessionCache.set("live-entry", {
+      expiresAt: now + 60_000,
+      valid: true,
+      userId: "live-user",
+    });
+
+    expect(_sessionCache.size).toBe(SESSION_CACHE_MAX);
+
+    // Trigger eviction by adding a new entry that pushes size to SESSION_CACHE_MAX + 1
+    _setSessionCache("new-key", { valid: true, userId: "new-user" });
+
+    // Expired entries must be purged; live entry and new entry must survive
+    expect(_sessionCache.has("live-entry")).toBe(true);
+    expect(_sessionCache.has("new-key")).toBe(true);
+    // Expired entries should have been evicted
+    expect(_sessionCache.has("expired-0")).toBe(false);
+  });
+
+  it("evicts the oldest entry when no expired entries exist", () => {
+    const now = Date.now();
+    const futureExpiry = now + 60_000;
+
+    // Fill to exactly SESSION_CACHE_MAX with live entries; insertion order matters
+    for (let i = 0; i < SESSION_CACHE_MAX; i++) {
+      _sessionCache.set(`live-${i}`, { expiresAt: futureExpiry, valid: true });
+    }
+
+    expect(_sessionCache.size).toBe(SESSION_CACHE_MAX);
+
+    // Adding one more: no expired entries exist, so the oldest (live-0) must be evicted
+    _setSessionCache("newest-key", { valid: true, userId: "newest" });
+
+    // The first-inserted key is the oldest and should have been evicted
+    expect(_sessionCache.has("live-0")).toBe(false);
+    // All other entries and the new one should remain
+    expect(_sessionCache.has("live-1")).toBe(true);
+    expect(_sessionCache.has("newest-key")).toBe(true);
+  });
+
+  it("does NOT clear all entries on size limit — only evicts minimally", () => {
+    const now = Date.now();
+
+    // Fill cache with all live entries (no expired ones)
+    for (let i = 0; i < SESSION_CACHE_MAX; i++) {
+      _sessionCache.set(`key-${i}`, { expiresAt: now + 60_000, valid: true });
+    }
+
+    _setSessionCache("trigger-eviction", { valid: false });
+
+    // Cache must NOT have been fully cleared; only 1 entry evicted
+    // so size should be SESSION_CACHE_MAX (500 - 1 evicted + 1 new = 500)
+    expect(_sessionCache.size).toBe(SESSION_CACHE_MAX);
+    // The new entry must exist
+    expect(_sessionCache.has("trigger-eviction")).toBe(true);
   });
 });
 

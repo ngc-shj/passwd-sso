@@ -264,6 +264,119 @@ describe("dispatchWebhook", () => {
 
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it("dispatches multiple webhooks in parallel — all fetch calls initiated before any resolve", async () => {
+    // Track the order in which fetch calls are initiated vs resolved
+    const callOrder: string[] = [];
+    const resolvers: Array<() => void> = [];
+
+    const makeWebhook = (id: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${id}` });
+    const webhooks = ["wh-a", "wh-b", "wh-c"].map(makeWebhook);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
+
+    mockFetch.mockImplementation((url: string) => {
+      callOrder.push(`call:${url}`);
+      return new Promise<{ ok: boolean }>((resolve) => {
+        resolvers.push(() => {
+          callOrder.push(`resolve:${url}`);
+          resolve({ ok: true });
+        });
+      });
+    });
+
+    dispatchWebhook(EVENT);
+    // Let the async logic start (findMany resolves, fetch calls are made)
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // All 3 fetches should have been called before any resolve
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    // Confirm: all calls happened before any resolver ran
+    const callCount = callOrder.filter((e) => e.startsWith("call:")).length;
+    const resolveCount = callOrder.filter((e) => e.startsWith("resolve:")).length;
+    expect(callCount).toBe(3);
+    expect(resolveCount).toBe(0); // no resolves yet — they are pending in parallel
+
+    // Resolve all and let everything settle
+    resolvers.forEach((r) => r());
+    await vi.advanceTimersByTimeAsync(100);
+  });
+
+  it("respects concurrency limit of 5 — 10 webhooks processed in two chunks", async () => {
+    // Each fetch is a Promise that we control manually.
+    // We hold the first chunk's resolvers until we can confirm only 5 calls were made,
+    // then release them so the second chunk can start.
+    const firstChunkResolvers: Array<() => void> = [];
+    let fetchCallCount = 0;
+
+    const makeWebhook = (i: number) => ({
+      ...WEBHOOK,
+      id: `wh-${i}`,
+      url: `https://example.com/hook-${i}`,
+    });
+    const webhooks = Array.from({ length: 10 }, (_, i) => makeWebhook(i));
+    mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
+
+    mockFetch.mockImplementation(() => {
+      fetchCallCount += 1;
+      const current = fetchCallCount;
+      if (current <= 5) {
+        // First chunk: return a manually-controlled promise
+        return new Promise<{ ok: boolean }>((resolve) => {
+          firstChunkResolvers.push(() => resolve({ ok: true }));
+        });
+      }
+      // Second chunk: resolve immediately
+      return Promise.resolve({ ok: true });
+    });
+
+    dispatchWebhook(EVENT);
+    // Allow the async IIFE and findMany to resolve, then fetch calls to be initiated
+    await vi.advanceTimersByTimeAsync(0);
+    // Flush microtasks: findMany resolved → dispatchToWebhooks starts → first chunk fetches called
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+
+    // At this point only the first chunk (5) should have been called
+    expect(fetchCallCount).toBe(5);
+    expect(firstChunkResolvers).toHaveLength(5);
+
+    // Release first chunk; second chunk should now start
+    firstChunkResolvers.forEach((r) => r());
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+
+    // Now all 10 should be done
+    expect(fetchCallCount).toBe(10);
+  });
+
+  it("individual webhook failure does not affect others (Promise.allSettled behavior)", async () => {
+    const makeWebhook = (id: string) => ({ ...WEBHOOK, id, url: `https://example.com/hook-${id}` });
+    const webhooks = ["wh-ok1", "wh-fail", "wh-ok2"].map(makeWebhook);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue(webhooks);
+
+    mockFetch
+      .mockResolvedValueOnce({ ok: true })       // wh-ok1 succeeds
+      .mockRejectedValueOnce(new Error("Network error")) // wh-fail throws
+      .mockResolvedValueOnce({ ok: true });       // wh-ok2 succeeds
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(100);
+
+    // All 3 fetches attempted
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+
+    // Both successful webhooks updated with failCount: 0
+    const successCalls = mockPrismaTeamWebhook.update.mock.calls.filter(
+      (call: Array<{ where?: { id: string }; data?: { failCount: number } }>) =>
+        call[0]?.data?.failCount === 0,
+    );
+    const successIds = successCalls.map(
+      (call: Array<{ where?: { id: string } }>) => call[0]?.where?.id,
+    );
+    expect(successIds).toContain("wh-ok1");
+    expect(successIds).toContain("wh-ok2");
+  });
 });
 
 describe("dispatchTenantWebhook", () => {
