@@ -103,9 +103,15 @@ vi.mock("@/lib/api-response", () => ({
     }),
 }));
 
-vi.mock("@/lib/validations", () => ({
-  TAILNET_NAME_MAX_LENGTH: 253,
-}));
+vi.mock("@/lib/validations", () => {
+  const { z } = require("zod");
+  return {
+    TAILNET_NAME_MAX_LENGTH: 253,
+    PIN_LENGTH_MIN: 4,
+    PIN_LENGTH_MAX: 63,
+    pinLengthSchema: z.number().int().min(4).max(63),
+  };
+});
 
 vi.mock("@/lib/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

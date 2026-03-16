@@ -22,6 +22,8 @@ export const MAX_VIEWS_MAX = 100;
 export const SEND_NAME_MAX_LENGTH = 200;
 export const PASSPHRASE_MIN_LENGTH = 10;
 export const TAILNET_NAME_MAX_LENGTH = 63;
+export const PIN_LENGTH_MIN = 4;   // CTAP2 spec minimum
+export const PIN_LENGTH_MAX = 63;  // CTAP2 spec maximum
 export const SCIM_TOKEN_DESC_MAX_LENGTH = 255;
 
 // ─── Entry Field Lengths (shareDataSchema) ──────────────────
@@ -56,6 +58,10 @@ export const ALLOWED_CONTENT_TYPES = [
 /** Validates a hex string of the given byte length (e.g. 12 bytes = 24 hex chars). */
 export const hexString = (bytes: number) =>
   z.string().length(bytes * 2).regex(/^[0-9a-f]+$/i);
+
+// ─── WebAuthn PIN Length Schema ──────────────────────────────
+
+export const pinLengthSchema = z.number().int().min(PIN_LENGTH_MIN).max(PIN_LENGTH_MAX);
 
 // ─── Bulk Operation Schemas ─────────────────────────────────
 

@@ -10,6 +10,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { PIN_LENGTH_MIN, PIN_LENGTH_MAX } from "@/lib/validations/common";
 import {
   verifyRegistration,
   uint8ArrayToBase64url,
@@ -135,7 +136,7 @@ async function handlePOST(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const rawMinPin = (response as any).clientExtensionResults?.minPinLength;
   const minPinLength: number | null =
-    typeof rawMinPin === "number" && Number.isInteger(rawMinPin) && rawMinPin >= 4 && rawMinPin <= 63
+    typeof rawMinPin === "number" && Number.isInteger(rawMinPin) && rawMinPin >= PIN_LENGTH_MIN && rawMinPin <= PIN_LENGTH_MAX
       ? rawMinPin : null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

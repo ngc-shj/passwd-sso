@@ -13,6 +13,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
+import { pinLengthSchema } from "@/lib/validations/common";
 
 const MAX_CIDRS = 50;
 
@@ -173,14 +174,9 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate requireMinPinLength: null (disabled) or integer 4-63
+  // Validate requireMinPinLength: null (disabled) or integer within CTAP2 bounds
   if (requireMinPinLength !== null && requireMinPinLength !== undefined) {
-    if (
-      typeof requireMinPinLength !== "number" ||
-      !Number.isInteger(requireMinPinLength) ||
-      requireMinPinLength < 4 ||
-      requireMinPinLength > 63
-    ) {
+    if (!pinLengthSchema.safeParse(requireMinPinLength).success) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
   }

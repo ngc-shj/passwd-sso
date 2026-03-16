@@ -389,9 +389,9 @@ model Tenant {
   allowedCidrs              String[] @default([]) @map("allowed_cidrs")
   tailscaleEnabled          Boolean  @default(false) @map("tailscale_enabled")
   tailscaleTailnet          String?  @map("tailscale_tailnet") @db.VarChar(255)
-  requireMinPinLength   Int?      @map("require_min_pin_length")
+  requireMinPinLength      Int?     @map("require_min_pin_length")
   createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   users                      User[]
   accounts                   Account[]

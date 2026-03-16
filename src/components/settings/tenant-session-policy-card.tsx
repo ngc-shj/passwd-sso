@@ -17,6 +17,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
+import { PIN_LENGTH_MIN, PIN_LENGTH_MAX } from "@/lib/validations";
 import { fetchApi } from "@/lib/url-helpers";
 
 export function TenantSessionPolicyCard() {
@@ -98,8 +99,8 @@ export function TenantSessionPolicyCard() {
     }
     if (minPinEnabled) {
       const num = Number(minPinLength);
-      if (!Number.isInteger(num) || num < 4) return t("minPinValidationMin");
-      if (num > 63) return t("minPinValidationMax");
+      if (!Number.isInteger(num) || num < PIN_LENGTH_MIN) return t("minPinValidationMin");
+      if (num > PIN_LENGTH_MAX) return t("minPinValidationMax");
     }
     return null;
   };
@@ -305,15 +306,15 @@ export function TenantSessionPolicyCard() {
             <Input
               id="min-pin-length"
               type="number"
-              min={4}
-              max={63}
+              min={PIN_LENGTH_MIN}
+              max={PIN_LENGTH_MAX}
               value={minPinLength}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (!raw) { setMinPinLength(""); } else {
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 4) { setMinPinLength(""); } else {
-                    setMinPinLength(String(Math.min(n, 63)));
+                  if (Number.isNaN(n) || n < PIN_LENGTH_MIN) { setMinPinLength(""); } else {
+                    setMinPinLength(String(Math.min(n, PIN_LENGTH_MAX)));
                   }
                 }
                 setError(null);
