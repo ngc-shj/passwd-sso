@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth } = vi.hoisted(() => ({
+const { mockAuth, mockCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
+}));
 
 // Mock global fetch for HIBP API
 const mockFetch = vi.fn();
@@ -15,7 +19,8 @@ import { GET } from "./route";
 describe("GET /api/watchtower/hibp", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: `user-${Date.now()}-${Math.random()}` } });
+    mockAuth.mockResolvedValue({ user: { id: "user-123" } });
+    mockCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -71,32 +76,28 @@ describe("GET /api/watchtower/hibp", () => {
     expect(res.status).toBe(502);
   });
 
-  it("rate limits after 30 requests", async () => {
-    const userId = `rate-${Date.now()}`;
-    mockAuth.mockResolvedValue({ user: { id: userId } });
+  it("returns 429 when rate limited", async () => {
+    mockCheck.mockResolvedValue({ allowed: false });
+
+    const res = await GET(
+      createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
+        searchParams: { prefix: "ABCDE" },
+      }),
+    );
+    expect(res.status).toBe(429);
+  });
+
+  it("uses userId-based rate limit key", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       text: () => Promise.resolve("data"),
     });
 
-    // First 30 should succeed (prefix needs to be different to avoid cache)
-    for (let i = 0; i < 30; i++) {
-      // Generate valid 5-char hex prefix
-      const validPrefix = i.toString(16).padStart(5, "0").toUpperCase().slice(0, 5);
-      const res = await GET(
-        createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
-          searchParams: { prefix: validPrefix },
-        }),
-      );
-      expect(res.status).toBe(200);
-    }
-
-    // 31st should be rate limited
-    const res = await GET(
+    await GET(
       createRequest("GET", "http://localhost:3000/api/watchtower/hibp", {
-        searchParams: { prefix: "FFFFF" },
+        searchParams: { prefix: "ABCDE" },
       }),
     );
-    expect(res.status).toBe(429);
+    expect(mockCheck).toHaveBeenCalledWith("rl:hibp:user-123");
   });
 });

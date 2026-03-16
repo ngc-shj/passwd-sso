@@ -51,7 +51,7 @@ async function handlePOST(req: NextRequest) {
   const { newBreachCount, teamId } = result.data;
 
   const rateLimitKey = teamId
-    ? `rl:watchtower:alert:team:${teamId}`
+    ? `rl:watchtower:alert:team:${teamId}:${session.user.id}`
     : `rl:watchtower:alert:${session.user.id}`;
   const { allowed } = await alertLimiter.check(rateLimitKey);
   if (!allowed) {
