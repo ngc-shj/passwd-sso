@@ -389,8 +389,9 @@ model Tenant {
   allowedCidrs              String[] @default([]) @map("allowed_cidrs")
   tailscaleEnabled          Boolean  @default(false) @map("tailscale_enabled")
   tailscaleTailnet          String?  @map("tailscale_tailnet") @db.VarChar(255)
+  requireMinPinLength      Int?     @map("require_min_pin_length")
   createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt             DateTime @updatedAt @map("updated_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
   users                      User[]
   accounts                   Account[]
@@ -1202,6 +1203,9 @@ model WebAuthnCredential {
   transports            String[]  @default([])
   deviceType            String    @map("device_type") @db.VarChar(32)
   backedUp              Boolean   @default(false) @map("backed_up")
+  discoverable          Boolean?  @map("discoverable")
+  minPinLength          Int?      @map("min_pin_length")
+  largeBlobSupported    Boolean?  @map("large_blob_supported")
   nickname              String?   @db.VarChar(100)
   prfEncryptedSecretKey String?   @map("prf_encrypted_secret_key") @db.Text
   prfSecretKeyIv        String?   @map("prf_secret_key_iv") @db.VarChar(24)

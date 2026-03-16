@@ -48,6 +48,8 @@
   "entryCountMismatch": "送信されたエントリ数が合計と一致しません。画面を更新して再度お試しください。",
   "onlyOwnEntries": "自分のエントリのみ変更できます。",
   "invalidDateRange": "有効期限は発行日より後の日付にしてください。",
+  "selfLockout": "現在のIPアドレスがこのポリシーによりブロックされます。",
+  "pinLengthPolicyNotSatisfied": "セキュリティキーのPIN長がテナントポリシーの要件を満たしていません。",
   "policySharingDisabled": "チームポリシーにより共有が無効になっています。",
   "policyExportDisabled": "チームポリシーによりエクスポートが無効になっています。",
   "alreadyRevoked": "既に取り消し済みです。",

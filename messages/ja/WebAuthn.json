@@ -47,11 +47,17 @@
   "vaultUnlock": "保管庫のロック解除",
   "vaultUnlockEnabled": "対応",
   "vaultUnlockDisabled": "非対応",
-  "tryIt": "試してみる",
-  "tryItSuccess": "パスキーの動作を確認しました！",
-  "discoverable": "パスキーログイン対応",
+  "testAuth": "認証を試す",
+  "testSuccess": "認証を確認しました。",
+  "testSuccessWithPrf": "認証と保管庫の自動アンロックを確認しました。",
+  "testError": "認証テストに失敗しました。",
+  "discoverable": "パスキーログイン",
   "discoverableDescription": "このパスキーはパスワードレスサインインに対応しています。メールアドレスを入力せずに直接サインインできます。",
   "notDiscoverable": "メール認証のみ",
   "notDiscoverableDescription": "このパスキーはDiscoverable Credentialではありません。メール + セキュリティキーオプションでサインインできます。PRF対応の場合は保管庫のロック解除にも使用できます。",
-  "nonDiscoverableNonPrfWarning": "このパスキーはパスキーサインインにも保管庫のロック解除にも使用できません。サインインにはメール + セキュリティキーオプションをご利用ください。別の認証器の登録をお勧めします。"
+  "nonDiscoverableNonPrfWarning": "このパスキーはパスキーサインインにも保管庫のロック解除にも使用できません。サインインにはメール + セキュリティキーオプションをご利用ください。別の認証器の登録をお勧めします。",
+  "pinPolicyError": "セキュリティキーのPIN長がテナントポリシーの要件を満たしていません。より長いPINを設定してください。",
+  "pinLength": "PIN: {length}桁",
+  "largeBlobLabel": "オフラインバックアップ",
+  "largeBlobSupported": "オフラインバックアップ対応"
 }

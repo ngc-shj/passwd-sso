@@ -60,11 +60,15 @@ export function TenantSessionPolicyCard() {
           setVaultAutoLockEnabled(true);
           setVaultAutoLockMinutes(String(autoLockVal));
         }
+      } else {
+        toast.error(t("sessionPolicyLoadFailed"));
       }
+    } catch {
+      toast.error(t("sessionPolicyLoadFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchPolicy();

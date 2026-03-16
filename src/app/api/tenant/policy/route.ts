@@ -13,6 +13,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
+import { pinLengthSchema } from "@/lib/validations/common";
 
 const MAX_CIDRS = 50;
 
@@ -44,6 +45,7 @@ async function handleGET(_req: NextRequest) {
         allowedCidrs: true,
         tailscaleEnabled: true,
         tailscaleTailnet: true,
+        requireMinPinLength: true,
       } } },
     }),
   );
@@ -55,6 +57,7 @@ async function handleGET(_req: NextRequest) {
     allowedCidrs: user?.tenant?.allowedCidrs ?? [],
     tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
     tailscaleTailnet: user?.tenant?.tailscaleTailnet ?? null,
+    requireMinPinLength: user?.tenant?.requireMinPinLength ?? null,
   });
 }
 
@@ -85,7 +88,7 @@ async function handlePATCH(req: NextRequest) {
   } catch {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
-  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, confirmLockout } = body;
+  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, requireMinPinLength, confirmLockout } = body;
 
   // Validate maxConcurrentSessions: null (unlimited) or positive integer 1-100
   if (maxConcurrentSessions !== null && maxConcurrentSessions !== undefined) {
@@ -171,6 +174,13 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
+  // Validate requireMinPinLength: null (disabled) or integer within CTAP2 bounds
+  if (requireMinPinLength !== null && requireMinPinLength !== undefined) {
+    if (!pinLengthSchema.safeParse(requireMinPinLength).success) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
   // Self-lockout detection: check if the requester's IP would be allowed under the new policy
   const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
   const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
@@ -194,7 +204,7 @@ async function handlePATCH(req: NextRequest) {
         ? "Your current IP would be blocked by this policy. Set confirmLockout: true to proceed."
         : "Your IP could not be determined; you may be locked out by this policy. Set confirmLockout: true to proceed.";
       return NextResponse.json(
-        { error: "SELF_LOCKOUT", message },
+        { error: API_ERROR.SELF_LOCKOUT, message },
         { status: 409 },
       );
     }
@@ -219,6 +229,9 @@ async function handlePATCH(req: NextRequest) {
   if (tailscaleTailnet !== undefined) {
     updateData.tailscaleTailnet = tailscaleTailnet ?? null;
   }
+  if (requireMinPinLength !== undefined) {
+    updateData.requireMinPinLength = requireMinPinLength ?? null;
+  }
 
   const updated = await withBypassRls(prisma, async () =>
     prisma.tenant.update({
@@ -231,6 +244,7 @@ async function handlePATCH(req: NextRequest) {
         allowedCidrs: true,
         tailscaleEnabled: true,
         tailscaleTailnet: true,
+        requireMinPinLength: true,
       },
     }),
   );
@@ -251,6 +265,7 @@ async function handlePATCH(req: NextRequest) {
       allowedCidrs: updated.allowedCidrs,
       tailscaleEnabled: updated.tailscaleEnabled,
       tailscaleTailnet: updated.tailscaleTailnet,
+      requireMinPinLength: updated.requireMinPinLength,
     },
     ip: meta.ip,
     userAgent: meta.userAgent,
@@ -263,6 +278,7 @@ async function handlePATCH(req: NextRequest) {
     allowedCidrs: updated.allowedCidrs,
     tailscaleEnabled: updated.tailscaleEnabled,
     tailscaleTailnet: updated.tailscaleTailnet,
+    requireMinPinLength: updated.requireMinPinLength,
   });
 }
 
