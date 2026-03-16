@@ -143,20 +143,22 @@ export function PasskeyCredentialsCard() {
         prfSalt ?? undefined,
       );
 
-      // 3. If PRF supported and vault unlocked, encrypt secretKey
-      const hadPrf = !!prfOutput;
+      // 3. If PRF supported and vault unlocked, encrypt secretKey.
+      //    Capture PRF availability before zeroing the buffer.
+      const prfAvailable = !!prfOutput;
       let prfData: Record<string, string> = {};
-      if (prfOutput) {
+      if (prfAvailable) {
         const secretKey = getSecretKey();
         if (secretKey) {
-          const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput);
+          // prfOutput is guaranteed non-null here (guarded by prfAvailable)
+          const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput!);
           prfData = {
             prfEncryptedSecretKey: wrapped.ciphertext,
             prfSecretKeyIv: wrapped.iv,
             prfSecretKeyAuthTag: wrapped.authTag,
           };
           secretKey.fill(0);
-          prfOutput.fill(0);
+          prfOutput!.fill(0);
         }
       }
 
@@ -180,9 +182,9 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
-        if (isNonDiscoverable(result) && !hadPrf) {
+        if (isNonDiscoverable(result) && !prfAvailable) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
-        } else if (!hadPrf) {
+        } else if (!prfAvailable) {
           toast.warning(t("prfNotSupportedWarning"));
         }
 
@@ -267,7 +269,7 @@ export function PasskeyCredentialsCard() {
       const { options, prfSalt } = await optionsRes.json();
 
       // 2. Authenticate (with PRF if available)
-      const { responseJSON, prfOutput: testPrfOutput } = await startPasskeyAuthentication(
+      const { responseJSON, prfOutput: authPrfOutput } = await startPasskeyAuthentication(
         options,
         cred?.prfSupported && prfSalt ? prfSalt : undefined,
       );
@@ -280,7 +282,7 @@ export function PasskeyCredentialsCard() {
       });
 
       if (verifyRes.ok) {
-        toast.success(testPrfOutput ? t("testSuccessWithPrf") : t("testSuccess"));
+        toast.success(authPrfOutput ? t("testSuccessWithPrf") : t("testSuccess"));
         fetchCredentials(); // Refresh lastUsedAt
       } else {
         toast.error(t("testError"));
