@@ -45,6 +45,7 @@ interface Credential {
   nickname: string | null;
   deviceType: string;
   backedUp: boolean;
+  discoverable: boolean | null;
   transports: string[];
   prfSupported: boolean;
   registeredDevice: string | null;
@@ -172,8 +173,9 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
-        const isNonDiscoverable =
-          result.deviceType === "singleDevice" && !result.backedUp;
+        const isNonDiscoverable = result.discoverable !== null
+          ? !result.discoverable
+          : (result.deviceType === "singleDevice" && !result.backedUp);
         if (isNonDiscoverable && !prfOutput) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
         } else if (!prfOutput) {
@@ -426,10 +428,9 @@ export function PasskeyCredentialsCard() {
                          3. Device type */}
                     <div className="flex items-center gap-2 flex-wrap">
                       {/* Discoverable vs non-discoverable credential indicator.
-                         Heuristic: singleDevice + not backed up strongly indicates
-                         a non-discoverable credential. WebAuthn L2 does not expose
-                         the resident key (rk) bit directly, so this is an approximation. */}
-                      {cred.deviceType === "singleDevice" && !cred.backedUp ? (
+                         Uses credProps.rk (WebAuthn L3) when available,
+                         falls back to heuristic (singleDevice + not backed up). */}
+                      {(cred.discoverable !== null ? !cred.discoverable : (cred.deviceType === "singleDevice" && !cred.backedUp)) ? (
                         <span
                           className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
                           title={t("notDiscoverableDescription")}

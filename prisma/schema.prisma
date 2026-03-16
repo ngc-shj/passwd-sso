@@ -1202,6 +1202,7 @@ model WebAuthnCredential {
   transports            String[]  @default([])
   deviceType            String    @map("device_type") @db.VarChar(32)
   backedUp              Boolean   @default(false) @map("backed_up")
+  discoverable          Boolean?  @map("discoverable")
   nickname              String?   @db.VarChar(100)
   prfEncryptedSecretKey String?   @map("prf_encrypted_secret_key") @db.Text
   prfSecretKeyIv        String?   @map("prf_secret_key_iv") @db.VarChar(24)

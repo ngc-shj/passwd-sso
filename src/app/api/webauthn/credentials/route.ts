@@ -27,6 +27,7 @@ async function handleGET(_req: NextRequest) {
         nickname: true,
         deviceType: true,
         backedUp: true,
+        discoverable: true,
         transports: true,
         prfSupported: true,
         registeredDevice: true,

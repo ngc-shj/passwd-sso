@@ -124,6 +124,12 @@ async function handlePOST(req: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const transports: string[] = (response as any).response?.transports ?? [];
 
+  // credProps.rk is a client-supplied value (not authenticator-signed).
+  // It is used ONLY for UI display. Never use it for auth/authz decisions.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rawRk = (response as any).clientExtensionResults?.credProps?.rk;
+  const discoverable: boolean | null = typeof rawRk === "boolean" ? rawRk : null;
+
   const hasPrf = !!(prfEncryptedSecretKey && prfSecretKeyIv && prfSecretKeyAuthTag);
   const registeredDevice = parseDeviceFromUserAgent(req.headers.get("user-agent"));
 
@@ -146,6 +152,7 @@ async function handlePOST(req: NextRequest) {
         transports,
         deviceType,
         backedUp,
+        discoverable,
         nickname: nickname ?? null,
         prfSupported: hasPrf,
         registeredDevice,
@@ -171,6 +178,7 @@ async function handlePOST(req: NextRequest) {
       deviceType,
       backedUp,
       prfSupported: hasPrf,
+      discoverable,
     },
     ...extractRequestMeta(req),
   });
@@ -193,6 +201,7 @@ async function handlePOST(req: NextRequest) {
       nickname: credential.nickname,
       deviceType: credential.deviceType,
       backedUp: credential.backedUp,
+      discoverable: credential.discoverable,
       prfSupported: credential.prfSupported,
       createdAt: credential.createdAt,
     },

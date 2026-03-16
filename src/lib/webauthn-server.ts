@@ -107,6 +107,7 @@ export async function generateRegistrationOpts(
       residentKey: "preferred",
       userVerification: "preferred",
     },
+    extensions: { credProps: true },
   };
 
   return generateRegistrationOptions(opts);
