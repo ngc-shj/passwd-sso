@@ -71,11 +71,15 @@ export function TenantSessionPolicyCard() {
           setMinPinEnabled(true);
           setMinPinLength(String(minPinVal));
         }
+      } else {
+        toast.error(t("sessionPolicySaveFailed"));
       }
+    } catch {
+      toast.error(t("sessionPolicySaveFailed"));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void fetchPolicy();

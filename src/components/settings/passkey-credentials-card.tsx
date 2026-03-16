@@ -448,16 +448,18 @@ export function PasskeyCredentialsCard() {
                         {t("vaultUnlock")}
                       </span>
 
-                      {/* Offline backup (largeBlob) */}
-                      <span
-                        className={`text-xs px-1.5 py-0.5 rounded ${
-                          cred.largeBlobSupported
-                            ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
-                            : "text-muted-foreground/50 line-through"
-                        }`}
-                      >
-                        {t("largeBlobLabel")}
-                      </span>
+                      {/* Offline backup (largeBlob) — only shown when status is known */}
+                      {cred.largeBlobSupported !== null && (
+                        <span
+                          className={`text-xs px-1.5 py-0.5 rounded ${
+                            cred.largeBlobSupported
+                              ? "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200"
+                              : "text-muted-foreground/50 line-through"
+                          }`}
+                        >
+                          {t("largeBlobLabel")}
+                        </span>
+                      )}
 
                       {/* Device type */}
                       <span className="text-xs px-1.5 py-0.5 rounded bg-muted">

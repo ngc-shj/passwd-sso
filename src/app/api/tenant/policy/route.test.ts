@@ -31,7 +31,7 @@ const {
     mockPrismaUserFindUnique: vi.fn(),
     mockPrismaTenantUpdate: vi.fn(),
     mockPrismaTenantFindUnique: vi.fn(),
-    mockWithBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(),
     mockLogAudit: vi.fn(),
     mockPolicyLimiterCheck: vi.fn(),
     mockInvalidateTenantPolicyCache: vi.fn(),
@@ -85,6 +85,7 @@ vi.mock("@/lib/api-error-codes", () => ({
     UNAUTHORIZED: "UNAUTHORIZED",
     RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
     VALIDATION_ERROR: "VALIDATION_ERROR",
+    SELF_LOCKOUT: "SELF_LOCKOUT",
   },
 }));
 
@@ -103,12 +104,14 @@ vi.mock("@/lib/api-response", () => ({
     }),
 }));
 
-vi.mock("@/lib/validations", () => {
+vi.mock("@/lib/validations", () => ({
+  TAILNET_NAME_MAX_LENGTH: 253,
+}));
+
+vi.mock("@/lib/validations/common", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { z } = require("zod");
   return {
-    TAILNET_NAME_MAX_LENGTH: 253,
-    PIN_LENGTH_MIN: 4,
-    PIN_LENGTH_MAX: 63,
     pinLengthSchema: z.number().int().min(4).max(63),
   };
 });
@@ -162,6 +165,7 @@ describe("GET /api/tenant/policy", () => {
     mockPrismaUserFindUnique.mockResolvedValue({
       tenant: { ...BASE_POLICY },
     });
+    mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -209,6 +213,7 @@ describe("PATCH /api/tenant/policy", () => {
       tailscaleEnabled: false,
       tailscaleTailnet: null,
     });
+    mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -299,5 +304,29 @@ describe("PATCH /api/tenant/policy", () => {
         data: expect.objectContaining({ requireMinPinLength: null }),
       }),
     );
+  });
+
+  it("returns 409 when PATCH would lock out the requester", async () => {
+    mockWouldIpBeAllowed.mockReturnValue(false);
+
+    const req = createRequest("PATCH", ROUTE_URL, {
+      body: { allowedCidrs: ["10.0.0.0/8"] },
+    });
+    const { status, json } = await parseResponse(await PATCH(req));
+
+    expect(status).toBe(409);
+    expect(json.error).toBe("SELF_LOCKOUT");
+  });
+
+  it("allows PATCH with confirmLockout when it would lock out", async () => {
+    mockWouldIpBeAllowed.mockReturnValue(false);
+    mockPrismaTenantUpdate.mockResolvedValue({ ...BASE_POLICY, allowedCidrs: ["10.0.0.0/8"] });
+
+    const req = createRequest("PATCH", ROUTE_URL, {
+      body: { allowedCidrs: ["10.0.0.0/8"], confirmLockout: true },
+    });
+    const { status } = await parseResponse(await PATCH(req));
+
+    expect(status).toBe(200);
   });
 });

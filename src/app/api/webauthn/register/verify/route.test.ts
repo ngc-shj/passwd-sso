@@ -98,6 +98,9 @@ vi.mock("@/lib/api-error-codes", () => ({
 }));
 
 vi.mock("@/lib/parse-body", () => ({
+  // Note: parseBody mock bypasses Zod schema validation (including the PRF
+  // all-or-nothing refine rule). Schema validation is implicitly tested by
+  // the production build's TypeScript checks and integration tests.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   parseBody: async (req: any, _schema: any) => {
     const body = await req.json();
@@ -464,11 +467,11 @@ describe("POST /api/webauthn/register/verify", () => {
       );
     });
 
-    it("passes minPinLength=null when value is out of range (2)", async () => {
+    it("passes minPinLength=null when value is out of range (3, one below min boundary)", async () => {
       mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
 
       const req = createRequest("POST", ROUTE_URL, {
-        body: makeBody({ minPinLength: 2 }),
+        body: makeBody({ minPinLength: 3 }),
       });
       const res = await POST(req);
       expect(res.status).toBe(201);
@@ -476,6 +479,22 @@ describe("POST /api/webauthn/register/verify", () => {
       expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
         expect.objectContaining({
           data: expect.objectContaining({ minPinLength: null }),
+        }),
+      );
+    });
+
+    it("passes minPinLength=4 when value is at exact lower boundary", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ minPinLength: 4 }),
+      });
+      const res = await POST(req);
+      expect(res.status).toBe(201);
+
+      expect(mockPrismaCredentialCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({ minPinLength: 4 }),
         }),
       );
     });

@@ -150,6 +150,34 @@ describe("POST /api/webauthn/authenticate/options", () => {
         }),
       );
     });
+
+    it("accepts credentialId at max length (256)", async () => {
+      const credentialId = "a".repeat(256);
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { credentialId },
+      });
+      await POST(req);
+
+      expect(mockPrismaFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: "user-1", credentialId },
+        }),
+      );
+    });
+
+    it("falls back to PRF-only when credentialId exceeds max length (257)", async () => {
+      const credentialId = "a".repeat(257);
+      const req = createRequest("POST", ROUTE_URL, {
+        body: { credentialId },
+      });
+      await POST(req);
+
+      expect(mockPrismaFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { userId: "user-1", prfSupported: true },
+        }),
+      );
+    });
   });
 
   // ── Auth & error handling ──────────────────────────────────

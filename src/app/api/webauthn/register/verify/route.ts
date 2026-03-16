@@ -121,9 +121,13 @@ async function handlePOST(req: NextRequest) {
   const deviceType = registrationInfo.credentialDeviceType;
   const backedUp = registrationInfo.credentialBackedUp;
 
-  // Extract transports from the response if available
+  // Extract transports from the response if available (allowlisted per WebAuthn spec)
+  const VALID_TRANSPORTS = new Set(["usb", "nfc", "ble", "internal", "hybrid", "smart-card"]);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const transports: string[] = (response as any).response?.transports ?? [];
+  const rawTransports: unknown[] = (response as any).response?.transports ?? [];
+  const transports: string[] = rawTransports.filter(
+    (t): t is string => typeof t === "string" && VALID_TRANSPORTS.has(t),
+  );
 
   // credProps.rk is a client-supplied value (not authenticator-signed).
   // It is used ONLY for UI display. Never use it for auth/authz decisions.
