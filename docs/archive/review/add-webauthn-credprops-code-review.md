@@ -1,67 +1,38 @@
 # Code Review: add-webauthn-credprops
 Date: 2026-03-16
-Review round: 1
+Review rounds: 2
 
-## Changes from Previous Round
-Initial review
+## Round 1
 
-## Functionality Findings
+### Functionality Findings
+- F1 (Major) RESOLVED: hasPrf判定がactual PRF出力でなくcred属性ベース → authPrfOutputを使用
+- F3 (Minor) RESOLVED: prfOutput fill(0)後の参照 → prfOutputで直接分岐（!不要）
+- F4 (Minor) RESOLVED: handleRename引数名 → idに変更
 
-### F1 (Major) — RESOLVED
-- **File:** src/components/settings/passkey-credentials-card.tsx:282
-- **Problem:** hasPrf判定がcred属性ベースで、実際のPRF出力を確認していない
-- **Fix:** `startPasskeyAuthentication`の`prfOutput`を使って判定
+### Security Findings
+- S2 (Minor) RESOLVED: credentialId長さバリデーション → max 256追加
 
-### F2 (Major) — SKIPPED
-- **Problem:** req.json()の空ボディ対応
-- **Reason:** try/catchで意図的にフォールバック、コメント記載済み
+### Testing Findings
+- T1 (Critical) RESOLVED: authenticate/options テスト新規作成
+- T2 (Critical) RESOLVED: isNonDiscoverable テスト新規作成
+- T4 (Minor) RESOLVED: audit log discoverable=false テスト追加
 
-### F3 (Minor) — RESOLVED
-- **File:** src/components/settings/passkey-credentials-card.tsx:147
-- **Problem:** prfOutput.fill(0)後の参照が読みにくい
-- **Fix:** fill(0)前に`hadPrf`フラグを保存
+### Simplify Review
+- prfAvailable冗長フラグ廃止 → prfOutputで直接narrowing
+- handleTest: Credential引数に変更 → credentials.find()廃止
 
-### F4 (Minor) — RESOLVED
-- **File:** src/components/settings/passkey-credentials-card.tsx:230
-- **Problem:** handleRenameの引数名`credentialId`がDB UUIDを指しており、WebAuthn credentialIdと混同
-- **Fix:** 引数名を`id`に変更
+## Round 2
 
-## Security Findings
+### Functionality Findings
+No findings.
 
-### S1 (Minor) — SKIPPED
-- **Problem:** チャレンジキー上書き
-- **Reason:** 同一ユーザーの連続操作で影響は最小限
+### Security Findings
+No findings.
 
-### S2 (Minor) — RESOLVED
-- **File:** src/app/api/webauthn/authenticate/options/route.ts:54
-- **Problem:** credentialIdの長さバリデーションなし
-- **Fix:** `body.credentialId.length <= 256` チェック追加
-
-### S3 (Minor) — SKIPPED
-- **Problem:** DBコメントで用途明記
-- **Reason:** コード内コメント（route.ts:127-128）で十分に明記済み
-
-## Testing Findings
-
-### T1 (Critical) — RESOLVED
-- **Problem:** authenticate/options のテストなし
-- **Fix:** route.test.ts新規作成（7テスト: credentialIdターゲティング4ケース + 認証/エラー3ケース）
-
-### T2 (Critical) — RESOLVED
-- **Problem:** isNonDiscoverable のテストなし
-- **Fix:** is-non-discoverable.test.ts新規作成（6テスト: discoverable true/false/null × deviceType/backedUp組み合わせ）
-
-### T3 (Major) — SKIPPED
-- **Problem:** rk:null と credProps absent の意図不明
-- **Reason:** 両ケースとも仕様上 `null` が正しい（typeof null !== "boolean"）
-
-### T4 (Minor) — RESOLVED
-- **File:** src/app/api/webauthn/register/verify/route.test.ts
-- **Problem:** audit log discoverable=false ケース欠落
-- **Fix:** テストケース追加
-
-## Adjacent Findings
-None.
+### Testing Findings
+- 1a-1e (Major) RESOLVED: register/verify 5ブランチ追加（challenge expired, missing RP ID, verify throws, verified false, PRF data）
+- 2a-2c (Major) RESOLVED: authenticate/options 3ブランチ追加（rate limit, Redis unavailable, derivePrfSalt throws）
+- 4 (Minor) RESOLVED: credentials 空リストテスト追加
 
 ## Resolution Status
-All Critical/Major findings resolved. Minor findings resolved or skipped with documented reasons.
+All Critical/Major findings resolved across 2 rounds. Total tests: 4779 (all pass).
