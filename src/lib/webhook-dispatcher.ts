@@ -16,6 +16,7 @@ import {
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
 import { resolve4, resolve6 } from "node:dns/promises";
+import { isIpInCidr } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 
@@ -95,47 +96,35 @@ function sanitizeWebhookData(value: unknown): unknown {
 }
 
 /**
- * Check if an IP address belongs to a private/reserved range.
- * Blocks RFC 1918, loopback, link-local, and cloud metadata IPs.
+ * CIDR ranges that must never receive webhook deliveries.
+ * Covers RFC 1918, loopback, link-local, cloud metadata, CGNAT,
+ * benchmarking, IETF reserved, and IPv6 equivalents.
+ */
+const BLOCKED_CIDRS = [
+  // IPv4
+  "10.0.0.0/8",         // RFC 1918
+  "172.16.0.0/12",      // RFC 1918
+  "192.168.0.0/16",     // RFC 1918
+  "127.0.0.0/8",        // loopback
+  "0.0.0.0/8",          // "this" network
+  "169.254.0.0/16",     // link-local + cloud metadata (169.254.169.254)
+  "100.64.0.0/10",      // RFC 6598 CGNAT (also Tailscale)
+  "192.0.0.0/24",       // RFC 6890 IETF protocol assignments
+  "198.18.0.0/15",      // RFC 2544 benchmarking
+  "240.0.0.0/4",        // RFC 1112 reserved
+  // IPv6
+  "::1/128",            // loopback
+  "::/128",             // unspecified
+  "fe80::/10",          // link-local
+  "fc00::/7",           // unique local (ULA)
+];
+
+/**
+ * Check if an IP address belongs to a private/reserved range
+ * using the existing CIDR matcher from ip-access.ts.
  */
 function isPrivateIp(ip: string): boolean {
-  const parts = ip.split(".");
-  const first = parts.length === 4 ? parseInt(parts[0], 10) : NaN;
-  const second = parts.length === 4 ? parseInt(parts[1], 10) : NaN;
-
-  // IPv4 reserved ranges
-  if (
-    ip.startsWith("10.") ||         // RFC 1918
-    ip.startsWith("127.") ||        // loopback
-    ip.startsWith("0.") ||          // "this" network
-    ip === "0.0.0.0" ||
-    ip === "255.255.255.255" ||      // broadcast
-    ip.startsWith("169.254.") ||     // link-local + cloud metadata
-    ip.startsWith("192.168.") ||     // RFC 1918
-    ip.startsWith("192.0.0.") ||     // RFC 6890 IETF protocol assignments
-    first >= 240                     // RFC 1112 reserved + broadcast
-  ) return true;
-
-  // 172.16.0.0/12 — RFC 1918
-  if (first === 172 && second >= 16 && second <= 31) return true;
-
-  // 100.64.0.0/10 — RFC 6598 CGNAT (also used by Tailscale)
-  if (first === 100 && second >= 64 && second <= 127) return true;
-
-  // 198.18.0.0/15 — RFC 2544 benchmarking
-  if (first === 198 && (second === 18 || second === 19)) return true;
-
-  // IPv6 loopback / unspecified / link-local / unique local
-  const lower = ip.toLowerCase();
-  if (
-    lower === "::1" ||
-    lower === "::" ||
-    lower.startsWith("fe80:") ||
-    lower.startsWith("fc") ||
-    lower.startsWith("fd")
-  ) return true;
-
-  return false;
+  return BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr));
 }
 
 /**
