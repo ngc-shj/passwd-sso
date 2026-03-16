@@ -113,3 +113,10 @@ None
 - Action: Added reactivation test
 - Modified file: src/lib/directory-sync/engine.test.ts
 - Status: RESOLVED
+
+## Round 2 Findings (after /simplify refactor)
+
+### F3+S3 [Minor] applyRemoveOperations missing teamId filter
+- Action: Added `teamId` to findMany where clause for defense-in-depth
+- Modified file: src/lib/services/scim-group-service.ts:177
+- Status: RESOLVED
