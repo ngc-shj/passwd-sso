@@ -8,6 +8,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUPS_PERSONAL, AUDIT_SCOPE } from "@/lib/constants";
 import {
   VALID_ACTIONS,
@@ -151,7 +152,7 @@ async function handleGET(
               targetUserId: grant.targetUserId,
             } as never,
             ip: ip ?? null,
-            userAgent: userAgent?.slice(0, 512) ?? null,
+            userAgent: userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
           },
         }),
       );

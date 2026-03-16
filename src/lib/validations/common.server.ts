@@ -25,6 +25,8 @@ export const VAULT_AUTO_LOCK_MAX = 1440;
 export const AUDIT_LOG_MAX_RANGE_DAYS = 90;
 export const AUDIT_LOG_BATCH_SIZE = 500;
 export const AUDIT_LOG_MAX_ROWS = 100_000;
+export const METADATA_MAX_BYTES = 10_240;      // 10 KB
+export const USER_AGENT_MAX_LENGTH = 512;      // matches @db.VarChar(512)
 
 // ─── Rate Limits ─────────────────────────────────────────────
 export const CSP_REPORT_RATE_MAX = 60;

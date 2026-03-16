@@ -8,6 +8,7 @@ import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
+import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { createNotification } from "@/lib/notification";
@@ -223,7 +224,7 @@ export function createCustomAdapter(): Adapter {
               tenantId,
               expires: session.expires,
               ipAddress: meta?.ip ?? null,
-              userAgent: meta?.userAgent?.slice(0, 512) ?? null,
+              userAgent: meta?.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
             },
             select: {
               sessionToken: true,

@@ -15,6 +15,7 @@ import {
   ENTRY_NAME_MAX,
   BREAKGLASS_INCIDENT_REF_MAX,
 } from "@/lib/validations/common";
+import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 // Read the Prisma schema once at module load time
 const schema = readFileSync(
@@ -154,6 +155,9 @@ describe("Prisma schema and TypeScript constant sync", () => {
       ["ApiKey", "name", NAME_MAX_LENGTH],
       ["Notification", "title", ENTRY_NAME_MAX],
       ["PersonalLogAccessGrant", "incidentRef", BREAKGLASS_INCIDENT_REF_MAX],
+      ["Session", "userAgent", USER_AGENT_MAX_LENGTH],
+      ["AuditLog", "userAgent", USER_AGENT_MAX_LENGTH],
+      ["ShareAccessLog", "userAgent", USER_AGENT_MAX_LENGTH],
     ] as const)(
       "%s.%s should have VarChar(%i)",
       (model, field, expectedLength) => {
