@@ -303,4 +303,46 @@ describe("POST /api/passwords/bulk-archive", () => {
       })
     );
   });
+
+  it("logAuditBatch receives per-entry data matching individual logAudit contract", async () => {
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }, { id: "p3" }]);
+    mockUpdateMany.mockResolvedValue({ count: 3 });
+
+    await POST(
+      createRequest("POST", URL, {
+        headers: { "user-agent": "TestAgent/1.0", "x-forwarded-for": "10.0.0.1" },
+        body: { ids: ["p1", "p2", "p3"] },
+      })
+    );
+
+    await vi.waitFor(() => expect(mockAuditCreateMany).toHaveBeenCalled());
+
+    const batchData: Record<string, unknown>[] = mockAuditCreateMany.mock.calls[0][0].data;
+
+    // Exactly 3 per-entry records — one per processed entry
+    expect(batchData).toHaveLength(3);
+
+    // Every record must carry the fields that individual logAudit calls would produce
+    for (const entry of batchData) {
+      expect(entry).toEqual(
+        expect.objectContaining({
+          scope: "PERSONAL",
+          action: "ENTRY_UPDATE",
+          userId: "user-1",
+          tenantId: "tenant-1", // resolved, never null
+          teamId: null,
+          targetType: "PasswordEntry",
+          metadata: expect.objectContaining({
+            source: "bulk-archive",
+            parentAction: "ENTRY_BULK_ARCHIVE",
+          }),
+        })
+      );
+    }
+
+    // targetId is unique per entry — not all the same
+    const ids = batchData.map((e) => e.targetId);
+    expect(ids).toEqual(expect.arrayContaining(["p1", "p2", "p3"]));
+    expect(new Set(ids).size).toBe(3);
+  });
 });

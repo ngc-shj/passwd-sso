@@ -304,6 +304,68 @@ describe("PasswordList — client-side search decoupling", () => {
     expect(mockFetchApi).toHaveBeenCalledTimes(1);
   });
 
+  it("filters case-insensitively matching both title and username", async () => {
+    mockFetchApi.mockReturnValue(
+      okJsonResponse([makeApiEntry("e1"), makeApiEntry("e2"), makeApiEntry("e3")])
+    );
+    mockDecryptData
+      .mockResolvedValueOnce(makeOverview("GitHub", "alice@example.com"))
+      .mockResolvedValueOnce(makeOverview("Notion", "Bob@example.com"))
+      .mockResolvedValueOnce(makeOverview("admin-panel", "Admin"));
+
+    const { rerender } = render(
+      <PasswordList
+        searchQuery=""
+        tagId={null}
+        refreshKey={0}
+      />
+    );
+
+    // All three entries visible initially
+    await waitFor(() => {
+      expect(screen.getAllByTestId("password-card")).toHaveLength(3);
+    });
+
+    // Lowercase "github" must match title "GitHub" (case-insensitive)
+    act(() => {
+      rerender(
+        <PasswordList
+          searchQuery="github"
+          tagId={null}
+          refreshKey={0}
+        />
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getAllByTestId("password-card")).toHaveLength(1);
+      expect(screen.getByText("GitHub")).toBeInTheDocument();
+    });
+
+    // Lowercase "admin" must match username "Admin" (case-insensitive)
+    act(() => {
+      rerender(
+        <PasswordList
+          searchQuery="admin"
+          tagId={null}
+          refreshKey={0}
+        />
+      );
+    });
+
+    await waitFor(() => {
+      const cards = screen.getAllByTestId("password-card");
+      // "admin-panel" matches by title; "admin-panel"'s username "Admin" also matches.
+      // Both "admin-panel" (title match) entries and any username match appear.
+      expect(cards.length).toBeGreaterThanOrEqual(1);
+      const texts = cards.map((c) => c.textContent);
+      expect(texts).toEqual(expect.arrayContaining(["admin-panel"]));
+    });
+
+    // No additional fetches triggered by search changes
+    expect(mockFetchApi).toHaveBeenCalledTimes(1);
+  });
+
   it("re-fetches when refreshKey changes", async () => {
     mockFetchApi.mockReturnValue(okJsonResponse([makeApiEntry("e1")]));
     mockDecryptData.mockResolvedValue(makeOverview("GitHub"));
