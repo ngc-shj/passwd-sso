@@ -67,4 +67,49 @@ Fix: Add test case
 None
 
 ## Resolution Status
-(To be updated after fixes)
+
+### F1 [Major] Bulk ops audit entryIds divergence
+- Action: Accepted as-is — entryIds = "attempted", count = "confirmed". Conservative audit approach.
+- Status: ACCEPTED (no code change)
+
+### F2 [Minor] rotate-key duplicate userId
+- Action: Existing Zod + member validation handles this. No change needed.
+- Status: ACCEPTED (no code change)
+
+### S1 [Major] TOCTOU in replaceScimGroup
+- Action: Moved `currentMembers` fetch and delta computation inside `$transaction`
+- Modified file: src/lib/services/scim-group-service.ts:218-229
+- Status: RESOLVED
+
+### S2 [Minor] Auth adapter idle timeout race
+- Action: Pre-existing issue, out of scope
+- Status: ACCEPTED (no code change)
+
+### T1 [Major] ScimDisplayNameMismatchError untested
+- Action: Added test case
+- Modified file: src/lib/services/scim-group-service.test.ts
+- Status: RESOLVED
+
+### T2 [Major] toUpdateRole path untested
+- Action: Added tests for both replaceScimGroup and patchScimGroup
+- Modified file: src/lib/services/scim-group-service.test.ts
+- Status: RESOLVED
+
+### T3 [Major] engine.test.ts non-dryRun transaction
+- Action: Added test with tx mock override verifying user.create and tenantMember.create
+- Modified file: src/lib/directory-sync/engine.test.ts
+- Status: RESOLVED
+
+### T4 [Major] Provider paths untested
+- Action: Out of scope — provider logic was not modified in this PR
+- Status: ACCEPTED (no code change)
+
+### T5 [Minor] Conditional OWNER assertion
+- Action: Replaced with unconditional negative assertion
+- Modified file: src/lib/directory-sync/engine.test.ts
+- Status: RESOLVED
+
+### T6 [Minor] Reactivation path untested
+- Action: Added reactivation test
+- Modified file: src/lib/directory-sync/engine.test.ts
+- Status: RESOLVED
