@@ -95,6 +95,7 @@ jobs:
       - run: npm run check:bypass-rls
       - run: npm run check:crypto-domains
       - run: npm test
+      - run: npm run test:coverage
       - run: npm run build
 
       - name: Build with basePath
