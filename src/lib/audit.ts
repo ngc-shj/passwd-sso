@@ -142,6 +142,107 @@ export function logAudit(params: AuditLogParams): void {
 }
 
 /**
+ * Write multiple audit log entries in a single DB round-trip.
+ * Async nonblocking: errors are silently caught.
+ *
+ * **Contract**: All entries in `paramsList` must share the same `userId` and
+ * `teamId` (if set). tenantId is resolved once from the first entry and applied
+ * to the entire batch. Mixing different users/teams in a single batch will
+ * produce incorrect tenantId assignments.
+ *
+ * Optimization over calling logAudit() in a loop:
+ * - tenantId resolved once (not per entry)
+ * - single withBypassRls call wrapping one createMany (not N create calls)
+ * - pino emit still happens per entry (no behavioral change for log forwarding)
+ */
+export function logAuditBatch(paramsList: AuditLogParams[]): void {
+  if (paramsList.length === 0) return;
+
+  // --- DB write: resolve tenantId once, then createMany ---
+  void (async () => {
+    await withBypassRls(prisma, async () => {
+      const first = paramsList[0];
+      let resolvedTenantId = first.tenantId ?? null;
+      if (!resolvedTenantId && first.teamId) {
+        const team = await prisma.team.findUnique({
+          where: { id: first.teamId },
+          select: { tenantId: true },
+        });
+        resolvedTenantId = team?.tenantId ?? null;
+      }
+      if (!resolvedTenantId) {
+        const user = await prisma.user.findUnique({
+          where: { id: first.userId },
+          select: { tenantId: true },
+        });
+        resolvedTenantId = user?.tenantId ?? null;
+      }
+      if (!resolvedTenantId) return;
+
+      await prisma.auditLog.createMany({
+        data: paramsList.map((p) => {
+          let safeMetadata: Record<string, unknown> | undefined;
+          if (p.metadata) {
+            const json = JSON.stringify(p.metadata);
+            safeMetadata =
+              json.length <= METADATA_MAX_BYTES
+                ? p.metadata
+                : { _truncated: true, _originalSize: json.length };
+          }
+          return {
+            scope: p.scope,
+            action: p.action,
+            userId: p.userId,
+            tenantId: resolvedTenantId!,
+            teamId: p.teamId ?? null,
+            targetType: p.targetType ?? null,
+            targetId: p.targetId ?? null,
+            metadata: safeMetadata as never ?? undefined,
+            ip: p.ip ?? null,
+            userAgent: p.userAgent?.slice(0, 512) ?? null,
+          };
+        }),
+      });
+    });
+  })().catch(() => {
+    // Silently swallow — audit logging must never break the app
+  });
+
+  // --- Structured JSON emit per entry for external forwarding ---
+  for (const p of paramsList) {
+    let safeMetadata: Record<string, unknown> | undefined;
+    if (p.metadata) {
+      const json = JSON.stringify(p.metadata);
+      safeMetadata =
+        json.length <= METADATA_MAX_BYTES
+          ? p.metadata
+          : { _truncated: true, _originalSize: json.length };
+    }
+    const safeUserAgent = p.userAgent?.slice(0, 512) ?? null;
+    try {
+      auditLogger.info(
+        {
+          audit: {
+            scope: p.scope,
+            action: p.action,
+            userId: p.userId,
+            teamId: p.teamId ?? null,
+            targetType: p.targetType ?? null,
+            targetId: p.targetId ?? null,
+            metadata: sanitizeMetadata(safeMetadata),
+            ip: p.ip ?? null,
+            userAgent: safeUserAgent,
+          },
+        },
+        `audit.${p.action}`,
+      );
+    } catch {
+      // Never let forwarding break the app
+    }
+  }
+}
+
+/**
  * Extract IP address, User-Agent, and Accept-Language from a NextRequest.
  */
 export function extractRequestMeta(req: NextRequest): {

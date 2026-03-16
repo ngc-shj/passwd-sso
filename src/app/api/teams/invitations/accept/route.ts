@@ -71,6 +71,7 @@ async function handlePOST(req: NextRequest) {
           userId: session.user.id,
         },
       },
+      select: { deactivatedAt: true, scimManaged: true },
     }),
   );
 

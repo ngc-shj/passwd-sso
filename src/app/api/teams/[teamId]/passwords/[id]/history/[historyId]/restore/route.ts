@@ -32,6 +32,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
+      select: {
+        teamId: true,
+        tenantId: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        aadVersion: true,
+        teamKeyVersion: true,
+      },
     }),
   );
 
@@ -42,6 +51,15 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const history = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntryHistory.findUnique({
       where: { id: historyId },
+      select: {
+        entryId: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        aadVersion: true,
+        teamKeyVersion: true,
+        changedAt: true,
+      },
     }),
   );
 

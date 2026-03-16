@@ -35,22 +35,21 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  const entry = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findUnique({
-      where: { id },
-      select: { teamId: true, entryType: true },
-    }),
+  const [entry, history] = await withTeamTenantRls(teamId, () =>
+    Promise.all([
+      prisma.teamPasswordEntry.findUnique({
+        where: { id },
+        select: { teamId: true, entryType: true },
+      }),
+      prisma.teamPasswordEntryHistory.findUnique({
+        where: { id: historyId },
+      }),
+    ]),
   );
 
   if (!entry || entry.teamId !== teamId) {
     return notFound();
   }
-
-  const history = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntryHistory.findUnique({
-      where: { id: historyId },
-    }),
-  );
 
   if (!history || history.entryId !== id) {
     return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
@@ -105,22 +104,21 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     oldBlobHash,
   } = parsed.data;
 
-  const entry = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findUnique({
-      where: { id },
-      select: { teamId: true },
-    }),
+  const [entry, history] = await withTeamTenantRls(teamId, () =>
+    Promise.all([
+      prisma.teamPasswordEntry.findUnique({
+        where: { id },
+        select: { teamId: true },
+      }),
+      prisma.teamPasswordEntryHistory.findUnique({
+        where: { id: historyId },
+      }),
+    ]),
   );
 
   if (!entry || entry.teamId !== teamId) {
     return notFound();
   }
-
-  const history = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntryHistory.findUnique({
-      where: { id: historyId },
-    }),
-  );
 
   if (!history || history.entryId !== id) {
     return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);

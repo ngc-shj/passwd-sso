@@ -98,23 +98,35 @@ async function handlePOST(req: NextRequest) {
   }
   // If detected is undefined (text files like .txt, .csv, .json), trust declared content type
 
-  // Storage limit check: sum of active (non-revoked, non-expired) Send files
+  // Storage limit check and actor (tenantId) lookup are independent — run in parallel
   const now = new Date();
-  const activeTotal = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordShare.aggregate({
-      where: {
-        createdById: session.user.id,
-        shareType: "FILE",
-        revokedAt: null,
-        expiresAt: { gt: now },
-        sendSizeBytes: { not: null },
-      },
-      _sum: { sendSizeBytes: true },
-    }),
-  );
+  const [activeTotal, actor] = await Promise.all([
+    withUserTenantRls(session.user.id, async () =>
+      prisma.passwordShare.aggregate({
+        where: {
+          createdById: session.user.id,
+          shareType: "FILE",
+          revokedAt: null,
+          expiresAt: { gt: now },
+          sendSizeBytes: { not: null },
+        },
+        _sum: { sendSizeBytes: true },
+      }),
+    ),
+    withUserTenantRls(session.user.id, async () =>
+      prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { tenantId: true },
+      }),
+    ),
+  ]);
+
   const currentTotal = activeTotal._sum.sendSizeBytes ?? 0;
   if (currentTotal + file.size > SEND_MAX_ACTIVE_TOTAL_BYTES) {
     return errorResponse(API_ERROR.SEND_STORAGE_LIMIT_EXCEEDED, 400);
+  }
+  if (!actor) {
+    return unauthorized();
   }
 
   // Generate access password if requested
@@ -138,15 +150,6 @@ async function handlePOST(req: NextRequest) {
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[meta.expiresIn]);
   const contentType = detected?.mime ?? file.type ?? "application/octet-stream";
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
 
   const share = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordShare.create({

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, Fragment, useCallback } from "react";
+import { useState, useRef, useEffect, Fragment, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
 import { PasswordList, type SortOption, type PasswordListHandle } from "@/components/passwords/password-list";
@@ -32,6 +32,18 @@ import { buildFolderPath } from "@/lib/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
 import { VAULT_DATA_CHANGED_EVENT, notifyVaultDataChanged } from "@/lib/events";
+
+// Static icon map — created once at module scope to avoid re-creation on every render
+const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
+  LOGIN: <KeyRound className="h-6 w-6" />,
+  SECURE_NOTE: <FileText className="h-6 w-6" />,
+  CREDIT_CARD: <CreditCard className="h-6 w-6" />,
+  IDENTITY: <IdCard className="h-6 w-6" />,
+  PASSKEY: <Fingerprint className="h-6 w-6" />,
+  BANK_ACCOUNT: <Landmark className="h-6 w-6" />,
+  SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
+  SSH_KEY: <Terminal className="h-6 w-6" />,
+};
 
 type VaultView = "all" | "favorites" | "archive" | "trash";
 
@@ -71,7 +83,9 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     ? (entryType as EntryTypeValue)
     : null;
 
-  const ENTRY_TYPE_TITLES: Record<string, string> = {
+  // useTranslations output is stable across renders within the same locale,
+  // but the object literal itself would be re-created each render without useMemo.
+  const ENTRY_TYPE_TITLES = useMemo<Record<string, string>>(() => ({
     LOGIN: t("catLogin"),
     SECURE_NOTE: t("catSecureNote"),
     CREDIT_CARD: t("catCreditCard"),
@@ -80,7 +94,7 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     BANK_ACCOUNT: t("catBankAccount"),
     SOFTWARE_LICENSE: t("catSoftwareLicense"),
     SSH_KEY: t("catSshKey"),
-  };
+  }), [t]);
 
   const folderLabel = folderId ? buildFolderPath(folderId, folders) : null;
   const matchedTag = tagId ? tags.find((tag) => tag.id === tagId) : undefined;
@@ -95,17 +109,6 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
         : entryType && ENTRY_TYPE_TITLES[entryType]
           ? ENTRY_TYPE_TITLES[entryType]
           : folderLabel ?? tagLabel ?? (folderId || tagId ? "\u00A0" : t("passwords"));
-
-  const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
-    LOGIN: <KeyRound className="h-6 w-6" />,
-    SECURE_NOTE: <FileText className="h-6 w-6" />,
-    CREDIT_CARD: <CreditCard className="h-6 w-6" />,
-    IDENTITY: <IdCard className="h-6 w-6" />,
-    PASSKEY: <Fingerprint className="h-6 w-6" />,
-    BANK_ACCOUNT: <Landmark className="h-6 w-6" />,
-    SOFTWARE_LICENSE: <KeySquare className="h-6 w-6" />,
-    SSH_KEY: <Terminal className="h-6 w-6" />,
-  };
 
   const headerIcon = isTrash
     ? <Trash2 className="h-6 w-6" />

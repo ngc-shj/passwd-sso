@@ -36,11 +36,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  // Verify target member exists, belongs to this team, and is active
+  // Verify target member exists, belongs to this team, is active, and has vault ready
   const targetMember = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
-      select: { teamId: true, userId: true, keyDistributed: true, deactivatedAt: true },
+      select: {
+        teamId: true,
+        userId: true,
+        keyDistributed: true,
+        deactivatedAt: true,
+        user: { select: { ecdhPublicKey: true } },
+      },
     }),
   );
 
@@ -48,15 +54,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.MEMBER_NOT_FOUND, 404);
   }
 
-  // Verify the target user has an ECDH public key (vault set up)
-  const targetUser = await withTeamTenantRls(teamId, async () =>
-    prisma.user.findUnique({
-      where: { id: targetMember.userId },
-      select: { ecdhPublicKey: true },
-    }),
-  );
-
-  if (!targetUser?.ecdhPublicKey) {
+  if (!targetMember.user?.ecdhPublicKey) {
     return errorResponse(API_ERROR.VAULT_NOT_READY, 409);
   }
 

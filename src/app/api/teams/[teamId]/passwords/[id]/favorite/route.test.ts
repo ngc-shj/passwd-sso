@@ -15,9 +15,8 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamPasswordFavorite, m
     mockAuth: vi.fn(),
     mockPrismaTeamPasswordEntry: { findUnique: vi.fn() },
     mockPrismaTeamPasswordFavorite: {
-      findUnique: vi.fn(),
       create: vi.fn(),
-      delete: vi.fn(),
+      deleteMany: vi.fn(),
     },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
@@ -93,8 +92,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
   });
 
   it("adds favorite when not yet favorited", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM_ID });
-    mockPrismaTeamPasswordFavorite.findUnique.mockResolvedValue(null);
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM_ID, tenantId: "tenant-1", favorites: [] });
     mockPrismaTeamPasswordFavorite.create.mockResolvedValue({});
 
     const res = await POST(
@@ -110,8 +108,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({
       teamId: TEAM_ID,
       tenantId: "tenant-1",
+      favorites: [],
     });
-    mockPrismaTeamPasswordFavorite.findUnique.mockResolvedValue(null);
     mockPrismaTeamPasswordFavorite.create.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError("duplicate", {
         code: "P2002",
@@ -130,9 +128,8 @@ describe("POST /api/teams/[teamId]/passwords/[id]/favorite", () => {
   });
 
   it("removes favorite when already favorited", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM_ID });
-    mockPrismaTeamPasswordFavorite.findUnique.mockResolvedValue({ id: "fav-1" });
-    mockPrismaTeamPasswordFavorite.delete.mockResolvedValue({});
+    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue({ teamId: TEAM_ID, tenantId: "tenant-1", favorites: [{ id: "fav-1" }] });
+    mockPrismaTeamPasswordFavorite.deleteMany.mockResolvedValue({ count: 1 });
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}/favorite`),

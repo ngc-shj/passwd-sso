@@ -26,6 +26,7 @@ async function handlePOST(
   const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
+      select: { status: true, granteeEmail: true, ownerId: true },
     }),
   );
 

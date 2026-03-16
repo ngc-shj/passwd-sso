@@ -28,11 +28,19 @@ async function handlePOST(_req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  // Verify the password belongs to this team
+  // Verify the password belongs to this team and load existing favorite in one query
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
-      select: { teamId: true, tenantId: true },
+      select: {
+        teamId: true,
+        tenantId: true,
+        favorites: {
+          where: { userId: session.user.id },
+          select: { id: true },
+          take: 1,
+        },
+      },
     }),
   );
 
@@ -40,22 +48,12 @@ async function handlePOST(_req: NextRequest, { params }: Params) {
     return notFound();
   }
 
-  // Toggle: if exists, remove; if not, create
-  const existing = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordFavorite.findUnique({
-      where: {
-        userId_teamPasswordEntryId: {
-          userId: session.user.id,
-          teamPasswordEntryId: id,
-        },
-      },
-    }),
-  );
+  const existing = entry.favorites[0] ?? null;
 
   if (existing) {
     await withTeamTenantRls(teamId, async () =>
-      prisma.teamPasswordFavorite.delete({
-        where: { id: existing.id },
+      prisma.teamPasswordFavorite.deleteMany({
+        where: { userId: session.user.id, teamPasswordEntryId: id },
       }),
     );
     return NextResponse.json({ isFavorite: false });
