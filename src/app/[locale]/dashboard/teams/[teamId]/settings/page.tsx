@@ -28,17 +28,13 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar";
+import { MemberInfo } from "@/components/member-info";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
 import { TeamWebhookCard } from "@/components/team/team-webhook-card";
 import { TabDescription } from "@/components/settings/tab-description";
 import { Link } from "@/i18n/navigation";
-import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Globe, Search, Shield, Webhook } from "lucide-react";
+import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Search, Shield, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -560,29 +556,14 @@ export default function TeamSettingsPage({
                           key={m.id}
                           className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                         >
-                          <Avatar className="h-8 w-8">
-                            <AvatarImage src={m.image ?? undefined} />
-                            <AvatarFallback>
-                              {(m.name ?? m.email ?? "?").charAt(0).toUpperCase()}
-                            </AvatarFallback>
-                          </Avatar>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">
-                              {m.name ?? m.email}
-                              {m.userId === currentUserId && (
-                                <span className="text-muted-foreground ml-1">{t("you")}</span>
-                              )}
-                            </p>
-                            {m.name && m.email && (
-                              <p className="text-xs text-muted-foreground truncate">{m.email}</p>
-                            )}
-                            {m.tenantName && team.tenantName && m.tenantName !== team.tenantName && (
-                              <p className="text-xs text-amber-600 dark:text-amber-400 truncate flex items-center gap-1">
-                                <Globe className="h-3 w-3 shrink-0" />
-                                {m.tenantName}
-                              </p>
-                            )}
-                          </div>
+                          <MemberInfo
+                            name={m.name}
+                            email={m.email}
+                            image={m.image}
+                            isCurrentUser={m.userId === currentUserId}
+                            tenantName={m.tenantName}
+                            teamTenantName={team.tenantName}
+                          />
                           {isAdmin && m.role !== TEAM_ROLE.OWNER && m.userId !== currentUserId ? (
                             <div className="flex items-center gap-2">
                               <Select value={m.role} onValueChange={(v) => handleChangeRole(m.id, v)}>
@@ -655,16 +636,13 @@ export default function TeamSettingsPage({
                               key={m.id}
                               className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                             >
-                              <Avatar className="h-8 w-8">
-                                <AvatarImage src={m.image ?? undefined} />
-                                <AvatarFallback>
-                                  {(m.name ?? m.email ?? "?").charAt(0).toUpperCase()}
-                                </AvatarFallback>
-                              </Avatar>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{m.name ?? m.email}</p>
+                              <MemberInfo
+                                name={m.name}
+                                email={m.email}
+                                image={m.image}
+                              >
                                 <TeamRoleBadge role={m.role} />
-                              </div>
+                              </MemberInfo>
                               <AlertDialog>
                                 <AlertDialogTrigger asChild>
                                   <Button variant="outline" size="sm">
@@ -746,18 +724,11 @@ export default function TeamSettingsPage({
                                 key={u.userId}
                                 className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                               >
-                                <Avatar className="h-8 w-8">
-                                  <AvatarImage src={u.image ?? undefined} />
-                                  <AvatarFallback>
-                                    {(u.name ?? u.email ?? "?").charAt(0).toUpperCase()}
-                                  </AvatarFallback>
-                                </Avatar>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium truncate">{u.name ?? u.email}</p>
-                                  {u.name && u.email && (
-                                    <p className="text-xs text-muted-foreground truncate">{u.email}</p>
-                                  )}
-                                </div>
+                                <MemberInfo
+                                  name={u.name}
+                                  email={u.email}
+                                  image={u.image}
+                                />
                                 <Button
                                   size="sm"
                                   onClick={() => handleAddMember(u.userId)}
