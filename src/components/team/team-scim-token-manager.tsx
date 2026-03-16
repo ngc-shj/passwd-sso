@@ -37,6 +37,7 @@ import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
+import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 
 const TOKEN_STATUS_VARIANT: Record<string, "default" | "secondary" | "destructive" | "outline"> = {
   active: "default",
@@ -161,7 +162,7 @@ export function ScimTokenManager({ locale }: Props) {
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium">
-              {token.description || token.id.slice(0, 8)}
+              {token.description || token.id.slice(0, DISPLAY_ID_SHORT)}
             </span>
             <Badge variant={TOKEN_STATUS_VARIANT[status] ?? "outline"} className="text-xs">
               {tokenStatusLabel(status)}

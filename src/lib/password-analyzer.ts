@@ -4,6 +4,7 @@
 
 import { fetchApi } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants";
+import { HIBP_PREFIX_LENGTH } from "@/lib/validations/common";
 
 export interface StrengthResult {
   score: number; // 0-100
@@ -171,8 +172,8 @@ export async function checkHIBP(
   password: string
 ): Promise<{ breached: boolean; count: number }> {
   const hash = (await sha1Hex(password)).toUpperCase();
-  const prefix = hash.slice(0, 5);
-  const suffix = hash.slice(5);
+  const prefix = hash.slice(0, HIBP_PREFIX_LENGTH);
+  const suffix = hash.slice(HIBP_PREFIX_LENGTH);
 
   try {
     const res = await fetchApi(`${API_PATH.WATCHTOWER_HIBP}?prefix=${prefix}`);

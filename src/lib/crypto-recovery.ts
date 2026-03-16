@@ -15,6 +15,7 @@
 
 import { hexEncode, hexDecode } from "./crypto-client";
 import { toArrayBuffer, textEncode } from "./crypto-utils";
+import { RECOVERY_KEY_DATA_LENGTH } from "./validations/common";
 
 const HKDF_RECOVERY_WRAP_INFO = "passwd-sso-recovery-wrap-v1";
 const HKDF_RECOVERY_VERIFIER_INFO = "passwd-sso-recovery-verifier-v1";
@@ -116,9 +117,9 @@ export async function parseRecoveryKey(formatted: string): Promise<Uint8Array> {
     }
   }
 
-  // Split: 52 data chars + 2 checksum chars
-  const dataChars = clean.slice(0, 52);
-  const checksumChars = clean.slice(52);
+  // Split: data chars + 2 checksum chars
+  const dataChars = clean.slice(0, RECOVERY_KEY_DATA_LENGTH);
+  const checksumChars = clean.slice(RECOVERY_KEY_DATA_LENGTH);
 
   // Decode data
   const key = base32Decode(dataChars);

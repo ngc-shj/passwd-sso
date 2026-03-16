@@ -5,8 +5,7 @@
  * Security: 256-char limit + attribute whitelist to prevent injection / ReDoS.
  */
 
-/** Maximum filter string length. */
-const MAX_FILTER_LENGTH = 256;
+import { SCIM_FILTER_MAX_LENGTH } from "@/lib/validations/common.server";
 
 /** Attributes allowed in SCIM filters. */
 const ALLOWED_FILTER_ATTRIBUTES = new Set([
@@ -123,9 +122,9 @@ export class FilterParseError extends Error {
  * Throws `FilterParseError` on invalid input.
  */
 export function parseScimFilter(filter: string): ScimFilterExpression {
-  if (filter.length > MAX_FILTER_LENGTH) {
+  if (filter.length > SCIM_FILTER_MAX_LENGTH) {
     throw new FilterParseError(
-      `Filter exceeds maximum length of ${MAX_FILTER_LENGTH} characters`,
+      `Filter exceeds maximum length of ${SCIM_FILTER_MAX_LENGTH} characters`,
     );
   }
 

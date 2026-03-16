@@ -4,6 +4,8 @@
  * Uses Microsoft Graph API via plain fetch — no external SDK.
  */
 
+import { DIRECTORY_SYNC_MAX_PAGES, DIRECTORY_SYNC_ERROR_PREVIEW } from "@/lib/validations/common.server";
+
 // ─── Types ───────────────────────────────────────────────────
 
 export interface AzureAdCredentials {
@@ -30,7 +32,6 @@ export interface AzureAdGroup {
 
 // ─── Constants ──────────────────────────────────────────────
 
-const MAX_PAGES = 1000;
 const GRAPH_ORIGIN = "https://graph.microsoft.com";
 const FETCH_TIMEOUT_MS = 30_000;
 
@@ -90,7 +91,7 @@ export async function getAzureAdToken(
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `Azure AD token request failed (${res.status}): ${text.slice(0, 200)}`,
+      `Azure AD token request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
     );
   }
 
@@ -127,8 +128,8 @@ export async function fetchAzureAdUsers(
   let pages = 0;
 
   while (url) {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Azure AD users pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Azure AD users pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const res = await fetch(url, {
@@ -139,7 +140,7 @@ export async function fetchAzureAdUsers(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Azure AD users request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Azure AD users request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 
@@ -196,8 +197,8 @@ export async function fetchAzureAdGroups(
   let pages = 0;
 
   while (url) {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Azure AD groups pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Azure AD groups pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const res = await fetch(url, {
@@ -208,7 +209,7 @@ export async function fetchAzureAdGroups(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Azure AD groups request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Azure AD groups request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 
@@ -248,8 +249,8 @@ async function fetchGroupMembers(
   let pages = 0;
 
   while (url) {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Azure AD group members pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Azure AD group members pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const res = await fetch(url, {
@@ -260,7 +261,7 @@ async function fetchGroupMembers(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Azure AD group members request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Azure AD group members request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 

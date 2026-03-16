@@ -3,13 +3,12 @@ import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
-import { HIBP_RATE_MAX } from "@/lib/validations/common.server";
+import { HIBP_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
 const PREFIX_REGEX = /^[0-9A-F]{5}$/;
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const RATE_WINDOW_MS = 60 * 1000;
 
 type CacheEntry = { expiresAt: number; body: string };
 type RateEntry = { resetAt: number; count: number };

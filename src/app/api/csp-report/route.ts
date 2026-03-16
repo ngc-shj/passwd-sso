@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { CSP_REPORT_RATE_MAX } from "@/lib/validations/common.server";
+import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
-
-const RATE_WINDOW_MS = 60_000;
 const rate = new Map<string, { resetAt: number; count: number }>();
 
 /**

@@ -33,9 +33,10 @@ export interface OktaGroup {
   };
 }
 
+import { DIRECTORY_SYNC_MAX_PAGES, DIRECTORY_SYNC_ERROR_PREVIEW } from "@/lib/validations/common.server";
+
 // ─── Constants ──────────────────────────────────────────────
 
-const MAX_PAGES = 1000;
 const FETCH_TIMEOUT_MS = 30_000;
 
 // ─── Validation ──────────────────────────────────────────────
@@ -105,8 +106,8 @@ export async function fetchOktaUsers(
   let pages = 0;
 
   while (url) {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Okta users pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Okta users pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const res = await fetch(url, {
@@ -120,7 +121,7 @@ export async function fetchOktaUsers(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Okta users request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Okta users request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 
@@ -178,8 +179,8 @@ export async function fetchOktaGroups(
   let pages = 0;
 
   while (url) {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Okta groups pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Okta groups pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const res = await fetch(url, {
@@ -193,7 +194,7 @@ export async function fetchOktaGroups(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Okta groups request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Okta groups request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 

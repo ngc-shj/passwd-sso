@@ -59,6 +59,39 @@ export const SESSION_CACHE_MAX = 500;
 // ─── Webhook Dispatcher ─────────────────────────────────────
 export const WEBHOOK_CONCURRENCY = 5;
 
+// ─── Rate Limit Window ──────────────────────────────────────
+export const RATE_WINDOW_MS = 60_000;           // 1 minute
+
+// ─── Tenant ─────────────────────────────────────────────────
+export const MAX_TENANT_CLAIM_LENGTH = 255;
+export const BOOTSTRAP_SLUG_HASH_LENGTH = 24;
+
+// ─── IP Address ─────────────────────────────────────────────
+export const IP_ADDRESS_MAX_LENGTH = 45;        // IPv6 max, matches @db.VarChar(45)
+
+// ─── Directory Sync ─────────────────────────────────────────
+export const DIRECTORY_SYNC_MAX_PAGES = 1000;
+export const DIRECTORY_SYNC_SANITIZE_MAX_LENGTH = 1_000;
+export const DIRECTORY_SYNC_ERROR_PREVIEW = 200;
+
+// ─── SCIM Filter ────────────────────────────────────────────
+export const SCIM_FILTER_MAX_LENGTH = 256;
+
+// ─── Rate Limit In-Memory Store ─────────────────────────────
+export const RATE_LIMIT_MAP_MAX_SIZE = 10_000;
+
+// ─── Webhook Dispatcher ─────────────────────────────────────
+export const WEBHOOK_MAX_RETRIES = 3;
+
+// ─── Folder Depth ───────────────────────────────────────────
+export const MAX_FOLDER_DEPTH = 5;
+
+// ─── Recovery Key ───────────────────────────────────────────
+export const RECOVERY_KEY_DATA_LENGTH = 52;
+
+// ─── HIBP ───────────────────────────────────────────────────
+export const HIBP_PREFIX_LENGTH = 5;            // k-anonymity protocol
+
 // ─── Query Limits (non-validation, readability) ─────────────
 export const SHARE_ACCESS_LOG_LIMIT = 50;
 export const BREAKGLASS_USER_LIST_LIMIT = 200;

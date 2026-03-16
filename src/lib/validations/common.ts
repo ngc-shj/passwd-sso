@@ -93,6 +93,36 @@ export const NOTIFICATION_BODY_MAX = 2000;
 // ─── Entry Snippet ──────────────────────────────────────────
 export const ENTRY_SNIPPET_MAX = 100;
 
+// ─── QR / Image ─────────────────────────────────────────────
+export const MAX_IMAGE_DIMENSION = 4096;
+
+// ─── Import ─────────────────────────────────────────────────
+export const MAX_IMPORT_FOLDERS = 200;
+
+// ─── Tag / Folder Tree ──────────────────────────────────────
+export const TAG_TREE_MAX_DEPTH = 3;
+
+// ─── Credit Card ────────────────────────────────────────────
+export const CREDIT_CARD_MIN_LENGTH = 12;
+export const CREDIT_CARD_MAX_LENGTH = 19;
+export const CREDIT_CARD_CVC_MAX_LENGTH = 4;
+
+// ─── UI Display Truncation ──────────────────────────────────
+export const DISPLAY_ID_SHORT = 8;
+export const DISPLAY_FINGERPRINT_SHORT = 16;
+export const DISPLAY_REASON_PREVIEW = 80;
+export const DISPLAY_INITIALS_LENGTH = 2;
+
+// ─── API Key ────────────────────────────────────────────────
+export const API_KEY_TOKEN_LENGTH = 43;         // base64url encoded
+export const API_KEY_PREFIX_LENGTH = 8;         // "api_XXXX"
+
+// ─── HIBP ───────────────────────────────────────────────────
+export const HIBP_PREFIX_LENGTH = 5;            // k-anonymity protocol
+
+// ─── Recovery Key ───────────────────────────────────────────
+export const RECOVERY_KEY_DATA_LENGTH = 52;     // Base32 data chars (32 bytes)
+
 export const PASSWORD_LENGTH_MIN = 8;
 export const PASSWORD_LENGTH_MAX = 128;
 export const PASSPHRASE_WORD_COUNT_MIN = 3;

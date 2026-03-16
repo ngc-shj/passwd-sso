@@ -3,12 +3,14 @@
  * Used by both Personal (Folder) and Team (TeamFolder) APIs via callback injection.
  */
 
+import { MAX_FOLDER_DEPTH } from "@/lib/validations/common.server";
+
+export { MAX_FOLDER_DEPTH };
+
 export interface ParentNode {
   parentId: string | null;
   ownerId: string;
 }
-
-export const MAX_FOLDER_DEPTH = 5;
 
 /**
  * Validate that `parentId` exists and belongs to the expected owner.

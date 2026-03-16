@@ -1,4 +1,5 @@
 import { getRedis, validateRedisConfig } from "@/lib/redis";
+import { RATE_LIMIT_MAP_MAX_SIZE } from "@/lib/validations/common.server";
 
 interface RateLimiterOptions {
   /** Time window in milliseconds */
@@ -19,8 +20,6 @@ interface RateLimiter {
   /** Clear the counter for a key (e.g. on successful auth) */
   clear(key: string): Promise<void>;
 }
-
-const MAX_MAP_SIZE = 10_000;
 
 let redisConfigValidated = false;
 
@@ -73,13 +72,13 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     const now = Date.now();
     const entry = store.get(key);
     if (!entry || entry.resetAt < now) {
-      if (store.size >= MAX_MAP_SIZE) {
+      if (store.size >= RATE_LIMIT_MAP_MAX_SIZE) {
         // Evict expired entries first
         for (const [k, v] of store) {
           if (v.resetAt < now) store.delete(k);
         }
         // If still too large, clear all
-        if (store.size >= MAX_MAP_SIZE) store.clear();
+        if (store.size >= RATE_LIMIT_MAP_MAX_SIZE) store.clear();
       }
       store.set(key, { resetAt: now + windowMs, count: 1 });
       return { allowed: true };

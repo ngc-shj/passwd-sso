@@ -21,6 +21,7 @@ import {
   SESSION_IDLE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
+  IP_ADDRESS_MAX_LENGTH,
 } from "@/lib/validations/common.server";
 
 const policyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
@@ -142,7 +143,7 @@ async function handlePATCH(req: NextRequest) {
     }
     for (const cidr of allowedCidrs) {
       if (typeof cidr !== "string" || !isValidCidr(cidr)) {
-        const truncated = typeof cidr === "string" ? cidr.slice(0, 45) : String(cidr).slice(0, 45);
+        const truncated = typeof cidr === "string" ? cidr.slice(0, IP_ADDRESS_MAX_LENGTH) : String(cidr).slice(0, IP_ADDRESS_MAX_LENGTH);
         return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: `Invalid CIDR: ${truncated}` });
       }
     }

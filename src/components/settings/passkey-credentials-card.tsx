@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
+import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { formatDateTime } from "@/lib/format-datetime";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
@@ -406,7 +407,7 @@ export function PasskeyCredentialsCard() {
                     ) : (
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-medium">
-                          {cred.nickname || cred.id.slice(0, 8)}
+                          {cred.nickname || cred.id.slice(0, DISPLAY_ID_SHORT)}
                         </span>
                         <Button
                           variant="ghost"

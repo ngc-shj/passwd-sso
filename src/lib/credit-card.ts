@@ -1,3 +1,5 @@
+import { CREDIT_CARD_MIN_LENGTH, CREDIT_CARD_MAX_LENGTH } from "@/lib/validations/common";
+
 export const CARD_BRANDS = [
   "Visa",
   "Mastercard",
@@ -21,9 +23,6 @@ const BRAND_LENGTHS: Record<CardBrand, number[]> = {
   UnionPay: [16, 17, 18, 19],
   Other: [],
 };
-
-const MIN_GENERIC_LENGTH = 12;
-const MAX_GENERIC_LENGTH = 19;
 
 const toNumber = (value: string, length: number) =>
   Number(value.slice(0, length));
@@ -85,18 +84,18 @@ export const getAllowedLengths = (brand?: string | null): number[] | null => {
 
 export const getMinLength = (brand?: string | null): number => {
   const allowed = getAllowedLengths(brand);
-  return allowed ? Math.min(...allowed) : MIN_GENERIC_LENGTH;
+  return allowed ? Math.min(...allowed) : CREDIT_CARD_MIN_LENGTH;
 };
 
 export const getMaxLength = (brand?: string | null): number => {
   const allowed = getAllowedLengths(brand);
-  return allowed ? Math.max(...allowed) : MAX_GENERIC_LENGTH;
+  return allowed ? Math.max(...allowed) : CREDIT_CARD_MAX_LENGTH;
 };
 
 export const isCardLengthValid = (length: number, brand?: string | null): boolean => {
   const allowed = getAllowedLengths(brand);
   if (allowed) return allowed.includes(length);
-  return length >= MIN_GENERIC_LENGTH && length <= MAX_GENERIC_LENGTH;
+  return length >= CREDIT_CARD_MIN_LENGTH && length <= CREDIT_CARD_MAX_LENGTH;
 };
 
 export const isValidLuhn = (digits: string): boolean => {
