@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { createBreakglassGrantSchema } from "@/lib/validations/breakglass";
+import {
+  BREAKGLASS_REASON_MAX,
+  BREAKGLASS_INCIDENT_REF_MAX,
+} from "@/lib/validations/common";
 
 describe("createBreakglassGrantSchema", () => {
   const validInput = {
@@ -24,7 +28,7 @@ describe("createBreakglassGrantSchema", () => {
   it("rejects reason longer than 1000 characters", () => {
     const result = createBreakglassGrantSchema.safeParse({
       ...validInput,
-      reason: "a".repeat(1001),
+      reason: "a".repeat(BREAKGLASS_REASON_MAX + 1),
     });
     expect(result.success).toBe(false);
   });
@@ -49,7 +53,7 @@ describe("createBreakglassGrantSchema", () => {
   it("rejects incidentRef longer than 500 characters", () => {
     const result = createBreakglassGrantSchema.safeParse({
       ...validInput,
-      incidentRef: "b".repeat(501),
+      incidentRef: "b".repeat(BREAKGLASS_INCIDENT_REF_MAX + 1),
     });
     expect(result.success).toBe(false);
   });

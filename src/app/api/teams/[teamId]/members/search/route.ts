@@ -8,10 +8,11 @@ import { TEAM_PERMISSION, INVITATION_STATUS } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { SEARCH_QUERY_MAX_LENGTH } from "@/lib/validations/common";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-const querySchema = z.string().min(1).max(100);
+const querySchema = z.string().min(1).max(SEARCH_QUERY_MAX_LENGTH);
 
 // GET /api/teams/[teamId]/members/search?q=<query> — Search tenant members to add
 async function handleGET(req: NextRequest, { params }: Params) {

@@ -21,13 +21,12 @@ import { z } from "zod";
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 
 type Params = { params: Promise<{ teamId: string }> };
 
-const MAX_WEBHOOKS_PER_TEAM = 5;
-
 const createWebhookSchema = z.object({
-  url: z.string().url().max(2048).refine(
+  url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
     (u) => {
       try {
         const parsed = new URL(u);
@@ -113,9 +112,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const existingCount = await withTeamTenantRls(teamId, async () =>
     prisma.teamWebhook.count({ where: { teamId } }),
   );
-  if (existingCount >= MAX_WEBHOOKS_PER_TEAM) {
+  if (existingCount >= MAX_WEBHOOKS) {
     return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { limit: `Maximum ${MAX_WEBHOOKS_PER_TEAM} webhooks per team` } },
+      { error: API_ERROR.VALIDATION_ERROR, details: { limit: `Maximum ${MAX_WEBHOOKS} webhooks per team` } },
       { status: 400 },
     );
   }

@@ -13,10 +13,11 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { VALID_ACTIONS } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
 import type { AuditAction } from "@prisma/client";
-
-const BATCH_SIZE = 500;
-const MAX_RANGE_DAYS = 90;
-const MAX_ROWS = 100_000;
+import {
+  AUDIT_LOG_MAX_RANGE_DAYS,
+  AUDIT_LOG_BATCH_SIZE,
+  AUDIT_LOG_MAX_ROWS,
+} from "@/lib/validations/common.server";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -65,14 +66,14 @@ async function handleGET(req: NextRequest) {
     return validationError({ date: "Invalid date format" });
   }
   const now = new Date();
-  const resolvedFrom = fromDate ?? new Date(now.getTime() - MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+  const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
   const resolvedTo = toDate ?? now;
   const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
   if (diffMs < 0) {
     return validationError({ date: "'from' must be before 'to'" });
   }
-  if (diffMs > MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
-    return validationError({ range: `Maximum range is ${MAX_RANGE_DAYS} days` });
+  if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+    return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
   }
 
   const where: Record<string, unknown> = {
@@ -119,8 +120,8 @@ async function handleGET(req: NextRequest) {
         let totalRows = 0;
 
         while (hasMore) {
-          const remaining = MAX_ROWS - totalRows;
-          const batchSize = Math.min(BATCH_SIZE, remaining);
+          const remaining = AUDIT_LOG_MAX_ROWS - totalRows;
+          const batchSize = Math.min(AUDIT_LOG_BATCH_SIZE, remaining);
 
           const batch = await withTenantRls(prisma, tenantId, async () =>
             prisma.auditLog.findMany({
@@ -176,7 +177,7 @@ async function handleGET(req: NextRequest) {
 
           totalRows += batch.length;
 
-          if (batch.length < batchSize || totalRows >= MAX_ROWS) {
+          if (batch.length < batchSize || totalRows >= AUDIT_LOG_MAX_ROWS) {
             hasMore = false;
           } else {
             cursor = batch[batch.length - 1].id;

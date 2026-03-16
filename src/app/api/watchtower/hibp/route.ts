@@ -3,13 +3,13 @@ import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { HIBP_RATE_MAX } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
 const PREFIX_REGEX = /^[0-9A-F]{5}$/;
 const CACHE_TTL_MS = 5 * 60 * 1000;
 const RATE_WINDOW_MS = 60 * 1000;
-const RATE_MAX = 30;
 
 type CacheEntry = { expiresAt: number; body: string };
 type RateEntry = { resetAt: number; count: number };
@@ -30,7 +30,7 @@ async function handleGET(request: Request) {
   const rateEntry = rate.get(rateKey);
   if (!rateEntry || rateEntry.resetAt < now) {
     rate.set(rateKey, { resetAt: now + RATE_WINDOW_MS, count: 1 });
-  } else if (rateEntry.count >= RATE_MAX) {
+  } else if (rateEntry.count >= HIBP_RATE_MAX) {
     return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   } else {
     rateEntry.count += 1;

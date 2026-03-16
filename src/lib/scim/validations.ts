@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SCIM_PATCH_OPERATIONS_MAX, SCIM_GROUP_MEMBERS_MAX } from "@/lib/validations/common";
 
 /**
  * SCIM User creation / PUT schema.
@@ -52,7 +53,7 @@ export const scimPatchOpSchema = z.object({
       }),
     )
     .min(1)
-    .max(100),
+    .max(SCIM_PATCH_OPERATIONS_MAX),
 });
 
 export type ScimPatchOpInput = z.infer<typeof scimPatchOpSchema>;
@@ -75,7 +76,7 @@ export const scimGroupSchema = z.object({
         value: z.string().min(1).max(255),
       }),
     )
-    .max(1000)
+    .max(SCIM_GROUP_MEMBERS_MAX)
     .optional()
     .default([]),
 });

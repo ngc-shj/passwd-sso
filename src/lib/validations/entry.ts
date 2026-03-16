@@ -3,9 +3,14 @@ import { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "@/lib/constants";
 import {
   PASSWORD_LENGTH_MIN,
   PASSWORD_LENGTH_MAX,
+  PASSWORD_LENGTH_DEFAULT,
   PASSPHRASE_WORD_COUNT_MIN,
   PASSPHRASE_WORD_COUNT_MAX,
+  PASSPHRASE_WORD_COUNT_DEFAULT,
+  PASSPHRASE_SEPARATOR_DEFAULT,
+  PASSPHRASE_SEPARATOR_MAX,
   CHARS_FIELD_MAX,
+  HISTORY_BLOB_MAX,
   asciiPrintable,
   encryptedFieldSchema,
   hexString,
@@ -14,7 +19,7 @@ import {
 export const entryTypeSchema = z.enum(ENTRY_TYPE_VALUES);
 
 export const generatePasswordSchema = z.object({
-  length: z.number().int().min(PASSWORD_LENGTH_MIN).max(PASSWORD_LENGTH_MAX).default(16),
+  length: z.number().int().min(PASSWORD_LENGTH_MIN).max(PASSWORD_LENGTH_MAX).default(PASSWORD_LENGTH_DEFAULT),
   uppercase: z.boolean().default(true),
   lowercase: z.boolean().default(true),
   numbers: z.boolean().default(true),
@@ -25,8 +30,8 @@ export const generatePasswordSchema = z.object({
 });
 
 export const generatePassphraseSchema = z.object({
-  wordCount: z.number().int().min(PASSPHRASE_WORD_COUNT_MIN).max(PASSPHRASE_WORD_COUNT_MAX).default(4),
-  separator: z.string().max(5).default("-"),
+  wordCount: z.number().int().min(PASSPHRASE_WORD_COUNT_MIN).max(PASSPHRASE_WORD_COUNT_MAX).default(PASSPHRASE_WORD_COUNT_DEFAULT),
+  separator: z.string().max(PASSPHRASE_SEPARATOR_MAX).default(PASSPHRASE_SEPARATOR_DEFAULT),
   capitalize: z.boolean().default(true),
   includeNumber: z.boolean().default(false),
 });
@@ -77,7 +82,7 @@ export const generateRequestSchema = z.preprocess(
 // ─── History Re-encrypt Schemas ─────────────────────────────
 
 export const historyReencryptSchema = z.object({
-  encryptedBlob: z.string().min(1).max(1_000_000),
+  encryptedBlob: z.string().min(1).max(HISTORY_BLOB_MAX),
   blobIv: hexString(12),
   blobAuthTag: hexString(16),
   keyVersion: z.number().int(),
@@ -85,7 +90,7 @@ export const historyReencryptSchema = z.object({
 });
 
 export const teamHistoryReencryptSchema = z.object({
-  encryptedBlob: z.string().min(1).max(1_000_000),
+  encryptedBlob: z.string().min(1).max(HISTORY_BLOB_MAX),
   blobIv: hexString(12),
   blobAuthTag: hexString(16),
   teamKeyVersion: z.number(),

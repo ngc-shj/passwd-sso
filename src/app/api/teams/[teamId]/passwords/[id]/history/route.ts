@@ -5,6 +5,7 @@ import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -41,7 +42,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     prisma.teamPasswordEntryHistory.findMany({
       where: { entryId: id },
       orderBy: { changedAt: "desc" },
-      take: 20,
+      take: HISTORY_PAGE_SIZE,
       include: { changedBy: { select: { id: true, name: true, email: true } } },
     }),
   );

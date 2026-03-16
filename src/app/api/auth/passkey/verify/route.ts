@@ -13,12 +13,11 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
+import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
-
-const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60; // 8 hours (matches auth.ts)
 
 // Cookie name must match auth.config.ts
 const SESSION_COOKIE_NAME = isHttps
@@ -98,7 +97,7 @@ async function handlePOST(req: NextRequest) {
 
   // Create database session (same as Auth.js would for OAuth providers)
   const sessionToken = `${randomUUID()}${randomBytes(16).toString("hex")}`;
-  const expires = new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000);
+  const expires = new Date(Date.now() + PASSKEY_SESSION_MAX_AGE_SECONDS * 1000);
 
   const adapter = createCustomAdapter();
 

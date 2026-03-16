@@ -24,11 +24,11 @@ import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { MAX_PENDING_RESETS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
 const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-const MAX_PENDING_RESETS = 3;
 
 const adminResetLimiter = createRateLimiter({
   windowMs: 24 * 60 * 60 * 1000,

@@ -10,6 +10,7 @@ import { assertOrigin } from "@/lib/csrf";
 import { extractClientIp } from "@/lib/ip-access";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/webauthn-server";
 import { randomBytes } from "node:crypto";
+import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
@@ -18,7 +19,7 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const CHALLENGE_TTL_SECONDS = 300;
 
 const emailSchema = z.object({
-  email: z.string().email().max(254),
+  email: z.string().email().max(EMAIL_MAX_LENGTH),
 });
 
 /**

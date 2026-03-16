@@ -12,6 +12,22 @@ import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import {
+  hexIv,
+  hexAuthTag,
+  hexSalt,
+  hexHash,
+} from "@/lib/validations/common";
+import {
+  KDF_PBKDF2_ITERATIONS_MIN,
+  KDF_PBKDF2_ITERATIONS_MAX,
+  KDF_ARGON2_ITERATIONS_MIN,
+  KDF_ARGON2_ITERATIONS_MAX,
+  KDF_ARGON2_MEMORY_MIN,
+  KDF_ARGON2_MEMORY_MAX,
+  KDF_ARGON2_PARALLELISM_MIN,
+  KDF_ARGON2_PARALLELISM_MAX,
+} from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
@@ -20,33 +36,33 @@ const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
 const kdfParamsSchema = z.discriminatedUnion("kdfType", [
   z.object({
     kdfType: z.literal(0),
-    kdfIterations: z.number().int().min(600_000).max(10_000_000),
+    kdfIterations: z.number().int().min(KDF_PBKDF2_ITERATIONS_MIN).max(KDF_PBKDF2_ITERATIONS_MAX),
   }),
   z.object({
     kdfType: z.literal(1),
-    kdfIterations: z.number().int().min(1).max(100),
-    kdfMemory: z.number().int().min(16384).max(4194304), // 16 MiB – 4 GiB in KiB
-    kdfParallelism: z.number().int().min(1).max(16),
+    kdfIterations: z.number().int().min(KDF_ARGON2_ITERATIONS_MIN).max(KDF_ARGON2_ITERATIONS_MAX),
+    kdfMemory: z.number().int().min(KDF_ARGON2_MEMORY_MIN).max(KDF_ARGON2_MEMORY_MAX),
+    kdfParallelism: z.number().int().min(KDF_ARGON2_PARALLELISM_MIN).max(KDF_ARGON2_PARALLELISM_MAX),
   }),
 ]).optional();
 
 const setupSchema = z.object({
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: z.string().regex(/^[0-9a-f]{24}$/), // 12 bytes hex
-  secretKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/), // 16 bytes hex
-  accountSalt: z.string().regex(/^[0-9a-f]{64}$/), // 32 bytes hex
-  authHash: z.string().regex(/^[0-9a-f]{64}$/), // SHA-256 hex
-  verifierHash: z.string().regex(/^[0-9a-f]{64}$/), // passphrase verifier
+  secretKeyIv: hexIv,
+  secretKeyAuthTag: hexAuthTag,
+  accountSalt: hexSalt,
+  authHash: hexHash,
+  verifierHash: hexHash,
   verificationArtifact: z.object({
     ciphertext: z.string().min(1),
-    iv: z.string().regex(/^[0-9a-f]{24}$/),
-    authTag: z.string().regex(/^[0-9a-f]{32}$/),
+    iv: hexIv,
+    authTag: hexAuthTag,
   }),
   // ECDH key pair for team E2E encryption
   ecdhPublicKey: z.string().min(1),
   encryptedEcdhPrivateKey: z.string().min(1),
-  ecdhPrivateKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
-  ecdhPrivateKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
+  ecdhPrivateKeyIv: hexIv,
+  ecdhPrivateKeyAuthTag: hexAuthTag,
   // KDF metadata (optional — server applies defaults if omitted)
   kdfParams: kdfParamsSchema,
 });

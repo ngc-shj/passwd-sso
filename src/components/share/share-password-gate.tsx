@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface SharePasswordGateProps {
@@ -29,7 +30,7 @@ export function SharePasswordGate({
   const [attempts, setAttempts] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const MAX_ATTEMPTS = 5;
+  const MAX_ATTEMPTS = SHARE_PASSWORD_MAX_ATTEMPTS;
 
   const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
     e.preventDefault();

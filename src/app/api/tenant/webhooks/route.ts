@@ -22,11 +22,10 @@ import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
-
-const MAX_WEBHOOKS_PER_TENANT = 5;
+import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 
 const createWebhookSchema = z.object({
-  url: z.string().url().max(2048).refine(
+  url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
     (u) => {
       try {
         const parsed = new URL(u);
@@ -113,9 +112,9 @@ async function handlePOST(req: NextRequest) {
   const existingCount = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.tenantWebhook.count({ where: { tenantId: actor.tenantId } }),
   );
-  if (existingCount >= MAX_WEBHOOKS_PER_TENANT) {
+  if (existingCount >= MAX_WEBHOOKS) {
     return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { limit: `Maximum ${MAX_WEBHOOKS_PER_TENANT} webhooks per tenant` } },
+      { error: API_ERROR.VALIDATION_ERROR, details: { limit: `Maximum ${MAX_WEBHOOKS} webhooks per tenant` } },
       { status: 400 },
     );
   }

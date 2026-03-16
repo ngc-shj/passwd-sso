@@ -13,9 +13,15 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
-import { pinLengthSchema } from "@/lib/validations/common";
-
-const MAX_CIDRS = 50;
+import { pinLengthSchema, MAX_CIDRS } from "@/lib/validations/common";
+import {
+  MAX_CONCURRENT_SESSIONS_MIN,
+  MAX_CONCURRENT_SESSIONS_MAX,
+  SESSION_IDLE_TIMEOUT_MIN,
+  SESSION_IDLE_TIMEOUT_MAX,
+  VAULT_AUTO_LOCK_MIN,
+  VAULT_AUTO_LOCK_MAX,
+} from "@/lib/validations/common.server";
 
 const policyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -90,37 +96,37 @@ async function handlePATCH(req: NextRequest) {
   }
   const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, requireMinPinLength, confirmLockout } = body;
 
-  // Validate maxConcurrentSessions: null (unlimited) or positive integer 1-100
+  // Validate maxConcurrentSessions: null (unlimited) or positive integer
   if (maxConcurrentSessions !== null && maxConcurrentSessions !== undefined) {
     if (
       typeof maxConcurrentSessions !== "number" ||
       !Number.isInteger(maxConcurrentSessions) ||
-      maxConcurrentSessions < 1 ||
-      maxConcurrentSessions > 100
+      maxConcurrentSessions < MAX_CONCURRENT_SESSIONS_MIN ||
+      maxConcurrentSessions > MAX_CONCURRENT_SESSIONS_MAX
     ) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
   }
 
-  // Validate vaultAutoLockMinutes: null (default 15min) or positive integer 1-1440 (24h)
+  // Validate vaultAutoLockMinutes: null (default 15min) or positive integer up to 24h
   if (vaultAutoLockMinutes !== null && vaultAutoLockMinutes !== undefined) {
     if (
       typeof vaultAutoLockMinutes !== "number" ||
       !Number.isInteger(vaultAutoLockMinutes) ||
-      vaultAutoLockMinutes < 1 ||
-      vaultAutoLockMinutes > 1440
+      vaultAutoLockMinutes < VAULT_AUTO_LOCK_MIN ||
+      vaultAutoLockMinutes > VAULT_AUTO_LOCK_MAX
     ) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
   }
 
-  // Validate sessionIdleTimeoutMinutes: null (disabled) or positive integer 1-1440 (24h)
+  // Validate sessionIdleTimeoutMinutes: null (disabled) or positive integer up to 24h
   if (sessionIdleTimeoutMinutes !== null && sessionIdleTimeoutMinutes !== undefined) {
     if (
       typeof sessionIdleTimeoutMinutes !== "number" ||
       !Number.isInteger(sessionIdleTimeoutMinutes) ||
-      sessionIdleTimeoutMinutes < 1 ||
-      sessionIdleTimeoutMinutes > 1440
+      sessionIdleTimeoutMinutes < SESSION_IDLE_TIMEOUT_MIN ||
+      sessionIdleTimeoutMinutes > SESSION_IDLE_TIMEOUT_MAX
     ) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }

@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod/v4";
+import { hexHash } from "@/lib/validations/common";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -19,7 +20,7 @@ export const runtime = "nodejs";
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
 const adminResetSchema = z.object({
-  token: z.string().length(64).regex(/^[0-9a-f]{64}$/),
+  token: hexHash,
   confirmation: z.string(),
 });
 

@@ -16,15 +16,20 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
+import {
+  SYNC_INTERVAL_MIN,
+  SYNC_INTERVAL_MAX,
+  NAME_MAX_LENGTH,
+} from "@/lib/validations/common";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 // ─── Validation ──────────────────────────────────────────────
 
 const updateSchema = z.object({
-  displayName: z.string().min(1).max(100).optional(),
+  displayName: z.string().min(1).max(NAME_MAX_LENGTH).optional(),
   enabled: z.boolean().optional(),
-  syncIntervalMinutes: z.number().int().min(15).max(1440).optional(),
+  syncIntervalMinutes: z.number().int().min(SYNC_INTERVAL_MIN).max(SYNC_INTERVAL_MAX).optional(),
   credentials: z.record(z.string(), z.unknown()).optional(),
 });
 

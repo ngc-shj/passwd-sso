@@ -8,11 +8,12 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { WEBAUTHN_NICKNAME_MAX_LENGTH } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
 const patchSchema = z.object({
-  nickname: z.string().max(100),
+  nickname: z.string().max(WEBAUTHN_NICKNAME_MAX_LENGTH),
 });
 
 // DELETE /api/webauthn/credentials/[id] — remove a credential

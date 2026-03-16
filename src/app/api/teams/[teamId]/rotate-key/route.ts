@@ -11,6 +11,14 @@ import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import {
+  encryptedFieldSchema,
+  TEAM_KEY_VERSION_MIN,
+  TEAM_KEY_VERSION_MAX,
+  TEAM_ROTATE_ENTRIES_MAX,
+  TEAM_ROTATE_MEMBER_KEYS_MIN,
+  TEAM_ROTATE_MEMBER_KEYS_MAX,
+} from "@/lib/validations/common";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -21,12 +29,6 @@ class TxValidationError extends Error {
     this.details = details;
   }
 }
-
-const encryptedFieldSchema = z.object({
-  ciphertext: z.string().min(1).max(500_000),
-  iv: z.string().length(24),
-  authTag: z.string().length(32),
-});
 
 // v0 (legacy): full re-encrypt of blob + overview
 const rotateEntryV0Schema = z.object({
@@ -48,13 +50,13 @@ const rotateEntryV1Schema = z.object({
 const rotateEntrySchema = z.union([rotateEntryV1Schema, rotateEntryV0Schema]);
 
 const rotateKeySchema = z.object({
-  newTeamKeyVersion: z.number().int().min(2).max(10_000),
-  entries: z.array(rotateEntrySchema).max(1000),
+  newTeamKeyVersion: z.number().int().min(TEAM_KEY_VERSION_MIN).max(TEAM_KEY_VERSION_MAX),
+  entries: z.array(rotateEntrySchema).max(TEAM_ROTATE_ENTRIES_MAX),
   memberKeys: z.array(
     z.object({
       userId: z.string().min(1),
     }).merge(teamMemberKeySchema)
-  ).min(1).max(1000),
+  ).min(TEAM_ROTATE_MEMBER_KEYS_MIN).max(TEAM_ROTATE_MEMBER_KEYS_MAX),
 });
 
 // POST /api/teams/[teamId]/rotate-key — Rotate team encryption key

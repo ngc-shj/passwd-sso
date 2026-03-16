@@ -7,12 +7,13 @@ import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, EXPORT_FORMAT_VALUES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
+import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 
 const bodySchema = z.object({
   teamId: z.string().optional(),
   entryCount: z.number().int().min(0),
   format: z.enum(EXPORT_FORMAT_VALUES),
-  filename: z.string().trim().min(1).max(255).optional(),
+  filename: z.string().trim().min(1).max(FILENAME_MAX_LENGTH).optional(),
   encrypted: z.boolean().optional(),
   includeTeams: z.boolean().optional(),
 });
