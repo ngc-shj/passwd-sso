@@ -337,6 +337,7 @@ function applySecurityHeaders(
   response.cookies.set("csp-nonce", nonce, {
     httpOnly: true,
     sameSite: "lax",
+    secure: isHttps,
     path: `${basePath}/`,
   });
 

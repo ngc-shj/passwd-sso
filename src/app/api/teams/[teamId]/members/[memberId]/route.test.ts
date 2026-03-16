@@ -379,9 +379,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { teamId: TEAM_ID, userId: "target-user" },
     });
-    expect(mockPrismaScimExternalMapping.deleteMany).toHaveBeenCalledWith({
-      where: { tenantId: "tenant-1", internalId: "target-user", resourceType: "User" },
-    });
     expect(mockPrismaTeamMember.delete).toHaveBeenCalledWith({
       where: { id: MEMBER_ID },
     });

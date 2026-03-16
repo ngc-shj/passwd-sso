@@ -15,6 +15,7 @@ import {
   decryptServerData,
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
+import { resolve4, resolve6 } from "node:dns/promises";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 
@@ -93,6 +94,61 @@ function sanitizeWebhookData(value: unknown): unknown {
   return value;
 }
 
+/**
+ * Check if an IP address belongs to a private/reserved range.
+ * Blocks RFC 1918, loopback, link-local, and cloud metadata IPs.
+ */
+function isPrivateIp(ip: string): boolean {
+  // IPv4
+  if (
+    ip.startsWith("10.") ||
+    ip.startsWith("127.") ||
+    ip.startsWith("0.") ||
+    ip === "0.0.0.0" ||
+    ip.startsWith("169.254.") || // link-local + cloud metadata
+    ip.startsWith("192.168.")
+  ) return true;
+
+  // 172.16.0.0/12
+  if (ip.startsWith("172.")) {
+    const second = parseInt(ip.split(".")[1], 10);
+    if (second >= 16 && second <= 31) return true;
+  }
+
+  // IPv6 loopback / link-local / unique local
+  const lower = ip.toLowerCase();
+  if (lower === "::1" || lower.startsWith("fe80:") || lower.startsWith("fc") || lower.startsWith("fd")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Resolve hostname and reject private/reserved IPs to prevent SSRF via DNS rebinding.
+ */
+async function assertPublicHostname(url: string): Promise<void> {
+  const hostname = new URL(url).hostname;
+
+  // Already an IP literal — check directly
+  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) {
+    if (isPrivateIp(hostname)) throw new Error(`Private IP rejected: ${hostname}`);
+    return;
+  }
+
+  const ips: string[] = [];
+  try { ips.push(...await resolve4(hostname)); } catch { /* no A records */ }
+  try { ips.push(...await resolve6(hostname)); } catch { /* no AAAA records */ }
+
+  if (ips.length === 0) throw new Error(`DNS resolution failed: ${hostname}`);
+
+  for (const ip of ips) {
+    if (isPrivateIp(ip)) {
+      throw new Error(`Hostname ${hostname} resolves to private IP: ${ip}`);
+    }
+  }
+}
+
 async function deliverWithRetry(
   url: string,
   payload: string,
@@ -100,6 +156,7 @@ async function deliverWithRetry(
 ): Promise<boolean> {
   for (let attempt = 0; attempt < WEBHOOK_MAX_RETRIES; attempt++) {
     try {
+      await assertPublicHostname(url);
       const res = await fetch(url, {
         method: "POST",
         headers: {

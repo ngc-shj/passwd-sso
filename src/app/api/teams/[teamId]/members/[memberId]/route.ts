@@ -190,9 +190,6 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   await withTeamTenantRls(teamId, async () =>
     prisma.$transaction([
       prisma.teamMemberKey.deleteMany({ where: { teamId: teamId, userId: target.userId } }),
-      prisma.scimExternalMapping.deleteMany({
-        where: { tenantId: target.tenantId, internalId: target.userId, resourceType: "User" },
-      }),
       prisma.teamMember.delete({ where: { id: memberId } }),
     ]),
   );

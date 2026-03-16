@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
+import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto-server";
@@ -38,6 +39,9 @@ const changeLimiter = createRateLimiter({
  * is stored as-is. Correctness is verified at next unlock.
  */
 async function handlePOST(request: Request) {
+  const originError = assertOrigin(request);
+  if (originError) return originError;
+
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

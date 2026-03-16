@@ -13,6 +13,7 @@ import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTI
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -65,14 +66,34 @@ async function handleGET(req: NextRequest) {
   // Auto-purge items deleted more than 30 days ago
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    await withUserTenantRls(userId, async () =>
-      prisma.passwordEntry.deleteMany({
-        where: {
-          userId,
-          deletedAt: { lt: thirtyDaysAgo },
-        },
-      }),
-    ).catch(() => {});
+    await withUserTenantRls(userId, async () => {
+      const staleEntries = await prisma.passwordEntry.findMany({
+        where: { userId, deletedAt: { lt: thirtyDaysAgo } },
+        select: { id: true },
+      });
+      if (staleEntries.length === 0) return;
+
+      // Clean up external blob-store objects before cascade delete
+      const blobStore = getAttachmentBlobStore();
+      if (blobStore.backend !== BLOB_STORAGE.DB) {
+        const attachments = await prisma.attachment.findMany({
+          where: { passwordEntryId: { in: staleEntries.map((e) => e.id) } },
+          select: { id: true, encryptedData: true, passwordEntryId: true },
+        });
+        await Promise.allSettled(
+          attachments.map((a) =>
+            blobStore.deleteObject(a.encryptedData, {
+              attachmentId: a.id,
+              entryId: a.passwordEntryId!,
+            }),
+          ),
+        );
+      }
+
+      await prisma.passwordEntry.deleteMany({
+        where: { id: { in: staleEntries.map((e) => e.id) } },
+      });
+    }).catch(() => {});
   }
 
   // Return encrypted overviews (and optionally blobs) for client-side decryption

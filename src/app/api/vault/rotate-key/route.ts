@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { createHash, randomBytes } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
+import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -39,6 +40,9 @@ const rotateKeySchema = z.object({
  * All EA grants with older keyVersion are marked STALE.
  */
 async function handlePOST(request: Request) {
+  const originError = assertOrigin(request);
+  if (originError) return originError;
+
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -73,7 +77,7 @@ async function handlePOST(request: Request) {
     }),
   );
 
-  if (!user?.vaultSetupAt) {
+  if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
     return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
   }
 
@@ -82,7 +86,9 @@ async function handlePOST(request: Request) {
     .update(parsed.data.currentAuthHash + user.masterPasswordServerSalt)
     .digest("hex");
 
-  if (computedHash !== user.masterPasswordServerHash) {
+  const hashA = Buffer.from(computedHash, "hex");
+  const hashB = Buffer.from(user.masterPasswordServerHash, "hex");
+  if (hashA.length !== hashB.length || !timingSafeEqual(hashA, hashB)) {
     return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
   }
 
