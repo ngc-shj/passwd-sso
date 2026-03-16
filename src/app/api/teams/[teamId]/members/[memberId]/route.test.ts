@@ -197,12 +197,14 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
     });
-    mockPrismaTeamMember.update.mockResolvedValue({
+    const updatedOwner = {
       id: MEMBER_ID,
       userId: "target-user",
       role: TEAM_ROLE.OWNER,
       user: { id: "target-user", name: "New Owner", email: "new@test.com", image: null },
-    });
+    };
+    mockPrismaTeamMember.update.mockResolvedValue(updatedOwner);
+    mockTransaction.mockResolvedValue([{}, updatedOwner]);
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {

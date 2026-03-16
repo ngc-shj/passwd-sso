@@ -46,8 +46,10 @@ async function handlePOST(
     return errorResponse(API_ERROR.GRANT_NOT_PENDING, 400);
   }
 
-  // No tokenExpiresAt check here — this route uses session auth, not token auth.
-  // Token expiry is only enforced on the token-based accept route (/api/emergency-access/accept).
+  // Enforce invitation expiry regardless of auth method (session or token)
+  if (grant.tokenExpiresAt && grant.tokenExpiresAt < new Date()) {
+    return errorResponse(API_ERROR.INVITATION_EXPIRED, 410);
+  }
 
   if (grant.granteeEmail.toLowerCase() !== session.user.email.toLowerCase()) {
     return errorResponse(API_ERROR.NOT_AUTHORIZED_FOR_GRANT, 403);

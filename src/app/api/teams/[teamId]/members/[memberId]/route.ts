@@ -61,21 +61,22 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       return errorResponse(API_ERROR.OWNER_ONLY, 403);
     }
 
-    // Transfer: promote target to OWNER, demote self to ADMIN
-    const updated = await withTeamTenantRls(teamId, async () => {
-      await prisma.teamMember.update({
-        where: { id: actorMembership.id },
-        data: { role: TEAM_ROLE.ADMIN },
-      });
-
-      return prisma.teamMember.update({
-        where: { id: memberId },
-        data: { role: TEAM_ROLE.OWNER },
-        include: {
-          user: { select: { id: true, name: true, email: true, image: true } },
-        },
-      });
-    });
+    // Transfer: promote target to OWNER, demote self to ADMIN (atomic)
+    const [, updated] = await withTeamTenantRls(teamId, async () =>
+      prisma.$transaction([
+        prisma.teamMember.update({
+          where: { id: actorMembership.id },
+          data: { role: TEAM_ROLE.ADMIN },
+        }),
+        prisma.teamMember.update({
+          where: { id: memberId },
+          data: { role: TEAM_ROLE.OWNER },
+          include: {
+            user: { select: { id: true, name: true, email: true, image: true } },
+          },
+        }),
+      ]),
+    );
 
     logAudit({
       scope: AUDIT_SCOPE.TEAM,

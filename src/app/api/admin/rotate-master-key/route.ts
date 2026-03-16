@@ -24,7 +24,7 @@ import {
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
-import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
 
@@ -115,12 +115,12 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Revoke old-version shares if requested
+  // Revoke shares across ALL tenants (master key is system-wide)
   let revokedShares = 0;
   if (revokeShares) {
-    const result = await withTenantRls(prisma, operator.tenantId, async () =>
+    const result = await withBypassRls(prisma, async () =>
       prisma.passwordShare.updateMany({
         where: {
-          tenantId: operator.tenantId,
           masterKeyVersion: { lt: targetVersion },
           revokedAt: null,
           expiresAt: { gt: new Date() },

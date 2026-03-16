@@ -150,7 +150,7 @@ describe("POST /api/emergency-access/[id]/accept", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
-  it("succeeds even if tokenExpiresAt is in the past (session-auth does not enforce token expiry)", async () => {
+  it("returns 410 when tokenExpiresAt is in the past", async () => {
     mockPrismaGrant.findUnique.mockResolvedValue({
       ...pendingGrant,
       tokenExpiresAt: new Date(Date.now() - 1000),
@@ -159,7 +159,7 @@ describe("POST /api/emergency-access/[id]/accept", () => {
       createRequest("POST", "http://localhost/api/emergency-access/grant-1/accept", { body: validBody }),
       createParams({ id: "grant-1" })
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(410);
   });
 
   it("successfully accepts grant", async () => {

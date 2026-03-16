@@ -17,22 +17,22 @@ export const createEmergencyGrantSchema = z.object({
 });
 
 export const acceptEmergencyGrantSchema = z.object({
-  token: z.string().min(1),
-  granteePublicKey: z.string().min(1),
+  token: z.string().min(1).max(128),
+  granteePublicKey: z.string().min(1).max(512),
   encryptedPrivateKey: z.object({
-    ciphertext: z.string().min(1),
+    ciphertext: z.string().min(1).max(1024),
     iv: z.string().length(HEX_IV_LENGTH),
     authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
   }),
 });
 
 export const rejectEmergencyGrantSchema = z.object({
-  token: z.string().min(1),
+  token: z.string().min(1).max(128),
 });
 
 export const confirmEmergencyGrantSchema = z.object({
-  ownerEphemeralPublicKey: z.string().min(1),
-  encryptedSecretKey: z.string().min(1),
+  ownerEphemeralPublicKey: z.string().min(1).max(512),
+  encryptedSecretKey: z.string().min(1).max(512),
   secretKeyIv: z.string().length(HEX_IV_LENGTH),
   secretKeyAuthTag: z.string().length(HEX_AUTH_TAG_LENGTH),
   hkdfSalt: z.string().length(HEX_SALT_LENGTH),
@@ -44,9 +44,9 @@ export const confirmEmergencyGrantSchema = z.object({
 });
 
 export const acceptEmergencyGrantByIdSchema = z.object({
-  granteePublicKey: z.string().min(1),
+  granteePublicKey: z.string().min(1).max(512),
   encryptedPrivateKey: z.object({
-    ciphertext: z.string().min(1),
+    ciphertext: z.string().min(1).max(1024),
     iv: z.string().length(HEX_IV_LENGTH),
     authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
   }),

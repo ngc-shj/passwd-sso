@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
+import { hmacVerifier } from "@/lib/crypto-server";
+import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -26,6 +28,7 @@ const rotateKeySchema = z.object({
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,
   newAuthHash: hexHash,
+  newVerifierHash: hexHash.optional(),
   verificationArtifact: z.object({
     ciphertext: z.string().min(1),
     iv: hexIv,
@@ -112,6 +115,13 @@ async function handlePOST(request: Request) {
           masterPasswordServerHash: newServerHash,
           masterPasswordServerSalt: newServerSalt,
           keyVersion: newKeyVersion,
+          // Sync verifier with new accountSalt to keep change-passphrase working
+          ...(parsed.data.newVerifierHash
+            ? {
+                passphraseVerifierHmac: hmacVerifier(parsed.data.newVerifierHash),
+                passphraseVerifierVersion: VERIFIER_VERSION,
+              }
+            : {}),
         },
       }),
       prisma.vaultKey.create({

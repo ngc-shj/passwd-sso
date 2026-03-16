@@ -42,6 +42,7 @@ export default defineConfig({
       ],
       exclude: ["src/app/api/auth/\\[...nextauth\\]/**"],
       thresholds: {
+        lines: 60,
         "src/lib/auth-or-token.ts": { lines: 80 },
         "src/lib/crypto-server.ts": { lines: 80 },
         "src/lib/crypto-team.ts": { lines: 80 },

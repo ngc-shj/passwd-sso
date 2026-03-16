@@ -199,7 +199,6 @@ describe("POST /api/admin/rotate-master-key", () => {
     expect(mockShareUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          tenantId: "tenant-1",
           masterKeyVersion: { lt: 2 },
           revokedAt: null,
         }),
