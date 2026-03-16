@@ -36,42 +36,29 @@ async function handlePOST(
 
   const { ids } = result.data;
 
-  const entriesToTrash = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        id: { in: ids },
-        deletedAt: null,
-      },
-      select: { id: true },
-    }),
-  );
-  const entryIds = entriesToTrash.map((entry) => entry.id);
-
   const deletedAt = new Date();
-  const updateResult = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.updateMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        deletedAt: null,
-      },
-      data: {
-        deletedAt,
-      },
+  const [entryIds, updateResult] = await withTeamTenantRls(teamId, () =>
+    prisma.$transaction(async (tx) => {
+      const entries = await tx.teamPasswordEntry.findMany({
+        where: {
+          teamId,
+          id: { in: ids },
+          deletedAt: null,
+        },
+        select: { id: true },
+      });
+      const eIds = entries.map((entry) => entry.id);
+      const result = await tx.teamPasswordEntry.updateMany({
+        where: {
+          teamId,
+          id: { in: eIds },
+          deletedAt: null,
+        },
+        data: { deletedAt },
+      });
+      return [eIds, result] as const;
     }),
   );
-  const movedEntries = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        deletedAt,
-      },
-      select: { id: true },
-    }),
-  );
-  const movedEntryIds = movedEntries.map((entry) => entry.id);
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
@@ -85,12 +72,12 @@ async function handlePOST(
       bulk: true,
       requestedCount: ids.length,
       movedCount: updateResult.count,
-      entryIds: movedEntryIds,
+      entryIds: entryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of movedEntryIds) {
+  for (const entryId of entryIds) {
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_TRASH,

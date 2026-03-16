@@ -81,12 +81,30 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const { email, role } = result.data;
 
-  // Check if already a member
-  const existingUser = await withTeamTenantRls(teamId, async () =>
-    prisma.user.findUnique({
-      where: { email },
-    }),
+  // Parallelize independent lookups: user, pending invitation, team
+  const [existingUser, existingInv, team] = await withTeamTenantRls(
+    teamId,
+    () =>
+      Promise.all([
+        prisma.user.findUnique({ where: { email } }),
+        prisma.teamInvitation.findFirst({
+          where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
+        }),
+        prisma.team.findUnique({
+          where: { id: teamId },
+          select: { tenantId: true },
+        }),
+      ]),
   );
+
+  if (!team) {
+    return notFound();
+  }
+
+  if (existingInv) {
+    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT, 409);
+  }
+
   if (existingUser) {
     const existingMember = await withTeamTenantRls(teamId, async () =>
       prisma.teamMember.findUnique({
@@ -96,39 +114,17 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       }),
     );
     if (existingMember) {
-      // Active member → already a member
       if (existingMember.deactivatedAt === null) {
         return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
       }
-      // Deactivated + scimManaged → must re-activate via IdP
       if (existingMember.scimManaged) {
         return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
       }
-      // Deactivated + !scimManaged → allow invitation (accept will re-activate)
     }
-  }
-
-  // Check for existing pending invitation
-  const existingInv = await withTeamTenantRls(teamId, async () =>
-    prisma.teamInvitation.findFirst({
-      where: { teamId: teamId, email, status: INVITATION_STATUS.PENDING },
-    }),
-  );
-  if (existingInv) {
-    return errorResponse(API_ERROR.INVITATION_ALREADY_SENT, 409);
   }
 
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!team) {
-    return notFound();
-  }
 
   const invitation = await withTeamTenantRls(teamId, async () =>
     prisma.teamInvitation.create({

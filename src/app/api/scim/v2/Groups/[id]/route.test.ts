@@ -15,8 +15,15 @@ const {
   mockCheckScimRateLimit: vi.fn(),
   mockLogAudit: vi.fn(),
   mockScimGroupMapping: { findUnique: vi.fn() },
-  mockTeamMember: { findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn(), create: vi.fn() },
-  mockTenantMember: { findUnique: vi.fn() },
+  mockTeamMember: {
+    findMany: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+    updateMany: vi.fn(),
+    create: vi.fn(),
+    createMany: vi.fn(),
+  },
+  mockTenantMember: { findUnique: vi.fn(), findMany: vi.fn() },
   mockTransaction: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
@@ -129,15 +136,21 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
+    // Default transaction: pass tx with batch-capable mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ teamMember: mockTeamMember, tenantMember: mockTenantMember }),
+      fn({
+        teamMember: mockTeamMember,
+        tenantMember: mockTenantMember,
+      }),
     );
   });
 
   it("adds a member", async () => {
-    mockTeamMember.findUnique.mockResolvedValue({ id: "tm1", role: "MEMBER" });
-    mockTeamMember.update.mockResolvedValue({});
-    mockTeamMember.findMany.mockResolvedValue([]);
+    // Existing member (role update path): findMany returns the member, updateMany is called
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "MEMBER" }]) // tx.teamMember.findMany (existing members)
+      .mockResolvedValueOnce([]); // loadGroupMembers after tx
+    mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makeReq({
@@ -151,11 +164,12 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
-    expect(mockTeamMember.update).toHaveBeenCalled();
+    expect(mockTeamMember.updateMany).toHaveBeenCalled();
   });
 
   it("returns 400 when removing a missing member", async () => {
-    mockTeamMember.findUnique.mockResolvedValue(null);
+    // Remove op: findMany returns empty (user not in team)
+    mockTeamMember.findMany.mockResolvedValueOnce([]);
 
     const res = await PATCH(
       makeReq({
@@ -172,7 +186,8 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 403 when patch would modify an owner", async () => {
-    mockTeamMember.findUnique.mockResolvedValue({ id: "tm1", role: "OWNER" });
+    // findMany returns an existing OWNER member
+    mockTeamMember.findMany.mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "OWNER" }]);
 
     const res = await PATCH(
       makeReq({
@@ -189,10 +204,12 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("creates a team member when adding a tenant user who is not yet in the team", async () => {
-    mockTeamMember.findUnique.mockResolvedValue(null);
-    mockTenantMember.findUnique.mockResolvedValue({ id: "tenant-member-1", deactivatedAt: null });
-    mockTeamMember.create.mockResolvedValue({});
-    mockTeamMember.findMany.mockResolvedValue([]);
+    // User not yet in team (toCreate path): findMany returns empty, tenantMember.findMany confirms active
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([]) // tx.teamMember.findMany (no existing team member)
+      .mockResolvedValueOnce([]); // loadGroupMembers after tx
+    mockTenantMember.findMany.mockResolvedValueOnce([{ userId: "user-1" }]);
+    mockTeamMember.createMany.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makeReq({
@@ -206,21 +223,25 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
-    expect(mockTeamMember.create).toHaveBeenCalledWith({
-      data: {
-        teamId: "team-1",
-        userId: "user-1",
-        tenantId: "tenant-1",
-        role: "ADMIN",
-        scimManaged: true,
-      },
+    expect(mockTeamMember.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamId: "team-1",
+          userId: "user-1",
+          tenantId: "tenant-1",
+          role: "ADMIN",
+          scimManaged: true,
+        },
+      ],
     });
   });
 
   it("downgrades a member to MEMBER when removing the mapped role", async () => {
-    mockTeamMember.findUnique.mockResolvedValue({ id: "tm1", role: "ADMIN" });
-    mockTeamMember.update.mockResolvedValue({});
-    mockTeamMember.findMany.mockResolvedValue([]);
+    // Remove op: findMany returns the member with ADMIN role, updateMany downgrades
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // tx.teamMember.findMany (remove lookup)
+      .mockResolvedValueOnce([]); // loadGroupMembers after tx
+    mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await PATCH(
       makeReq({
@@ -234,16 +255,16 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
-    expect(mockTeamMember.update).toHaveBeenCalledWith({
-      where: { id: "tm1" },
+    expect(mockTeamMember.updateMany).toHaveBeenCalledWith({
+      where: { id: { in: ["tm1"] } },
       data: { role: "MEMBER" },
     });
   });
 
   it("returns 400 when adding a user not in the tenant", async () => {
-    mockTeamMember.findUnique.mockResolvedValue(null);
-    mockTenantMember.findUnique.mockResolvedValue(null);
-    mockTeamMember.findMany.mockResolvedValue([]);
+    // User not in team and not in tenant: tenantMember.findMany returns empty
+    mockTeamMember.findMany.mockResolvedValueOnce([]);
+    mockTenantMember.findMany.mockResolvedValueOnce([]);
 
     const res = await PATCH(
       makeReq({
@@ -340,17 +361,24 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     mockValidateScimToken.mockResolvedValue(SCIM_TOKEN_DATA);
     mockCheckScimRateLimit.mockResolvedValue(true);
     mockScimGroupMapping.findUnique.mockResolvedValue(mapping);
+    // Default transaction: pass tx with batch-capable mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
-      fn({ teamMember: mockTeamMember, tenantMember: mockTenantMember }),
+      fn({
+        teamMember: mockTeamMember,
+        tenantMember: mockTenantMember,
+      }),
     );
   });
 
   it("replaces role members", async () => {
+    // Pre-tx read: current ADMIN members (user-1 will be removed)
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }])
-      .mockResolvedValueOnce([]);
-    mockTeamMember.findUnique.mockResolvedValue({ id: "tm2", role: "MEMBER" });
-    mockTeamMember.update.mockResolvedValue({});
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // prisma.teamMember.findMany (current members)
+      .mockResolvedValueOnce([{ id: "tm2", userId: "user-2", role: "MEMBER" }]) // tx.teamMember.findMany (existing for toAdd)
+      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // tx.teamMember.findMany (freshMembers for toRemove)
+      .mockResolvedValueOnce([]); // loadGroupMembers after tx
+    mockTenantMember.findMany.mockResolvedValue([]);
+    mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
 
     const res = await PUT(
       makeReq({
@@ -368,12 +396,13 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("creates team member when user exists in tenant but not in team", async () => {
+    // Pre-tx read: no current ADMIN members
     mockTeamMember.findMany
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ id: "tm-created", userId: "user-2", role: "ADMIN", user: { id: "user-2", email: "u2@example.com" } }]);
-    mockTeamMember.findUnique.mockResolvedValue(null);
-    mockTenantMember.findUnique.mockResolvedValue({ id: "tenmem-2", deactivatedAt: null });
-    mockTeamMember.create.mockResolvedValue({});
+      .mockResolvedValueOnce([]) // prisma.teamMember.findMany (current members)
+      .mockResolvedValueOnce([]) // tx.teamMember.findMany (no existing for toAdd)
+      .mockResolvedValueOnce([{ id: "tm-created", userId: "user-2", role: "ADMIN", user: { id: "user-2", email: "u2@example.com" } }]); // loadGroupMembers after tx
+    mockTenantMember.findMany.mockResolvedValueOnce([{ userId: "user-2" }]);
+    mockTeamMember.createMany.mockResolvedValue({ count: 1 });
 
     const res = await PUT(
       makeReq({
@@ -388,14 +417,16 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
     );
 
     expect(res!.status).toBe(200);
-    expect(mockTeamMember.create).toHaveBeenCalledWith({
-      data: {
-        teamId: "team-1",
-        userId: "user-2",
-        tenantId: "tenant-1",
-        role: "ADMIN",
-        scimManaged: true,
-      },
+    expect(mockTeamMember.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          teamId: "team-1",
+          userId: "user-2",
+          tenantId: "tenant-1",
+          role: "ADMIN",
+          scimManaged: true,
+        },
+      ],
     });
   });
 
@@ -416,9 +447,11 @@ describe("PUT /api/scim/v2/Groups/[id]", () => {
   });
 
   it("returns 400 when requested member is not active in the tenant", async () => {
-    mockTeamMember.findMany.mockResolvedValueOnce([]);
-    mockTeamMember.findUnique.mockResolvedValue(null);
-    mockTenantMember.findUnique.mockResolvedValue(null);
+    // No current members; user-2 is not a team member and not in tenant
+    mockTeamMember.findMany
+      .mockResolvedValueOnce([]) // prisma.teamMember.findMany (current members)
+      .mockResolvedValueOnce([]); // tx.teamMember.findMany (no existing for toAdd)
+    mockTenantMember.findMany.mockResolvedValueOnce([]);
 
     const res = await PUT(
       makeReq({

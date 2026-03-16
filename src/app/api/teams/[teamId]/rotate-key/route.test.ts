@@ -27,7 +27,7 @@ const txMock = {
   team: { findUnique: vi.fn(), update: vi.fn() },
   teamMember: { findMany: vi.fn() },
   teamPasswordEntry: { updateMany: vi.fn(), findMany: vi.fn() },
-  teamMemberKey: { create: vi.fn() },
+  teamMemberKey: { createMany: vi.fn() },
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -99,7 +99,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
-    txMock.teamMemberKey.create.mockResolvedValue({});
+    txMock.teamMemberKey.createMany.mockResolvedValue({ count: 1 });
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
   });
 
@@ -290,7 +290,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(json.error).toBe("ENTRY_COUNT_MISMATCH");
   });
 
-  it("passes wrapVersion to TeamMemberKey create (F-19)", async () => {
+  it("passes wrapVersion to TeamMemberKey createMany (F-19)", async () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -300,9 +300,11 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    expect(txMock.teamMemberKey.create).toHaveBeenCalledWith(
+    expect(txMock.teamMemberKey.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ wrapVersion: 1 }),
+        data: expect.arrayContaining([
+          expect.objectContaining({ wrapVersion: 1 }),
+        ]),
       }),
     );
   });
@@ -320,9 +322,11 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createParams("team-1"),
     );
     expect(res.status).toBe(200);
-    expect(txMock.teamMemberKey.create).toHaveBeenCalledWith(
+    expect(txMock.teamMemberKey.createMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ keyVersion: 2 }), // server forces correct version
+        data: expect.arrayContaining([
+          expect.objectContaining({ keyVersion: 2 }), // server forces correct version
+        ]),
       }),
     );
   });

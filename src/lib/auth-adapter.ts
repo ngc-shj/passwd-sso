@@ -289,13 +289,14 @@ export function createCustomAdapter(): Adapter {
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
       try {
-        // Read current session BEFORE updating lastActiveAt so we can check idle timeout
+        // Read current session + tenant in a single query
         const current = await withBypassRls(prisma, async () =>
           prisma.session.findUnique({
             where: { sessionToken: session.sessionToken },
             select: {
               lastActiveAt: true,
               tenantId: true,
+              tenant: { select: { sessionIdleTimeoutMinutes: true } },
             },
           }),
         );
@@ -304,14 +305,7 @@ export function createCustomAdapter(): Adapter {
 
         // Check idle timeout before refreshing the session
         if (current.lastActiveAt && current.tenantId) {
-          const tenant = await withBypassRls(prisma, async () =>
-            prisma.tenant.findUnique({
-              where: { id: current.tenantId! },
-              select: { sessionIdleTimeoutMinutes: true },
-            }),
-          );
-
-          const timeout = tenant?.sessionIdleTimeoutMinutes;
+          const timeout = current.tenant?.sessionIdleTimeoutMinutes;
           if (timeout != null && timeout > 0) {
             const idleSince = Date.now() - current.lastActiveAt.getTime();
             if (idleSince > timeout * 60_000) {

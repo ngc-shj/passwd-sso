@@ -36,43 +36,28 @@ async function handlePOST(
 
   const { ids } = result.data;
 
-  const entriesToRestore = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        id: { in: ids },
-        deletedAt: { not: null },
-      },
-      select: { id: true },
+  const [entryIds, updateResult] = await withTeamTenantRls(teamId, () =>
+    prisma.$transaction(async (tx) => {
+      const entries = await tx.teamPasswordEntry.findMany({
+        where: {
+          teamId,
+          id: { in: ids },
+          deletedAt: { not: null },
+        },
+        select: { id: true },
+      });
+      const eIds = entries.map((entry) => entry.id);
+      const result = await tx.teamPasswordEntry.updateMany({
+        where: {
+          teamId,
+          id: { in: eIds },
+          deletedAt: { not: null },
+        },
+        data: { deletedAt: null },
+      });
+      return [eIds, result] as const;
     }),
   );
-  const entryIds = entriesToRestore.map((entry) => entry.id);
-
-  const updateResult = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.updateMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        deletedAt: { not: null },
-      },
-      data: {
-        deletedAt: null,
-      },
-    }),
-  );
-
-  // Re-fetch to get accurate list of actually restored entries
-  const restoredEntries = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        deletedAt: null,
-      },
-      select: { id: true },
-    }),
-  );
-  const restoredEntryIds = restoredEntries.map((e) => e.id);
 
   const requestMeta = extractRequestMeta(req);
 
@@ -88,12 +73,12 @@ async function handlePOST(
       operation: "restore",
       requestedCount: ids.length,
       restoredCount: updateResult.count,
-      entryIds: restoredEntryIds,
+      entryIds: entryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of restoredEntryIds) {
+  for (const entryId of entryIds) {
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_RESTORE,

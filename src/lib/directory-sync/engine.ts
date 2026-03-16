@@ -294,7 +294,11 @@ export async function runDirectorySync(
           }),
           prisma.tenantMember.findMany({
             where: { tenantId },
-            include: {
+            select: {
+              id: true,
+              userId: true,
+              deactivatedAt: true,
+              role: true,
               user: { select: { id: true, email: true, name: true } },
             },
           }),
@@ -404,26 +408,36 @@ export async function runDirectorySync(
       await withTenantRls(prisma, tenantId, () =>
         prisma.$transaction(async (tx) => {
           // Create new users
-          for (const pu of toCreate) {
-            let user = await tx.user.findUnique({
-              where: { email: pu.email },
-            });
-            if (!user) {
-              user = await tx.user.create({
-                data: {
-                  tenantId,
-                  email: pu.email,
-                  name: pu.displayName,
-                },
-              });
-            }
+          // Batch pre-fetch: all users by email for toCreate
+          const createEmails = toCreate.map((pu) => pu.email);
+          const existingUsers = await tx.user.findMany({
+            where: { email: { in: createEmails } },
+            select: { id: true, email: true },
+          });
+          const userByEmail = new Map(existingUsers.map((u) => [u.email, u]));
 
-            // Check if already a tenant member
-            const existing = await tx.tenantMember.findUnique({
-              where: {
-                tenantId_userId: { tenantId, userId: user.id },
-              },
-            });
+          // Create missing users individually (need IDs back)
+          for (const pu of toCreate) {
+            if (!userByEmail.has(pu.email)) {
+              const newUser = await tx.user.create({
+                data: { tenantId, email: pu.email, name: pu.displayName },
+              });
+              userByEmail.set(pu.email, newUser);
+            }
+          }
+
+          // Batch pre-fetch: tenantMembers for all users in toCreate
+          const allUserIds = toCreate.map((pu) => userByEmail.get(pu.email)!.id);
+          const existingTenantMembers = await tx.tenantMember.findMany({
+            where: { tenantId, userId: { in: allUserIds } },
+            select: { id: true, userId: true, deactivatedAt: true },
+          });
+          const tmByUserId = new Map(existingTenantMembers.map((m) => [m.userId, m]));
+
+          // Process each user: create/reactivate tenantMember + upsert mapping
+          for (const pu of toCreate) {
+            const user = userByEmail.get(pu.email)!;
+            const existing = tmByUserId.get(user.id);
 
             if (!existing) {
               await tx.tenantMember.create({
@@ -441,10 +455,7 @@ export async function runDirectorySync(
               // Reactivate
               await tx.tenantMember.update({
                 where: { id: existing.id },
-                data: {
-                  deactivatedAt: null,
-                  lastScimSyncedAt: new Date(),
-                },
+                data: { deactivatedAt: null, lastScimSyncedAt: new Date() },
               });
             }
 
@@ -481,6 +492,12 @@ export async function runDirectorySync(
               data: { name: pu.displayName },
             });
 
+            // OWNER protection: skip deactivation for OWNER role
+            if (member.role === "OWNER" && !pu.active) {
+              usersUpdated++;
+              continue;
+            }
+
             await tx.tenantMember.update({
               where: { id: member.id },
               data: {
@@ -492,20 +509,26 @@ export async function runDirectorySync(
             usersUpdated++;
           }
 
-          // Deactivate users no longer in provider
-          for (const userId of toDeactivate) {
-            const member = memberByUserId.get(userId);
-            if (!member) continue;
+          // Deactivate users no longer in provider (batch, OWNER-safe)
+          if (toDeactivate.length > 0) {
+            const memberIds = toDeactivate
+              .map((userId) => memberByUserId.get(userId)?.id)
+              .filter((id): id is string => id != null);
 
-            await tx.tenantMember.update({
-              where: { id: member.id },
-              data: {
-                deactivatedAt: new Date(),
-                lastScimSyncedAt: new Date(),
-              },
-            });
-
-            usersDeactivated++;
+            if (memberIds.length > 0) {
+              const result = await tx.tenantMember.updateMany({
+                where: {
+                  id: { in: memberIds },
+                  tenantId,
+                  role: { not: "OWNER" },
+                },
+                data: {
+                  deactivatedAt: new Date(),
+                  lastScimSyncedAt: new Date(),
+                },
+              });
+              usersDeactivated = result.count;
+            }
           }
         }),
       );

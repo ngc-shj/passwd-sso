@@ -529,12 +529,12 @@ describe("createCustomAdapter", () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 
-      // findUnique returns current session (recently active)
+      // findUnique returns current session with tenant relation included
       mockPrismaSession.findUnique.mockResolvedValue({
         lastActiveAt: new Date("2025-03-15T11:59:00Z"),
         tenantId: "tenant-1",
+        tenant: { sessionIdleTimeoutMinutes: null },
       });
-      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: null });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -547,10 +547,10 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      // Should first read current session
+      // Should first read current session (with tenant included)
       expect(mockPrismaSession.findUnique).toHaveBeenCalledWith({
         where: { sessionToken: "tok-1" },
-        select: { lastActiveAt: true, tenantId: true },
+        select: { lastActiveAt: true, tenantId: true, tenant: { select: { sessionIdleTimeoutMinutes: true } } },
       });
       // Then update
       expect(mockPrismaSession.update).toHaveBeenCalledWith({
@@ -573,8 +573,8 @@ describe("createCustomAdapter", () => {
       mockPrismaSession.findUnique.mockResolvedValue({
         lastActiveAt: new Date(),
         tenantId: "tenant-1",
+        tenant: { sessionIdleTimeoutMinutes: null },
       });
-      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: null });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
         userId: "u-1",
@@ -593,13 +593,12 @@ describe("createCustomAdapter", () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 
-      // Session was last active 10 minutes ago
+      // Session was last active 10 minutes ago; tenant has 5 minute idle timeout
       mockPrismaSession.findUnique.mockResolvedValue({
         lastActiveAt: new Date("2025-03-15T11:49:00Z"),
         tenantId: "tenant-1",
+        tenant: { sessionIdleTimeoutMinutes: 5 },
       });
-      // Tenant has 5 minute idle timeout
-      mockPrismaTenant.findUnique.mockResolvedValue({ sessionIdleTimeoutMinutes: 5 });
       mockPrismaSession.delete.mockResolvedValue({});
 
       const adapter = createCustomAdapter();
