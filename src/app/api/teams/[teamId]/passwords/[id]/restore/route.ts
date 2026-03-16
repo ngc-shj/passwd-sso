@@ -32,6 +32,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const existing = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({
       where: { id },
+      select: { teamId: true, deletedAt: true },
     }),
   );
 

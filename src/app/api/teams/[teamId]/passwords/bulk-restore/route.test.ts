@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockLogAuditBatch } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -21,6 +21,7 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequir
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn(),
+    mockLogAuditBatch: vi.fn(),
   };
 });
 
@@ -41,6 +42,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  logAuditBatch: mockLogAuditBatch,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 
@@ -155,6 +157,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-restore", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
+    // Parent log via logAudit
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: AUDIT_SCOPE.TEAM,
@@ -171,30 +174,31 @@ describe("POST /api/teams/[teamId]/passwords/bulk-restore", () => {
       }),
     );
 
-    // Per-entry audit logs
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: AUDIT_SCOPE.TEAM,
-        action: "ENTRY_RESTORE",
-        teamId: TEAM_ID,
-        targetId: "p1",
-        metadata: expect.objectContaining({
-          source: "bulk-restore",
-          parentAction: "ENTRY_BULK_RESTORE",
+    // Per-entry logs batched via logAuditBatch
+    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditBatch).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          scope: AUDIT_SCOPE.TEAM,
+          action: "ENTRY_RESTORE",
+          teamId: TEAM_ID,
+          targetId: "p1",
+          metadata: expect.objectContaining({
+            source: "bulk-restore",
+            parentAction: "ENTRY_BULK_RESTORE",
+          }),
         }),
-      }),
-    );
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: AUDIT_SCOPE.TEAM,
-        action: "ENTRY_RESTORE",
-        teamId: TEAM_ID,
-        targetId: "p2",
-        metadata: expect.objectContaining({
-          source: "bulk-restore",
-          parentAction: "ENTRY_BULK_RESTORE",
+        expect.objectContaining({
+          scope: AUDIT_SCOPE.TEAM,
+          action: "ENTRY_RESTORE",
+          teamId: TEAM_ID,
+          targetId: "p2",
+          metadata: expect.objectContaining({
+            source: "bulk-restore",
+            parentAction: "ENTRY_BULK_RESTORE",
+          }),
         }),
-      }),
+      ]),
     );
   });
 });

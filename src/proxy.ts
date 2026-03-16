@@ -217,7 +217,10 @@ async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
   const cookie = request.headers.get("cookie");
   if (!cookie) return { valid: false };
 
-  const cacheKey = await hashCookie(cookie);
+  const cacheKey = extractSessionToken(cookie);
+  // If no session token cookie is present, skip cache lookup entirely
+  if (!cacheKey) return { valid: false };
+
   const cached = sessionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return { valid: cached.valid, userId: cached.userId, tenantId: cached.tenantId };
@@ -260,7 +263,16 @@ async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
 
 function setSessionCache(key: string, info: SessionInfo) {
   if (sessionCache.size >= SESSION_CACHE_MAX) {
-    sessionCache.clear();
+    const now = Date.now();
+    // First pass: evict all expired entries
+    for (const [k, v] of sessionCache) {
+      if (v.expiresAt <= now) sessionCache.delete(k);
+    }
+    // Second pass: if still at limit, evict the oldest entry (Map preserves insertion order)
+    if (sessionCache.size >= SESSION_CACHE_MAX) {
+      const oldest = sessionCache.keys().next().value;
+      if (oldest !== undefined) sessionCache.delete(oldest);
+    }
   }
   sessionCache.set(key, {
     expiresAt: Date.now() + SESSION_CACHE_TTL_MS,
@@ -268,11 +280,23 @@ function setSessionCache(key: string, info: SessionInfo) {
   });
 }
 
-async function hashCookie(cookie: string): Promise<string> {
-  const data = new TextEncoder().encode(cookie);
-  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
-  const hashArray = new Uint8Array(hashBuffer);
-  return Array.from(hashArray, (b) => b.toString(16).padStart(2, "0")).join("");
+// Extract the session token value directly to use as cache key.
+// This avoids SHA-256 hashing the entire cookie string on every request.
+// Falls back to the full cookie string if neither known token cookie is present.
+function extractSessionToken(cookie: string): string {
+  // Cookie names used by Auth.js (dev and prod variants)
+  const names = ["__Secure-authjs.session-token", "authjs.session-token"];
+  for (const name of names) {
+    const prefix = `${name}=`;
+    const idx = cookie.indexOf(prefix);
+    if (idx !== -1) {
+      const start = idx + prefix.length;
+      const end = cookie.indexOf(";", start);
+      return end === -1 ? cookie.slice(start) : cookie.slice(start, end);
+    }
+  }
+  // No session token cookie found — treat as unauthenticated (empty key)
+  return "";
 }
 
 function applySecurityHeaders(
@@ -321,6 +345,9 @@ function applySecurityHeaders(
 
 // Exported for testing
 export { applySecurityHeaders as _applySecurityHeaders };
+export { extractSessionToken as _extractSessionToken };
+export { setSessionCache as _setSessionCache };
+export { sessionCache as _sessionCache };
 
 function clearAuthSessionCookies(response: NextResponse, basePath: string = ""): void {
   const authSessionCookieNames = [

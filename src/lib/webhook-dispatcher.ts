@@ -123,9 +123,55 @@ async function deliverWithRetry(
   return false;
 }
 
+const WEBHOOK_CONCURRENCY = 5;
+
+async function deliverSingleWebhook(
+  webhook: WebhookRecord,
+  payload: string,
+  onSuccess: (id: string) => Promise<void>,
+  onFailure: (id: string, failCount: number, url: string) => Promise<void>,
+): Promise<void> {
+  try {
+    let secret: string;
+    try {
+      const masterKey = getMasterKeyByVersion(webhook.masterKeyVersion);
+      secret = decryptServerData(
+        {
+          ciphertext: webhook.secretEncrypted,
+          iv: webhook.secretIv,
+          authTag: webhook.secretAuthTag,
+        },
+        masterKey,
+      );
+    } catch (err) {
+      console.error("[webhook-dispatcher] secret decryption failed", {
+        webhookId: webhook.id,
+        masterKeyVersion: webhook.masterKeyVersion,
+        error: err instanceof Error ? err.message : "unknown",
+      });
+      return;
+    }
+
+    const signature = computeHmac(secret, payload);
+    const ok = await deliverWithRetry(webhook.url, payload, signature);
+
+    if (ok) {
+      await onSuccess(webhook.id);
+    } else {
+      await onFailure(webhook.id, webhook.failCount + 1, webhook.url);
+    }
+  } catch (err) {
+    console.error("[webhook-dispatcher] dispatch error", {
+      webhookId: webhook.id,
+      error: err instanceof Error ? err.message : "unknown",
+    });
+  }
+}
+
 /**
  * Shared delivery loop for both team and tenant webhooks.
  * Decrypts HMAC secret, computes signature, delivers with retry.
+ * Processes up to WEBHOOK_CONCURRENCY webhooks in parallel per chunk.
  */
 async function dispatchToWebhooks(
   webhooks: WebhookRecord[],
@@ -133,42 +179,13 @@ async function dispatchToWebhooks(
   onSuccess: (id: string) => Promise<void>,
   onFailure: (id: string, failCount: number, url: string) => Promise<void>,
 ): Promise<void> {
-  for (const webhook of webhooks) {
-    try {
-      let secret: string;
-      try {
-        const masterKey = getMasterKeyByVersion(webhook.masterKeyVersion);
-        secret = decryptServerData(
-          {
-            ciphertext: webhook.secretEncrypted,
-            iv: webhook.secretIv,
-            authTag: webhook.secretAuthTag,
-          },
-          masterKey,
-        );
-      } catch (err) {
-        console.error("[webhook-dispatcher] secret decryption failed", {
-          webhookId: webhook.id,
-          masterKeyVersion: webhook.masterKeyVersion,
-          error: err instanceof Error ? err.message : "unknown",
-        });
-        continue;
-      }
-
-      const signature = computeHmac(secret, payload);
-      const ok = await deliverWithRetry(webhook.url, payload, signature);
-
-      if (ok) {
-        await onSuccess(webhook.id);
-      } else {
-        await onFailure(webhook.id, webhook.failCount + 1, webhook.url);
-      }
-    } catch (err) {
-      console.error("[webhook-dispatcher] dispatch error", {
-        webhookId: webhook.id,
-        error: err instanceof Error ? err.message : "unknown",
-      });
-    }
+  for (let i = 0; i < webhooks.length; i += WEBHOOK_CONCURRENCY) {
+    const chunk = webhooks.slice(i, i + WEBHOOK_CONCURRENCY);
+    await Promise.allSettled(
+      chunk.map((webhook) =>
+        deliverSingleWebhook(webhook, payload, onSuccess, onFailure),
+      ),
+    );
   }
 }
 

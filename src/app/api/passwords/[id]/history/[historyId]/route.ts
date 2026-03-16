@@ -28,11 +28,16 @@ async function handleGET(
 
   const { id, historyId } = await params;
 
-  const entry = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findUnique({
-      where: { id },
-      select: { userId: true },
-    }),
+  const [entry, history] = await withUserTenantRls(session.user.id, () =>
+    Promise.all([
+      prisma.passwordEntry.findUnique({
+        where: { id },
+        select: { userId: true },
+      }),
+      prisma.passwordEntryHistory.findUnique({
+        where: { id: historyId },
+      }),
+    ]),
   );
 
   if (!entry) {
@@ -41,12 +46,6 @@ async function handleGET(
   if (entry.userId !== session.user.id) {
     return forbidden();
   }
-
-  const history = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntryHistory.findUnique({
-      where: { id: historyId },
-    }),
-  );
 
   if (!history || history.entryId !== id) {
     return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);
@@ -87,12 +86,17 @@ async function handlePATCH(
 
   const { encryptedBlob, blobIv, blobAuthTag, keyVersion, oldBlobHash } = parsed.data;
 
-  // Verify ownership
-  const entry = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findUnique({
-      where: { id },
-      select: { userId: true },
-    }),
+  // Verify ownership and fetch history in parallel
+  const [entry, history] = await withUserTenantRls(session.user.id, () =>
+    Promise.all([
+      prisma.passwordEntry.findUnique({
+        where: { id },
+        select: { userId: true },
+      }),
+      prisma.passwordEntryHistory.findUnique({
+        where: { id: historyId },
+      }),
+    ]),
   );
 
   if (!entry) {
@@ -101,12 +105,6 @@ async function handlePATCH(
   if (entry.userId !== session.user.id) {
     return forbidden();
   }
-
-  const history = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntryHistory.findUnique({
-      where: { id: historyId },
-    }),
-  );
 
   if (!history || history.entryId !== id) {
     return errorResponse(API_ERROR.HISTORY_NOT_FOUND, 404);

@@ -87,8 +87,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
 
   it("returns 409 when target user has no ECDH public key", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: null });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null, user: { ecdhPublicKey: null } });
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -101,8 +100,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
 
   it("returns 400 on invalid body", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null, user: { ecdhPublicKey: "pub-key" } });
 
     const res = await POST(
       createRequest("POST", URL, { body: { encryptedTeamKey: "data" } }),
@@ -114,9 +112,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   it("distributes key successfully", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // getTeamMembership (findFirst)
     mockPrismaTeamMember.findUnique
-      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null, user: { ecdhPublicKey: "pub-key" } }) // target check
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check inside tx
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -143,8 +140,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
 
   it("returns 409 when key already distributed (pre-check, Q-2)", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: true, deactivatedAt: null }); // already distributed
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: true, deactivatedAt: null, user: { ecdhPublicKey: "pub-key" } }); // already distributed
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),
@@ -159,8 +155,7 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
 
   it("returns 400 on malformed JSON (Q-3)", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" });
-    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null, user: { ecdhPublicKey: "pub-key" } });
 
     const { NextRequest } = await import("next/server");
     const req = new NextRequest(URL, {
@@ -180,9 +175,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   it("returns 409 when keyVersion does not match team's current version (F-16)", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // admin (findFirst)
     mockPrismaTeamMember.findUnique
-      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null, user: { ecdhPublicKey: "pub-key" } })
       .mockResolvedValueOnce({ keyDistributed: false, deactivatedAt: null }); // re-check passes
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
     mockPrismaTeam.findUnique.mockResolvedValue({ teamKeyVersion: 2 }); // team rotated to v2
 
     const res = await POST(
@@ -197,9 +191,8 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
   it("returns 409 when key already distributed (TOCTOU race)", async () => {
     mockPrismaTeamMember.findFirst.mockResolvedValueOnce({ role: "OWNER", teamId: "team-1" }); // getTeamMembership (findFirst)
     mockPrismaTeamMember.findUnique
-      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null }) // target check (passes)
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null, user: { ecdhPublicKey: "pub-key" } }) // target check (passes)
       .mockResolvedValueOnce({ keyDistributed: true, deactivatedAt: null }); // re-check inside tx (race: another admin distributed first)
-    mockPrismaUser.findUnique.mockResolvedValue({ ecdhPublicKey: "pub-key" });
 
     const res = await POST(
       createRequest("POST", URL, { body: validBody }),

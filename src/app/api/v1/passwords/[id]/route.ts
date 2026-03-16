@@ -116,7 +116,18 @@ async function handlePUT(
   const { id } = await params;
 
   const existing = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.findUnique({ where: { id } }),
+    prisma.passwordEntry.findUnique({
+      where: { id },
+      select: {
+        userId: true,
+        tenantId: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        keyVersion: true,
+        aadVersion: true,
+      },
+    }),
   );
 
   if (!existing || existing.userId !== userId) {
@@ -150,34 +161,7 @@ async function handlePUT(
 
   const updateData: Record<string, unknown> = {};
 
-  // Snapshot to history if encryptedBlob is changing
   if (encryptedBlob) {
-    await withTenantRls(prisma, tenantId, async () =>
-      prisma.$transaction(async (tx) => {
-        await tx.passwordEntryHistory.create({
-          data: {
-            entryId: id,
-            tenantId: existing.tenantId,
-            encryptedBlob: existing.encryptedBlob,
-            blobIv: existing.blobIv,
-            blobAuthTag: existing.blobAuthTag,
-            keyVersion: existing.keyVersion,
-            aadVersion: existing.aadVersion,
-          },
-        });
-        const all = await tx.passwordEntryHistory.findMany({
-          where: { entryId: id },
-          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
-          select: { id: true },
-        });
-        if (all.length > 20) {
-          await tx.passwordEntryHistory.deleteMany({
-            where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
-          });
-        }
-      }),
-    );
-
     updateData.encryptedBlob = encryptedBlob.ciphertext;
     updateData.blobIv = encryptedBlob.iv;
     updateData.blobAuthTag = encryptedBlob.authTag;
@@ -199,11 +183,38 @@ async function handlePUT(
     updateData.tags = { set: tagIds.map((tid) => ({ id: tid })) };
   }
 
+  // Snapshot history and update entry in a single transaction
   const updated = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.update({
-      where: { id },
-      data: updateData,
-      include: { tags: { select: { id: true } } },
+    prisma.$transaction(async (tx) => {
+      if (encryptedBlob) {
+        await tx.passwordEntryHistory.create({
+          data: {
+            entryId: id,
+            tenantId: existing.tenantId,
+            encryptedBlob: existing.encryptedBlob,
+            blobIv: existing.blobIv,
+            blobAuthTag: existing.blobAuthTag,
+            keyVersion: existing.keyVersion,
+            aadVersion: existing.aadVersion,
+          },
+        });
+        // Trim to max 20 history entries (stable sort: changedAt asc, id asc)
+        const all = await tx.passwordEntryHistory.findMany({
+          where: { entryId: id },
+          orderBy: [{ changedAt: "asc" }, { id: "asc" }],
+          select: { id: true },
+        });
+        if (all.length > 20) {
+          await tx.passwordEntryHistory.deleteMany({
+            where: { id: { in: all.slice(0, all.length - 20).map((r) => r.id) } },
+          });
+        }
+      }
+      return tx.passwordEntry.update({
+        where: { id },
+        data: updateData,
+        include: { tags: { select: { id: true } } },
+      });
     }),
   );
 
@@ -252,7 +263,7 @@ async function handleDELETE(
   const permanent = searchParams.get("permanent") === "true";
 
   const existing = await withTenantRls(prisma, tenantId, async () =>
-    prisma.passwordEntry.findUnique({ where: { id } }),
+    prisma.passwordEntry.findUnique({ where: { id }, select: { userId: true } }),
   );
 
   if (!existing || existing.userId !== userId) {

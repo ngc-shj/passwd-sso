@@ -41,6 +41,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
     prisma.teamPasswordEntryHistory.findMany({
       where: { entryId: id },
       orderBy: { changedAt: "desc" },
+      take: 20,
       include: { changedBy: { select: { id: true, name: true, email: true } } },
     }),
   );

@@ -32,14 +32,23 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     const redis = getRedis();
     if (!redis) return null;
     try {
-      const count = await redis.incr(key);
-      if (count === 1) {
-        await redis.pexpire(key, windowMs);
-      }
+      // Pipeline: INCR + conditional PEXPIRE + PTTL in one round-trip.
+      // PEXPIRE only sets TTL on first increment (count === 1).
+      // PTTL is always included so rate-limited responses don't need a second call.
+      const pipeline = redis.pipeline();
+      pipeline.incr(key);
+      pipeline.pexpire(key, windowMs, "NX"); // NX: only set if no TTL exists
+      pipeline.pttl(key);
+      const results = await pipeline.exec();
+
+      // ioredis pipeline results: [[err, value], ...]
+      if (!results) return null;
+      const count = results[0]?.[1] as number;
+      const ttl = results[2]?.[1] as number;
+
       if (count <= max) {
         return { allowed: true };
       }
-      const ttl = await redis.pttl(key);
       return {
         allowed: false,
         retryAfterMs: ttl > 0 ? ttl : windowMs,

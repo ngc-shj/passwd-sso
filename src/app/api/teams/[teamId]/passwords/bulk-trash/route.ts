@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAudit, logAuditBatch, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -77,8 +77,8 @@ async function handlePOST(
     ...requestMeta,
   });
 
-  for (const entryId of entryIds) {
-    logAudit({
+  logAuditBatch(
+    entryIds.map((entryId) => ({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_TRASH,
       userId: session.user.id,
@@ -90,8 +90,8 @@ async function handlePOST(
         parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
       },
       ...requestMeta,
-    });
-  }
+    })),
+  );
 
   return NextResponse.json({ success: true, movedCount: updateResult.count });
 }
