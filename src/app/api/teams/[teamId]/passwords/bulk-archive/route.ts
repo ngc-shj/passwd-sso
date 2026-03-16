@@ -37,45 +37,30 @@ async function handlePOST(
   const { ids, operation } = result.data;
   const toArchived = operation === "archive";
 
-  const entriesToProcess = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        id: { in: ids },
-        deletedAt: null,
-        isArchived: !toArchived,
-      },
-      select: { id: true },
+  const [entryIds, updateResult] = await withTeamTenantRls(teamId, () =>
+    prisma.$transaction(async (tx) => {
+      const entries = await tx.teamPasswordEntry.findMany({
+        where: {
+          teamId,
+          id: { in: ids },
+          deletedAt: null,
+          isArchived: !toArchived,
+        },
+        select: { id: true },
+      });
+      const entryIds = entries.map((entry) => entry.id);
+      const result = await tx.teamPasswordEntry.updateMany({
+        where: {
+          teamId,
+          id: { in: entryIds },
+          deletedAt: null,
+          isArchived: !toArchived,
+        },
+        data: { isArchived: toArchived },
+      });
+      return [entryIds, result] as const;
     }),
   );
-  const entryIds = entriesToProcess.map((entry) => entry.id);
-
-  const updateResult = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.updateMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        deletedAt: null,
-        isArchived: !toArchived,
-      },
-      data: {
-        isArchived: toArchived,
-      },
-    }),
-  );
-
-  // Re-fetch to get accurate list of actually processed entries
-  const processedEntries = await withTeamTenantRls(teamId, async () =>
-    prisma.teamPasswordEntry.findMany({
-      where: {
-        teamId,
-        id: { in: entryIds },
-        isArchived: toArchived,
-      },
-      select: { id: true },
-    }),
-  );
-  const processedEntryIds = processedEntries.map((e) => e.id);
 
   const requestMeta = extractRequestMeta(req);
 
@@ -95,12 +80,12 @@ async function handlePOST(
       processedCount: updateResult.count,
       archivedCount: toArchived ? updateResult.count : 0,
       unarchivedCount: toArchived ? 0 : updateResult.count,
-      entryIds: processedEntryIds,
+      entryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of processedEntryIds) {
+  for (const entryId of entryIds) {
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_UPDATE,

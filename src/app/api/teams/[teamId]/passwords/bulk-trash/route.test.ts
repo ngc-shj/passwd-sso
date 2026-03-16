@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamPasswordEntry, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -16,6 +16,7 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockRequireTeamPermission, TeamAu
       findMany: vi.fn(),
       updateMany: vi.fn(),
     },
+    mockPrismaTransaction: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
@@ -25,7 +26,11 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockRequireTeamPermission, TeamAu
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { teamPasswordEntry: mockPrismaTeamPasswordEntry, auditLog: { create: vi.fn().mockResolvedValue({}) } },
+  prisma: {
+    teamPasswordEntry: mockPrismaTeamPasswordEntry,
+    auditLog: { create: vi.fn().mockResolvedValue({}) },
+    $transaction: mockPrismaTransaction,
+  },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
@@ -52,6 +57,15 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 2 });
+    // Default: $transaction invokes callback with a tx object that delegates to top-level mocks
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        teamPasswordEntry: {
+          findMany: mockPrismaTeamPasswordEntry.findMany,
+          updateMany: mockPrismaTeamPasswordEntry.updateMany,
+        },
+      })
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {

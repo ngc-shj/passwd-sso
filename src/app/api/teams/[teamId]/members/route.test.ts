@@ -309,7 +309,8 @@ describe("POST /api/teams/[teamId]/members", () => {
   });
 
   it("returns 404 when target user not in tenant", async () => {
-    mockPrismaUser.findFirst.mockResolvedValue(null);
+    // New code uses a single tenantMember.findFirst query (no separate user.findFirst)
+    mockPrismaTenantMember.findFirst.mockResolvedValue(null);
 
     const res = await POST(
       createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/members`, {

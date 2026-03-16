@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
@@ -9,6 +9,7 @@ const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser,
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockTransaction: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -22,6 +23,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockAuditCreate,
     },
     user: mockPrismaUser,
+    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -43,6 +45,15 @@ describe("POST /api/passwords/bulk-archive", () => {
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
     mockAuditCreate.mockResolvedValue({});
+    // Default: $transaction invokes callback with a tx object that delegates to top-level mocks
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        passwordEntry: {
+          findMany: mockFindMany,
+          updateMany: mockUpdateMany,
+        },
+      })
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -81,9 +92,7 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("archives entries when operation is omitted (defaults to archive)", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const res = await POST(createRequest("POST", URL, {
@@ -98,9 +107,8 @@ describe("POST /api/passwords/bulk-archive", () => {
     expect(json.archivedCount).toBe(2);
     expect(json.unarchivedCount).toBe(0);
 
-    // findMany: lookup entries where isArchived is false
-    expect(mockFindMany).toHaveBeenNthCalledWith(
-      1,
+    // findMany: lookup entries where isArchived is false (single call inside transaction)
+    expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           userId: "user-1",
@@ -125,24 +133,10 @@ describe("POST /api/passwords/bulk-archive", () => {
         }),
       })
     );
-
-    // re-fetch: entries where isArchived is true
-    expect(mockFindMany).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        where: expect.objectContaining({
-          userId: "user-1",
-          id: { in: ["p1", "p2"] },
-          isArchived: true,
-        }),
-      })
-    );
   });
 
   it("unarchives entries when operation is 'unarchive'", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const res = await POST(createRequest("POST", URL, {
@@ -157,9 +151,8 @@ describe("POST /api/passwords/bulk-archive", () => {
     expect(json.archivedCount).toBe(0);
     expect(json.unarchivedCount).toBe(2);
 
-    // findMany: lookup entries where isArchived is true
-    expect(mockFindMany).toHaveBeenNthCalledWith(
-      1,
+    // findMany: lookup entries where isArchived is true (single call inside transaction)
+    expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           isArchived: true,
@@ -181,9 +174,7 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("logs ENTRY_BULK_ARCHIVE for archive operation", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     await POST(createRequest("POST", URL, { body: { ids: ["p1", "p2"] } }));
@@ -227,9 +218,7 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("logs ENTRY_BULK_UNARCHIVE for unarchive operation", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }])
-      .mockResolvedValueOnce([{ id: "p1" }]);
+    mockFindMany.mockResolvedValue([{ id: "p1" }]);
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
     await POST(createRequest("POST", URL, {
@@ -268,34 +257,33 @@ describe("POST /api/passwords/bulk-archive", () => {
     );
   });
 
-  it("uses re-fetched entry IDs for per-entry audit logs", async () => {
-    // First findMany returns 3, but re-fetch returns only 2 (one failed to update)
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }, { id: "p3" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p3" }]);
+  it("uses transaction findMany entry IDs for per-entry audit logs", async () => {
+    // findMany inside transaction returns 3 entries, updateMany reports count: 2
+    // entryIds for audit come from the findMany result (not updateMany count)
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }, { id: "p3" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     await POST(createRequest("POST", URL, {
       body: { ids: ["p1", "p2", "p3"] },
     }));
 
-    // 1 parent + 2 per-entry (only re-fetched entries) = 3
-    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
+    // 1 parent + 3 per-entry (all entries returned by findMany) = 4
+    expect(mockAuditCreate).toHaveBeenCalledTimes(4);
 
-    // Parent log has the re-fetched entryIds
+    // Parent log has entryIds from findMany
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_ARCHIVE",
           metadata: expect.objectContaining({
-            entryIds: ["p1", "p3"],
+            entryIds: ["p1", "p2", "p3"],
           }),
         }),
       })
     );
 
-    // Per-entry logs only for re-fetched entries
+    // Per-entry logs for all findMany entries
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
@@ -307,6 +295,15 @@ describe("POST /api/passwords/bulk-archive", () => {
     );
     expect(mockAuditCreate).toHaveBeenNthCalledWith(
       3,
+      expect.objectContaining({
+        data: expect.objectContaining({
+          action: "ENTRY_UPDATE",
+          targetId: "p2",
+        }),
+      })
+    );
+    expect(mockAuditCreate).toHaveBeenNthCalledWith(
+      4,
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_UPDATE",

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
@@ -9,6 +9,7 @@ const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser,
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockTransaction: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -22,6 +23,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockAuditCreate,
     },
     user: mockPrismaUser,
+    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -43,6 +45,15 @@ describe("POST /api/passwords/bulk-trash", () => {
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
     mockAuditCreate.mockResolvedValue({});
+    // Default: $transaction invokes callback with a tx object that delegates to top-level mocks
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        passwordEntry: {
+          findMany: mockFindMany,
+          updateMany: mockUpdateMany,
+        },
+      })
+    );
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -81,9 +92,7 @@ describe("POST /api/passwords/bulk-trash", () => {
   });
 
   it("deduplicates IDs via Set before processing", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const res = await POST(createRequest("POST", URL, {
@@ -91,9 +100,8 @@ describe("POST /api/passwords/bulk-trash", () => {
     }));
     expect(res.status).toBe(200);
 
-    // First findMany should receive deduplicated ids
-    expect(mockFindMany).toHaveBeenNthCalledWith(
-      1,
+    // findMany inside transaction should receive deduplicated ids
+    expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           id: { in: ["p1", "p2"] },
@@ -102,10 +110,8 @@ describe("POST /api/passwords/bulk-trash", () => {
     );
   });
 
-  it("soft-deletes entries: findMany → updateMany → re-fetch → audit, returns movedCount", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+  it("soft-deletes entries: findMany → updateMany → audit, returns movedCount", async () => {
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const res = await POST(createRequest("POST", URL, {
@@ -117,9 +123,8 @@ describe("POST /api/passwords/bulk-trash", () => {
     expect(json.success).toBe(true);
     expect(json.movedCount).toBe(2);
 
-    // findMany: initial lookup
-    expect(mockFindMany).toHaveBeenNthCalledWith(
-      1,
+    // findMany: initial lookup inside transaction
+    expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           userId: "user-1",
@@ -142,24 +147,10 @@ describe("POST /api/passwords/bulk-trash", () => {
         }),
       })
     );
-
-    // findMany: re-fetch with deletedAt
-    expect(mockFindMany).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({
-        where: expect.objectContaining({
-          userId: "user-1",
-          id: { in: ["p1", "p2"] },
-          deletedAt: expect.any(Date),
-        }),
-      })
-    );
   });
 
   it("logs parent ENTRY_BULK_TRASH and per-entry ENTRY_TRASH audit logs", async () => {
-    mockFindMany
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }])
-      .mockResolvedValueOnce([{ id: "p1" }, { id: "p2" }]);
+    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     await POST(createRequest("POST", URL, { body: { ids: ["p1", "p2"] } }));

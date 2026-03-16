@@ -21,42 +21,31 @@ async function handlePOST(req: NextRequest) {
 
   const { ids } = result.data;
 
-  const entriesToTrash = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: session.user.id,
-        id: { in: ids },
-        deletedAt: null,
-      },
-      select: { id: true },
-    }),
-  );
-  const entryIds = entriesToTrash.map((entry) => entry.id);
-
   const deletedAt = new Date();
-  const updateResult = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.updateMany({
-      where: {
-        userId: session.user.id,
-        id: { in: entryIds },
-        deletedAt: null,
-      },
-      data: {
-        deletedAt,
-      },
-    }),
+  const [entryIds, updateResult] = await withUserTenantRls(
+    session.user.id,
+    () =>
+      prisma.$transaction(async (tx) => {
+        const entries = await tx.passwordEntry.findMany({
+          where: {
+            userId: session.user.id,
+            id: { in: ids },
+            deletedAt: null,
+          },
+          select: { id: true },
+        });
+        const entryIds = entries.map((entry) => entry.id);
+        const result = await tx.passwordEntry.updateMany({
+          where: {
+            userId: session.user.id,
+            id: { in: entryIds },
+            deletedAt: null,
+          },
+          data: { deletedAt },
+        });
+        return [entryIds, result] as const;
+      }),
   );
-  const movedEntries = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: session.user.id,
-        id: { in: entryIds },
-        deletedAt,
-      },
-      select: { id: true },
-    }),
-  );
-  const movedEntryIds = movedEntries.map((entry) => entry.id);
   const requestMeta = extractRequestMeta(req);
 
   logAudit({
@@ -69,12 +58,12 @@ async function handlePOST(req: NextRequest) {
       bulk: true,
       requestedCount: ids.length,
       movedCount: updateResult.count,
-      entryIds: movedEntryIds,
+      entryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of movedEntryIds) {
+  for (const entryId of entryIds) {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_TRASH,

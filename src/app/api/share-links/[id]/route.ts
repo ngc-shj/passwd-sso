@@ -28,6 +28,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
         createdById: true,
         revokedAt: true,
         teamPasswordEntryId: true,
+        teamPasswordEntry: { select: { teamId: true } },
       },
     }),
   );
@@ -57,16 +58,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       ? AUDIT_ACTION.SEND_REVOKE
       : AUDIT_ACTION.SHARE_REVOKE,
     userId: session.user.id,
-    teamId: teamPasswordEntryId
-      ? (
-          await withUserTenantRls(session.user.id, async () =>
-            prisma.teamPasswordEntry.findUnique({
-              where: { id: teamPasswordEntryId },
-              select: { teamId: true },
-            }),
-          )
-        )?.teamId
-      : undefined,
+    teamId: share.teamPasswordEntry?.teamId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     ip,

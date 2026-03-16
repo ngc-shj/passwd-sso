@@ -117,17 +117,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
       }
 
-      // Verify target user is an active tenant member
-      const targetUser = await prisma.user.findFirst({
-        where: { id: userId, tenantId: team.tenantId },
-        select: { id: true },
-      });
-      if (!targetUser) {
-        throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
-      }
-
+      // Verify target user is an active tenant member (single query replaces user + tenantMember lookups)
       const tenantMembership = await prisma.tenantMember.findFirst({
         where: { tenantId: team.tenantId, userId, deactivatedAt: null },
+        select: { id: true },
       });
       if (!tenantMembership) {
         throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
