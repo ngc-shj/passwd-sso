@@ -1,6 +1,6 @@
 # Code Review: full-codebase-review
 Date: 2026-03-17
-Review round: 1
+Review round: 2
 
 ## Changes from Previous Round
 Initial review — full codebase review of ~180k lines, 1100 files.
@@ -145,3 +145,21 @@ None — all findings were within scope boundaries.
 
 #### Testing findings (T-C1, T-C2, T-M1–M5) — DEFERRED
 - Test coverage additions and CI config changes are separate tasks; not addressed in this security-focused review round.
+
+### Round 2 Fixes Applied
+
+#### Finding 1 [Major] isPrivateIp blocklist incomplete — FIXED
+- **Action:** Added CGNAT (100.64/10), IETF protocol assignments (192.0.0/24), benchmarking (198.18/15), reserved (240/4), broadcast (255.255.255.255), IPv6 unspecified (::)
+- **Modified file:** `src/lib/webhook-dispatcher.ts`
+
+#### Finding 2 [Minor, Adjacent] Multiple Google domains hd hint — ACKNOWLEDGED
+- By design: Google only accepts single `hd` value; `signIn` callback validates `hd` claim as backfill
+
+#### Finding 3 [Minor, Adjacent] Auto-purge runs on every GET — ACKNOWLEDGED
+- Performance concern, not security. Rate limiter provides DoS protection.
+
+#### Finding 4 [Minor] change-passphrase design comment — ACKNOWLEDGED
+- Verified: no bypass route exists. verifier-null users fall back to rotate-key.
+
+#### Finding 5 [Minor] IPv6 literal test coverage — ACKNOWLEDGED
+- Test coverage improvement deferred to testing task.
