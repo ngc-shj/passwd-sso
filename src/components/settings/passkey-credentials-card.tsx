@@ -144,6 +144,7 @@ export function PasskeyCredentialsCard() {
       );
 
       // 3. If PRF supported and vault unlocked, encrypt secretKey
+      const hadPrf = !!prfOutput;
       let prfData: Record<string, string> = {};
       if (prfOutput) {
         const secretKey = getSecretKey();
@@ -179,9 +180,9 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
-        if (isNonDiscoverable(result) && !prfOutput) {
+        if (isNonDiscoverable(result) && !hadPrf) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
-        } else if (!prfOutput) {
+        } else if (!hadPrf) {
           toast.warning(t("prfNotSupportedWarning"));
         }
 
@@ -226,9 +227,9 @@ export function PasskeyCredentialsCard() {
     }
   };
 
-  const handleRename = async (credentialId: string) => {
+  const handleRename = async (id: string) => {
     try {
-      const res = await fetchApi(apiPath.webauthnCredentialById(credentialId), {
+      const res = await fetchApi(apiPath.webauthnCredentialById(id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ nickname: renameValue }),
