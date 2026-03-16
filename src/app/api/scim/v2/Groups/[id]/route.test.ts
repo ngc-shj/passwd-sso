@@ -237,9 +237,13 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
   });
 
   it("downgrades a member to MEMBER when removing the mapped role", async () => {
-    // Remove op: findMany returns the member with ADMIN role, updateMany downgrades
+    // Remove op sequence: applyAddOperations with addOps=[] returns early (no findMany)
+    // (1) tx.teamMember.findMany for validate existence, (2) tx.teamMember.findMany in applyRemoveOperations
+    // (3) prisma.teamMember.findMany in loadGroupMembers after tx
+    const member = [{ id: "tm1", userId: "user-1", role: "ADMIN" }];
     mockTeamMember.findMany
-      .mockResolvedValueOnce([{ id: "tm1", userId: "user-1", role: "ADMIN" }]) // tx.teamMember.findMany (remove lookup)
+      .mockResolvedValueOnce(member) // validate existence in removeOps
+      .mockResolvedValueOnce(member) // freshMembers in applyRemoveOperations
       .mockResolvedValueOnce([]); // loadGroupMembers after tx
     mockTeamMember.updateMany.mockResolvedValue({ count: 1 });
 

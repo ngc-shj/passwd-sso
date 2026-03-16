@@ -35,17 +35,17 @@ async function handlePOST(req: NextRequest) {
           },
           select: { id: true },
         });
-        const eIds = entries.map((entry) => entry.id);
+        const entryIds = entries.map((entry) => entry.id);
         const result = await tx.passwordEntry.updateMany({
           where: {
             userId: session.user.id,
-            id: { in: eIds },
+            id: { in: entryIds },
             deletedAt: null,
             isArchived: !toArchived,
           },
           data: { isArchived: toArchived },
         });
-        return [eIds, result] as const;
+        return [entryIds, result] as const;
       }),
   );
 
@@ -66,7 +66,7 @@ async function handlePOST(req: NextRequest) {
       processedCount: updateResult.count,
       archivedCount: toArchived ? updateResult.count : 0,
       unarchivedCount: toArchived ? 0 : updateResult.count,
-      entryIds: entryIds,
+      entryIds,
     },
     ...requestMeta,
   });

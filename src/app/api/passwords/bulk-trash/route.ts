@@ -34,16 +34,16 @@ async function handlePOST(req: NextRequest) {
           },
           select: { id: true },
         });
-        const eIds = entries.map((entry) => entry.id);
+        const entryIds = entries.map((entry) => entry.id);
         const result = await tx.passwordEntry.updateMany({
           where: {
             userId: session.user.id,
-            id: { in: eIds },
+            id: { in: entryIds },
             deletedAt: null,
           },
           data: { deletedAt },
         });
-        return [eIds, result] as const;
+        return [entryIds, result] as const;
       }),
   );
   const requestMeta = extractRequestMeta(req);
@@ -58,7 +58,7 @@ async function handlePOST(req: NextRequest) {
       bulk: true,
       requestedCount: ids.length,
       movedCount: updateResult.count,
-      entryIds: entryIds,
+      entryIds,
     },
     ...requestMeta,
   });

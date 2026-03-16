@@ -128,11 +128,13 @@ describe("replaceScimGroup", () => {
       { id: "m-1", userId: "user-a", role: "ADMIN" },
       { id: "m-2", userId: "user-b", role: "ADMIN" },
     ];
+    // Call sequence inside tx: (1) currentMembers, (2) freshMembers in applyRemoveOperations
+    // applyAddOperations is called with toAdd=[] and returns early (no findMany)
+    // After tx: (3) loadGroupMembers uses prisma.teamMember.findMany (same mock)
     mockTeamMemberFindMany
-      .mockResolvedValueOnce(currentMembers) // currentMembers (outer)
-      .mockResolvedValueOnce([]) // existingMembers in tx for toAdd (empty since all are being removed)
-      .mockResolvedValueOnce(currentMembers) // freshMembers in tx for toRemove
-      .mockResolvedValueOnce([]); // loadGroupMembers
+      .mockResolvedValueOnce(currentMembers) // currentMembers (outer, inside tx)
+      .mockResolvedValueOnce(currentMembers) // freshMembers in applyRemoveOperations
+      .mockResolvedValueOnce([]); // loadGroupMembers (after tx)
     mockTeamMemberUpdateMany.mockResolvedValue({ count: 2 });
 
     const result = await replaceScimGroup(
@@ -217,11 +219,11 @@ describe("replaceScimGroup", () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
     // user-a is currently in the group (ADMIN role); requested list is empty so it goes to toRemove
     // freshMembers fetch reveals it was promoted to OWNER before the transaction
+    // applyAddOperations is called with toAdd=[] and returns early (no findMany)
     const currentMembers = [{ id: "m-1", userId: "user-a", role: "ADMIN" }];
     mockTeamMemberFindMany
-      .mockResolvedValueOnce(currentMembers) // currentMembers (outer)
-      .mockResolvedValueOnce([]) // existingMembers in tx for toAdd (empty since toAdd=[])
-      .mockResolvedValueOnce([{ id: "m-1", role: "OWNER" }]); // freshMembers for toRemove
+      .mockResolvedValueOnce(currentMembers) // currentMembers (outer, inside tx)
+      .mockResolvedValueOnce([{ id: "m-1", role: "OWNER" }]); // freshMembers in applyRemoveOperations
 
     await expect(
       replaceScimGroup(
@@ -392,9 +394,14 @@ describe("patchScimGroup", () => {
       { id: "m-1", userId: "user-a", role: "ADMIN" },
       { id: "m-2", userId: "user-b", role: "ADMIN" },
     ];
+    // Call sequence: applyAddOperations with addOps=[] returns early (no findMany)
+    // (1) tx.teamMember.findMany for validate existence (removeOps)
+    // (2) tx.teamMember.findMany in applyRemoveOperations (freshMembers)
+    // (3) prisma.teamMember.findMany in loadGroupMembers (after tx)
     mockTeamMemberFindMany
-      .mockResolvedValueOnce(existingMembers) // members in tx for removeOps
-      .mockResolvedValueOnce([]); // loadGroupMembers
+      .mockResolvedValueOnce(existingMembers) // validate existence in removeOps
+      .mockResolvedValueOnce(existingMembers) // freshMembers in applyRemoveOperations
+      .mockResolvedValueOnce([]); // loadGroupMembers (after tx)
     mockTeamMemberUpdateMany.mockResolvedValue({ count: 2 });
 
     await patchScimGroup(
@@ -426,9 +433,13 @@ describe("patchScimGroup", () => {
 
   it("throws ScimOwnerProtectedError when removing a user with OWNER role", async () => {
     mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
-    mockTeamMemberFindMany.mockResolvedValueOnce([
-      { id: "m-owner", userId: "user-a", role: "OWNER" },
-    ]);
+    // Call sequence: applyAddOperations with addOps=[] returns early (no findMany)
+    // (1) tx.teamMember.findMany for validate existence → returns member with OWNER role
+    // (2) tx.teamMember.findMany in applyRemoveOperations (freshMembers) → same OWNER member
+    const ownerMember = [{ id: "m-owner", userId: "user-a", role: "OWNER" }];
+    mockTeamMemberFindMany
+      .mockResolvedValueOnce(ownerMember) // validate existence in removeOps
+      .mockResolvedValueOnce(ownerMember); // freshMembers in applyRemoveOperations → throws OWNER_PROTECTED
 
     await expect(
       patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "remove", userId: "user-a" }], BASE_URL),

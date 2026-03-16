@@ -14,7 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { logAudit } from "@/lib/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { decryptCredentials } from "./credentials";
 import { sanitizeSyncError } from "./sanitize";
 
@@ -343,7 +343,7 @@ export async function runDirectorySync(
     for (const [extId, internalId] of extIdToInternal) {
       if (!seenExternalIds.has(extId)) {
         const member = memberByUserId.get(internalId);
-        if (member && member.deactivatedAt === null && member.role !== "OWNER") {
+        if (member && member.deactivatedAt === null && member.role !== TENANT_ROLE.OWNER) {
           toDeactivate.push(internalId);
         }
       }
@@ -493,7 +493,7 @@ export async function runDirectorySync(
             });
 
             // OWNER protection: skip deactivation for OWNER role
-            if (member.role === "OWNER" && !pu.active) {
+            if (member.role === TENANT_ROLE.OWNER && !pu.active) {
               usersUpdated++;
               continue;
             }
@@ -520,7 +520,7 @@ export async function runDirectorySync(
                 where: {
                   id: { in: memberIds },
                   tenantId,
-                  role: { not: "OWNER" },
+                  role: { not: TENANT_ROLE.OWNER },
                 },
                 data: {
                   deactivatedAt: new Date(),

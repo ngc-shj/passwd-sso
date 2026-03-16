@@ -46,16 +46,16 @@ async function handlePOST(
         },
         select: { id: true },
       });
-      const eIds = entries.map((entry) => entry.id);
+      const entryIds = entries.map((entry) => entry.id);
       const result = await tx.teamPasswordEntry.updateMany({
         where: {
           teamId,
-          id: { in: eIds },
+          id: { in: entryIds },
           deletedAt: { not: null },
         },
         data: { deletedAt: null },
       });
-      return [eIds, result] as const;
+      return [entryIds, result] as const;
     }),
   );
 
@@ -73,7 +73,7 @@ async function handlePOST(
       operation: "restore",
       requestedCount: ids.length,
       restoredCount: updateResult.count,
-      entryIds: entryIds,
+      entryIds,
     },
     ...requestMeta,
   });

@@ -206,7 +206,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             keyVersion: newTeamKeyVersion,
             wrapVersion: k.wrapVersion,
           })),
-          skipDuplicates: false,
         });
         if (createResult.count !== memberKeys.length) {
           throw new Error("ENTRY_COUNT_MISMATCH");

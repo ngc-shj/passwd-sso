@@ -110,6 +110,90 @@ async function loadGroupMembers(teamId: string, role: TeamRole): Promise<ScimGro
     .map((m) => ({ userId: m.userId, email: m.user.email! }));
 }
 
+type TxClient = Parameters<Parameters<typeof prisma.$transaction>[0]>[0];
+
+async function applyAddOperations(
+  tx: TxClient,
+  teamId: string,
+  tenantId: string,
+  role: TeamRole,
+  userIds: string[],
+): Promise<void> {
+  if (userIds.length === 0) return;
+
+  const existingMembers = await tx.teamMember.findMany({
+    where: { teamId, userId: { in: userIds } },
+    select: { id: true, userId: true, role: true },
+  });
+  const existingByUserId = new Map(existingMembers.map((m) => [m.userId, m]));
+
+  for (const m of existingMembers) {
+    if (m.role === TEAM_ROLE.OWNER) {
+      throw new Error("SCIM_OWNER_PROTECTED");
+    }
+  }
+
+  const toUpdateRole = existingMembers.filter((m) => m.role !== role);
+  const toCreateUserIds = userIds.filter((uid) => !existingByUserId.has(uid));
+
+  if (toCreateUserIds.length > 0) {
+    const tenantMembers = await tx.tenantMember.findMany({
+      where: { tenantId, userId: { in: toCreateUserIds }, deactivatedAt: null },
+      select: { userId: true },
+    });
+    const activeTenantUserIds = new Set(tenantMembers.map((m) => m.userId));
+    for (const uid of toCreateUserIds) {
+      if (!activeTenantUserIds.has(uid)) {
+        throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
+      }
+    }
+    await tx.teamMember.createMany({
+      data: toCreateUserIds.map((uid) => ({
+        teamId,
+        userId: uid,
+        tenantId,
+        role,
+        scimManaged: true,
+      })),
+    });
+  }
+
+  if (toUpdateRole.length > 0) {
+    await tx.teamMember.updateMany({
+      where: { id: { in: toUpdateRole.map((m) => m.id) } },
+      data: { role },
+    });
+  }
+}
+
+async function applyRemoveOperations(
+  tx: TxClient,
+  _teamId: string,
+  role: TeamRole,
+  memberIds: string[],
+): Promise<void> {
+  if (memberIds.length === 0) return;
+
+  const freshMembers = await tx.teamMember.findMany({
+    where: { id: { in: memberIds } },
+    select: { id: true, role: true },
+  });
+
+  for (const m of freshMembers) {
+    if (m.role === TEAM_ROLE.OWNER) {
+      throw new Error("SCIM_OWNER_PROTECTED");
+    }
+  }
+
+  const toDowngrade = freshMembers.filter((m) => m.role === role);
+  if (toDowngrade.length > 0) {
+    await tx.teamMember.updateMany({
+      where: { id: { in: toDowngrade.map((m) => m.id) } },
+      data: { role: TEAM_ROLE.MEMBER },
+    });
+  }
+}
+
 // ── Service functions ─────────────────────────────────────────
 
 /**
@@ -210,12 +294,11 @@ export async function replaceScimGroup(
 
   const requestedUserIds = new Set(data.memberUserIds);
 
-  // Track counts outside the transaction so they are accessible in the return value
   let addedCount = 0;
   let removedCount = 0;
 
   try {
-    await prisma.$transaction(async (tx) => {
+    const counts = await prisma.$transaction(async (tx) => {
       // Compute delta inside transaction to avoid TOCTOU race
       const currentMembers = await tx.teamMember.findMany({
         where: { teamId: mapping.teamId, role: mapping.role, deactivatedAt: null },
@@ -225,82 +308,14 @@ export async function replaceScimGroup(
 
       const toAdd = [...requestedUserIds].filter((uid) => !currentUserIds.has(uid));
       const toRemove = currentMembers.filter((m) => !requestedUserIds.has(m.userId));
-      addedCount = toAdd.length;
-      removedCount = toRemove.length;
 
-      // ── toAdd: batch pre-fetch ──
-      const existingMembers = await tx.teamMember.findMany({
-        where: { teamId: mapping.teamId, userId: { in: toAdd } },
-        select: { id: true, userId: true, role: true },
-      });
-      const existingByUserId = new Map(existingMembers.map((m) => [m.userId, m]));
+      await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, toAdd);
+      await applyRemoveOperations(tx, mapping.teamId, mapping.role, toRemove.map((m) => m.id));
 
-      // OWNER protection check
-      for (const m of existingMembers) {
-        if (m.role === TEAM_ROLE.OWNER) {
-          throw new Error("SCIM_OWNER_PROTECTED");
-        }
-      }
-
-      // Separate: existing members needing role update vs new members
-      const toUpdateRole = existingMembers.filter((m) => m.role !== mapping.role);
-      const toCreateUserIds = toAdd.filter((uid) => !existingByUserId.has(uid));
-
-      // Batch-validate tenant membership for new members
-      if (toCreateUserIds.length > 0) {
-        const tenantMembers = await tx.tenantMember.findMany({
-          where: { tenantId, userId: { in: toCreateUserIds }, deactivatedAt: null },
-          select: { userId: true },
-        });
-        const activeTenantUserIds = new Set(tenantMembers.map((m) => m.userId));
-        for (const uid of toCreateUserIds) {
-          if (!activeTenantUserIds.has(uid)) {
-            throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
-          }
-        }
-
-        // Batch create
-        await tx.teamMember.createMany({
-          data: toCreateUserIds.map((uid) => ({
-            teamId: mapping.teamId,
-            userId: uid,
-            tenantId,
-            role: mapping.role,
-            scimManaged: true,
-          })),
-        });
-      }
-
-      // Batch update existing members' roles
-      if (toUpdateRole.length > 0) {
-        await tx.teamMember.updateMany({
-          where: { id: { in: toUpdateRole.map((m) => m.id) } },
-          data: { role: mapping.role },
-        });
-      }
-
-      // ── toRemove: batch pre-fetch ──
-      if (toRemove.length > 0) {
-        const freshMembers = await tx.teamMember.findMany({
-          where: { id: { in: toRemove.map((m) => m.id) } },
-          select: { id: true, role: true },
-        });
-
-        for (const m of freshMembers) {
-          if (m.role === TEAM_ROLE.OWNER) {
-            throw new Error("SCIM_OWNER_PROTECTED");
-          }
-        }
-
-        const toDowngrade = freshMembers.filter((m) => m.role === mapping.role);
-        if (toDowngrade.length > 0) {
-          await tx.teamMember.updateMany({
-            where: { id: { in: toDowngrade.map((m) => m.id) } },
-            data: { role: TEAM_ROLE.MEMBER },
-          });
-        }
-      }
+      return { added: toAdd.length, removed: toRemove.length };
     });
+    addedCount = counts.added;
+    removedCount = counts.removed;
   } catch (e) {
     if (e instanceof Error) {
       if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
@@ -370,55 +385,9 @@ export async function patchScimGroup(
       const addOps = operations.filter((a) => a.op === "add");
       const removeOps = operations.filter((a) => a.op === "remove");
 
-      // ── Add operations: batch ──
-      if (addOps.length > 0) {
-        const addUserIds = addOps.map((a) => a.userId);
-        const existingMembers = await tx.teamMember.findMany({
-          where: { teamId: mapping.teamId, userId: { in: addUserIds } },
-          select: { id: true, userId: true, role: true },
-        });
-        const existingByUserId = new Map(existingMembers.map((m) => [m.userId, m]));
+      await applyAddOperations(tx, mapping.teamId, tenantId, mapping.role, addOps.map((a) => a.userId));
 
-        for (const m of existingMembers) {
-          if (m.role === TEAM_ROLE.OWNER) {
-            throw new Error("SCIM_OWNER_PROTECTED");
-          }
-        }
-
-        const toUpdateRole = existingMembers.filter((m) => m.role !== mapping.role);
-        const toCreateUserIds = addUserIds.filter((uid) => !existingByUserId.has(uid));
-
-        if (toCreateUserIds.length > 0) {
-          const tenantMembers = await tx.tenantMember.findMany({
-            where: { tenantId, userId: { in: toCreateUserIds }, deactivatedAt: null },
-            select: { userId: true },
-          });
-          const activeTenantUserIds = new Set(tenantMembers.map((m) => m.userId));
-          for (const uid of toCreateUserIds) {
-            if (!activeTenantUserIds.has(uid)) {
-              throw new Error(`SCIM_NO_SUCH_MEMBER:${uid}`);
-            }
-          }
-          await tx.teamMember.createMany({
-            data: toCreateUserIds.map((uid) => ({
-              teamId: mapping.teamId,
-              userId: uid,
-              tenantId,
-              role: mapping.role,
-              scimManaged: true,
-            })),
-          });
-        }
-
-        if (toUpdateRole.length > 0) {
-          await tx.teamMember.updateMany({
-            where: { id: { in: toUpdateRole.map((m) => m.id) } },
-            data: { role: mapping.role },
-          });
-        }
-      }
-
-      // ── Remove operations: batch ──
+      // Remove: validate existence before delegating
       if (removeOps.length > 0) {
         const removeUserIds = removeOps.map((a) => a.userId);
         const members = await tx.teamMember.findMany({
@@ -433,19 +402,7 @@ export async function patchScimGroup(
           }
         }
 
-        for (const m of members) {
-          if (m.role === TEAM_ROLE.OWNER) {
-            throw new Error("SCIM_OWNER_PROTECTED");
-          }
-        }
-
-        const toDowngrade = members.filter((m) => m.role === mapping.role);
-        if (toDowngrade.length > 0) {
-          await tx.teamMember.updateMany({
-            where: { id: { in: toDowngrade.map((m) => m.id) } },
-            data: { role: TEAM_ROLE.MEMBER },
-          });
-        }
+        await applyRemoveOperations(tx, mapping.teamId, mapping.role, members.map((m) => m.id));
       }
     });
   } catch (e) {
