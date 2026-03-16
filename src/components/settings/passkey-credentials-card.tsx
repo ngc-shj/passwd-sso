@@ -143,22 +143,19 @@ export function PasskeyCredentialsCard() {
         prfSalt ?? undefined,
       );
 
-      // 3. If PRF supported and vault unlocked, encrypt secretKey.
-      //    Capture PRF availability before zeroing the buffer.
-      const prfAvailable = !!prfOutput;
+      // 3. If PRF supported and vault unlocked, encrypt secretKey
       let prfData: Record<string, string> = {};
-      if (prfAvailable) {
+      if (prfOutput) {
         const secretKey = getSecretKey();
         if (secretKey) {
-          // prfOutput is guaranteed non-null here (guarded by prfAvailable)
-          const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput!);
+          const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput);
           prfData = {
             prfEncryptedSecretKey: wrapped.ciphertext,
             prfSecretKeyIv: wrapped.iv,
             prfSecretKeyAuthTag: wrapped.authTag,
           };
           secretKey.fill(0);
-          prfOutput!.fill(0);
+          prfOutput.fill(0);
         }
       }
 
@@ -182,9 +179,9 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
-        if (isNonDiscoverable(result) && !prfAvailable) {
+        if (isNonDiscoverable(result) && !prfOutput) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
-        } else if (!prfAvailable) {
+        } else if (!prfOutput) {
           toast.warning(t("prfNotSupportedWarning"));
         }
 
@@ -249,17 +246,15 @@ export function PasskeyCredentialsCard() {
     }
   };
 
-  const handleTest = async (credentialId: string) => {
+  const handleTest = async (cred: Credential) => {
     if (testingId) return;
-    setTestingId(credentialId);
+    setTestingId(cred.credentialId);
     try {
-      const cred = credentials.find((c) => c.credentialId === credentialId);
-
       // 1. Get authentication options for this specific credential
       const optionsRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ credentialId }),
+        body: JSON.stringify({ credentialId: cred.credentialId }),
       });
       if (!optionsRes.ok) {
         toast.error(t("testError"));
@@ -271,7 +266,7 @@ export function PasskeyCredentialsCard() {
       // 2. Authenticate (with PRF if available)
       const { responseJSON, prfOutput: authPrfOutput } = await startPasskeyAuthentication(
         options,
-        cred?.prfSupported && prfSalt ? prfSalt : undefined,
+        cred.prfSupported && prfSalt ? prfSalt : undefined,
       );
 
       // 3. Verify with server
@@ -498,7 +493,7 @@ export function PasskeyCredentialsCard() {
                       variant="outline"
                       size="sm"
                       disabled={!!testingId}
-                      onClick={() => handleTest(cred.credentialId)}
+                      onClick={() => handleTest(cred)}
                     >
                       {testingId === cred.credentialId ? (
                         <Loader2 className="h-3 w-3 animate-spin" />
