@@ -137,6 +137,31 @@ describe("DELETE /api/share-links/[id]", () => {
     );
   });
 
+  it("uses teamId from included teamPasswordEntry relation in audit log", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockFindUnique.mockResolvedValue({
+      id: "s1",
+      shareType: "ENTRY_SHARE",
+      createdById: DEFAULT_SESSION.user.id,
+      revokedAt: null,
+      teamPasswordEntryId: "tpe-1",
+      teamPasswordEntry: { teamId: "team-1" },
+    });
+    mockUpdate.mockResolvedValue({});
+
+    const { logAudit } = await import("@/lib/audit");
+
+    const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
+    const res = await DELETE(req as never, createParams({ id: "s1" }));
+
+    expect(res.status).toBe(200);
+    expect(logAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamId: "team-1",
+      }),
+    );
+  });
+
   it("logs SEND_REVOKE when revoking a FILE send", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({

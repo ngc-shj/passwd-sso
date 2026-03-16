@@ -113,4 +113,18 @@ describe("GET /api/passwords/[id]/history", () => {
     const json = await res.json();
     expect(json).toEqual([]);
   });
+
+  it("limits results to 20 entries", async () => {
+    mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
+    mockPrismaHistory.findMany.mockResolvedValue([]);
+
+    await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${ENTRY_ID}/history`),
+      createParams({ id: ENTRY_ID }),
+    );
+
+    expect(mockPrismaHistory.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ take: 20 }),
+    );
+  });
 });
