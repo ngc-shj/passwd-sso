@@ -54,6 +54,12 @@ interface Credential {
   lastUsedAt: string | null;
 }
 
+function isNonDiscoverable(cred: Pick<Credential, "discoverable" | "deviceType" | "backedUp">): boolean {
+  return cred.discoverable !== null
+    ? !cred.discoverable
+    : (cred.deviceType === "singleDevice" && !cred.backedUp);
+}
+
 function CredentialIcon({ transports }: { transports: string[] }) {
   const isInternal = transports.includes("internal");
   const isUsb = transports.includes("usb");
@@ -173,10 +179,7 @@ export function PasskeyCredentialsCard() {
         const result = await verifyRes.json();
         toast.success(t("registerSuccess"));
 
-        const isNonDiscoverable = result.discoverable !== null
-          ? !result.discoverable
-          : (result.deviceType === "singleDevice" && !result.backedUp);
-        if (isNonDiscoverable && !prfOutput) {
+        if (isNonDiscoverable(result) && !prfOutput) {
           toast.warning(t("nonDiscoverableNonPrfWarning"));
         } else if (!prfOutput) {
           toast.warning(t("prfNotSupportedWarning"));
@@ -247,36 +250,28 @@ export function PasskeyCredentialsCard() {
     if (testingId) return;
     setTestingId(credentialId);
     try {
-      // 1. Get authentication options
+      const cred = credentials.find((c) => c.credentialId === credentialId);
+
+      // 1. Get authentication options for this specific credential
       const optionsRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_OPTIONS, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credentialId }),
       });
       if (!optionsRes.ok) {
-        toast.error(t("unlockError"));
+        toast.error(t("testError"));
         return;
       }
 
       const { options, prfSalt } = await optionsRes.json();
-      if (!prfSalt) {
-        toast.error(t("unlockError"));
-        return;
-      }
 
-      // 2. Replace allowCredentials with only the target credential
-      const cred = credentials.find((c) => c.credentialId === credentialId);
-      if (cred) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        (options as any).allowCredentials = [{
-          id: credentialId,
-          type: "public-key",
-          transports: cred.transports,
-        }];
-      }
+      // 2. Authenticate (with PRF if available)
+      const { responseJSON } = await startPasskeyAuthentication(
+        options,
+        cred?.prfSupported && prfSalt ? prfSalt : undefined,
+      );
 
-      // 3. Authenticate with PRF
-      const { responseJSON } = await startPasskeyAuthentication(options, prfSalt);
-
-      // 4. Verify with server
+      // 3. Verify with server
       const verifyRes = await fetchApi(API_PATH.WEBAUTHN_AUTHENTICATE_VERIFY, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -284,10 +279,11 @@ export function PasskeyCredentialsCard() {
       });
 
       if (verifyRes.ok) {
-        toast.success(t("tryItSuccess"));
+        const hasPrf = cred?.prfSupported && prfSalt;
+        toast.success(hasPrf ? t("testSuccessWithPrf") : t("testSuccess"));
         fetchCredentials(); // Refresh lastUsedAt
       } else {
-        toast.error(t("unlockError"));
+        toast.error(t("testError"));
       }
     } catch (err) {
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
@@ -297,7 +293,7 @@ export function PasskeyCredentialsCard() {
         toast.warning(t("requestPending"));
         return;
       }
-      toast.error(t("unlockError"));
+      toast.error(t("testError"));
     } finally {
       setTestingId(null);
     }
@@ -430,7 +426,7 @@ export function PasskeyCredentialsCard() {
                       {/* Discoverable vs non-discoverable credential indicator.
                          Uses credProps.rk (WebAuthn L3) when available,
                          falls back to heuristic (singleDevice + not backed up). */}
-                      {(cred.discoverable !== null ? !cred.discoverable : (cred.deviceType === "singleDevice" && !cred.backedUp)) ? (
+                      {isNonDiscoverable(cred) ? (
                         <span
                           className="text-xs px-1.5 py-0.5 rounded bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200"
                           title={t("notDiscoverableDescription")}
@@ -496,21 +492,19 @@ export function PasskeyCredentialsCard() {
 
                   {/* Action buttons */}
                   <div className="flex flex-col gap-1.5">
-                    {cred.prfSupported && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={!!testingId}
-                        onClick={() => handleTest(cred.credentialId)}
-                      >
-                        {testingId === cred.credentialId ? (
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                        ) : (
-                          <Fingerprint className="h-3 w-3" />
-                        )}
-                        {t("tryIt")}
-                      </Button>
-                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!!testingId}
+                      onClick={() => handleTest(cred.credentialId)}
+                    >
+                      {testingId === cred.credentialId ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Fingerprint className="h-3 w-3" />
+                      )}
+                      {t("testAuth")}
+                    </Button>
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button variant="destructive" size="sm">
