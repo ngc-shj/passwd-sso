@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
@@ -109,7 +109,8 @@ export function PasswordList({
   const t = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
   const { active: travelModeActive } = useTravelMode();
-  const [entries, setEntries] = useState<DisplayEntry[]>([]);
+  // All decrypted entries fetched from the server (no search filter applied)
+  const [allEntries, setAllEntries] = useState<DisplayEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -132,7 +133,7 @@ export function PasswordList({
       if (!res.ok) return;
       const data = await res.json();
 
-      // Decrypt overviews client-side
+      // Decrypt overviews client-side (no search filtering here — done via useMemo)
       const decrypted: DisplayEntry[] = [];
       for (const entry of data) {
         if (!entry.encryptedOverview) continue;
@@ -147,29 +148,6 @@ export function PasswordList({
               aad
             )
           );
-
-          // Client-side search filtering
-          if (searchQuery) {
-            const q = searchQuery.toLowerCase();
-            const matches =
-              overview.title.toLowerCase().includes(q) ||
-              (overview.username?.toLowerCase().includes(q) ?? false) ||
-              (overview.urlHost?.toLowerCase().includes(q) ?? false) ||
-              (overview.snippet?.toLowerCase().includes(q) ?? false) ||
-              (overview.brand?.toLowerCase().includes(q) ?? false) ||
-              (overview.lastFour?.includes(q) ?? false) ||
-              (overview.cardholderName?.toLowerCase().includes(q) ?? false) ||
-              (overview.fullName?.toLowerCase().includes(q) ?? false) ||
-              (overview.idNumberLast4?.includes(q) ?? false) ||
-              (overview.relyingPartyId?.toLowerCase().includes(q) ?? false) ||
-              (overview.bankName?.toLowerCase().includes(q) ?? false) ||
-              (overview.accountNumberLast4?.includes(q) ?? false) ||
-              (overview.softwareName?.toLowerCase().includes(q) ?? false) ||
-              (overview.licensee?.toLowerCase().includes(q) ?? false) ||
-              (overview.keyType?.toLowerCase().includes(q) ?? false) ||
-              (overview.fingerprint?.toLowerCase().includes(q) ?? false);
-            if (!matches) continue;
-          }
 
           decrypted.push({
             id: entry.id,
@@ -210,20 +188,45 @@ export function PasswordList({
       // Client-side sorting
       filtered.sort((a, b) => compareEntriesWithFavorite(a, b, sortBy));
 
-      setEntries(filtered);
+      setAllEntries(filtered);
     } catch {
       // Network error
     } finally {
       setLoading(false);
     }
-  }, [searchQuery, tagId, folderId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId, travelModeActive]);
+  // searchQuery intentionally omitted — search is applied via useMemo below
+  }, [tagId, folderId, entryType, encryptionKey, favoritesOnly, archivedOnly, sortBy, userId, travelModeActive]);
+
+  // Apply client-side search filtering without re-fetching or re-decrypting
+  const entries = useMemo(() => {
+    if (!searchQuery) return allEntries;
+    const q = searchQuery.toLowerCase();
+    return allEntries.filter((entry) =>
+      entry.title.toLowerCase().includes(q) ||
+      (entry.username?.toLowerCase().includes(q) ?? false) ||
+      (entry.urlHost?.toLowerCase().includes(q) ?? false) ||
+      (entry.snippet?.toLowerCase().includes(q) ?? false) ||
+      (entry.brand?.toLowerCase().includes(q) ?? false) ||
+      (entry.lastFour?.includes(q) ?? false) ||
+      (entry.cardholderName?.toLowerCase().includes(q) ?? false) ||
+      (entry.fullName?.toLowerCase().includes(q) ?? false) ||
+      (entry.idNumberLast4?.includes(q) ?? false) ||
+      (entry.relyingPartyId?.toLowerCase().includes(q) ?? false) ||
+      (entry.bankName?.toLowerCase().includes(q) ?? false) ||
+      (entry.accountNumberLast4?.includes(q) ?? false) ||
+      (entry.softwareName?.toLowerCase().includes(q) ?? false) ||
+      (entry.licensee?.toLowerCase().includes(q) ?? false) ||
+      (entry.keyType?.toLowerCase().includes(q) ?? false) ||
+      (entry.fingerprint?.toLowerCase().includes(q) ?? false)
+    );
+  }, [allEntries, searchQuery]);
 
   useEffect(() => {
     fetchPasswords();
   }, [fetchPasswords, refreshKey]);
 
   // Bulk selection (replaces selectedIds state, reconcile/reset/count effects, useImperativeHandle)
-  const entryIds = entries.map((e) => e.id);
+  const entryIds = allEntries.map((e) => e.id);
   const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,
     selectionMode,
@@ -252,7 +255,7 @@ export function PasswordList({
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
     // Optimistic update
-    setEntries((prev) =>
+    setAllEntries((prev) =>
       prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
     );
 
@@ -263,19 +266,19 @@ export function PasswordList({
         body: JSON.stringify({ isFavorite: !current }),
       });
       if (!res.ok) {
-        setEntries((prev) =>
+        setAllEntries((prev) =>
           prev.map((e) => (e.id === id ? { ...e, isFavorite: current } : e))
         );
       }
     } catch {
-      setEntries((prev) =>
+      setAllEntries((prev) =>
         prev.map((e) => (e.id === id ? { ...e, isFavorite: current } : e))
       );
     }
   };
 
   const handleToggleArchive = async (id: string, current: boolean) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    setAllEntries((prev) => prev.filter((e) => e.id !== id));
     try {
       const res = await fetchApi(apiPath.passwordById(id), {
         method: "PUT",
@@ -290,7 +293,7 @@ export function PasswordList({
   };
 
   const handleDelete = async (id: string) => {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
+    setAllEntries((prev) => prev.filter((e) => e.id !== id));
     try {
       const res = await fetchApi(apiPath.passwordById(id), { method: "DELETE" });
       if (!res.ok) fetchPasswords();

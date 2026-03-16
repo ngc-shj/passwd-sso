@@ -2,6 +2,29 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { proxy as handleProxy } from "./src/proxy";
 
+// Pre-compute static CSP parts at module init time to avoid per-request work.
+// Only the nonce value is injected per-request.
+const _isProd = process.env.NODE_ENV === "production";
+const _cspMode = process.env.CSP_MODE ?? (_isProd ? "strict" : "dev");
+const _reportUri = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/csp-report`;
+const _scriptSrcSuffix = _isProd ? "" : " 'unsafe-eval'";
+// In dev mode style-src uses 'unsafe-inline'; in strict mode nonce is injected.
+const _stylePrefix = _cspMode === "dev" ? "style-src 'self' 'unsafe-inline'" : "style-src 'self' 'nonce-";
+const _styleSuffix = _cspMode === "dev" ? "" : "'";
+const _staticDirectives = [
+  "img-src 'self' data: https:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "upgrade-insecure-requests",
+  "block-all-mixed-content",
+  "report-to csp-endpoint",
+  `report-uri ${_reportUri}`,
+].join("; ");
+
 export function proxy(request: NextRequest) {
   // Guard: skip Next.js internals that the matcher regex may not exclude
   const { pathname } = request.nextUrl;
@@ -41,27 +64,9 @@ function generateNonce(): string {
 }
 
 function buildCspHeader(nonce: string): string {
-  const isProd = process.env.NODE_ENV === "production";
-  const cspMode = process.env.CSP_MODE ?? (isProd ? "strict" : "dev");
-
-  const directives = [
-    "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${isProd ? "" : " 'unsafe-eval'"}`,
-    cspMode === "dev"
-      ? "style-src 'self' 'unsafe-inline'"
-      : `style-src 'self' 'nonce-${nonce}'`,
-    "img-src 'self' data: https:",
-    "font-src 'self'",
-    "connect-src 'self'",
-    "object-src 'none'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "upgrade-insecure-requests",
-    "block-all-mixed-content",
-    "report-to csp-endpoint",
-    `report-uri ${process.env.NEXT_PUBLIC_BASE_PATH || ""}/api/csp-report`,
-  ];
-
-  return directives.join("; ");
+  const scriptSrc = `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' 'wasm-unsafe-eval'${_scriptSrcSuffix}`;
+  const styleSrc = _cspMode === "dev"
+    ? _stylePrefix
+    : `${_stylePrefix}${nonce}${_styleSuffix}`;
+  return `default-src 'self'; ${scriptSrc}; ${styleSrc}; ${_staticDirectives}`;
 }

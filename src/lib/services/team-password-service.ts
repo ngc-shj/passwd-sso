@@ -216,11 +216,20 @@ export async function createTeamPassword(
     expiresAt,
   } = input;
 
-  // Validate teamKeyVersion matches current team key version
-  const team = await prisma.team.findUnique({
-    where: { id: teamId },
-    select: { teamKeyVersion: true, tenantId: true },
-  });
+  // Validate teamKeyVersion and folder ownership — fetch in parallel when both are needed
+  const [team, folder] = await Promise.all([
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: { teamKeyVersion: true, tenantId: true },
+    }),
+    teamFolderId
+      ? prisma.teamFolder.findUnique({
+          where: { id: teamFolderId },
+          select: { teamId: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
   if (!team || teamKeyVersion !== team.teamKeyVersion) {
     throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
   }
@@ -228,15 +237,8 @@ export async function createTeamPassword(
   // tenantId is resolved from the team record, not passed by caller
   const tenantId = team.tenantId;
 
-  // Validate teamFolderId belongs to this team
-  if (teamFolderId) {
-    const folder = await prisma.teamFolder.findUnique({
-      where: { id: teamFolderId },
-      select: { teamId: true },
-    });
-    if (!folder || folder.teamId !== teamId) {
-      throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
-    }
+  if (teamFolderId && (!folder || folder.teamId !== teamId)) {
+    throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
   }
 
   // Use client-provided ID (bound into AAD during encryption) or generate one
@@ -372,26 +374,28 @@ export async function updateTeamPassword(
     throw new TeamPasswordServiceError(API_ERROR.ITEM_KEY_REQUIRED, 400);
   }
 
-  // Validate teamKeyVersion matches current team key version (F-13)
-  if (isFullUpdate) {
-    const team = await prisma.team.findUnique({
-      where: { id: teamId },
-      select: { teamKeyVersion: true },
-    });
-    if (!team || teamKeyVersion !== team.teamKeyVersion) {
-      throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
-    }
+  // Validate teamKeyVersion and folder ownership — fetch in parallel when both are needed
+  const [team, folder] = await Promise.all([
+    isFullUpdate
+      ? prisma.team.findUnique({
+          where: { id: teamId },
+          select: { teamKeyVersion: true },
+        })
+      : Promise.resolve(null),
+    teamFolderId
+      ? prisma.teamFolder.findUnique({
+          where: { id: teamFolderId },
+          select: { teamId: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  if (isFullUpdate && (!team || teamKeyVersion !== team.teamKeyVersion)) {
+    throw new TeamPasswordServiceError(API_ERROR.TEAM_KEY_VERSION_MISMATCH, 409);
   }
 
-  // Validate teamFolderId belongs to this team
-  if (teamFolderId) {
-    const folder = await prisma.teamFolder.findUnique({
-      where: { id: teamFolderId },
-      select: { teamId: true },
-    });
-    if (!folder || folder.teamId !== teamId) {
-      throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
-    }
+  if (teamFolderId && (!folder || folder.teamId !== teamId)) {
+    throw new TeamPasswordServiceError(API_ERROR.FOLDER_NOT_FOUND, 400);
   }
 
   const updateData: Record<string, unknown> = { updatedById: userId };

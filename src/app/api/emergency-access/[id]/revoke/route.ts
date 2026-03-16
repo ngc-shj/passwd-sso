@@ -30,6 +30,7 @@ async function handlePOST(
   const grant = await withUserTenantRls(session.user.id, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
+      select: { ownerId: true, status: true, granteeId: true },
     }),
   );
 

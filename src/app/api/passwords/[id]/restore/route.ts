@@ -23,6 +23,7 @@ async function handlePOST(
   const existing = await withUserTenantRls(session.user.id, async () =>
     prisma.passwordEntry.findUnique({
       where: { id },
+      select: { userId: true, deletedAt: true },
     }),
   );
 

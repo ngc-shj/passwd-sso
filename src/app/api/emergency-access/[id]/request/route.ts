@@ -34,6 +34,7 @@ async function handlePOST(
   const grant = await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
+      select: { granteeId: true, status: true, ownerId: true, waitDays: true },
     }),
   );
 
@@ -69,19 +70,21 @@ async function handlePOST(
     ...extractRequestMeta(req),
   });
 
-  const owner = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
-      where: { id: grant.ownerId },
-      select: { email: true, name: true, locale: true },
-    }),
-  );
-  if (owner?.email) {
-    const grantee = await withBypassRls(prisma, async () =>
+  const [owner, grantee] = await Promise.all([
+    withBypassRls(prisma, async () =>
+      prisma.user.findUnique({
+        where: { id: grant.ownerId },
+        select: { email: true, name: true, locale: true },
+      }),
+    ),
+    withBypassRls(prisma, async () =>
       prisma.user.findUnique({
         where: { id: session.user.id },
         select: { name: true, email: true },
       }),
-    );
+    ),
+  ]);
+  if (owner?.email) {
     const granteeName = grantee?.name ?? grantee?.email ?? "";
     const { subject, html, text } = emergencyAccessRequestedEmail(resolveUserLocale(owner.locale), granteeName, grant.waitDays);
     void sendEmail({ to: owner.email, subject, html, text });

@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockAuditCreate: vi.fn(),
+  mockAuditCreateMany: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -21,6 +22,7 @@ vi.mock("@/lib/prisma", () => ({
     },
     auditLog: {
       create: mockAuditCreate,
+      createMany: mockAuditCreateMany,
     },
     user: mockPrismaUser,
     $transaction: mockTransaction,
@@ -45,6 +47,7 @@ describe("POST /api/passwords/bulk-restore", () => {
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
     mockAuditCreate.mockResolvedValue({});
+    mockAuditCreateMany.mockResolvedValue({ count: 0 });
     // Default: $transaction invokes callback with a tx object that delegates to top-level mocks
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
       fn({
@@ -136,12 +139,9 @@ describe("POST /api/passwords/bulk-restore", () => {
 
     await POST(createRequest("POST", URL, { body: { ids: ["p1", "p2"] } }));
 
-    // 1 parent log + 2 per-entry logs = 3 calls
-    expect(mockAuditCreate).toHaveBeenCalledTimes(3);
-
-    // Parent log: ENTRY_BULK_RESTORE
-    expect(mockAuditCreate).toHaveBeenNthCalledWith(
-      1,
+    // 1 parent log via logAudit (create), per-entry logs via logAuditBatch (createMany)
+    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
+    expect(mockAuditCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_RESTORE",
@@ -157,33 +157,28 @@ describe("POST /api/passwords/bulk-restore", () => {
       })
     );
 
-    // Per-entry log: ENTRY_RESTORE for p1
-    expect(mockAuditCreate).toHaveBeenNthCalledWith(
-      2,
+    // Per-entry logs batched into a single createMany
+    expect(mockAuditCreateMany).toHaveBeenCalledTimes(1);
+    expect(mockAuditCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_RESTORE",
-          targetId: "p1",
-          metadata: expect.objectContaining({
-            source: "bulk-restore",
-            parentAction: "ENTRY_BULK_RESTORE",
+        data: expect.arrayContaining([
+          expect.objectContaining({
+            action: "ENTRY_RESTORE",
+            targetId: "p1",
+            metadata: expect.objectContaining({
+              source: "bulk-restore",
+              parentAction: "ENTRY_BULK_RESTORE",
+            }),
           }),
-        }),
-      })
-    );
-
-    // Per-entry log: ENTRY_RESTORE for p2
-    expect(mockAuditCreate).toHaveBeenNthCalledWith(
-      3,
-      expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_RESTORE",
-          targetId: "p2",
-          metadata: expect.objectContaining({
-            source: "bulk-restore",
-            parentAction: "ENTRY_BULK_RESTORE",
+          expect.objectContaining({
+            action: "ENTRY_RESTORE",
+            targetId: "p2",
+            metadata: expect.objectContaining({
+              source: "bulk-restore",
+              parentAction: "ENTRY_BULK_RESTORE",
+            }),
           }),
-        }),
+        ]),
       })
     );
   });

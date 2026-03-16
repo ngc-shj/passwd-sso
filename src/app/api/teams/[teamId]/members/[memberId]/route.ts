@@ -168,6 +168,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   const target = await withTeamTenantRls(teamId, async () =>
     prisma.teamMember.findUnique({
       where: { id: memberId },
+      select: { teamId: true, deactivatedAt: true, role: true, userId: true, tenantId: true },
     }),
   );
 
