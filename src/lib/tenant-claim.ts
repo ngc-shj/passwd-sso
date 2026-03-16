@@ -1,5 +1,6 @@
 import type { Account } from "next-auth";
 import { createHash } from "node:crypto";
+import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 
 const MAX_TENANT_CLAIM_LENGTH = 255;
 
@@ -29,7 +30,7 @@ export function slugifyTenant(input: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 50);
+    .slice(0, SLUG_MAX_LENGTH);
 
   // Fallback for non-ASCII-only inputs (e.g. Japanese org names)
   if (!slug) {
@@ -38,7 +39,7 @@ export function slugifyTenant(input: string): string {
 
   // Prevent collision with reserved internal prefixes
   if (RESERVED_SLUG_PREFIXES.some((p) => slug.startsWith(p))) {
-    slug = `t-${slug}`.slice(0, 50);
+    slug = `t-${slug}`.slice(0, SLUG_MAX_LENGTH);
   }
   return slug;
 }

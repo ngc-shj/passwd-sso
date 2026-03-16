@@ -10,6 +10,7 @@ import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 
@@ -207,7 +208,7 @@ async function handlePOST(req: NextRequest) {
             .replace(/[\0\x01-\x1f\x7f-\x9f]/g, "") // null bytes + control chars
             .replace(/[/\\]/g, "_")                    // path separators → underscore
             .trim()
-            .slice(0, 255) || undefined
+            .slice(0, FILENAME_MAX_LENGTH) || undefined
         : undefined;
       return filename
         ? {

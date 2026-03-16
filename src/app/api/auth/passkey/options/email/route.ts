@@ -11,6 +11,7 @@ import { extractClientIp } from "@/lib/ip-access";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/webauthn-server";
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
+import { PASSKEY_DUMMY_CREDENTIALS_MAX } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
@@ -41,7 +42,7 @@ function generateDummyCredentials(): Array<{
   credentialId: string;
   transports: string[];
 }> {
-  const count = 1 + uniformRandom(3);
+  const count = 1 + uniformRandom(PASSKEY_DUMMY_CREDENTIALS_MAX);
   return Array.from({ length: count }, () => ({
     credentialId: randomBytes(32).toString("base64url"),
     transports: ["usb"] as string[],
@@ -133,7 +134,7 @@ async function handlePOST(req: NextRequest) {
       prisma.webAuthnCredential.findMany({
         where: { userId: "00000000-0000-0000-0000-000000000000" },
         select: { credentialId: true, transports: true },
-        take: 3,
+        take: PASSKEY_DUMMY_CREDENTIALS_MAX,
       }),
     );
     allowCredentials = generateDummyCredentials();

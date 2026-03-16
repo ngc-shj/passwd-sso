@@ -9,6 +9,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { SEARCH_QUERY_MAX_LENGTH } from "@/lib/validations/common";
+import { TEAM_MEMBER_SEARCH_LIMIT } from "@/lib/validations/common.server";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -97,7 +98,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
           ],
         },
         select: { id: true, name: true, email: true, image: true },
-        take: 10,
+        take: TEAM_MEMBER_SEARCH_LIMIT,
         orderBy: { name: "asc" },
       });
     });

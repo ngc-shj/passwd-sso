@@ -84,6 +84,14 @@ export const MAX_CIDRS = 50;
 // ─── SCIM Batch Limits ───────────────────────────────────────
 export const SCIM_PATCH_OPERATIONS_MAX = 100;
 export const SCIM_GROUP_MEMBERS_MAX = 1000;
+export const SCIM_FIELD_MAX_LENGTH = 255;
+
+// ─── Notification ───────────────────────────────────────────
+export const NOTIFICATION_TITLE_MAX = 200;
+export const NOTIFICATION_BODY_MAX = 2000;
+
+// ─── Entry Snippet ──────────────────────────────────────────
+export const ENTRY_SNIPPET_MAX = 100;
 
 export const PASSWORD_LENGTH_MIN = 8;
 export const PASSWORD_LENGTH_MAX = 128;

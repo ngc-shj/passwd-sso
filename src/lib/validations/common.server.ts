@@ -52,3 +52,18 @@ export const NOTIFICATION_PAGE_MAX = 50;
 export const SCIM_PAGE_COUNT_MIN = 1;
 export const SCIM_PAGE_COUNT_MAX = 200;
 export const SCIM_PAGE_COUNT_DEFAULT = 100;
+
+// ─── Session Cache ──────────────────────────────────────────
+export const SESSION_CACHE_MAX = 500;
+
+// ─── Webhook Dispatcher ─────────────────────────────────────
+export const WEBHOOK_CONCURRENCY = 5;
+
+// ─── Query Limits (non-validation, readability) ─────────────
+export const SHARE_ACCESS_LOG_LIMIT = 50;
+export const BREAKGLASS_USER_LIST_LIMIT = 200;
+export const VAULT_RESET_HISTORY_LIMIT = 50;
+export const TEAM_MEMBER_SEARCH_LIMIT = 10;
+export const NOTIFICATION_BELL_LIMIT = 10;
+export const PASSKEY_DUMMY_CREDENTIALS_MAX = 3;
+export const PASSWORD_HISTORY_SNIPPET_LENGTH = 10;

@@ -24,7 +24,7 @@ import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
-import { MAX_PENDING_RESETS } from "@/lib/validations/common.server";
+import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
@@ -230,7 +230,7 @@ async function handleGET(
         initiatedBy: { select: { name: true, email: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 50,
+      take: VAULT_RESET_HISTORY_LIMIT,
     }),
   );
 

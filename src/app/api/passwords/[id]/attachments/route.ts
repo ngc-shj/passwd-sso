@@ -7,6 +7,7 @@ import {
   ALLOWED_CONTENT_TYPES,
   MAX_FILE_SIZE,
   MAX_ATTACHMENTS_PER_ENTRY,
+  FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -161,7 +162,7 @@ async function handlePOST(
   if (!isValidSendFilename(filename)) {
     return errorResponse(API_ERROR.INVALID_FILENAME, 400);
   }
-  const sanitizedFilename = filename.slice(0, 255);
+  const sanitizedFilename = filename.slice(0, FILENAME_MAX_LENGTH);
 
   // Read encrypted blob and validate actual size
   const buffer = Buffer.from(await file.arrayBuffer());

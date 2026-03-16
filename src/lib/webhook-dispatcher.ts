@@ -16,6 +16,7 @@ import {
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { WEBHOOK_CONCURRENCY } from "@/lib/validations/common.server";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -122,8 +123,6 @@ async function deliverWithRetry(
   }
   return false;
 }
-
-const WEBHOOK_CONCURRENCY = 5;
 
 async function deliverSingleWebhook(
   webhook: WebhookRecord,
