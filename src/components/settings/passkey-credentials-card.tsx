@@ -54,7 +54,7 @@ interface Credential {
   lastUsedAt: string | null;
 }
 
-function isNonDiscoverable(cred: Pick<Credential, "discoverable" | "deviceType" | "backedUp">): boolean {
+export function isNonDiscoverable(cred: Pick<Credential, "discoverable" | "deviceType" | "backedUp">): boolean {
   return cred.discoverable !== null
     ? !cred.discoverable
     : (cred.deviceType === "singleDevice" && !cred.backedUp);
@@ -266,7 +266,7 @@ export function PasskeyCredentialsCard() {
       const { options, prfSalt } = await optionsRes.json();
 
       // 2. Authenticate (with PRF if available)
-      const { responseJSON } = await startPasskeyAuthentication(
+      const { responseJSON, prfOutput: testPrfOutput } = await startPasskeyAuthentication(
         options,
         cred?.prfSupported && prfSalt ? prfSalt : undefined,
       );
@@ -279,8 +279,7 @@ export function PasskeyCredentialsCard() {
       });
 
       if (verifyRes.ok) {
-        const hasPrf = cred?.prfSupported && prfSalt;
-        toast.success(hasPrf ? t("testSuccessWithPrf") : t("testSuccess"));
+        toast.success(testPrfOutput ? t("testSuccessWithPrf") : t("testSuccess"));
         fetchCredentials(); // Refresh lastUsedAt
       } else {
         toast.error(t("testError"));

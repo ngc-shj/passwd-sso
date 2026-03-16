@@ -296,6 +296,21 @@ describe("POST /api/webauthn/register/verify", () => {
       );
     });
 
+    it("includes discoverable=false in audit metadata", async () => {
+      mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(false));
+
+      const req = createRequest("POST", ROUTE_URL, {
+        body: makeBody({ credProps: { rk: false } }),
+      });
+      await POST(req);
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          metadata: expect.objectContaining({ discoverable: false }),
+        }),
+      );
+    });
+
     it("includes discoverable=null in audit metadata when credProps absent", async () => {
       mockPrismaCredentialCreate.mockResolvedValue(makeCreatedCredential(null));
 

@@ -51,7 +51,7 @@ async function handlePOST(req: NextRequest) {
   let targetCredentialId: string | undefined;
   try {
     const body = await req.json();
-    if (body?.credentialId && typeof body.credentialId === "string") {
+    if (body?.credentialId && typeof body.credentialId === "string" && body.credentialId.length <= 256) {
       targetCredentialId = body.credentialId;
     }
   } catch {
