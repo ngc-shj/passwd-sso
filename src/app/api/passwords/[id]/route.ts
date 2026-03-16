@@ -75,6 +75,15 @@ async function handlePUT(
   const existing = await withUserTenantRls(userId, async () =>
     prisma.passwordEntry.findUnique({
       where: { id },
+      select: {
+        userId: true,
+        tenantId: true,
+        encryptedBlob: true,
+        blobIv: true,
+        blobAuthTag: true,
+        keyVersion: true,
+        aadVersion: true,
+      },
     }),
   );
 
@@ -215,6 +224,7 @@ async function handleDELETE(
   const existing = await withUserTenantRls(userId, async () =>
     prisma.passwordEntry.findUnique({
       where: { id },
+      select: { userId: true },
     }),
   );
 

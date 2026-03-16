@@ -22,41 +22,38 @@ async function handleGET(request: NextRequest) {
 
   const currentToken = getSessionToken(request);
 
-  // Look up current session ID without loading all tokens into memory
-  let currentSessionId: string | null = null;
-  if (currentToken) {
-    const current = await withUserTenantRls(session.user.id, async () =>
-      prisma.session.findUnique({
-        where: { sessionToken: currentToken },
-        select: { id: true },
-      }),
-    );
-    currentSessionId = current?.id ?? null;
-  }
-
-  const sessions = await withUserTenantRls(session.user.id, async () =>
-    prisma.session.findMany({
-      where: {
-        userId: session.user.id,
-        expires: { gt: new Date() },
-      },
-      select: {
-        id: true,
-        createdAt: true,
-        lastActiveAt: true,
-        ipAddress: true,
-        userAgent: true,
-      },
-      orderBy: { lastActiveAt: "desc" },
-    }),
-  );
-
-  // Fetch tenant's maxConcurrentSessions for the response
-  const tenant = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenant: { select: { maxConcurrentSessions: true } } },
-    }),
+  // Parallelize independent queries
+  const [sessions, tenant, currentSessionId] = await withUserTenantRls(
+    session.user.id,
+    () =>
+      Promise.all([
+        prisma.session.findMany({
+          where: {
+            userId: session.user.id,
+            expires: { gt: new Date() },
+          },
+          select: {
+            id: true,
+            createdAt: true,
+            lastActiveAt: true,
+            ipAddress: true,
+            userAgent: true,
+          },
+          orderBy: { lastActiveAt: "desc" },
+        }),
+        prisma.user.findUnique({
+          where: { id: session.user.id },
+          select: { tenant: { select: { maxConcurrentSessions: true } } },
+        }),
+        currentToken
+          ? prisma.session
+              .findUnique({
+                where: { sessionToken: currentToken },
+                select: { id: true },
+              })
+              .then((r) => r?.id ?? null)
+          : Promise.resolve(null),
+      ]),
   );
 
   const items = sessions.map((s) => ({

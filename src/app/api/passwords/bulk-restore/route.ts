@@ -21,43 +21,30 @@ async function handlePOST(req: NextRequest) {
 
   const { ids } = result.data;
 
-  const entriesToRestore = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: session.user.id,
-        id: { in: ids },
-        deletedAt: { not: null },
-      },
-      select: { id: true },
-    }),
+  const [entryIds, updateResult] = await withUserTenantRls(
+    session.user.id,
+    () =>
+      prisma.$transaction(async (tx) => {
+        const entries = await tx.passwordEntry.findMany({
+          where: {
+            userId: session.user.id,
+            id: { in: ids },
+            deletedAt: { not: null },
+          },
+          select: { id: true },
+        });
+        const entryIds = entries.map((entry) => entry.id);
+        const result = await tx.passwordEntry.updateMany({
+          where: {
+            userId: session.user.id,
+            id: { in: entryIds },
+            deletedAt: { not: null },
+          },
+          data: { deletedAt: null },
+        });
+        return [entryIds, result] as const;
+      }),
   );
-  const entryIds = entriesToRestore.map((entry) => entry.id);
-
-  const updateResult = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.updateMany({
-      where: {
-        userId: session.user.id,
-        id: { in: entryIds },
-        deletedAt: { not: null },
-      },
-      data: {
-        deletedAt: null,
-      },
-    }),
-  );
-
-  // Re-fetch to get accurate list of actually restored entries
-  const restoredEntries = await withUserTenantRls(session.user.id, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: session.user.id,
-        id: { in: entryIds },
-        deletedAt: null,
-      },
-      select: { id: true },
-    }),
-  );
-  const restoredEntryIds = restoredEntries.map((e) => e.id);
 
   const requestMeta = extractRequestMeta(req);
 
@@ -72,12 +59,12 @@ async function handlePOST(req: NextRequest) {
       operation: "restore",
       requestedCount: ids.length,
       restoredCount: updateResult.count,
-      entryIds: restoredEntryIds,
+      entryIds,
     },
     ...requestMeta,
   });
 
-  for (const entryId of restoredEntryIds) {
+  for (const entryId of entryIds) {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_RESTORE,

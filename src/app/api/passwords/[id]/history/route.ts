@@ -35,6 +35,7 @@ async function handleGET(
     prisma.passwordEntryHistory.findMany({
       where: { entryId: id },
       orderBy: { changedAt: "desc" },
+      take: 20,
     }),
   );
 

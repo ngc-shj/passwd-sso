@@ -243,6 +243,7 @@ export async function patchScimUser(
 ): Promise<ScimUserPatchResult> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
+    select: { id: true, role: true, deactivatedAt: true },
   });
   if (!member) throw new ScimUserNotFoundError();
 
@@ -301,7 +302,7 @@ export async function deactivateScimUser(
 ): Promise<DeactivateResult> {
   const member = await prisma.tenantMember.findUnique({
     where: { tenantId_userId: { tenantId, userId } },
-    include: { user: { select: { email: true } } },
+    select: { id: true, role: true, user: { select: { email: true } } },
   });
   if (!member) throw new ScimUserNotFoundError();
   if (member.role === "OWNER") throw new ScimOwnerProtectedError();

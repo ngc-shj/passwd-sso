@@ -193,24 +193,23 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
       // Create new TeamMemberKey for each member (old keys kept for history)
       // No filter needed: member validation above guarantees exact 1:1 match
-        await Promise.all(
-          memberKeys.map((k) =>
-              tx.teamMemberKey.create({
-                data: {
-                  teamId: teamId,
-                  tenantId: team.tenantId,
-                  userId: k.userId,
-                  encryptedTeamKey: k.encryptedTeamKey,
-                  teamKeyIv: k.teamKeyIv,
-                  teamKeyAuthTag: k.teamKeyAuthTag,
-                  ephemeralPublicKey: k.ephemeralPublicKey,
-                  hkdfSalt: k.hkdfSalt,
-                  keyVersion: newTeamKeyVersion,
-                  wrapVersion: k.wrapVersion,
-                },
-              })
-            )
-        );
+        const createResult = await tx.teamMemberKey.createMany({
+          data: memberKeys.map((k) => ({
+            teamId: teamId,
+            tenantId: team.tenantId,
+            userId: k.userId,
+            encryptedTeamKey: k.encryptedTeamKey,
+            teamKeyIv: k.teamKeyIv,
+            teamKeyAuthTag: k.teamKeyAuthTag,
+            ephemeralPublicKey: k.ephemeralPublicKey,
+            hkdfSalt: k.hkdfSalt,
+            keyVersion: newTeamKeyVersion,
+            wrapVersion: k.wrapVersion,
+          })),
+        });
+        if (createResult.count !== memberKeys.length) {
+          throw new Error("ENTRY_COUNT_MISMATCH");
+        }
 
       // Bump team key version
         await tx.team.update({
