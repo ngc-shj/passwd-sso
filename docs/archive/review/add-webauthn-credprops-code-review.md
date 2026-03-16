@@ -6,49 +6,62 @@ Review round: 1
 Initial review
 
 ## Functionality Findings
-No findings.
+
+### F1 (Major) — RESOLVED
+- **File:** src/components/settings/passkey-credentials-card.tsx:282
+- **Problem:** hasPrf判定がcred属性ベースで、実際のPRF出力を確認していない
+- **Fix:** `startPasskeyAuthentication`の`prfOutput`を使って判定
+
+### F2 (Major) — SKIPPED
+- **Problem:** req.json()の空ボディ対応
+- **Reason:** try/catchで意図的にフォールバック、コメント記載済み
+
+### F3 (Minor) — RESOLVED
+- **File:** src/components/settings/passkey-credentials-card.tsx:147
+- **Problem:** prfOutput.fill(0)後の参照が読みにくい
+- **Fix:** fill(0)前に`hadPrf`フラグを保存
+
+### F4 (Minor) — RESOLVED
+- **File:** src/components/settings/passkey-credentials-card.tsx:230
+- **Problem:** handleRenameの引数名`credentialId`がDB UUIDを指しており、WebAuthn credentialIdと混同
+- **Fix:** 引数名を`id`に変更
 
 ## Security Findings
 
-### S1 (Minor) — RESOLVED
-- **File:** src/app/api/webauthn/register/verify/route.ts:127
-- **Problem:** Comment should explicitly state credProps.rk is client-supplied and not authenticator-signed
-- **Fix:** Updated comment to include security guidance
+### S1 (Minor) — SKIPPED
+- **Problem:** チャレンジキー上書き
+- **Reason:** 同一ユーザーの連続操作で影響は最小限
+
+### S2 (Minor) — RESOLVED
+- **File:** src/app/api/webauthn/authenticate/options/route.ts:54
+- **Problem:** credentialIdの長さバリデーションなし
+- **Fix:** `body.credentialId.length <= 256` チェック追加
+
+### S3 (Minor) — SKIPPED
+- **Problem:** DBコメントで用途明記
+- **Reason:** コード内コメント（route.ts:127-128）で十分に明記済み
 
 ## Testing Findings
 
-### T1 (Major) — RESOLVED
-- **File:** src/app/api/webauthn/register/verify/route.test.ts
-- **Problem:** Response body assertions on `json.discoverable` tested the mock's return value, not extraction logic
-- **Fix:** Removed misleading response assertions; kept Prisma call argument assertions as primary validation
+### T1 (Critical) — RESOLVED
+- **Problem:** authenticate/options のテストなし
+- **Fix:** route.test.ts新規作成（7テスト: credentialIdターゲティング4ケース + 認証/エラー3ケース）
 
-### T3 (Minor) — RESOLVED
-- **File:** src/app/api/webauthn/register/verify/route.test.ts
-- **Problem:** Audit metadata only tested for `discoverable: true`, not null fallback
-- **Fix:** Added test for `discoverable: null` in audit metadata
+### T2 (Critical) — RESOLVED
+- **Problem:** isNonDiscoverable のテストなし
+- **Fix:** is-non-discoverable.test.ts新規作成（6テスト: discoverable true/false/null × deviceType/backedUp組み合わせ）
+
+### T3 (Major) — SKIPPED
+- **Problem:** rk:null と credProps absent の意図不明
+- **Reason:** 両ケースとも仕様上 `null` が正しい（typeof null !== "boolean"）
 
 ### T4 (Minor) — RESOLVED
 - **File:** src/app/api/webauthn/register/verify/route.test.ts
-- **Problem:** Redis unavailable (503) path not covered
-- **Fix:** Added test case with `getRedis` returning null
+- **Problem:** audit log discoverable=false ケース欠落
+- **Fix:** テストケース追加
 
 ## Adjacent Findings
 None.
 
 ## Resolution Status
-
-### S1 Minor — Comment clarity
-- Action: Updated comment to warn against auth/authz usage
-- Modified file: src/app/api/webauthn/register/verify/route.ts:127
-
-### T1 Major — Misleading test assertions
-- Action: Removed response body discoverable assertions, kept Prisma call assertions
-- Modified file: src/app/api/webauthn/register/verify/route.test.ts
-
-### T3 Minor — Missing audit null test
-- Action: Added audit metadata test for null case
-- Modified file: src/app/api/webauthn/register/verify/route.test.ts
-
-### T4 Minor — Missing 503 test
-- Action: Added Redis null test with mockGetRedis
-- Modified file: src/app/api/webauthn/register/verify/route.test.ts
+All Critical/Major findings resolved. Minor findings resolved or skipped with documented reasons.
