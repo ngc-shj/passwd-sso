@@ -10,6 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { NotesField, TwoColumnFields, VisibilityToggleInput } from "@/components/entry-fields/form-fields";
+import { CREDIT_CARD_CVC_MAX_LENGTH } from "@/lib/validations/common";
 
 const EXPIRY_YEARS = Array.from({ length: 15 }, (_, i) =>
   String(new Date().getFullYear() + i)
@@ -215,7 +216,7 @@ export function CreditCardFields({
                 onChange: (e) => onCvvChange(e.target.value),
                 placeholder: cvvPlaceholder,
                 autoComplete: "off",
-                maxLength: 4,
+                maxLength: CREDIT_CARD_CVC_MAX_LENGTH,
               }}
             />
           </>

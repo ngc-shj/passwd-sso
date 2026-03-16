@@ -5,6 +5,11 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import type { Prisma } from "@prisma/client";
+import {
+  NOTIFICATION_PAGE_MIN,
+  NOTIFICATION_PAGE_DEFAULT,
+  NOTIFICATION_PAGE_MAX,
+} from "@/lib/validations/common.server";
 
 // GET /api/notifications — List notifications (cursor-based pagination)
 async function handleGET(req: NextRequest) {
@@ -20,8 +25,8 @@ async function handleGET(req: NextRequest) {
   const cursor = searchParams.get("cursor");
   const limitParam = searchParams.get("limit");
   const limit = Math.min(
-    Math.max(parseInt(limitParam ?? "20", 10) || 20, 1),
-    50,
+    Math.max(parseInt(limitParam ?? String(NOTIFICATION_PAGE_DEFAULT), 10) || NOTIFICATION_PAGE_DEFAULT, NOTIFICATION_PAGE_MIN),
+    NOTIFICATION_PAGE_MAX,
   );
   const unreadOnly = searchParams.get("unreadOnly") === "true";
 

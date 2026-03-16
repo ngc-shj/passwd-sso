@@ -10,7 +10,14 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { PIN_LENGTH_MIN, PIN_LENGTH_MAX } from "@/lib/validations/common";
+import {
+  PIN_LENGTH_MIN,
+  PIN_LENGTH_MAX,
+  WEBAUTHN_NICKNAME_MAX_LENGTH,
+  PRF_ENCRYPTED_KEY_MAX_LENGTH,
+  hexIv,
+  hexAuthTag,
+} from "@/lib/validations/common";
 import {
   verifyRegistration,
   uint8ArrayToBase64url,
@@ -26,10 +33,10 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 const verifyRegistrationSchema = z.object({
   response: z.record(z.string(), z.unknown()),
-  nickname: z.string().max(100).optional(),
-  prfEncryptedSecretKey: z.string().max(10_000).optional(),
-  prfSecretKeyIv: z.string().max(24).optional(),
-  prfSecretKeyAuthTag: z.string().max(32).optional(),
+  nickname: z.string().max(WEBAUTHN_NICKNAME_MAX_LENGTH).optional(),
+  prfEncryptedSecretKey: z.string().max(PRF_ENCRYPTED_KEY_MAX_LENGTH).optional(),
+  prfSecretKeyIv: hexIv.optional(),
+  prfSecretKeyAuthTag: hexAuthTag.optional(),
 }).refine(
   (d) => {
     const prfFields = [d.prfEncryptedSecretKey, d.prfSecretKeyIv, d.prfSecretKeyAuthTag];

@@ -15,14 +15,21 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
+import {
+  DIRECTORY_SYNC_PROVIDERS,
+  SYNC_INTERVAL_MIN,
+  SYNC_INTERVAL_MAX,
+  SYNC_INTERVAL_DEFAULT,
+  NAME_MAX_LENGTH,
+} from "@/lib/validations/common";
 
 // ─── Validation ──────────────────────────────────────────────
 
 const createSchema = z.object({
-  provider: z.enum(["AZURE_AD", "GOOGLE_WORKSPACE", "OKTA"]),
-  displayName: z.string().min(1).max(100),
+  provider: z.enum(DIRECTORY_SYNC_PROVIDERS),
+  displayName: z.string().min(1).max(NAME_MAX_LENGTH),
   enabled: z.boolean().optional().default(true),
-  syncIntervalMinutes: z.number().int().min(15).max(1440).optional().default(60),
+  syncIntervalMinutes: z.number().int().min(SYNC_INTERVAL_MIN).max(SYNC_INTERVAL_MAX).optional().default(SYNC_INTERVAL_DEFAULT),
   credentials: z.record(z.string(), z.unknown()),
 });
 

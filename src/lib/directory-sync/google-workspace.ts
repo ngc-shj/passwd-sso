@@ -38,9 +38,10 @@ export interface GoogleGroup {
   email: string;
 }
 
+import { DIRECTORY_SYNC_MAX_PAGES, DIRECTORY_SYNC_ERROR_PREVIEW } from "@/lib/validations/common.server";
+
 // ─── Constants ──────────────────────────────────────────────
 
-const MAX_PAGES = 1000;
 const FETCH_TIMEOUT_MS = 30_000;
 
 // ─── Validation ──────────────────────────────────────────────
@@ -124,7 +125,7 @@ export async function getGoogleAccessToken(
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(
-      `Google token request failed (${res.status}): ${text.slice(0, 200)}`,
+      `Google token request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
     );
   }
 
@@ -163,8 +164,8 @@ export async function fetchGoogleUsers(
   let pages = 0;
 
   do {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Google users pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Google users pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const params = new URLSearchParams({ domain });
@@ -179,7 +180,7 @@ export async function fetchGoogleUsers(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Google users request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Google users request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 
@@ -227,8 +228,8 @@ export async function fetchGoogleGroups(
   let pages = 0;
 
   do {
-    if (++pages > MAX_PAGES) {
-      throw new Error(`Google groups pagination exceeded ${MAX_PAGES} pages`);
+    if (++pages > DIRECTORY_SYNC_MAX_PAGES) {
+      throw new Error(`Google groups pagination exceeded ${DIRECTORY_SYNC_MAX_PAGES} pages`);
     }
 
     const params = new URLSearchParams({ domain });
@@ -243,7 +244,7 @@ export async function fetchGoogleGroups(
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(
-        `Google groups request failed (${res.status}): ${text.slice(0, 200)}`,
+        `Google groups request failed (${res.status}): ${text.slice(0, DIRECTORY_SYNC_ERROR_PREVIEW)}`,
       );
     }
 

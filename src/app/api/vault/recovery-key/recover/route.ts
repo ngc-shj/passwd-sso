@@ -10,33 +10,30 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
+import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
-const HEX64 = z.string().regex(/^[0-9a-f]{64}$/);
-const HEX24 = z.string().regex(/^[0-9a-f]{24}$/);
-const HEX32 = z.string().regex(/^[0-9a-f]{32}$/);
-
 const verifySchema = z.object({
   step: z.literal("verify"),
-  verifierHash: HEX64,
+  verifierHash: hexHash,
 });
 
 const resetSchema = z.object({
   step: z.literal("reset"),
-  verifierHash: HEX64,
+  verifierHash: hexHash,
   // New passphrase-wrapped data
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: HEX24,
-  secretKeyAuthTag: HEX32,
-  accountSalt: HEX64,
-  newVerifierHash: HEX64,
+  secretKeyIv: hexIv,
+  secretKeyAuthTag: hexAuthTag,
+  accountSalt: hexSalt,
+  newVerifierHash: hexHash,
   // Re-wrapped recovery key data
   recoveryEncryptedSecretKey: z.string().min(1),
-  recoverySecretKeyIv: HEX24,
-  recoverySecretKeyAuthTag: HEX32,
-  recoveryHkdfSalt: HEX64,
-  recoveryVerifierHash: HEX64,
+  recoverySecretKeyIv: hexIv,
+  recoverySecretKeyAuthTag: hexAuthTag,
+  recoveryHkdfSalt: hexSalt,
+  recoveryVerifierHash: hexHash,
 });
 
 const recoverLimiter = createRateLimiter({

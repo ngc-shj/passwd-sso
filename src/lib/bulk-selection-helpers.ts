@@ -1,5 +1,6 @@
-/** Maximum number of entries that can be selected for bulk operations. */
-export const MAX_BULK_SELECTION = 100;
+import { MAX_BULK_IDS } from "@/lib/validations/common";
+
+export const MAX_BULK_SELECTION = MAX_BULK_IDS;
 
 /**
  * Remove IDs from `prev` that no longer exist in `currentIds`.

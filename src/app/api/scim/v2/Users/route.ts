@@ -25,6 +25,11 @@ import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
+import {
+  SCIM_PAGE_COUNT_MIN,
+  SCIM_PAGE_COUNT_MAX,
+  SCIM_PAGE_COUNT_DEFAULT,
+} from "@/lib/validations/common.server";
 
 // GET /api/scim/v2/Users — List/filter users in the tenant
 async function handleGET(req: NextRequest) {
@@ -44,7 +49,7 @@ async function handleGET(req: NextRequest) {
   return withTenantRls(prisma, tenantId, async () => {
     const url = req.nextUrl;
     const startIndex = Math.max(1, parseInt(url.searchParams.get("startIndex") ?? "1", 10) || 1);
-    const count = Math.min(200, Math.max(1, parseInt(url.searchParams.get("count") ?? "100", 10) || 100));
+    const count = Math.min(SCIM_PAGE_COUNT_MAX, Math.max(SCIM_PAGE_COUNT_MIN, parseInt(url.searchParams.get("count") ?? String(SCIM_PAGE_COUNT_DEFAULT), 10) || SCIM_PAGE_COUNT_DEFAULT));
     const filterParam = url.searchParams.get("filter");
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

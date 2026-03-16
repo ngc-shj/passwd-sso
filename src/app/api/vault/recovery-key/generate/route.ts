@@ -11,16 +11,17 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
+import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
 const generateSchema = z.object({
-  currentVerifierHash: z.string().regex(/^[0-9a-f]{64}$/),
+  currentVerifierHash: hexHash,
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: z.string().regex(/^[0-9a-f]{24}$/),
-  secretKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/),
-  hkdfSalt: z.string().regex(/^[0-9a-f]{64}$/),
-  verifierHash: z.string().regex(/^[0-9a-f]{64}$/),
+  secretKeyIv: hexIv,
+  secretKeyAuthTag: hexAuthTag,
+  hkdfSalt: hexSalt,
+  verifierHash: hexHash,
 });
 
 const generateLimiter = createRateLimiter({

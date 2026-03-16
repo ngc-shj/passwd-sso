@@ -12,8 +12,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import type { AuditAction, AuditScope } from "@prisma/client";
 import type { NextRequest } from "next/server";
-
-const METADATA_MAX_BYTES = 10_240; // 10 KB
+import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 export interface AuditLogParams {
   scope: AuditScope;
@@ -75,7 +74,7 @@ export function logAudit(params: AuditLogParams): void {
     }
   }
 
-  const safeUserAgent = userAgent?.slice(0, 512) ?? null;
+  const safeUserAgent = userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
 
   // --- DB write (existing, unchanged) ---
   void (async () => {
@@ -199,7 +198,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
             targetId: p.targetId ?? null,
             metadata: safeMetadata as never ?? undefined,
             ip: p.ip ?? null,
-            userAgent: p.userAgent?.slice(0, 512) ?? null,
+            userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
           };
         }),
       });
@@ -218,7 +217,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
           ? p.metadata
           : { _truncated: true, _originalSize: json.length };
     }
-    const safeUserAgent = p.userAgent?.slice(0, 512) ?? null;
+    const safeUserAgent = p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
     try {
       auditLogger.info(
         {

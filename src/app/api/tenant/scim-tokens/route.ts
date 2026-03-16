@@ -15,13 +15,18 @@ import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import {
+  SCIM_TOKEN_EXPIRY_MIN_DAYS,
+  SCIM_TOKEN_EXPIRY_MAX_DAYS,
+  SCIM_TOKEN_EXPIRY_DEFAULT_DAYS,
+} from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
 const createTokenSchema = z.object({
   description: z.string().max(SCIM_TOKEN_DESC_MAX_LENGTH).optional(),
-  /** Expiry in days. null = never expires. Default = 365. */
-  expiresInDays: z.number().int().min(1).max(3650).nullable().optional().default(365),
+  /** Expiry in days. null = never expires. */
+  expiresInDays: z.number().int().min(SCIM_TOKEN_EXPIRY_MIN_DAYS).max(SCIM_TOKEN_EXPIRY_MAX_DAYS).nullable().optional().default(SCIM_TOKEN_EXPIRY_DEFAULT_DAYS),
 });
 
 // GET /api/tenant/scim-tokens — List SCIM tokens for the tenant

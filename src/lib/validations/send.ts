@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SEND_NAME_MAX_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "./common";
+import { SEND_NAME_MAX_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX, EXPIRY_PERIODS } from "./common";
 
 // ─── Send Schemas ─────────────────────────────────────────
 
@@ -43,14 +43,14 @@ export function isValidSendFilename(name: string): boolean {
 export const createSendTextSchema = z.object({
   name: z.string().min(1).max(SEND_NAME_MAX_LENGTH).trim(),
   text: z.string().min(1).max(SEND_MAX_TEXT_LENGTH),
-  expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
+  expiresIn: z.enum(EXPIRY_PERIODS),
   maxViews: z.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
   requirePassword: z.boolean().optional(),
 });
 
 export const createSendFileMetaSchema = z.object({
   name: z.string().min(1).max(SEND_NAME_MAX_LENGTH).trim(),
-  expiresIn: z.enum(["1h", "1d", "7d", "30d"]),
+  expiresIn: z.enum(EXPIRY_PERIODS),
   maxViews: z.coerce.number().int().min(MAX_VIEWS_MIN).max(MAX_VIEWS_MAX).optional(),
   requirePassword: z.string().transform((v) => v === "true").optional(),
 });

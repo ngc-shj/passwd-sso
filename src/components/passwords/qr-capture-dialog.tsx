@@ -15,14 +15,13 @@ import { Label } from "@/components/ui/label";
 import { scanImageForQR, parseOtpauthUri } from "@/lib/qr-scanner-client";
 import type { EntryTotp } from "@/lib/entry-form-types";
 import { Camera, Upload, AlertTriangle } from "lucide-react";
+import { MAX_IMAGE_DIMENSION } from "@/lib/validations/common";
 
 interface QRCaptureDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onTotpDetected: (totp: EntryTotp) => void;
 }
-
-const MAX_DIMENSION = 4096;
 
 export function QRCaptureDialog({
   open,
@@ -67,7 +66,7 @@ export function QRCaptureDialog({
 
       img.onload = () => {
         try {
-          if (img.width > MAX_DIMENSION || img.height > MAX_DIMENSION) {
+          if (img.width > MAX_IMAGE_DIMENSION || img.height > MAX_IMAGE_DIMENSION) {
             setError(t("qrImageTooLarge"));
             return;
           }
@@ -106,7 +105,7 @@ export function QRCaptureDialog({
     let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getDisplayMedia({
-        video: { width: { max: MAX_DIMENSION }, height: { max: MAX_DIMENSION } },
+        video: { width: { max: MAX_IMAGE_DIMENSION }, height: { max: MAX_IMAGE_DIMENSION } },
       });
 
       const track = stream.getVideoTracks()[0];

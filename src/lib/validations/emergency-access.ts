@@ -1,11 +1,17 @@
 import { z } from "zod";
 import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
+import {
+  HEX_IV_LENGTH,
+  HEX_AUTH_TAG_LENGTH,
+  HEX_SALT_LENGTH,
+  EMERGENCY_WAIT_DAYS,
+} from "./common";
 
 // ─── Emergency Access Schemas ─────────────────────────────
 
 export const createEmergencyGrantSchema = z.object({
   granteeEmail: z.string().email(),
-  waitDays: z.number().int().refine((n) => [7, 14, 30].includes(n), {
+  waitDays: z.number().int().refine((n) => (EMERGENCY_WAIT_DAYS as readonly number[]).includes(n), {
     message: "waitDays must be 7, 14, or 30",
   }),
 });
@@ -15,8 +21,8 @@ export const acceptEmergencyGrantSchema = z.object({
   granteePublicKey: z.string().min(1),
   encryptedPrivateKey: z.object({
     ciphertext: z.string().min(1),
-    iv: z.string().length(24),
-    authTag: z.string().length(32),
+    iv: z.string().length(HEX_IV_LENGTH),
+    authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
   }),
 });
 
@@ -27,9 +33,9 @@ export const rejectEmergencyGrantSchema = z.object({
 export const confirmEmergencyGrantSchema = z.object({
   ownerEphemeralPublicKey: z.string().min(1),
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: z.string().length(24),
-  secretKeyAuthTag: z.string().length(32),
-  hkdfSalt: z.string().length(64),
+  secretKeyIv: z.string().length(HEX_IV_LENGTH),
+  secretKeyAuthTag: z.string().length(HEX_AUTH_TAG_LENGTH),
+  hkdfSalt: z.string().length(HEX_SALT_LENGTH),
   wrapVersion: z.number().int().refine(
     (v) => SUPPORTED_WRAP_VERSIONS.has(v),
     { message: `wrapVersion must be one of: ${[...SUPPORTED_WRAP_VERSIONS].join(", ")}` }
@@ -41,8 +47,8 @@ export const acceptEmergencyGrantByIdSchema = z.object({
   granteePublicKey: z.string().min(1),
   encryptedPrivateKey: z.object({
     ciphertext: z.string().min(1),
-    iv: z.string().length(24),
-    authTag: z.string().length(32),
+    iv: z.string().length(HEX_IV_LENGTH),
+    authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
   }),
 });
 

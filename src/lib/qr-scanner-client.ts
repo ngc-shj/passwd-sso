@@ -7,8 +7,7 @@
 
 import jsQR from "jsqr";
 import type { EntryTotp } from "@/lib/entry-form-types";
-
-const MAX_IMAGE_DIMENSION = 4096;
+import { MAX_IMAGE_DIMENSION } from "@/lib/validations/common";
 
 /**
  * Scan an ImageData for a QR code and return the decoded text.

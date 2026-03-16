@@ -8,12 +8,13 @@ import { AUDIT_ACTION, AUDIT_SCOPE, IMPORT_FORMAT_VALUES } from "@/lib/constants
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
+import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 
 const bodySchema = z.object({
   requestedCount: z.number().int().min(0),
   successCount: z.number().int().min(0),
   failedCount: z.number().int().min(0),
-  filename: z.string().trim().min(1).max(255).optional(),
+  filename: z.string().trim().min(1).max(FILENAME_MAX_LENGTH).optional(),
   format: z.enum(IMPORT_FORMAT_VALUES).optional(),
   encrypted: z.boolean().optional(),
   teamId: z.string().uuid().optional(),

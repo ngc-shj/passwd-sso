@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { RECOVERY_KEY_DATA_LENGTH } from "./validations/common";
 import {
   generateRecoveryKey,
   formatRecoveryKey,
@@ -111,9 +112,9 @@ describe("crypto-recovery", () => {
       const formatted = await formatRecoveryKey(key);
       const clean = formatted.replace(/-/g, "");
       // Flip last 2 chars (checksum)
-      const data = clean.slice(0, 52);
+      const data = clean.slice(0, RECOVERY_KEY_DATA_LENGTH);
       // Construct wrong checksum
-      const wrongCs = clean[52] === "A" ? "B" : "A";
+      const wrongCs = clean[RECOVERY_KEY_DATA_LENGTH] === "A" ? "B" : "A";
       const tampered = data + wrongCs + clean[53];
       await expect(parseRecoveryKey(tampered)).rejects.toThrow("INVALID_CHECKSUM");
     });

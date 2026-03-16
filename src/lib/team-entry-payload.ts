@@ -1,5 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
+import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
 import { filterNonEmptyCustomFields, parseUrlHost } from "@/lib/entry-form-helpers";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 
@@ -183,7 +184,7 @@ export function buildTeamEntryPayload(
     case ENTRY_TYPE.SECURE_NOTE:
       overviewData = {
         title,
-        snippet: (input.content ?? "").slice(0, 100) || null,
+        snippet: (input.content ?? "").slice(0, ENTRY_SNIPPET_MAX) || null,
         tags,
       };
       break;

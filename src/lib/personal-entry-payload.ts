@@ -3,6 +3,7 @@ import {
   parseUrlHost,
   toTagNameColor,
 } from "@/lib/entry-form-helpers";
+import { PASSWORD_HISTORY_SNIPPET_LENGTH } from "@/lib/validations/common.server";
 import type {
   EntryCustomField,
   EntryPasswordHistory,
@@ -36,7 +37,7 @@ export function buildPasswordHistory(
   return [
     { password: previousPassword, changedAt: nowIso },
     ...existingHistory,
-  ].slice(0, 10);
+  ].slice(0, PASSWORD_HISTORY_SNIPPET_LENGTH);
 }
 
 export function buildPersonalEntryPayload(

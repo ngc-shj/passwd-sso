@@ -10,16 +10,17 @@ import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
 
 const changePassphraseSchema = z.object({
-  currentVerifierHash: z.string().regex(/^[0-9a-f]{64}$/),
+  currentVerifierHash: hexHash,
   encryptedSecretKey: z.string().min(1),
-  secretKeyIv: z.string().regex(/^[0-9a-f]{24}$/), // 12 bytes hex
-  secretKeyAuthTag: z.string().regex(/^[0-9a-f]{32}$/), // 16 bytes hex
-  accountSalt: z.string().regex(/^[0-9a-f]{64}$/), // 32 bytes hex
-  newVerifierHash: z.string().regex(/^[0-9a-f]{64}$/),
+  secretKeyIv: hexIv,
+  secretKeyAuthTag: hexAuthTag,
+  accountSalt: hexSalt,
+  newVerifierHash: hexHash,
 });
 
 const changeLimiter = createRateLimiter({

@@ -16,6 +16,7 @@ import { formatRelativeTime } from "@/lib/format-datetime";
 import { API_PATH, apiPath } from "@/lib/constants";
 import type { NotificationType } from "@prisma/client";
 import { fetchApi } from "@/lib/url-helpers";
+import { NOTIFICATION_BELL_LIMIT } from "@/lib/validations/common.server";
 
 interface NotificationItem {
   id: string;
@@ -28,7 +29,6 @@ interface NotificationItem {
 }
 
 const POLL_INTERVAL_MS = 60_000;
-const PAGE_LIMIT = 10;
 
 /** Resolve notification body using i18n when a translation key exists for the type */
 function resolveNotificationBody(
@@ -68,7 +68,7 @@ export function NotificationBell() {
     setLoading(true);
     try {
       const res = await fetchApi(
-        `${API_PATH.NOTIFICATIONS}?limit=${PAGE_LIMIT}`,
+        `${API_PATH.NOTIFICATIONS}?limit=${NOTIFICATION_BELL_LIMIT}`,
       );
       if (res.ok) {
         const data = await res.json();

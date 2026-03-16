@@ -250,11 +250,12 @@ describe("POST /api/vault/admin-reset", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 for uppercase hex token", async () => {
+  it("accepts uppercase hex token (hexHash is case-insensitive)", async () => {
+    // hexHash uses /^[0-9a-f]+$/i, so uppercase is valid
     const res = await POST(createRequest("POST", URL, {
       body: { token: "A".repeat(64), confirmation: "DELETE MY VAULT" },
     }));
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(200);
   });
 
   it("returns 400 for token shorter than 64 chars", async () => {

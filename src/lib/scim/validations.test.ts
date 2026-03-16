@@ -4,6 +4,10 @@ import {
   scimPatchOpSchema,
   scimGroupSchema,
 } from "./validations";
+import {
+  SCIM_PATCH_OPERATIONS_MAX,
+  SCIM_GROUP_MEMBERS_MAX,
+} from "@/lib/validations/common";
 
 describe("scimUserSchema", () => {
   const validUser = {
@@ -125,7 +129,7 @@ describe("scimPatchOpSchema", () => {
   });
 
   it("rejects Operations exceeding max count of 100", () => {
-    const ops = Array.from({ length: 101 }, () => ({
+    const ops = Array.from({ length: SCIM_PATCH_OPERATIONS_MAX + 1 }, () => ({
       op: "replace" as const,
       path: "active",
       value: false,
@@ -179,7 +183,7 @@ describe("scimGroupSchema", () => {
   });
 
   it("rejects members exceeding max count of 1000", () => {
-    const members = Array.from({ length: 1001 }, (_, i) => ({
+    const members = Array.from({ length: SCIM_GROUP_MEMBERS_MAX + 1 }, (_, i) => ({
       value: `user-${i}`,
     }));
     const result = scimGroupSchema.safeParse({

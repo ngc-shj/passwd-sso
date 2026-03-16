@@ -7,6 +7,7 @@ import { GRANT_STATUS } from "@/lib/constants/breakglass";
 import type { GrantStatus } from "@/lib/constants/breakglass";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -249,7 +250,7 @@ async function handleGET(_req: NextRequest) {
         targetUser: { select: { id: true, name: true, email: true, image: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      take: BREAKGLASS_USER_LIST_LIMIT,
     }),
   );
 

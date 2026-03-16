@@ -15,6 +15,13 @@ import {
   CHARS_FIELD_MAX,
 } from "./validations";
 import { ENTRY_TYPE } from "@/lib/constants";
+import {
+  HEX_IV_LENGTH,
+  HEX_AUTH_TAG_LENGTH,
+  HEX_SALT_LENGTH,
+  ENCRYPTED_TEAM_KEY_MAX,
+  EPHEMERAL_PUBLIC_KEY_MAX,
+} from "@/lib/validations/common";
 
 describe("entryTypeSchema", () => {
   it.each([
@@ -38,8 +45,8 @@ describe("entryTypeSchema", () => {
 describe("createE2EPasswordSchema", () => {
   const validEncrypted = {
     ciphertext: "data",
-    iv: "a".repeat(24),
-    authTag: "b".repeat(32),
+    iv: "a".repeat(HEX_IV_LENGTH),
+    authTag: "b".repeat(HEX_AUTH_TAG_LENGTH),
   };
 
   const validBase = {
@@ -218,10 +225,10 @@ describe("createShareLinkSchema – passkey fields", () => {
 describe("teamMemberKeySchema", () => {
   const validKey = {
     encryptedTeamKey: "enc-key-data",
-    teamKeyIv: "a".repeat(24),
-    teamKeyAuthTag: "b".repeat(32),
+    teamKeyIv: "a".repeat(HEX_IV_LENGTH),
+    teamKeyAuthTag: "b".repeat(HEX_AUTH_TAG_LENGTH),
     ephemeralPublicKey: '{"kty":"EC"}',
-    hkdfSalt: "c".repeat(64),
+    hkdfSalt: "c".repeat(HEX_SALT_LENGTH),
     keyVersion: 1,
   };
 
@@ -232,7 +239,7 @@ describe("teamMemberKeySchema", () => {
   it("rejects encryptedTeamKey exceeding max length (1000)", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      encryptedTeamKey: "x".repeat(1001),
+      encryptedTeamKey: "x".repeat(ENCRYPTED_TEAM_KEY_MAX + 1),
     });
     expect(result.success).toBe(false);
   });
@@ -240,7 +247,7 @@ describe("teamMemberKeySchema", () => {
   it("accepts encryptedTeamKey at max length (1000)", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      encryptedTeamKey: "x".repeat(1000),
+      encryptedTeamKey: "x".repeat(ENCRYPTED_TEAM_KEY_MAX),
     });
     expect(result.success).toBe(true);
   });
@@ -248,7 +255,7 @@ describe("teamMemberKeySchema", () => {
   it("rejects ephemeralPublicKey exceeding max length (500)", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      ephemeralPublicKey: "x".repeat(501),
+      ephemeralPublicKey: "x".repeat(EPHEMERAL_PUBLIC_KEY_MAX + 1),
     });
     expect(result.success).toBe(false);
   });
@@ -256,7 +263,7 @@ describe("teamMemberKeySchema", () => {
   it("accepts ephemeralPublicKey at max length (500)", () => {
     const result = teamMemberKeySchema.safeParse({
       ...validKey,
-      ephemeralPublicKey: "x".repeat(500),
+      ephemeralPublicKey: "x".repeat(EPHEMERAL_PUBLIC_KEY_MAX),
     });
     expect(result.success).toBe(true);
   });
@@ -359,7 +366,7 @@ describe("generatePasswordSchema", () => {
 });
 
 describe("updateTeamE2EPasswordSchema itemKeyVersion/encryptedItemKey refine", () => {
-  const encField = { ciphertext: "a".repeat(10), iv: "a".repeat(24), authTag: "b".repeat(32) };
+  const encField = { ciphertext: "a".repeat(10), iv: "a".repeat(HEX_IV_LENGTH), authTag: "b".repeat(HEX_AUTH_TAG_LENGTH) };
 
   it("accepts metadata-only update without itemKeyVersion", () => {
     const result = updateTeamE2EPasswordSchema.safeParse({ isArchived: true });

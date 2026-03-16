@@ -19,6 +19,7 @@ import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
+import { BREACH_COUNT_MAX } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
 
@@ -28,7 +29,7 @@ const alertLimiter = createRateLimiter({
 });
 
 const alertSchema = z.object({
-  newBreachCount: z.number().int().nonnegative().max(10000),
+  newBreachCount: z.number().int().nonnegative().max(BREACH_COUNT_MAX),
   teamId: z.string().trim().min(1).optional(),
 });
 

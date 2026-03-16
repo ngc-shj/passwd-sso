@@ -14,6 +14,7 @@ import {
   API_KEY_PREFIX,
   MAX_API_KEYS_PER_USER,
 } from "@/lib/constants/api-key";
+import { API_KEY_TOKEN_LENGTH, API_KEY_PREFIX_LENGTH } from "@/lib/validations/common";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // GET /api/api-keys — List API keys for the current user
@@ -92,13 +93,13 @@ async function handlePOST(req: NextRequest) {
   const base62 = rawBytes
     .toString("base64url")
     .replace(/[_-]/g, "")
-    .slice(0, 43);
-  if (base62.length < 43) {
+    .slice(0, API_KEY_TOKEN_LENGTH);
+  if (base62.length < API_KEY_TOKEN_LENGTH) {
     return errorResponse(API_ERROR.SERVICE_UNAVAILABLE, 500);
   }
   const plaintext = `${API_KEY_PREFIX}${base62}`;
   const tokenHash = hashToken(plaintext);
-  const prefix = plaintext.slice(0, 8); // "api_XXXX"
+  const prefix = plaintext.slice(0, API_KEY_PREFIX_LENGTH); // "api_XXXX"
 
   const actor = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({

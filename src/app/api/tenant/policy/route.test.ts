@@ -108,11 +108,10 @@ vi.mock("@/lib/validations", () => ({
   TAILNET_NAME_MAX_LENGTH: 253,
 }));
 
-vi.mock("@/lib/validations/common", () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { z } = require("zod");
+vi.mock("@/lib/validations/common", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/validations/common")>();
   return {
-    pinLengthSchema: z.number().int().min(4).max(63),
+    ...actual,
   };
 });
 

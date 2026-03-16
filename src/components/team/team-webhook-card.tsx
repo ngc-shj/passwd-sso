@@ -34,6 +34,7 @@ import {
 } from "@/lib/constants/audit";
 import { formatDateTime } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
+import { MAX_WEBHOOKS } from "@/lib/validations/common";
 
 interface WebhookItem {
   id: string;
@@ -51,8 +52,6 @@ interface Props {
   teamId: string;
   locale: string;
 }
-
-const MAX_WEBHOOKS = 5;
 
 /**
  * Event groups available for webhook subscription.
