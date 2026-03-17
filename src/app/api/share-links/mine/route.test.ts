@@ -52,7 +52,7 @@ function makeShare(overrides: Record<string, unknown> = {}) {
   return {
     id: "share-1",
     entryType: "LOGIN",
-    shareType: "ENTRY",
+    shareType: "ENTRY_SHARE",
     sendName: null,
     sendFilename: null,
     sendSizeBytes: null,
@@ -101,7 +101,7 @@ describe("GET /api/share-links/mine", () => {
     expect(json.items).toHaveLength(1);
     const item = json.items[0];
     expect(item.id).toBe("share-1");
-    expect(item.shareType).toBe("ENTRY");
+    expect(item.shareType).toBe("ENTRY_SHARE");
     expect(item.sharedBy).toBe("Test User");
     expect(item.canRevoke).toBe(true);
     expect(item.isActive).toBe(true);

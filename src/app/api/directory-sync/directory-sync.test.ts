@@ -160,7 +160,7 @@ describe("POST /api/directory-sync", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
-    expect(json.error).toBeDefined();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for invalid body (missing displayName)", async () => {
@@ -174,7 +174,7 @@ describe("POST /api/directory-sync", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
-    expect(json.error).toBeDefined();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for invalid body (unknown provider)", async () => {
@@ -188,7 +188,7 @@ describe("POST /api/directory-sync", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(400);
-    expect(json.error).toBeDefined();
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 409 when duplicate provider config exists", async () => {
