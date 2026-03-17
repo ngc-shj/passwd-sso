@@ -6,6 +6,7 @@ const KEYS = [
   "ADMIN_VAULT_RESET",
   "ADMIN_VAULT_RESET_REVOKED",
   "WATCHTOWER_ALERT",
+  "VAULT_LOCKOUT",
 ] as const;
 
 const LOCALES = ["en", "ja"] as const;
@@ -94,6 +95,14 @@ describe("notificationBody", () => {
       const result = notificationBody("NEW_DEVICE_LOGIN", "ja", "Firefox", "Windows");
       expect(result).toContain("Firefox");
       expect(result).toContain("Windows");
+    });
+  });
+
+  describe.each(LOCALES)("VAULT_LOCKOUT body (%s)", (locale) => {
+    it("includes email and lockMinutes", () => {
+      const result = notificationBody("VAULT_LOCKOUT", locale, "bob@example.com", "60");
+      expect(result).toContain("bob@example.com");
+      expect(result).toContain("60");
     });
   });
 });

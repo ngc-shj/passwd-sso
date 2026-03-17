@@ -371,6 +371,95 @@ describe("recordFailure", () => {
     await recordFailure("user-1");
     expect(mockNotifyAdminsOfLockout).not.toHaveBeenCalled();
   });
+
+  it("clears existing expired lock when new attempts do not reach threshold", async () => {
+    // existingLockedUntil is set but already expired, newLockedUntil is null
+    // (attempts < 5 → no new threshold) → finalLockedUntil becomes null
+    const expiredLock = new Date(Date.now() - 60_000); // 1 min in the past
+    setupTransaction({
+      failed_unlock_attempts: 1,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: expiredLock,
+    });
+
+    const result = await recordFailure("user-1");
+    expect(result).not.toBeNull();
+    expect(result!.attempts).toBe(2);
+    expect(result!.locked).toBe(false);
+    expect(result!.lockedUntil).toBeNull();
+  });
+
+  it("keeps existing lock when it is still active and new attempts do not reach threshold", async () => {
+    // existingLockedUntil is set and still active, newLockedUntil is null → keep existing
+    const activeLock = new Date(Date.now() + 60 * 60 * 1000); // 1h from now
+    setupTransaction({
+      failed_unlock_attempts: 1,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: activeLock,
+    });
+
+    const result = await recordFailure("user-1");
+    expect(result).not.toBeNull();
+    expect(result!.locked).toBe(true);
+    expect(result!.lockedUntil).toEqual(activeLock);
+  });
+
+  it("swallows logAudit error in VAULT_UNLOCK_FAILED block", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    mockLogAudit.mockImplementationOnce(() => {
+      throw new Error("audit write failed");
+    });
+
+    const result = await recordFailure("user-1");
+    // Should not propagate — function returns normally
+    expect(result).not.toBeNull();
+    expect(mockLoggerInstance.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "audit.vaultUnlockFailed.error",
+    );
+  });
+
+  it("swallows logAudit error in VAULT_LOCKOUT_TRIGGERED block", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 4,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+    // First call (VAULT_UNLOCK_FAILED) succeeds; second call (VAULT_LOCKOUT_TRIGGERED) throws
+    mockLogAudit
+      .mockImplementationOnce(() => undefined)
+      .mockImplementationOnce(() => {
+        throw new Error("audit write failed on lockout");
+      });
+
+    const result = await recordFailure("user-1");
+    expect(result).not.toBeNull();
+    expect(mockLoggerInstance.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "audit.vaultLockoutTriggered.error",
+    );
+  });
+
+  it("swallows logAudit error in lock_timeout catch block", async () => {
+    const lockTimeoutError = Object.assign(new Error("lock timeout"), {
+      code: "55P03",
+    });
+    mockPrismaTransaction.mockRejectedValue(lockTimeoutError);
+    mockLogAudit.mockImplementationOnce(() => {
+      throw new Error("audit write failed on lock_timeout");
+    });
+
+    const result = await recordFailure("user-1");
+    expect(result).toBeNull();
+    expect(mockLoggerInstance.error).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: "user-1" }),
+      "audit.vaultUnlockFailed.lockTimeout.error",
+    );
+  });
 });
 
 describe("resetLockout", () => {
