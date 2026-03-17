@@ -199,6 +199,7 @@ describe("GET /s/[token]/download", () => {
     mockFindUnique.mockResolvedValue(
       makeFileShare({ maxViews: 1, viewCount: 1 })
     );
+    mockExecuteRaw.mockResolvedValueOnce(0);
 
     const req = createDownloadRequest(VALID_TOKEN);
     const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
