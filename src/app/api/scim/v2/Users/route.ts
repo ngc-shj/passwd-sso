@@ -173,6 +173,17 @@ async function handlePOST(req: NextRequest) {
           });
         }
 
+        // Reject if user already belongs to a different tenant (cross-tenant DoS prevention)
+        if (user.tenantId !== tenantId) {
+          const otherMembership = await tx.tenantMember.findFirst({
+            where: { userId: user.id, tenantId: { not: tenantId }, deactivatedAt: null },
+            select: { id: true },
+          });
+          if (otherMembership) {
+            throw new Error("SCIM_USER_BELONGS_TO_OTHER_TENANT");
+          }
+        }
+
         const existingMember = await tx.tenantMember.findUnique({
           where: { tenantId_userId: { tenantId, userId: user.id } },
         });
@@ -258,6 +269,9 @@ async function handlePOST(req: NextRequest) {
 
     return scimResponse(resource, 201);
   } catch (e) {
+    if (e instanceof Error && e.message === "SCIM_USER_BELONGS_TO_OTHER_TENANT") {
+      return scimError(409, "User already belongs to another organization", "uniqueness");
+    }
     if (e instanceof Error && e.message === "SCIM_RESOURCE_EXISTS") {
       return scimError(409, "User already exists in this tenant", "uniqueness");
     }

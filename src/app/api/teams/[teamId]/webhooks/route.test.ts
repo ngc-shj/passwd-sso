@@ -64,6 +64,7 @@ vi.mock("@/lib/crypto-server", () => ({
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
 }));
+vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/logger", () => ({
   default: {
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -259,6 +260,17 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
       body: {
         url: "https://example.com/hook",
         events: ["INVALID_EVENT"],
+      },
+    });
+    const { status } = await parseResponse(await POST(req, teamParams()));
+    expect(status).toBe(400);
+  });
+
+  it("returns 400 for personal/tenant-scoped event not in team allowlist", async () => {
+    const req = createRequest("POST", "http://localhost:3000/api/teams/team-1/webhooks", {
+      body: {
+        url: "https://example.com/hook",
+        events: ["AUTH_LOGIN"],
       },
     });
     const { status } = await parseResponse(await POST(req, teamParams()));

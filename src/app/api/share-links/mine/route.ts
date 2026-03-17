@@ -20,6 +20,9 @@ async function handleGET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status"); // "active" | "expired" | "revoked" | null (all)
   const shareType = searchParams.get("shareType"); // "entry" | "send" | null (all)
+  if (shareType && shareType !== "entry" && shareType !== "send") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
   const teamId = searchParams.get("team");
   const cursor = searchParams.get("cursor");
   const limit = 30;

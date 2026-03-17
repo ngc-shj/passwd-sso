@@ -6,15 +6,14 @@
  * sent as an Authorization header to content/download APIs.
  */
 
-import { createHmac, createHash, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { getMasterKeyByVersion } from "@/lib/crypto-server";
 
 const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 function getSigningKey(): Buffer {
-  return createHash("sha256")
-    .update("share-access-token:")
-    .update(getMasterKeyByVersion(1))
+  return createHmac("sha256", getMasterKeyByVersion(1))
+    .update("share-access-token-v1")
     .digest();
 }
 

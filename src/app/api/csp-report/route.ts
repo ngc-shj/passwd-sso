@@ -4,6 +4,7 @@ import { getLogger } from "@/lib/logger";
 import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
+const MAX_RATE_ENTRIES = 10_000;
 const rate = new Map<string, { resetAt: number; count: number }>();
 
 /**
@@ -66,6 +67,14 @@ async function handlePOST(request: Request) {
     request.headers.get("x-forwarded-for") ??
     request.headers.get("x-real-ip") ??
     "unknown";
+  // Evict stale entries to prevent unbounded memory growth
+  if (rate.size >= MAX_RATE_ENTRIES) {
+    for (const [k, v] of rate) {
+      if (v.resetAt < now) rate.delete(k);
+    }
+    if (rate.size >= MAX_RATE_ENTRIES) rate.clear();
+  }
+
   const entry = rate.get(ip);
   if (!entry || entry.resetAt < now) {
     rate.set(ip, { resetAt: now + RATE_WINDOW_MS, count: 1 });

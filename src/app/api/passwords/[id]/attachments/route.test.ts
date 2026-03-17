@@ -340,4 +340,67 @@ describe("POST /api/passwords/[id]/attachments", () => {
       }),
     );
   });
+
+  it("falls back to server-generated UUID when clientId is not a valid UUID", async () => {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    mockPrismaAttachment.create.mockImplementation(async (args: { data: { id: string } }) =>
+      ({
+        id: args.data.id,
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: 100,
+        createdAt: now,
+      })
+    );
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        id: "../../../etc/passwd",
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+      }),
+      createParams("pw-1")
+    );
+    expect(res.status).toBe(201);
+    const [[callArgs]] = mockPrismaAttachment.create.mock.calls;
+    const usedId = callArgs.data.id;
+    expect(usedId).not.toBe("../../../etc/passwd");
+    expect(UUID_RE.test(usedId)).toBe(true);
+  });
+
+  it("uses valid client-supplied UUID when provided", async () => {
+    const clientId = "550e8400-e29b-41d4-a716-446655440000";
+    mockPrismaAttachment.create.mockResolvedValue({
+      id: clientId,
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        id: clientId,
+        file: new Blob(["encrypted-data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+      }),
+      createParams("pw-1")
+    );
+    expect(res.status).toBe(201);
+    expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: clientId,
+        }),
+      }),
+    );
+  });
 });

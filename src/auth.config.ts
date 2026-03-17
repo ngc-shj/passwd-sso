@@ -30,8 +30,10 @@ export default {
           Google({
             clientId: process.env.AUTH_GOOGLE_ID,
             clientSecret: process.env.AUTH_GOOGLE_SECRET,
-            // This app trusts Google as an IdP; allow linking by verified email.
-            allowDangerousEmailAccountLinking: true,
+            // Allow account linking only when domain restriction is active.
+            // Without domain restriction, any Google account could hijack
+            // an existing account by matching on email address.
+            allowDangerousEmailAccountLinking: allowedGoogleDomains.length > 0,
             authorization: {
               params: {
                 // Restrict to specific domain (optional, omit for personal accounts).

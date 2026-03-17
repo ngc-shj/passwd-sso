@@ -196,7 +196,9 @@ export async function fetchGoogleUsers(
       }
     }
 
-    pageToken = json.nextPageToken;
+    pageToken = typeof json.nextPageToken === "string" && json.nextPageToken.length <= 2048
+      ? json.nextPageToken
+      : undefined;
   } while (pageToken);
 
   return users;
@@ -259,7 +261,9 @@ export async function fetchGoogleGroups(
       }
     }
 
-    pageToken = json.nextPageToken;
+    pageToken = typeof json.nextPageToken === "string" && json.nextPageToken.length <= 2048
+      ? json.nextPageToken
+      : undefined;
   } while (pageToken);
 
   return groups;

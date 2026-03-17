@@ -87,14 +87,20 @@ export default async function SharePage({ params }: Props) {
       );
     }
 
-    // Non-protected share: existing flow with viewCount increment
-    const updated: number = await prisma.$executeRaw`
-      UPDATE "password_shares"
-      SET "view_count" = "view_count" + 1
-      WHERE "id" = ${share.id}
-        AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+    // Non-protected share: increment viewCount for non-FILE shares.
+    // FILE shares defer viewCount increment to the download route to prevent
+    // race conditions where concurrent page loads allow extra downloads.
+    if (share.shareType !== "FILE") {
+      const updated: number = await prisma.$executeRaw`
+        UPDATE "password_shares"
+        SET "view_count" = "view_count" + 1
+        WHERE "id" = ${share.id}
+          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
-    if (updated === 0) {
+      if (updated === 0) {
+        return <ShareError reason="maxViews" />;
+      }
+    } else if (share.maxViews !== null && share.viewCount >= share.maxViews) {
       return <ShareError reason="maxViews" />;
     }
 
@@ -165,7 +171,7 @@ export default async function SharePage({ params }: Props) {
           sizeBytes={share.sendSizeBytes}
           token={token}
           expiresAt={share.expiresAt.toISOString()}
-          viewCount={share.viewCount + 1}
+          viewCount={share.viewCount}
           maxViews={share.maxViews}
         />
       );

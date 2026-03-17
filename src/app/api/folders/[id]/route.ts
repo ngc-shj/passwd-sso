@@ -187,50 +187,44 @@ async function handleDELETE(
   // Collect children and detect name conflicts at the target parent level.
   // The deleted folder still occupies a name slot during the transaction,
   // so we must include it when computing used names.
-  const children = await withUserTenantRls(session.user.id, async () =>
-    prisma.folder.findMany({
-      where: { parentId: id },
-      select: { id: true, name: true },
-    }),
-  );
-
-  const siblingsAtTarget = await withUserTenantRls(session.user.id, async () =>
-    prisma.folder.findMany({
-      where: { parentId: existing.parentId, userId: session.user.id },
-      select: { id: true, name: true },
-    }),
-  );
-
-  const usedNames = new Set(
-    siblingsAtTarget
-      .filter((s) => s.id !== id) // exclude the folder being deleted
-      .map((s) => s.name),
-  );
-
-  // Build rename map for children that would collide (including with the
-  // deleted folder's own name, which still exists during the transaction).
-  // Also account for children colliding among themselves after adding the
-  // deleted folder's name to usedNames.
-  usedNames.add(existing.name);
-
-  const renames: Array<{ childId: string; newName: string }> = [];
-  for (const child of children) {
-    if (usedNames.has(child.name)) {
-      let suffix = 2;
-      let newName = `${child.name} (${suffix})`;
-      while (usedNames.has(newName)) {
-        suffix++;
-        newName = `${child.name} (${suffix})`;
-      }
-      renames.push({ childId: child.id, newName });
-      usedNames.add(newName);
-    } else {
-      usedNames.add(child.name);
-    }
-  }
-
   await withUserTenantRls(session.user.id, async () =>
     prisma.$transaction(async (tx) => {
+      // Fetch children and siblings inside the transaction to avoid TOCTOU
+      const children = await tx.folder.findMany({
+        where: { parentId: id },
+        select: { id: true, name: true },
+      });
+
+      const siblingsAtTarget = await tx.folder.findMany({
+        where: { parentId: existing.parentId, userId: session.user.id },
+        select: { id: true, name: true },
+      });
+
+      const usedNames = new Set(
+        siblingsAtTarget
+          .filter((s) => s.id !== id)
+          .map((s) => s.name),
+      );
+
+      // Build rename map for children that would collide
+      usedNames.add(existing.name);
+
+      const renames: Array<{ childId: string; newName: string }> = [];
+      for (const child of children) {
+        if (usedNames.has(child.name)) {
+          let suffix = 2;
+          let newName = `${child.name} (${suffix})`;
+          while (usedNames.has(newName)) {
+            suffix++;
+            newName = `${child.name} (${suffix})`;
+          }
+          renames.push({ childId: child.id, newName });
+          usedNames.add(newName);
+        } else {
+          usedNames.add(child.name);
+        }
+      }
+
       // Promote children individually, renaming conflicts in the same update
       for (const child of children) {
         const rename = renames.find((r) => r.childId === child.id);

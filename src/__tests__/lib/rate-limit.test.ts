@@ -57,12 +57,6 @@ describe("createRateLimiter — Redis pipeline", () => {
   const mockPexpire = vi.fn().mockReturnThis();
   const mockIncr = vi.fn().mockReturnThis();
   const mockPttl = vi.fn().mockReturnThis();
-  const mockPipeline = vi.fn(() => ({
-    incr: mockIncr,
-    pexpire: mockPexpire,
-    pttl: mockPttl,
-    exec: mockExec,
-  }));
 
   beforeEach(() => {
     vi.clearAllMocks();

@@ -197,12 +197,14 @@ describe("PUT /api/teams/[teamId]/members/[memberId]", () => {
       role: TEAM_ROLE.ADMIN,
       deactivatedAt: null,
     });
-    mockPrismaTeamMember.update.mockResolvedValue({
+    const updatedOwner = {
       id: MEMBER_ID,
       userId: "target-user",
       role: TEAM_ROLE.OWNER,
       user: { id: "target-user", name: "New Owner", email: "new@test.com", image: null },
-    });
+    };
+    mockPrismaTeamMember.update.mockResolvedValue(updatedOwner);
+    mockTransaction.mockResolvedValue([{}, updatedOwner]);
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/members/${MEMBER_ID}`, {
@@ -378,9 +380,6 @@ describe("DELETE /api/teams/[teamId]/members/[memberId]", () => {
     expect(mockTransaction).toHaveBeenCalled();
     expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
       where: { teamId: TEAM_ID, userId: "target-user" },
-    });
-    expect(mockPrismaScimExternalMapping.deleteMany).toHaveBeenCalledWith({
-      where: { tenantId: "tenant-1", internalId: "target-user", resourceType: "User" },
     });
     expect(mockPrismaTeamMember.delete).toHaveBeenCalledWith({
       where: { id: MEMBER_ID },

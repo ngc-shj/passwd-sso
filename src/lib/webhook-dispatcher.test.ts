@@ -8,6 +8,8 @@ const {
   mockGetMasterKeyByVersion,
   mockDecryptServerData,
   mockFetch,
+  mockResolve4,
+  mockResolve6,
 } = vi.hoisted(() => ({
   mockPrismaTeamWebhook: {
     findMany: vi.fn(),
@@ -24,6 +26,8 @@ const {
   mockGetMasterKeyByVersion: vi.fn(() => Buffer.alloc(32)),
   mockDecryptServerData: vi.fn(() => "test-hmac-secret"),
   mockFetch: vi.fn(),
+  mockResolve4: vi.fn(async () => ["93.184.216.34"]),
+  mockResolve6: vi.fn(async () => []),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -58,6 +62,11 @@ vi.mock("@/lib/logger", () => ({
   },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
+
+vi.mock("node:dns/promises", () => ({
+  resolve4: mockResolve4,
+  resolve6: mockResolve6,
 }));
 
 // Replace global fetch

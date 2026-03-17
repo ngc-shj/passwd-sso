@@ -5,7 +5,16 @@ import {
   DEFAULT_KDF_PARAMS,
   ARGON2ID_KDF_PARAMS,
   hexEncode,
+  generateSecretKey,
+  wrapSecretKey,
+  unwrapSecretKey,
+  deriveEncryptionKey,
+  deriveAuthKey,
+  computeAuthHash,
+  createVerificationArtifact,
+  verifyKey,
 } from "./crypto-client";
+import type { EncryptedData } from "./crypto-client";
 
 // Mock argon2-browser for Node/Vitest (WASM not available)
 // Uses PBKDF2 as a deterministic stand-in — NOT cryptographically equivalent,
@@ -254,3 +263,188 @@ describe("deriveWrappingKeyWithParams (Argon2id)", () => {
     ).rejects.toThrow();
   });
 });
+
+// ─── Helpers shared across lower-level test suites ───────────────────────────
+
+async function makeWrappingKey(): Promise<CryptoKey> {
+  return deriveWrappingKeyWithParams(TEST_PASSPHRASE, TEST_SALT, DEFAULT_KDF_PARAMS);
+}
+
+async function makeWrappingKey2(): Promise<CryptoKey> {
+  const salt2 = new Uint8Array(32).fill(0xcd);
+  return deriveWrappingKeyWithParams("different-passphrase", salt2, DEFAULT_KDF_PARAMS);
+}
+
+// ─── wrapSecretKey / unwrapSecretKey ─────────────────────────────────────────
+
+describe("wrapSecretKey / unwrapSecretKey", () => {
+  it("roundtrip: wrap then unwrap returns the original secret key", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey = await makeWrappingKey();
+
+    const encrypted = await wrapSecretKey(secretKey, wrappingKey);
+    const recovered = await unwrapSecretKey(encrypted, wrappingKey);
+
+    expect(recovered).toEqual(secretKey);
+  });
+
+  it("different wrapping keys produce different ciphertexts for the same secret key", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey1 = await makeWrappingKey();
+    const wrappingKey2 = await makeWrappingKey2();
+
+    const enc1 = await wrapSecretKey(secretKey, wrappingKey1);
+    const enc2 = await wrapSecretKey(secretKey, wrappingKey2);
+
+    // Ciphertexts must differ (different keys, different IVs — at least one differs)
+    expect(enc1.ciphertext).not.toBe(enc2.ciphertext);
+  });
+
+  it("each wrap produces a unique IV (non-deterministic)", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey = await makeWrappingKey();
+
+    const enc1 = await wrapSecretKey(secretKey, wrappingKey);
+    const enc2 = await wrapSecretKey(secretKey, wrappingKey);
+
+    expect(enc1.iv).not.toBe(enc2.iv);
+  });
+
+  it("tampered ciphertext causes unwrap to throw (GCM auth failure)", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey = await makeWrappingKey();
+    const encrypted = await wrapSecretKey(secretKey, wrappingKey);
+
+    // Flip the first byte of the ciphertext hex
+    const tampered: EncryptedData = {
+      ...encrypted,
+      ciphertext: flipFirstHexByte(encrypted.ciphertext),
+    };
+
+    await expect(unwrapSecretKey(tampered, wrappingKey)).rejects.toThrow();
+  });
+
+  it("tampered authTag causes unwrap to throw", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey = await makeWrappingKey();
+    const encrypted = await wrapSecretKey(secretKey, wrappingKey);
+
+    const tampered: EncryptedData = {
+      ...encrypted,
+      authTag: flipFirstHexByte(encrypted.authTag),
+    };
+
+    await expect(unwrapSecretKey(tampered, wrappingKey)).rejects.toThrow();
+  });
+
+  it("tampered IV causes unwrap to throw", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey = await makeWrappingKey();
+    const encrypted = await wrapSecretKey(secretKey, wrappingKey);
+
+    const tampered: EncryptedData = {
+      ...encrypted,
+      iv: flipFirstHexByte(encrypted.iv),
+    };
+
+    await expect(unwrapSecretKey(tampered, wrappingKey)).rejects.toThrow();
+  });
+
+  it("wrong wrapping key causes unwrap to throw", async () => {
+    const secretKey = generateSecretKey();
+    const wrappingKey1 = await makeWrappingKey();
+    const wrappingKey2 = await makeWrappingKey2();
+
+    const encrypted = await wrapSecretKey(secretKey, wrappingKey1);
+
+    await expect(unwrapSecretKey(encrypted, wrappingKey2)).rejects.toThrow();
+  });
+});
+
+// ─── computeAuthHash ─────────────────────────────────────────────────────────
+
+describe("computeAuthHash", () => {
+  it("is deterministic: same key produces same hash", async () => {
+    const secretKey = new Uint8Array(32).fill(0xaa);
+    const authKey = await deriveAuthKey(secretKey);
+
+    const hash1 = await computeAuthHash(authKey);
+    const hash2 = await computeAuthHash(authKey);
+
+    expect(hash1).toBe(hash2);
+  });
+
+  it("different keys produce different hashes", async () => {
+    const secretKey1 = new Uint8Array(32).fill(0xaa);
+    const secretKey2 = new Uint8Array(32).fill(0xbb);
+
+    const authKey1 = await deriveAuthKey(secretKey1);
+    const authKey2 = await deriveAuthKey(secretKey2);
+
+    const hash1 = await computeAuthHash(authKey1);
+    const hash2 = await computeAuthHash(authKey2);
+
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it("output is a 64-character lowercase hex string (SHA-256)", async () => {
+    const secretKey = generateSecretKey();
+    const authKey = await deriveAuthKey(secretKey);
+
+    const hash = await computeAuthHash(authKey);
+
+    expect(hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+// ─── createVerificationArtifact / verifyKey ──────────────────────────────────
+
+describe("createVerificationArtifact / verifyKey", () => {
+  it("roundtrip: create then verify with same key returns true", async () => {
+    const secretKey = generateSecretKey();
+    const encryptionKey = await deriveEncryptionKey(secretKey);
+
+    const artifact = await createVerificationArtifact(encryptionKey);
+    const result = await verifyKey(encryptionKey, artifact);
+
+    expect(result).toBe(true);
+  });
+
+  it("verify with wrong key returns false", async () => {
+    const secretKey1 = generateSecretKey();
+    const secretKey2 = generateSecretKey();
+    const encryptionKey1 = await deriveEncryptionKey(secretKey1);
+    const encryptionKey2 = await deriveEncryptionKey(secretKey2);
+
+    const artifact = await createVerificationArtifact(encryptionKey1);
+    const result = await verifyKey(encryptionKey2, artifact);
+
+    expect(result).toBe(false);
+  });
+
+  it("tampered artifact returns false", async () => {
+    const secretKey = generateSecretKey();
+    const encryptionKey = await deriveEncryptionKey(secretKey);
+
+    const artifact = await createVerificationArtifact(encryptionKey);
+    const tampered: EncryptedData = {
+      ...artifact,
+      ciphertext: flipFirstHexByte(artifact.ciphertext),
+    };
+
+    const result = await verifyKey(encryptionKey, tampered);
+    expect(result).toBe(false);
+  });
+});
+
+// ─── Internal helpers ────────────────────────────────────────────────────────
+
+/**
+ * Flip the first byte of a hex string to produce a deterministically different value.
+ * "00..." → "01...", "ff..." → "fe..."
+ */
+function flipFirstHexByte(hex: string): string {
+  const byte = parseInt(hex.slice(0, 2), 16);
+  const flipped = (byte ^ 0xff).toString(16).padStart(2, "0");
+  return flipped + hex.slice(2);
+}

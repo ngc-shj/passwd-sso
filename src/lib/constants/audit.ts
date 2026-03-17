@@ -439,6 +439,10 @@ export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = [
   AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
 ] as const;
 
+export const TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
+  AUDIT_ACTION_GROUPS_TEAM,
+).flat() as unknown as readonly AuditAction[];
+
 export const AUDIT_METADATA_KEY = {
   HISTORY_ID: "historyId",
   RESTORED_FROM_CHANGED_AT: "restoredFromChangedAt",

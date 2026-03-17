@@ -14,7 +14,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { VALID_ACTIONS } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
-import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
+import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -102,6 +102,7 @@ async function handleGET(req: NextRequest) {
 
         let cursor: string | undefined;
         let hasMore = true;
+        let totalRows = 0;
 
         while (hasMore) {
           const batch = await withUserTenantRls(userId, async () =>
@@ -156,7 +157,8 @@ async function handleGET(req: NextRequest) {
             }
           }
 
-          if (batch.length < AUDIT_LOG_BATCH_SIZE) {
+          totalRows += batch.length;
+          if (batch.length < AUDIT_LOG_BATCH_SIZE || totalRows >= AUDIT_LOG_MAX_ROWS) {
             hasMore = false;
           } else {
             cursor = batch[batch.length - 1].id;

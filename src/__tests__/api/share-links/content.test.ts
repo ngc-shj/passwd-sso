@@ -191,6 +191,60 @@ describe("GET /api/share-links/[id]/content", () => {
     expect(json.viewCount).toBe(1); // 0 + 1
   });
 
+  it("does not call decryptShareData for E2E shares (masterKeyVersion === 0)", async () => {
+    mockFindUnique.mockResolvedValue(
+      makeShare({
+        masterKeyVersion: 0,
+        encryptedData: "e2e-blob",
+        dataIv: "e2e-iv",
+        dataAuthTag: "e2e-tag",
+      })
+    );
+
+    const req = createContentRequest("share-1", "valid-token");
+    const res = await GET(req, createParams({ id: "share-1" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    // Server must not attempt to decrypt E2E shares — the blob is
+    // encrypted with the sharer's client-side key, which the server
+    // never has access to.
+    expect(mockDecryptShareData).not.toHaveBeenCalled();
+    // Raw encrypted fields are returned so the recipient can decrypt
+    // them client-side.
+    expect(json.encryptedData).toBe("e2e-blob");
+    expect(json.dataIv).toBe("e2e-iv");
+    expect(json.dataAuthTag).toBe("e2e-tag");
+  });
+
+  it("does not apply HIDE_PASSWORD permission server-side (client-side responsibility)", async () => {
+    // Design decision: the content route returns all decrypted fields
+    // for server-encrypted shares without filtering based on share
+    // permissions (e.g., HIDE_PASSWORD).  Permission enforcement such
+    // as hiding the password field is intentionally delegated to the
+    // client so that the server does not need to know the structure of
+    // the encrypted blob beyond its JSON wrapper.
+    const decryptedPayload = {
+      title: "My Login",
+      username: "alice",
+      password: "s3cr3t",
+      url: "https://example.com",
+    };
+    mockDecryptShareData.mockReturnValue(JSON.stringify(decryptedPayload));
+    mockFindUnique.mockResolvedValue(makeShare({ masterKeyVersion: 1 }));
+
+    const req = createContentRequest("share-1", "valid-token");
+    const res = await GET(req, createParams({ id: "share-1" }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    // The server returns the full decrypted payload including the
+    // password field; no server-side HIDE_PASSWORD filtering is applied.
+    expect(json.data.password).toBe("s3cr3t");
+    expect(json.data.username).toBe("alice");
+    expect(json.data.title).toBe("My Login");
+  });
+
   it("returns 404 when decryption fails", async () => {
     mockFindUnique.mockResolvedValue(makeShare());
     mockDecryptShareData.mockImplementation(() => {

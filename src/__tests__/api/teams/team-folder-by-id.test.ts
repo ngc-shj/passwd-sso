@@ -203,15 +203,17 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
   let txTeamFolderUpdate: ReturnType<typeof vi.fn>;
   let txTeamFolderDelete: ReturnType<typeof vi.fn>;
   let txTeamEntryUpdateMany: ReturnType<typeof vi.fn>;
+  let txTeamFolderFindMany: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
     txTeamFolderUpdate = vi.fn();
     txTeamFolderDelete = vi.fn();
     txTeamEntryUpdateMany = vi.fn();
+    txTeamFolderFindMany = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        teamFolder: { update: txTeamFolderUpdate, delete: txTeamFolderDelete },
+        teamFolder: { findMany: txTeamFolderFindMany, update: txTeamFolderUpdate, delete: txTeamFolderDelete },
         teamPasswordEntry: { updateMany: txTeamEntryUpdateMany },
       });
     });
@@ -255,7 +257,8 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Parent" });
-    mockTeamFolderFindMany
+    txTeamFolderFindMany
+      .mockReset()
       .mockResolvedValueOnce([{ id: "c1", name: "Unique" }])
       .mockResolvedValueOnce([{ id: "s1", name: "Sibling" }]);
 
@@ -270,7 +273,8 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Parent" });
-    mockTeamFolderFindMany
+    txTeamFolderFindMany
+      .mockReset()
       .mockResolvedValueOnce([{ id: "c1", name: "Parent" }])
       .mockResolvedValueOnce([{ id: "s1", name: "Parent (2)" }]);
 
@@ -285,7 +289,8 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamFolderFindUnique.mockResolvedValue({ id: "f1", teamId: "o1", parentId: null, name: "Parent" });
-    mockTeamFolderFindMany
+    txTeamFolderFindMany
+      .mockReset()
       .mockResolvedValueOnce([{ id: "c1", name: "Parent" }])
       .mockResolvedValueOnce([]);
 

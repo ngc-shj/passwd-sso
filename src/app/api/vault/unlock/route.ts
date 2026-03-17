@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
+import { createHash, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
+import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { hmacVerifier } from "@/lib/crypto-server";
@@ -33,6 +34,9 @@ const unlockLimiter = createRateLimiter({
  * so the client can decrypt the secret key and verify locally.
  */
 async function handlePOST(request: NextRequest) {
+  const originError = assertOrigin(request);
+  if (originError) return originError;
+
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -81,7 +85,7 @@ async function handlePOST(request: NextRequest) {
     }),
   );
 
-  if (!user?.vaultSetupAt) {
+  if (!user?.vaultSetupAt || !user.masterPasswordServerHash || !user.masterPasswordServerSalt) {
     return errorResponse(API_ERROR.VAULT_NOT_SETUP, 404);
   }
 
@@ -90,7 +94,9 @@ async function handlePOST(request: NextRequest) {
     .update(parsed.data.authHash + user.masterPasswordServerSalt)
     .digest("hex");
 
-  if (computedHash !== user.masterPasswordServerHash) {
+  const hashA = Buffer.from(computedHash, "hex");
+  const hashB = Buffer.from(user.masterPasswordServerHash, "hex");
+  if (hashA.length !== hashB.length || !timingSafeEqual(hashA, hashB)) {
     const failResult = await recordFailure(session.user.id, request);
     if (failResult === null) {
       // lock_timeout: counter NOT incremented, temporary contention

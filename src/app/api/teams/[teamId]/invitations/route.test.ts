@@ -97,6 +97,7 @@ describe("GET /api/teams/[teamId]/invitations", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].email).toBe("user@test.com");
+    expect(json[0]).not.toHaveProperty("token");
   });
 });
 

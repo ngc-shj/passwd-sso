@@ -122,7 +122,7 @@ async function applyAddOperations(
   if (userIds.length === 0) return;
 
   const existingMembers = await tx.teamMember.findMany({
-    where: { teamId, userId: { in: userIds } },
+    where: { teamId, userId: { in: userIds }, deactivatedAt: null },
     select: { id: true, userId: true, role: true },
   });
   const existingByUserId = new Map(existingMembers.map((m) => [m.userId, m]));
@@ -185,11 +185,13 @@ async function applyRemoveOperations(
     }
   }
 
-  const toDowngrade = freshMembers.filter((m) => m.role === role);
-  if (toDowngrade.length > 0) {
+  const toRemove = freshMembers.filter((m) => m.role === role);
+  if (toRemove.length > 0) {
+    // Deactivate members removed from the group (not downgrade to MEMBER,
+    // which would be a privilege escalation for VIEWER role)
     await tx.teamMember.updateMany({
-      where: { id: { in: toDowngrade.map((m) => m.id) } },
-      data: { role: TEAM_ROLE.MEMBER },
+      where: { id: { in: toRemove.map((m) => m.id) } },
+      data: { deactivatedAt: new Date() },
     });
   }
 }
