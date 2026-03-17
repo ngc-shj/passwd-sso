@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
 
 const { mockAuth, mockCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -34,6 +35,19 @@ describe("POST /api/watchtower/start", () => {
     expect(json.ok).toBe(true);
     expect(mockCheck).toHaveBeenCalledTimes(1);
     expect(mockCheck.mock.calls[0][0]).toContain("rl:watchtower:start:");
+  });
+
+  it("accepts NextRequest argument", async () => {
+    mockAuth.mockResolvedValue({ user: { id: "user-req-test" } });
+    const req = new NextRequest("http://localhost:3000/api/watchtower/start", {
+      method: "POST",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    expect(Object.keys(json)).toContain("ok");
+    expect(typeof json.ok).toBe("boolean");
   });
 
   it("returns 429 during cooldown", async () => {
