@@ -7,6 +7,7 @@ const {
   mockExtractRequestMeta,
   mockGetLogger,
   mockLoggerInstance,
+  mockNotifyAdminsOfLockout,
 } = vi.hoisted(() => {
   const mockLoggerInstance = {
     info: vi.fn(),
@@ -20,6 +21,7 @@ const {
     mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: null, userAgent: null }),
     mockGetLogger: vi.fn(() => mockLoggerInstance),
     mockLoggerInstance,
+    mockNotifyAdminsOfLockout: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -44,6 +46,9 @@ vi.mock("@/lib/constants", () => ({
     VAULT_LOCKOUT_TRIGGERED: "VAULT_LOCKOUT_TRIGGERED",
   },
   AUDIT_SCOPE: { PERSONAL: "PERSONAL" },
+}));
+vi.mock("@/lib/lockout-admin-notify", () => ({
+  notifyAdminsOfLockout: mockNotifyAdminsOfLockout,
 }));
 
 import { checkLockout, recordFailure, resetLockout } from "./account-lockout";
@@ -295,6 +300,76 @@ describe("recordFailure", () => {
   it("rethrows unexpected errors", async () => {
     mockPrismaTransaction.mockRejectedValue(new Error("unexpected"));
     await expect(recordFailure("user-1")).rejects.toThrow("unexpected");
+  });
+
+  it("calls notifyAdminsOfLockout when threshold 5 is first crossed (4→5)", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 4,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    await recordFailure("user-1");
+    expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
+      userId: "user-1",
+      attempts: 5,
+      lockMinutes: 15,
+      ip: null,
+    });
+  });
+
+  it("calls notifyAdminsOfLockout when threshold 10 is first crossed (9→10)", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 9,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    await recordFailure("user-1");
+    expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
+      userId: "user-1",
+      attempts: 10,
+      lockMinutes: 60,
+      ip: null,
+    });
+  });
+
+  it("calls notifyAdminsOfLockout when threshold 15 is first crossed (14→15)", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 14,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    await recordFailure("user-1");
+    expect(mockNotifyAdminsOfLockout).toHaveBeenCalledWith({
+      userId: "user-1",
+      attempts: 15,
+      lockMinutes: 1440,
+      ip: null,
+    });
+  });
+
+  it("does NOT call notifyAdminsOfLockout on 5→6 (already past threshold)", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 5,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    await recordFailure("user-1");
+    expect(mockNotifyAdminsOfLockout).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call notifyAdminsOfLockout when attempts < 5", async () => {
+    setupTransaction({
+      failed_unlock_attempts: 2,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    await recordFailure("user-1");
+    expect(mockNotifyAdminsOfLockout).not.toHaveBeenCalled();
   });
 });
 
