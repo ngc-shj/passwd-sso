@@ -134,9 +134,10 @@ async function handlePOST(req: NextRequest) {
   // Audit log (async nonblocking; logAudit handles errors internally)
   const { ip } = extractRequestMeta(req);
   logAudit({
-    scope: AUDIT_SCOPE.TEAM,
+    scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     userId: operatorId,
+    tenantId: operator.tenantId,
     metadata: {
       targetVersion,
       revokedShares,
