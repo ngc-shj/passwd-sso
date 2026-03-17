@@ -409,25 +409,26 @@ export async function runDirectorySync(
         prisma.$transaction(async (tx) => {
           // Create new users
           // Batch pre-fetch: all users by email for toCreate
-          const createEmails = toCreate.map((pu) => pu.email);
+          const createEmails = toCreate.map((pu) => pu.email.toLowerCase());
           const existingUsers = await tx.user.findMany({
-            where: { email: { in: createEmails } },
+            where: { email: { in: createEmails, mode: "insensitive" } },
             select: { id: true, email: true },
           });
-          const userByEmail = new Map(existingUsers.map((u) => [u.email, u]));
+          const userByEmail = new Map(existingUsers.map((u) => [u.email!.toLowerCase(), u]));
 
           // Create missing users individually (need IDs back)
           for (const pu of toCreate) {
-            if (!userByEmail.has(pu.email)) {
+            const emailKey = pu.email.toLowerCase();
+            if (!userByEmail.has(emailKey)) {
               const newUser = await tx.user.create({
                 data: { tenantId, email: pu.email, name: pu.displayName },
               });
-              userByEmail.set(pu.email, newUser);
+              userByEmail.set(emailKey, newUser);
             }
           }
 
           // Batch pre-fetch: tenantMembers for all users in toCreate
-          const allUserIds = toCreate.map((pu) => userByEmail.get(pu.email)!.id);
+          const allUserIds = toCreate.map((pu) => userByEmail.get(pu.email.toLowerCase())!.id);
           const existingTenantMembers = await tx.tenantMember.findMany({
             where: { tenantId, userId: { in: allUserIds } },
             select: { id: true, userId: true, deactivatedAt: true },
@@ -436,7 +437,7 @@ export async function runDirectorySync(
 
           // Process each user: create/reactivate tenantMember + upsert mapping
           for (const pu of toCreate) {
-            const user = userByEmail.get(pu.email)!;
+            const user = userByEmail.get(pu.email.toLowerCase())!;
             const existing = tmByUserId.get(user.id);
 
             if (!existing) {

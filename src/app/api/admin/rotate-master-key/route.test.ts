@@ -172,6 +172,8 @@ describe("POST /api/admin/rotate-master-key", () => {
     // Verify audit log was called
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
+        tenantId: "tenant-1",
         action: "MASTER_KEY_ROTATION",
         userId: "user-1",
         metadata: expect.objectContaining({
