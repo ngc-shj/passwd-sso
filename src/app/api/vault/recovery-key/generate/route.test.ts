@@ -106,6 +106,17 @@ describe("POST /api/vault/recovery-key/generate", () => {
     expect(json.error).toBe("VERIFIER_NOT_SET");
   });
 
+  it("returns 409 when verifier version is unsupported", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue({
+      ...userWithVault,
+      passphraseVerifierVersion: 999,
+    });
+    const res = await POST(createRequest("POST", URL, { body: validBody }));
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json.error).toBe("VERIFIER_VERSION_UNSUPPORTED");
+  });
+
   it("returns 401 when passphrase verification fails", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
       ...userWithVault,

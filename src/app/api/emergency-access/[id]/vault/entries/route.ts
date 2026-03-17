@@ -5,8 +5,11 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+
+const entriesLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 // GET /api/emergency-access/[id]/vault/entries — Fetch owner's encrypted entries
 async function handleGET(
@@ -16,6 +19,10 @@ async function handleGET(
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
+  }
+
+  if (!(await entriesLimiter.check(`rl:ea_vault_entries:${session.user.id}`)).allowed) {
+    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
   }
 
   const { id } = await params;

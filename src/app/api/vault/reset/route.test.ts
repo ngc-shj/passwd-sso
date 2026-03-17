@@ -4,7 +4,7 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaPasswordShare, mockPrismaVaultKey, mockPrismaTag, mockPrismaFolder,
   mockPrismaEmergencyGrant, mockPrismaTeamMemberKey, mockPrismaTeamMember,
-  mockPrismaTransaction, mockRateLimiter, mockLogAudit,
+  mockPrismaTransaction, mockRateLimiter, mockLogAudit, mockExecuteVaultReset,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { update: vi.fn() },
@@ -20,6 +20,7 @@ const { mockAuth, mockPrismaUser, mockPrismaPasswordEntry, mockPrismaAttachment,
   mockPrismaTransaction: vi.fn(),
   mockRateLimiter: { check: vi.fn() },
   mockLogAudit: vi.fn(),
+  mockExecuteVaultReset: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -48,6 +49,9 @@ vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
+vi.mock("@/lib/vault-reset", () => ({
+  executeVaultReset: mockExecuteVaultReset,
+}));
 // executeVaultReset uses withBypassRls (not withUserTenantRls)
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
@@ -70,6 +74,7 @@ describe("POST /api/vault/reset", () => {
     mockPrismaPasswordEntry.count.mockResolvedValue(5);
     mockPrismaAttachment.count.mockResolvedValue(2);
     mockPrismaTransaction.mockResolvedValue([]);
+    mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 5, deletedAttachments: 2 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -105,8 +110,8 @@ describe("POST /api/vault/reset", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
 
-    // Transaction was called
-    expect(mockPrismaTransaction).toHaveBeenCalledTimes(1);
+    // executeVaultReset was called
+    expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
 
     // Audit log
     expect(mockLogAudit).toHaveBeenCalledWith(
@@ -125,25 +130,21 @@ describe("POST /api/vault/reset", () => {
     expect(res.status).toBe(400);
   });
 
-  it("includes ECDH cleanup, TeamMemberKey deletion, and keyDistributed reset in transaction", async () => {
+  it("returns 500 when executeVaultReset throws", async () => {
+    mockExecuteVaultReset.mockRejectedValue(new Error("DB failure"));
+    await expect(
+      POST(createRequest("POST", URL, { body: { confirmation: "DELETE MY VAULT" } })),
+    ).rejects.toThrow("DB failure");
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("delegates full vault wipe to executeVaultReset with correct userId", async () => {
     const res = await POST(createRequest("POST", URL, {
       body: { confirmation: "DELETE MY VAULT" },
     }));
     expect(res.status).toBe(200);
 
-    // Verify TeamMemberKey.deleteMany was included
-    expect(mockPrismaTeamMemberKey.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
-    });
-
-    // Verify TeamMember.updateMany was included (reset keyDistributed)
-    expect(mockPrismaTeamMember.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1" },
-      data: { keyDistributed: false },
-    });
-
-    // Transaction should have 10 operations (original 7 + 2 team E2E + 1 folder)
-    const txArray = mockPrismaTransaction.mock.calls[0][0];
-    expect(txArray).toHaveLength(10);
+    expect(mockExecuteVaultReset).toHaveBeenCalledOnce();
+    expect(mockExecuteVaultReset).toHaveBeenCalledWith("user-1");
   });
 });

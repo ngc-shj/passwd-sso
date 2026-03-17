@@ -238,13 +238,14 @@ describe("DELETE /api/folders/[id]", () => {
 
   it("deletes folder and promotes children", async () => {
     mockPrismaFolder.findUnique.mockResolvedValue(ownedFolder);
-    // findMany: 1st call = children, 2nd call = siblings at target
-    mockPrismaFolder.findMany
-      .mockResolvedValueOnce([]) // no children
-      .mockResolvedValueOnce([]); // no siblings
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        folder: mockPrismaFolder,
+        folder: {
+          ...mockPrismaFolder,
+          findMany: vi.fn()
+            .mockResolvedValueOnce([]) // children
+            .mockResolvedValueOnce([]), // siblings
+        },
         passwordEntry: mockPrismaPasswordEntry,
       });
     });
@@ -266,15 +267,14 @@ describe("DELETE /api/folders/[id]", () => {
     mockPrismaFolder.findUnique.mockResolvedValue(parentFolder);
 
     const childId = "cm000000000000000child01";
-    // findMany: 1st = children, 2nd = siblings at root (includes the folder being deleted)
-    mockPrismaFolder.findMany
-      .mockResolvedValueOnce([{ id: childId, name: "テスト" }])
-      .mockResolvedValueOnce([{ id: FOLDER_ID, name: "テスト" }]);
 
     const txUpdates: Array<{ where: unknown; data: unknown }> = [];
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
         folder: {
+          findMany: vi.fn()
+            .mockResolvedValueOnce([{ id: childId, name: "テスト" }]) // children
+            .mockResolvedValueOnce([{ id: FOLDER_ID, name: "テスト" }]), // siblings
           update: vi.fn(({ where, data }: { where: unknown; data: unknown }) => {
             txUpdates.push({ where, data });
             return Promise.resolve({});

@@ -15,6 +15,8 @@ import {
   decryptServerData,
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
+import { resolve4, resolve6 } from "node:dns/promises";
+import { isIpInCidr } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 
@@ -93,6 +95,63 @@ function sanitizeWebhookData(value: unknown): unknown {
   return value;
 }
 
+/**
+ * CIDR ranges that must never receive webhook deliveries.
+ * Covers RFC 1918, loopback, link-local, cloud metadata, CGNAT,
+ * benchmarking, IETF reserved, and IPv6 equivalents.
+ */
+const BLOCKED_CIDRS = [
+  // IPv4
+  "10.0.0.0/8",         // RFC 1918
+  "172.16.0.0/12",      // RFC 1918
+  "192.168.0.0/16",     // RFC 1918
+  "127.0.0.0/8",        // loopback
+  "0.0.0.0/8",          // "this" network
+  "169.254.0.0/16",     // link-local + cloud metadata (169.254.169.254)
+  "100.64.0.0/10",      // RFC 6598 CGNAT (also Tailscale)
+  "192.0.0.0/24",       // RFC 6890 IETF protocol assignments
+  "198.18.0.0/15",      // RFC 2544 benchmarking
+  "240.0.0.0/4",        // RFC 1112 reserved
+  // IPv6
+  "::1/128",            // loopback
+  "::/128",             // unspecified
+  "fe80::/10",          // link-local
+  "fc00::/7",           // unique local (ULA)
+];
+
+/**
+ * Check if an IP address belongs to a private/reserved range
+ * using the existing CIDR matcher from ip-access.ts.
+ */
+function isPrivateIp(ip: string): boolean {
+  return BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr));
+}
+
+/**
+ * Resolve hostname and reject private/reserved IPs to prevent SSRF via DNS rebinding.
+ */
+async function assertPublicHostname(url: string): Promise<void> {
+  const hostname = new URL(url).hostname;
+
+  // Already an IP literal — check directly
+  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) {
+    if (isPrivateIp(hostname)) throw new Error(`Private IP rejected: ${hostname}`);
+    return;
+  }
+
+  const ips: string[] = [];
+  try { ips.push(...await resolve4(hostname)); } catch { /* no A records */ }
+  try { ips.push(...await resolve6(hostname)); } catch { /* no AAAA records */ }
+
+  if (ips.length === 0) throw new Error(`DNS resolution failed: ${hostname}`);
+
+  for (const ip of ips) {
+    if (isPrivateIp(ip)) {
+      throw new Error(`Hostname ${hostname} resolves to private IP: ${ip}`);
+    }
+  }
+}
+
 async function deliverWithRetry(
   url: string,
   payload: string,
@@ -100,6 +159,7 @@ async function deliverWithRetry(
 ): Promise<boolean> {
   for (let attempt = 0; attempt < WEBHOOK_MAX_RETRIES; attempt++) {
     try {
+      await assertPublicHostname(url);
       const res = await fetch(url, {
         method: "POST",
         headers: {

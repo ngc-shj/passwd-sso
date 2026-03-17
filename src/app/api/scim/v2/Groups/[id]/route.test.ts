@@ -261,7 +261,7 @@ describe("PATCH /api/scim/v2/Groups/[id]", () => {
     expect(res!.status).toBe(200);
     expect(mockTeamMember.updateMany).toHaveBeenCalledWith({
       where: { id: { in: ["tm1"] } },
-      data: { role: "MEMBER" },
+      data: { deactivatedAt: expect.any(Date) },
     });
   });
 

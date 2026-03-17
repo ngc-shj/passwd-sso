@@ -13,7 +13,7 @@ vi.mock("@/components/ui/avatar", () => ({
     <div data-testid="avatar" className={className}>{children}</div>
   ),
   AvatarImage: ({ src }: { src?: string }) => (
-    src ? <img data-testid="avatar-image" src={src} /> : null
+    src ? <span data-testid="avatar-image" data-src={src} /> : null
   ),
   AvatarFallback: ({ children }: { children: ReactNode }) => (
     <span data-testid="avatar-fallback">{children}</span>
@@ -80,7 +80,7 @@ describe("MemberInfo", () => {
   it("passes image src to AvatarImage", () => {
     renderMemberInfo({ name: "Test", email: null, image: "https://example.com/photo.jpg" });
 
-    expect(screen.getByTestId("avatar-image")).toHaveAttribute("src", "https://example.com/photo.jpg");
+    expect(screen.getByTestId("avatar-image")).toHaveAttribute("data-src", "https://example.com/photo.jpg");
   });
 
   it("shows '(you)' label when isCurrentUser is true", () => {

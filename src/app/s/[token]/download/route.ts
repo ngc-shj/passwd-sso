@@ -98,8 +98,14 @@ export async function GET(req: NextRequest, { params }: Params) {
         return new NextResponse(null, { status: 410 });
       }
     } else {
-      // Non-protected: viewCount already incremented by page.tsx, just check limit
-      if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+      // Non-protected: atomically check and increment viewCount at download time
+      const updated: number = await prisma.$executeRaw`
+        UPDATE "password_shares"
+        SET "view_count" = "view_count" + 1
+        WHERE "id" = ${share.id}
+          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+
+      if (updated === 0) {
         return new NextResponse(null, { status: 410 });
       }
     }

@@ -131,4 +131,74 @@ describe("POST /api/passwords/[id]/history/[historyId]/restore", () => {
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
+
+  it("creates history snapshot of current entry before restoring", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const entry = {
+      id: "p1",
+      userId: DEFAULT_SESSION.user.id,
+      tenantId: "tenant-1",
+      encryptedBlob: "current-blob",
+      blobIv: "current-iv",
+      blobAuthTag: "current-tag",
+      keyVersion: 2,
+      aadVersion: 1,
+    };
+    mockEntryFindUnique.mockResolvedValue(entry);
+    mockHistoryFindUnique.mockResolvedValue({
+      id: "h1",
+      entryId: "p1",
+      encryptedBlob: "restored-blob",
+      blobIv: "restored-iv",
+      blobAuthTag: "restored-tag",
+      keyVersion: 1,
+      aadVersion: 0,
+      changedAt: new Date("2025-01-01"),
+    });
+
+    const historyCreate = vi.fn().mockResolvedValue({});
+    const entryUpdate = vi.fn().mockResolvedValue({});
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
+      await fn({
+        passwordEntryHistory: {
+          create: historyCreate,
+          findMany: vi.fn().mockResolvedValue([]),
+          deleteMany: vi.fn(),
+        },
+        passwordEntry: { update: entryUpdate },
+      });
+    });
+
+    const req = createRequest("POST", "http://localhost/api/passwords/p1/history/h1/restore");
+    const res = await POST(req, createParams({ id: "p1", historyId: "h1" }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+
+    // Snapshot of current entry must be saved before restore
+    expect(historyCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          entryId: "p1",
+          encryptedBlob: "current-blob",
+          blobIv: "current-iv",
+          blobAuthTag: "current-tag",
+          keyVersion: 2,
+          aadVersion: 1,
+        }),
+      }),
+    );
+
+    // The restored data (not the current data) must be written to the entry
+    expect(entryUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          encryptedBlob: "restored-blob",
+          blobIv: "restored-iv",
+          blobAuthTag: "restored-tag",
+        }),
+      }),
+    );
+  });
 });

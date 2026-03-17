@@ -12,10 +12,14 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
 
-function getPersonalParent(id: string): Promise<ParentNode | null> {
-  return prisma.folder
-    .findUnique({ where: { id }, select: { parentId: true, userId: true } })
-    .then((f) => (f ? { parentId: f.parentId, ownerId: f.userId } : null));
+function getPersonalParent(userId: string, id: string): Promise<ParentNode | null> {
+  return withUserTenantRls(userId, async () => {
+    const f = await prisma.folder.findUnique({
+      where: { id },
+      select: { parentId: true, userId: true },
+    });
+    return f ? { parentId: f.parentId, ownerId: f.userId } : null;
+  });
 }
 
 // GET /api/folders - List user's folders with entry count
@@ -78,8 +82,9 @@ async function handlePOST(req: NextRequest) {
   // Parent ownership + existence check
   if (parentId) {
     try {
-      await withUserTenantRls(session.user.id, async () =>
-        validateParentFolder(parentId, session.user.id, getPersonalParent),
+      await validateParentFolder(
+        parentId, session.user.id,
+        (pid) => getPersonalParent(session.user.id, pid),
       );
     } catch {
       return notFound();
@@ -88,8 +93,9 @@ async function handlePOST(req: NextRequest) {
 
   // Depth check
   try {
-    await withUserTenantRls(session.user.id, async () =>
-      validateFolderDepth(parentId ?? null, session.user.id, getPersonalParent),
+    await validateFolderDepth(
+      parentId ?? null, session.user.id,
+      (pid) => getPersonalParent(session.user.id, pid),
     );
   } catch {
     return errorResponse(API_ERROR.FOLDER_MAX_DEPTH_EXCEEDED, 400);

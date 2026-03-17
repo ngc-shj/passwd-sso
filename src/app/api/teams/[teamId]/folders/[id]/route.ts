@@ -204,47 +204,43 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   // Collect children and detect name conflicts at the target parent level.
-  const children = await withTeamTenantRls(teamId, async () =>
-    prisma.teamFolder.findMany({
-      where: { parentId: id },
-      select: { id: true, name: true },
-    }),
-  );
-
-  const siblingsAtTarget = await withTeamTenantRls(teamId, async () =>
-    prisma.teamFolder.findMany({
-      where: { parentId: existing.parentId, teamId: teamId },
-      select: { id: true, name: true },
-    }),
-  );
-
-  const usedNames = new Set(
-    siblingsAtTarget
-      .filter((s) => s.id !== id)
-      .map((s) => s.name),
-  );
-
-  // Include the deleted folder's name (it still exists during the transaction)
-  usedNames.add(existing.name);
-
-  const renames: Array<{ childId: string; newName: string }> = [];
-  for (const child of children) {
-    if (usedNames.has(child.name)) {
-      let suffix = 2;
-      let newName = `${child.name} (${suffix})`;
-      while (usedNames.has(newName)) {
-        suffix++;
-        newName = `${child.name} (${suffix})`;
-      }
-      renames.push({ childId: child.id, newName });
-      usedNames.add(newName);
-    } else {
-      usedNames.add(child.name);
-    }
-  }
-
   await withTeamTenantRls(teamId, async () =>
     prisma.$transaction(async (tx) => {
+      // Fetch children and siblings inside the transaction to avoid TOCTOU
+      const children = await tx.teamFolder.findMany({
+        where: { parentId: id },
+        select: { id: true, name: true },
+      });
+
+      const siblingsAtTarget = await tx.teamFolder.findMany({
+        where: { parentId: existing.parentId, teamId: teamId },
+        select: { id: true, name: true },
+      });
+
+      const usedNames = new Set(
+        siblingsAtTarget
+          .filter((s) => s.id !== id)
+          .map((s) => s.name),
+      );
+
+      usedNames.add(existing.name);
+
+      const renames: Array<{ childId: string; newName: string }> = [];
+      for (const child of children) {
+        if (usedNames.has(child.name)) {
+          let suffix = 2;
+          let newName = `${child.name} (${suffix})`;
+          while (usedNames.has(newName)) {
+            suffix++;
+            newName = `${child.name} (${suffix})`;
+          }
+          renames.push({ childId: child.id, newName });
+          usedNames.add(newName);
+        } else {
+          usedNames.add(child.name);
+        }
+      }
+
       for (const child of children) {
         const rename = renames.find((r) => r.childId === child.id);
         await tx.teamFolder.update({

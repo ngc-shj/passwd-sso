@@ -195,7 +195,7 @@ describe("POST /api/scim/v2/Users", () => {
       const tx = {
         user: {
           findUnique: vi.fn().mockResolvedValue(null),
-          create: vi.fn().mockResolvedValue({ id: "new-user", email: "new@example.com", name: "New" }),
+          create: vi.fn().mockResolvedValue({ id: "new-user", tenantId: "tenant-1", email: "new@example.com", name: "New" }),
         },
         tenantMember: {
           findUnique: vi.fn().mockResolvedValue(null),
@@ -228,7 +228,7 @@ describe("POST /api/scim/v2/Users", () => {
   it("returns 409 when user already exists in tenant", async () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "dup@example.com" }) },
+        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com" }) },
         tenantMember: { findUnique: vi.fn().mockResolvedValue({ id: "tm1" }) },
       };
       return fn(tx);
@@ -260,7 +260,7 @@ describe("POST /api/scim/v2/Users", () => {
   it("returns 409 when externalId is already mapped to another user", async () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "dup@example.com", name: "Dup" }) },
+        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "dup@example.com", name: "Dup" }) },
         tenantMember: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),
@@ -337,7 +337,7 @@ describe("POST /api/scim/v2/Users", () => {
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
         user: {
-          findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "inactive@example.com", name: "Inactive" }),
+          findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "inactive@example.com", name: "Inactive" }),
         },
         tenantMember: {
           findUnique: vi.fn().mockResolvedValue(null),
@@ -374,7 +374,7 @@ describe("POST /api/scim/v2/Users", () => {
     const create = vi.fn();
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
-        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", email: "same@example.com", name: "Same" }) },
+        user: { findUnique: vi.fn().mockResolvedValue({ id: "user-1", tenantId: "tenant-1", email: "same@example.com", name: "Same" }) },
         tenantMember: {
           findUnique: vi.fn().mockResolvedValue(null),
           create: vi.fn().mockResolvedValue({ id: "tm1", deactivatedAt: null }),

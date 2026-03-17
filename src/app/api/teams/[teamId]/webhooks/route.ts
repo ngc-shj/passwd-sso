@@ -17,8 +17,9 @@ import {
   encryptServerData,
 } from "@/lib/crypto-server";
 import { randomBytes } from "node:crypto";
+import { assertOrigin } from "@/lib/csrf";
 import { z } from "zod";
-import { AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
@@ -44,7 +45,7 @@ const createWebhookSchema = z.object({
     },
     { message: "URL must use HTTPS and must not point to private/internal addresses" },
   ),
-  events: z.array(z.enum(AUDIT_ACTION_VALUES as unknown as [string, ...string[]])).min(1).max(AUDIT_ACTION_VALUES.length),
+  events: z.array(z.enum(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]])).min(1).max(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks
@@ -88,6 +89,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
 // POST /api/teams/[teamId]/webhooks — Create a webhook
 async function handlePOST(req: NextRequest, { params }: Params) {
+  const originError = assertOrigin(req);
+  if (originError) return originError;
+
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

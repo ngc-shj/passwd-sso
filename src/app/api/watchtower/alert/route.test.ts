@@ -186,7 +186,7 @@ describe("POST /api/watchtower/alert", () => {
     mockWithUserTenantRls.mockResolvedValue({ email: null, locale: "en" });
     const res = await POST(makeRequest({ newBreachCount: 1, teamId: "team-abc" }));
     expect(res.status).toBe(200);
-    expect(mockCheck).toHaveBeenCalledWith("rl:watchtower:alert:team:team-abc");
+    expect(mockCheck).toHaveBeenCalledWith(`rl:watchtower:alert:team:team-abc:${userId}`);
   });
 
   it("logs audit with TEAM scope when teamId is provided", async () => {
