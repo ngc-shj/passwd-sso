@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
+import { AUDIT_LOG_MAX_ROWS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
 
 const {
   mockAuth,
@@ -234,6 +235,34 @@ describe("GET /api/audit-logs/download", () => {
         skip: 1,
       }),
     );
+  });
+
+  it("stops fetching after AUDIT_LOG_MAX_ROWS are reached", async () => {
+    const maxBatches = AUDIT_LOG_MAX_ROWS / AUDIT_LOG_BATCH_SIZE;
+    const fullBatch = Array.from({ length: AUDIT_LOG_BATCH_SIZE }, (_, index) => ({
+      id: `log-${index}`,
+      action: "ENTRY_CREATE",
+      targetType: null,
+      targetId: null,
+      metadata: null,
+      ip: null,
+      userAgent: null,
+      createdAt: new Date("2026-01-15T10:00:00Z"),
+      user: { id: "user-1", name: "Test User", email: "test@example.com" },
+    }));
+
+    let callCount = 0;
+    mockPrismaAuditLog.findMany.mockImplementation(async () => {
+      callCount++;
+      return fullBatch;
+    });
+
+    const req = createRequest("GET", "http://localhost:3000/api/audit-logs/download");
+    const res = await GET(req);
+    await parseStreamResponse(res);
+
+    expect(callCount).toBe(maxBatches);
+    expect(mockPrismaAuditLog.findMany).toHaveBeenCalledTimes(maxBatches);
   });
 
   it("records audit log download event", async () => {

@@ -539,4 +539,33 @@ describe("patchScimGroup", () => {
       patchScimGroup(TENANT_ID, SCIM_ID, [{ op: "add", userId: "user-a" }], BASE_URL),
     ).rejects.toThrow(ScimGroupNotFoundError);
   });
+
+  it("treats a deactivated team member as new and calls createMany when re-adding", async () => {
+    mockScimGroupMappingFindUnique.mockResolvedValue(DEFAULT_MAPPING);
+    // existingMembers query uses deactivatedAt: null — deactivated record is filtered out,
+    // so the mock returns [] simulating the filter working correctly
+    mockTeamMemberFindMany
+      .mockResolvedValueOnce([]) // existingMembers in applyAddOperations (deactivatedAt: null excludes the deactivated record)
+      .mockResolvedValueOnce([]); // loadGroupMembers after tx
+    // user-a is an active tenant member
+    mockTenantMemberFindMany.mockResolvedValue([{ userId: "user-a" }]);
+    mockTeamMemberCreateMany.mockResolvedValue({ count: 1 });
+
+    await patchScimGroup(
+      TENANT_ID,
+      SCIM_ID,
+      [{ op: "add", userId: "user-a" }],
+      BASE_URL,
+    );
+
+    // user-a had a deactivated TeamMember record but it was excluded by the filter,
+    // so it lands in toCreateUserIds and createMany is called to re-create it
+    expect(mockTeamMemberCreateMany).toHaveBeenCalledOnce();
+    const createCall = mockTeamMemberCreateMany.mock.calls[0][0];
+    expect(createCall.data).toHaveLength(1);
+    expect(createCall.data[0].userId).toBe("user-a");
+    expect(createCall.data[0].teamId).toBe(TEAM_ID);
+    expect(createCall.data[0].role).toBe("ADMIN");
+    expect(mockTeamMemberUpdateMany).not.toHaveBeenCalled();
+  });
 });
