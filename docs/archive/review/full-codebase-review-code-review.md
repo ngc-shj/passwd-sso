@@ -201,3 +201,72 @@ None — all findings were within scope boundaries.
 
 #### T-M2 [Major] No global coverage threshold — FIXED
 - **Action:** Added `lines: 60` global threshold to vitest.config.ts
+
+### Round 4 — HIBP, Watchtower, Audit Download, Attachment Security
+
+#### F1 [Major] HIBP unbounded in-memory maps — FIXED
+- **Action:** Replaced hand-rolled rate limiter with `createRateLimiter`; added cache eviction with TTL and size cap
+
+#### F2 [Major] Watchtower alert team rate key excludes userId — FIXED
+- **Action:** Added userId to team rate-limit key
+
+#### F3 [Major] Audit log download no row cap — FIXED
+- **Action:** Enforced `AUDIT_LOG_MAX_ROWS` in streaming loop
+
+#### S-F2 [Major] Client-supplied attachmentId path traversal — FIXED
+- **Action:** Validated clientId against UUID regex; fallback to server-generated UUID
+
+### Round 5 — SCIM Groups, Break Glass, Invitation Token
+
+#### F1 [Major] SCIM Group POST 201 for idempotent re-create — FIXED
+- **Action:** Return 200 when mapping already exists (RFC 7644 §3.3 compliance)
+
+#### F2 [Major] SCIM remove VIEWER→MEMBER privilege escalation — FIXED
+- **Action:** Changed `applyRemoveOperations` to deactivate members instead of downgrading to MEMBER
+
+#### S1 [Major] SCIM add ignores deactivated members — FIXED
+- **Action:** Added `deactivatedAt: null` filter to `applyAddOperations` member lookup
+
+#### F3 [Major] Break Glass unbounded cache maps — FIXED
+- **Action:** Added eviction with TTL sweep and size cap
+
+#### S2 [Minor] Invitation token exposed in GET list — FIXED
+- **Action:** Removed `token` from GET response; added test assertion for absence
+
+### Round 6 — Webhooks, Audit Scope, CSP
+
+#### F1 [Major] Team webhook events accepts all audit actions — FIXED
+- **Action:** Created `TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS` allowlist; restricted schema
+
+#### F2 [Major] rotate-master-key audit scope TEAM→TENANT — FIXED
+- **Action:** Changed scope to TENANT with explicit tenantId
+
+#### S1 [Minor] Team webhook POST missing assertOrigin — FIXED
+
+#### S3 [Minor] CSP report rate-limiter unbounded — FIXED
+- **Action:** Added eviction with size cap
+
+### Round 7 — Directory Sync Email Case
+
+#### F1 [Major] Directory sync email case-insensitive lookup — FIXED
+- **Action:** Normalized email to lowercase for Map keys; used `mode: "insensitive"` in Prisma query
+
+### Round 8 — Convergence Check
+
+All three experts returned **No findings** (1 Minor test gap acknowledged).
+
+## Final Summary
+
+| Round | Critical | Major | Minor | Status |
+|-------|----------|-------|-------|--------|
+| R1 | 0 (2 rejected) | 4 | 3 | All fixed |
+| R2 | 0 | 1 | 0 | All fixed |
+| R3 | 0 | 4 | 4 | All fixed |
+| R4 | 0 | 4 | 6 | 4 fixed, 6 acknowledged |
+| R5 | 0 | 4 | 2 | All fixed |
+| R6 | 0 | 2 | 4 | All fixed |
+| R7 | 0 | 1 | 2 | All fixed |
+| R8 | 0 | 0 | 1 | Converged |
+| **Total** | **0** | **20** | **22** | **Complete** |
+
+Files changed: 50 | Lines: +1717 / -187 | Tests: 4958 passing
