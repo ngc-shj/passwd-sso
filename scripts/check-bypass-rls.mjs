@@ -60,7 +60,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/[id]/approve/route.ts", ["emergencyAccessGrant", "user"]],
   ["src/app/api/emergency-access/[id]/decline/route.ts", ["emergencyAccessGrant", "user"]],
   ["src/app/api/emergency-access/[id]/request/route.ts", ["emergencyAccessGrant", "user"]],
-  ["src/app/api/emergency-access/[id]/revoke/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/revoke/route.ts", ["user"]],
   ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
 ]);
