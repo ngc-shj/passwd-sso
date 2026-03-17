@@ -211,14 +211,17 @@ describe("DELETE /api/folders/[id]", () => {
   let txFolderDelete: ReturnType<typeof vi.fn>;
   let txEntryUpdateMany: ReturnType<typeof vi.fn>;
 
+  let txFolderFindMany: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     txFolderUpdate = vi.fn();
     txFolderDelete = vi.fn();
     txEntryUpdateMany = vi.fn();
+    txFolderFindMany = vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     mockTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {
       await fn({
-        folder: { update: txFolderUpdate, delete: txFolderDelete },
+        folder: { findMany: txFolderFindMany, update: txFolderUpdate, delete: txFolderDelete },
         passwordEntry: { updateMany: txEntryUpdateMany },
       });
     });
@@ -258,7 +261,8 @@ describe("DELETE /api/folders/[id]", () => {
       parentId: null,
       name: "Parent",
     });
-    mockFolderFindMany
+    txFolderFindMany
+      .mockReset()
       .mockResolvedValueOnce([{ id: "c1", name: "Child" }]) // children
       .mockResolvedValueOnce([]); // siblings at target
 
@@ -277,7 +281,8 @@ describe("DELETE /api/folders/[id]", () => {
       parentId: null,
       name: "Parent",
     });
-    mockFolderFindMany
+    txFolderFindMany
+      .mockReset()
       .mockResolvedValueOnce([{ id: "c1", name: "Parent" }]) // children
       .mockResolvedValueOnce([]); // siblings
 
@@ -297,7 +302,8 @@ describe("DELETE /api/folders/[id]", () => {
       parentId: null,
       name: "Parent",
     });
-    mockFolderFindMany
+    txFolderFindMany
+      .mockReset()
       .mockResolvedValueOnce([{ id: "c1", name: "Parent" }]) // children
       .mockResolvedValueOnce([{ id: "s1", name: "Parent (2)" }]); // sibling already uses (2)
 
