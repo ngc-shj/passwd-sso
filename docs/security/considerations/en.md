@@ -191,6 +191,10 @@ Client(on valid):
 - Web app:
   - Vault decryption key is handled in runtime memory during unlock windows
   - Auto-lock: 15 min inactivity / 5 min hidden tab
+- Web Crypto API constraints:
+  - `CryptoKey` objects are created with `extractable: false` where possible
+  - Key material lifetime is managed by the JavaScript garbage collector after reference clearing
+  - There is no guaranteed immediate memory zeroization in browser environments (Web Crypto API limitation)
 - Browser extension:
   - token persisted in `chrome.storage.session` (cleared on browser close)
   - `vaultSecretKey` for key re-derivation is also in `chrome.storage.session`
@@ -395,6 +399,16 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 - Therefore, `chrome.storage.session` is used with compensating controls:
   TTL, scoped tokens, revoke endpoints, and auto-lock.
 - This remains a policy-sensitive area and should be periodically re-evaluated.
+- Web Crypto API does not provide explicit memory zeroization primitives.
+  Browser-managed `CryptoKey` objects are opaque and non-extractable, which prevents
+  accidental export but also means the runtime controls when key material is freed.
+- For the web app, `secretKeyRef` (Uint8Array) is explicitly cleared on lock/unload
+  (`vault-context.tsx:143`, `vault-context.tsx:280`), which is the best-effort approach
+  available in browser environments.
+- For the extension, `vaultSecretKey` in `chrome.storage.session` is cleared on lock
+  and auto-cleared by Chrome on browser close. The 15-minute auto-lock timer provides
+  an additional time-bound control.
+- For detailed technical assessment, see `security-review.md` Section 4 (Crypto Primitives).
 
 ## 15. Key Sharing (Emergency Access)
 

@@ -1,6 +1,6 @@
 # passwd-sso Production-Readiness ToDo
 
-Last updated: 2026-02-27
+Last updated: 2026-03-18
 Baseline: `main` branch
 
 ---
@@ -35,7 +35,7 @@ Baseline: `main` branch
 | 2.3 | Required | Passphrase recovery flow | Done | Recovery key (256-bit, HKDF+AES-256-GCM) restores `secretKey` + sets new passphrase. Vault Reset (full data deletion) as final fallback. Missing-key banner prompt (reappears after 24h). 4 audit events. CSRF (Origin validation) + rate limiting included. PR #25 |
 | 2.4 | Strongly Recommended | Explicit CORS policy | Done | Same-origin-only policy explicitly enforced. OPTIONS preflight 204 + `applyCorsHeaders()` on all API return paths. `Vary: Origin` + case-insensitive dedupe. Extension bypasses CORS via Service Worker + bearer token. Policy documented in `../security/cors-policy.md`. #46, PR #57 |
 | 2.5 | Strongly Recommended | Concurrent session management | Not started | Session list view, remote logout, new-login notification |
-| 2.6 | Strongly Recommended | Document key-material memory handling | Partially done | Covered in `../security/security-review.md`. Risk acceptance under Web Crypto constraints should be published for users as well |
+| 2.6 | Strongly Recommended | Document key-material memory handling | Done | Technical review in `../security/security-review.md` Section 4. User-facing docs in `../security/considerations/{en,ja}.md` Sections 1.5 and 14.4. #56 |
 | 2.7 | Recommended | External third-party security audit | Not started | External crypto review (NCC Group, Cure53, etc.) |
 
 ---
@@ -47,7 +47,7 @@ Baseline: `main` branch
 | 3.1 | Required | Backup/recovery strategy | Done | AWS Backup Vault Lock (WORM/compliance) + S3 Object Lock + cross-region copy + EventBridge failure notifications. RPO 1h / RTO 2h. PR #23 |
 | 3.2 | Strongly Recommended | DB connection pool tuning | Done | pg.Pool via env tuning (max / connectionTimeoutMillis / idleTimeoutMillis / maxLifetimeSeconds / statement_timeout). `envInt()` strict parse + range guard (production fail-fast). `pool.on("error")` + SIGTERM graceful shutdown. CloudWatch RDS `DatabaseConnections` alarm added. #48 |
 | 3.3 | Strongly Recommended | Separate migration strategy | Done | ECS one-off task definition (Fargate RunTask) fully separates migrations from app startup. `deploy.sh` enforces migrate -> success check -> app update order. docker-compose profile split. `../operations/deployment.md`. #47 |
-| 3.4 | Recommended | Redis high availability | Not started | Current deployment is single Redis. Consider Redis Sentinel / ElastiCache failover |
+| 3.4 | Recommended | Redis high availability | Done | Sentinel topology documented in `../operations/redis-ha.md` with failover test procedure and verification checklist. Incident runbook updated with Sentinel-specific actions. #55 |
 
 ---
 
@@ -56,9 +56,9 @@ Baseline: `main` branch
 | # | Priority | Item | Status | Notes |
 |---|--------|------|------|------|
 | 4.1 | Required | Introduce E2E tests | Done | Playwright (Chromium). 7 specs / 22 cases: setup -> unlock -> CRUD -> lock/reunlock -> Recovery Key -> Vault Reset -> locale switch. Node crypto helpers (shared `CRYPTO_CONSTANTS`), dual DB safety guard (URL pattern + `E2E_ALLOW_DB_MUTATION`), 16 crypto-compat tests. CI job includes PostgreSQL + Redis services |
-| 4.2 | Strongly Recommended | Expand coverage targets | Partially done | Component test foundation in place (`@testing-library/react` + `jsdom`, `.test.tsx`). Coverage scope still limited to 4 paths -> add `crypto-client.ts` and component layers |
+| 4.2 | Strongly Recommended | Expand coverage targets | Done | Component and crypto layers included in coverage targets. 60% global / 80% critical crypto/auth modules. ESLint rule forbids conditional assertion skip in e2e. #54, #37 |
 | 4.3 | Strongly Recommended | Load testing | Done | k6 with 6 scenarios (health / vault-unlock / passwords-list / passwords-create / passwords-generate / mixed-workload). DB seed script with triple safety guards + smoke test. Initial SLO goals + threshold-based pass/fail. #49 |
-| 4.4 | Recommended | Automated security scanning | Not started | Integrate Dependabot / Snyk / Trivy (container) into CI |
+| 4.4 | Recommended | Automated security scanning | Done | Trivy container scan + npm audit (app/ext/cli) + license audit in CI. Vulnerability triage procedure in `../security/vulnerability-triage.md`. #51 |
 
 ---
 
@@ -68,7 +68,7 @@ Baseline: `main` branch
 |---|--------|------|------|------|
 | 5.1 | Required | Privacy policy / terms of service | Not started | APPI (Japan), GDPR alignment. Data Processing Agreement (DPA) |
 | 5.2 | Strongly Recommended | Dependency license audit | Done | CI strict mode (`--strict`) fails on unreviewed/expired entries. Allowlist JSON with 11 required fields for exceptions. Policy doc: `../security/license-policy.md` |
-| 5.3 | Strongly Recommended | Incident response runbook | Not started | Escalation, patching, and user-notification flow for vulnerabilities |
+| 5.3 | Strongly Recommended | Incident response runbook | Done | `../operations/incident-runbook.md` with key compromise, DB breach, service degradation procedures, and communication templates. #45 |
 | 5.4 | Recommended | SOC 2 / ISMAP certification | Not started | Long-term goal; ISMAP is especially relevant for Japan market |
 
 ---
@@ -125,23 +125,23 @@ Assuming OSS-first public operation, the following are out of immediate scope:
 - `2.7` External third-party security audit
 - `5.4` SOC 2 / ISMAP certifications
 
-### P1 (Immediate)
+### P1 (Immediate) — All Complete ✅
 
-1. `5.3` Incident response runbook
-2. `2.4` Explicit CORS policy
-3. `3.3` Migration strategy separation
-4. `3.2` DB connection pool tuning
-5. `4.3` Load testing
+1. ~~`5.3` Incident response runbook~~ ✅
+2. ~~`2.4` Explicit CORS policy~~ ✅
+3. ~~`3.3` Migration strategy separation~~ ✅
+4. ~~`3.2` DB connection pool tuning~~ ✅
+5. ~~`4.3` Load testing~~ ✅
 
 ### P2 (Next Phase)
 
 1. ~~`5.2` Dependency license audit~~ ✅
-2. `4.4` Automated security scanning
+2. ~~`4.4` Automated security scanning~~ ✅
 3. `2.5` Concurrent session management
 4. `1.6` Error tracking
-5. `4.2` Coverage expansion
+5. ~~`4.2` Coverage expansion~~ ✅
 
-### P3 (Mid/Long Term)
+### P3 (Mid/Long Term) — All Complete ✅
 
-1. `3.4` Redis high availability
-2. `2.6` Additional documentation on key-material memory handling
+1. ~~`3.4` Redis high availability~~ ✅
+2. ~~`2.6` Additional documentation on key-material memory handling~~ ✅

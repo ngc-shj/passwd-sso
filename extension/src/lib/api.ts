@@ -1,5 +1,3 @@
-// IMPROVE(#38): add runtime validation (zod) for API action responses
-
 /**
  * Ensure the extension has host permission for the configured server URL.
  * Prompts the user if not already granted (optional_host_permissions).

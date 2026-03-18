@@ -13,27 +13,20 @@ const TEST_ENTRY = {
   notes: "Created by E2E test",
 };
 
-/**
- * Tests run sequentially within the describe block (workers: 1).
- * create → view → edit → delete form a chain — each depends on the prior.
- * IMPROVE(#27): consolidate into test.step or use independent data per test
- */
-test.describe("Password CRUD", () => {
-  test.beforeEach(async ({ context, page }) => {
-    const { vaultReady } = getAuthState();
-    await injectSession(context, vaultReady.sessionToken);
-    await page.goto("/ja/dashboard");
+test("Password CRUD lifecycle", async ({ context, page }) => {
+  // Setup: inject session and unlock vault
+  const { vaultReady } = getAuthState();
+  await injectSession(context, vaultReady.sessionToken);
+  await page.goto("/ja/dashboard");
 
-    // Unlock vault
-    const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
-    await lockPage.unlockAndWait(vaultReady.passphrase!);
-  });
+  const lockPage = new VaultLockPage(page);
+  await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+  await lockPage.unlockAndWait(vaultReady.passphrase!);
 
-  test("create a password entry", async ({ page }) => {
-    const dashboard = new DashboardPage(page);
-    const entryPage = new PasswordEntryPage(page);
+  const dashboard = new DashboardPage(page);
+  const entryPage = new PasswordEntryPage(page);
 
+  await test.step("create a password entry", async () => {
     await dashboard.createNewPassword();
 
     await entryPage.fill(TEST_ENTRY);
@@ -45,10 +38,7 @@ test.describe("Password CRUD", () => {
     });
   });
 
-  test("view password entry details", async ({ page }) => {
-    const dashboard = new DashboardPage(page);
-
-    // Entry must exist (created by previous test)
+  await test.step("view password entry details", async () => {
     const entry = dashboard.entryByTitle(TEST_ENTRY.title);
     await expect(entry).toBeVisible({ timeout: 10_000 });
     await entry.click();
@@ -59,10 +49,9 @@ test.describe("Password CRUD", () => {
     });
   });
 
-  test("edit a password entry", async ({ page }) => {
-    const dashboard = new DashboardPage(page);
-    const entryPage = new PasswordEntryPage(page);
+  const updatedTitle = `${TEST_ENTRY.title} (edited)`;
 
+  await test.step("edit a password entry", async () => {
     const entry = dashboard.entryByTitle(TEST_ENTRY.title);
     await expect(entry).toBeVisible({ timeout: 10_000 });
     await entry.click();
@@ -76,7 +65,6 @@ test.describe("Password CRUD", () => {
     await entryPage.openEditDialog(TEST_ENTRY.title);
 
     // Change title in the edit dialog
-    const updatedTitle = `${TEST_ENTRY.title} (edited)`;
     await entryPage.titleInput.clear();
     await entryPage.titleInput.fill(updatedTitle);
     await entryPage.updateButton.click();
@@ -93,11 +81,8 @@ test.describe("Password CRUD", () => {
     });
   });
 
-  test("delete a password entry", async ({ page }) => {
-    const entryPage = new PasswordEntryPage(page);
-
-    // Find entry with our test title (may be original or edited)
-    const entry = page.getByText(/E2E Test Entry/).first();
+  await test.step("delete a password entry", async () => {
+    const entry = dashboard.entryByTitle(updatedTitle);
     await expect(entry).toBeVisible({ timeout: 10_000 });
     await entry.click();
 
@@ -107,10 +92,10 @@ test.describe("Password CRUD", () => {
     });
 
     // Delete via ⋮ menu → confirmation dialog (scoped to this card)
-    await entryPage.deleteEntry(/E2E Test Entry/);
+    await entryPage.deleteEntry(updatedTitle);
 
     // Entry should no longer be in the active list (moved to trash)
-    await expect(page.getByText(/E2E Test Entry/)).not.toBeVisible({
+    await expect(dashboard.entryByTitle(updatedTitle)).not.toBeVisible({
       timeout: 10_000,
     });
   });

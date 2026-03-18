@@ -48,3 +48,56 @@ The readiness probe (`GET /api/health/ready`) reports Redis status:
 - `pass`: Redis is healthy
 - `warn`: Redis unavailable but `HEALTH_REDIS_REQUIRED` is not set (degraded mode)
 - `fail`: Redis unavailable and `HEALTH_REDIS_REQUIRED=true` (returns 503)
+
+## Failover Test Procedure
+
+Verify Sentinel failover works correctly before relying on HA in production.
+
+### Prerequisites
+
+- Running HA setup: `docker compose -f docker-compose.yml -f docker-compose.ha.yml up -d`
+- Application connected to Sentinel (verify `REDIS_SENTINEL=true` in env)
+
+### Steps
+
+1. Identify the current master:
+   ```bash
+   docker compose exec sentinel-1 redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster
+   ```
+
+2. Stop the master node:
+   ```bash
+   docker compose stop redis
+   ```
+
+3. Wait for failover (typically 5-30 seconds):
+   ```bash
+   docker compose exec sentinel-1 redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster
+   ```
+
+4. Verify the application reconnected:
+   ```bash
+   curl -s http://localhost:3000/api/health/ready | jq '.checks.redis'
+   # Expected: {"status":"pass","responseTimeMs":N}
+   ```
+
+5. Restart the old master (joins as replica):
+   ```bash
+   docker compose start redis
+   ```
+
+### Expected Results
+
+- New master elected within 30 seconds
+- Application health check returns `{"status":"healthy",...}` with `redis.status: "pass"` after reconnection
+- No request errors during failover (rate limiting falls back to in-memory)
+
+## Verification Checklist
+
+| Check | Command | Expected |
+|-------|---------|----------|
+| Sentinel quorum | `SENTINEL ckquorum mymaster` | `OK 3 usable Sentinels` |
+| Master reachable | `SENTINEL get-master-addr-by-name mymaster` | Returns IP:port |
+| Replica count | `SENTINEL replicas mymaster` | 2 replicas listed |
+| App health | `GET /api/health/ready` | `{"status":"healthy","checks":{"redis":{"status":"pass","responseTimeMs":N}}}` |
+| Rate limiting | `POST /api/vault/unlock` (6x) | 429 after 5th attempt |

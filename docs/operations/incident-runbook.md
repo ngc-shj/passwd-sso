@@ -61,8 +61,8 @@ Determine which tables/data were exposed:
 | `audit_logs` | Metadata may contain PII (IPs, emails) | Notify affected users |
 | `password_entries` | Encrypted with AES-256-GCM | Safe without secret keys — no action needed |
 | `team_member_keys` | Encrypted team keys per member | Safe without user secret keys |
-| `extension_tokens` | Token hashes (bcrypt) | Revoke all tokens as precaution |
-| `api_keys` | Token hashes (bcrypt) | Revoke all API keys as precaution |
+| `extension_tokens` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all tokens as precaution |
+| `api_keys` | Token hashes (SHA-256, 256-bit entropy tokens) | Revoke all API keys as precaution |
 
 ### 2b. Immediate Actions
 
@@ -88,11 +88,20 @@ Determine which tables/data were exposed:
 **Impact:** Rate limiting and session caching degrade. Auth.js falls back to
 database sessions automatically.
 
-**Actions:**
+**Actions (standalone Redis):**
 1. Check Redis health: `redis-cli ping`
 2. If container issue: `docker restart redis`
 3. If persistent: switch to database-only mode (remove `REDIS_URL`)
 4. Monitor database load — may need to scale
+
+**Actions (Sentinel HA):**
+1. Check Sentinel status: `redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster`
+2. If master is down, verify automatic failover occurred (new master elected)
+3. If failover did not trigger, force manual failover: `redis-cli -p 26379 SENTINEL failover mymaster`
+4. Verify application reconnected: `curl -s /api/health/ready | jq .checks.redis`
+5. Restart failed node — it will rejoin as replica automatically
+
+See [Redis HA documentation](redis-ha.md) for full topology and failover test procedure.
 
 ### 3b. PostgreSQL Down
 

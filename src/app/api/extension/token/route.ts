@@ -13,6 +13,12 @@ import {
   EXTENSION_TOKEN_MAX_ACTIVE,
 } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
+import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
+import logger from "@/lib/logger";
+
+function internalError() {
+  return NextResponse.json({ error: "INTERNAL_ERROR" }, { status: 500 });
+}
 
 export const runtime = "nodejs";
 
@@ -77,11 +83,19 @@ async function handlePOST() {
     }),
   );
 
-  return NextResponse.json({
+  const body = {
     token: plaintext,
     expiresAt: created.expiresAt.toISOString(),
     scope: created.scope.split(","),
-  }, { status: 201 });
+  };
+
+  const parsed = TokenIssueResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    logger.error({ error: parsed.error.message }, "extension token issue response validation failed");
+    return internalError();
+  }
+
+  return NextResponse.json(parsed.data, { status: 201 });
 }
 
 /**
@@ -107,7 +121,15 @@ async function handleDELETE(req: NextRequest) {
     }),
   );
 
-  return NextResponse.json({ ok: true });
+  const body = { ok: true as const };
+
+  const parsed = TokenRevokeResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    logger.error({ error: parsed.error.message }, "extension token revoke response validation failed");
+    return internalError();
+  }
+
+  return NextResponse.json(parsed.data);
 }
 
 export const POST = withRequestLog(handlePOST);

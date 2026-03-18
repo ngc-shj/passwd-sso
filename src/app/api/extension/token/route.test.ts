@@ -114,9 +114,14 @@ describe("POST /api/extension/token", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
+    expect(json).toMatchObject({
+      token: expect.any(String),
+      expiresAt: expect.any(String),
+      scope: expect.arrayContaining(["passwords:read"]),
+    });
     expect(json.token).toBe("a".repeat(64));
-    expect(json.scope).toContain("passwords:read");
-    expect(json.expiresAt).toBeDefined();
+    // Verify response conforms to Zod schema
+    expect(Object.keys(json).sort()).toEqual(["expiresAt", "scope", "token"]);
   });
 
   it("revokes oldest token when MAX_ACTIVE exceeded", async () => {
@@ -166,7 +171,7 @@ describe("DELETE /api/extension/token", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
-    expect(json.ok).toBe(true);
+    expect(json).toEqual({ ok: true });
   });
 
   it("returns 404 for non-existent token", async () => {

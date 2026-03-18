@@ -5,9 +5,9 @@ import { getAuthState } from "../helpers/fixtures";
 /**
  * Vault Reset tests.
  *
- * Each test uses its own user so they are fully independent
- * and safe for parallel execution or retry:
- * - "wrong confirmation" → vaultReady (non-destructive, read-only page visit)
+ * Each test uses its own dedicated user for full independence
+ * and safe parallel execution or retry:
+ * - "wrong confirmation" → resetValidation (non-destructive, dedicated user)
  * - "correct reset"      → reset (destructive, dedicated user)
  */
 test.describe("Vault Reset", () => {
@@ -15,10 +15,8 @@ test.describe("Vault Reset", () => {
     context,
     page,
   }) => {
-    // Non-destructive — safe to use shared vaultReady user
-    // IMPROVE(#27): use dedicated user for full independence
-    const { vaultReady } = getAuthState();
-    await injectSession(context, vaultReady.sessionToken);
+    const { resetValidation } = getAuthState();
+    await injectSession(context, resetValidation.sessionToken);
     await page.goto("/ja/vault-reset");
 
     const confirmInput = page.locator("#confirm-reset");
