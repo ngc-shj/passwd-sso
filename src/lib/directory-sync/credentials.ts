@@ -13,35 +13,13 @@ import {
   decryptServerData,
   type ServerEncryptedData,
 } from "@/lib/crypto-server";
-
-const HEX64_RE = /^[0-9a-fA-F]{64}$/;
+import { getKeyProviderSync } from "@/lib/key-provider";
 
 /**
  * Resolve the 256-bit encryption key for directory-sync credentials.
- *
- * Priority:
- *  1. DIRECTORY_SYNC_MASTER_KEY (64-char hex)
- *  2. SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY (dev/test only)
- *
- * In production, DIRECTORY_SYNC_MASTER_KEY is mandatory.
  */
 function getDirectorySyncKey(): Buffer {
-  const hex = process.env.DIRECTORY_SYNC_MASTER_KEY?.trim();
-  if (hex && HEX64_RE.test(hex)) return Buffer.from(hex, "hex");
-
-  if (process.env.NODE_ENV === "production") {
-    throw new Error("DIRECTORY_SYNC_MASTER_KEY required in production");
-  }
-
-  // dev/test fallback
-  const fallback = (
-    process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY
-  )?.trim();
-  if (fallback && HEX64_RE.test(fallback)) return Buffer.from(fallback, "hex");
-
-  throw new Error(
-    "No encryption key available for directory sync credentials",
-  );
+  return getKeyProviderSync().getKeySync("directory-sync");
 }
 
 /** Build AAD buffer that binds ciphertext to a specific config row. */

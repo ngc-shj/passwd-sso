@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // Build metadata for reproducible build tracking
 function getGitSha(): string {
@@ -21,7 +22,7 @@ if (rawBasePath && !/^\/[\w-]+(?:\/[\w-]+)*$/.test(rawBasePath)) {
 const nextConfig: NextConfig = {
   basePath: rawBasePath || undefined,
   output: "standalone",
-  serverExternalPackages: ["file-type", "argon2-browser"],
+  serverExternalPackages: ["file-type", "argon2-browser", "@aws-sdk/client-secrets-manager", "@azure/keyvault-secrets", "@azure/identity", "@google-cloud/secret-manager"],
 
   env: {
     NEXT_PUBLIC_BUILD_SHA: getGitSha(),
@@ -86,4 +87,6 @@ const nextConfig: NextConfig = {
 
 const withNextIntl = createNextIntlPlugin();
 
-export default withNextIntl(nextConfig);
+export default withSentryConfig(withNextIntl(nextConfig), {
+  silent: true,
+});

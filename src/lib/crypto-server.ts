@@ -19,11 +19,11 @@ import {
   createHmac,
   timingSafeEqual,
 } from "node:crypto";
+import { getKeyProviderSync } from "@/lib/key-provider";
 
 const ALGORITHM = "aes-256-gcm";
 const IV_LENGTH = 12; // 96 bits, recommended for GCM
 const AUTH_TAG_LENGTH = 16; // 128 bits
-const HEX64_RE = /^[0-9a-fA-F]{64}$/;
 
 export interface ServerEncryptedData {
   ciphertext: string; // hex
@@ -51,24 +51,7 @@ export function getCurrentMasterKeyVersion(): number {
  * For V2+: requires SHARE_MASTER_KEY_V{version}.
  */
 export function getMasterKeyByVersion(version: number): Buffer {
-  if (!Number.isInteger(version) || version < 1 || version > 100) {
-    throw new Error(`Invalid master key version: ${version} (must be integer 1-100)`);
-  }
-
-  let hex: string | undefined;
-
-  if (version === 1) {
-    hex = (process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY)?.trim();
-  } else {
-    hex = process.env[`SHARE_MASTER_KEY_V${version}`]?.trim();
-  }
-
-  if (!hex || !HEX64_RE.test(hex)) {
-    throw new Error(
-      `Master key for version ${version} not found or invalid (expected 64-char hex)`
-    );
-  }
-  return Buffer.from(hex, "hex");
+  return getKeyProviderSync().getKeySync("share-master", version);
 }
 
 // ─── Data Encryption / Decryption ───────────────────────────────
@@ -248,28 +231,7 @@ const VERIFIER_HEX_RE = /^[0-9a-f]{64}$/;
  * - In dev/test, falls back to SHA-256("verifier-pepper:" || SHARE_MASTER_KEY).
  */
 function getVerifierPepper(): Buffer {
-  const pepperHex = process.env.VERIFIER_PEPPER_KEY;
-  if (pepperHex) {
-    if (!VERIFIER_HEX_RE.test(pepperHex.toLowerCase())) {
-      throw new Error(
-        "VERIFIER_PEPPER_KEY must be a 64-char hex string (256 bits)"
-      );
-    }
-    return Buffer.from(pepperHex, "hex");
-  }
-
-  // Production requires explicit pepper — no silent fallback
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(
-      "VERIFIER_PEPPER_KEY is required in production"
-    );
-  }
-
-  // Dev/test fallback: domain-separated derivation from master key V1
-  return createHash("sha256")
-    .update("verifier-pepper:")
-    .update(getMasterKeyByVersion(1))
-    .digest();
+  return getKeyProviderSync().getKeySync("verifier-pepper");
 }
 
 /**

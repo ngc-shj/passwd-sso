@@ -146,6 +146,11 @@ const envSchema = z
       .default("true")
       .transform((v) => v === "true"),
 
+    // --- Key provider ---
+    // Vendor-specific validation is handled by each provider's validateKeys().
+    KEY_PROVIDER: z.string().default("env"),
+    SM_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
+
     // --- DB connection pool tuning (optional) ---
     DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
     DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce
@@ -247,33 +252,36 @@ const envSchema = z
       }
     }
 
-    // ── Key rotation: current version key must exist ───────
+    // ── Key rotation: current version key must exist (env provider only) ───────
     const currentVersion = data.SHARE_MASTER_KEY_CURRENT_VERSION;
-    const hex64Re = /^[0-9a-fA-F]{64}$/;
+    // Cloud providers (aws-sm, azure-kv, gcp-sm) manage keys externally
+    if (data.KEY_PROVIDER === "env") {
+      const hex64Re = /^[0-9a-fA-F]{64}$/;
 
-    if (currentVersion === 1) {
-      // V1: SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY must exist
-      const v1Raw =
-        process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY;
-      const v1Key = v1Raw?.trim();
-      if (!v1Key || !hex64Re.test(v1Key)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["SHARE_MASTER_KEY"],
-          message:
-            "SHARE_MASTER_KEY or SHARE_MASTER_KEY_V1 is required (64-char hex)",
-        });
-      }
-    } else {
-      // V2+: SHARE_MASTER_KEY_V{N} must exist
-      const vNRaw = process.env[`SHARE_MASTER_KEY_V${currentVersion}`];
-      const vNKey = vNRaw?.trim();
-      if (!vNKey || !hex64Re.test(vNKey)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["SHARE_MASTER_KEY_CURRENT_VERSION"],
-          message: `SHARE_MASTER_KEY_V${currentVersion} is required (64-char hex) when CURRENT_VERSION=${currentVersion}`,
-        });
+      if (currentVersion === 1) {
+        // V1: SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY must exist
+        const v1Raw =
+          process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY;
+        const v1Key = v1Raw?.trim();
+        if (!v1Key || !hex64Re.test(v1Key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["SHARE_MASTER_KEY"],
+            message:
+              "SHARE_MASTER_KEY or SHARE_MASTER_KEY_V1 is required (64-char hex)",
+          });
+        }
+      } else {
+        // V2+: SHARE_MASTER_KEY_V{N} must exist
+        const vNRaw = process.env[`SHARE_MASTER_KEY_V${currentVersion}`];
+        const vNKey = vNRaw?.trim();
+        if (!vNKey || !hex64Re.test(vNKey)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["SHARE_MASTER_KEY_CURRENT_VERSION"],
+            message: `SHARE_MASTER_KEY_V${currentVersion} is required (64-char hex) when CURRENT_VERSION=${currentVersion}`,
+          });
+        }
       }
     }
 
@@ -287,66 +295,11 @@ const envSchema = z
       });
     }
 
-    // ── Conditional: Blob backend ───────────────────────────
-
-    if (data.BLOB_BACKEND === "s3") {
-      if (!data.AWS_REGION) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AWS_REGION"],
-          message: "AWS_REGION is required when BLOB_BACKEND=s3",
-        });
-      }
-      if (!data.S3_ATTACHMENTS_BUCKET) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["S3_ATTACHMENTS_BUCKET"],
-          message: "S3_ATTACHMENTS_BUCKET is required when BLOB_BACKEND=s3",
-        });
-      }
-    }
-
-    if (data.BLOB_BACKEND === "azure") {
-      if (!data.AZURE_STORAGE_ACCOUNT) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AZURE_STORAGE_ACCOUNT"],
-          message:
-            "AZURE_STORAGE_ACCOUNT is required when BLOB_BACKEND=azure",
-        });
-      }
-      if (!data.AZURE_BLOB_CONTAINER) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AZURE_BLOB_CONTAINER"],
-          message:
-            "AZURE_BLOB_CONTAINER is required when BLOB_BACKEND=azure",
-        });
-      }
-      if (
-        !data.AZURE_STORAGE_CONNECTION_STRING &&
-        !data.AZURE_STORAGE_SAS_TOKEN
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AZURE_STORAGE_CONNECTION_STRING"],
-          message:
-            "AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN " +
-            "is required when BLOB_BACKEND=azure",
-        });
-      }
-    }
-
-    if (data.BLOB_BACKEND === "gcs") {
-      if (!data.GCS_ATTACHMENTS_BUCKET) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["GCS_ATTACHMENTS_BUCKET"],
-          message:
-            "GCS_ATTACHMENTS_BUCKET is required when BLOB_BACKEND=gcs",
-        });
-      }
-    }
+    // Blob backend and key provider validation is delegated to each
+    // provider's own validateConfig()/validateKeys() — no vendor-specific
+    // checks in env.ts. See:
+    //   - src/lib/blob-store/config.ts (blob backend)
+    //   - src/lib/key-provider/*.ts (key provider)
   });
 
 // ─── Type export ────────────────────────────────────────────

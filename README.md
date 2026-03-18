@@ -211,6 +211,8 @@ Edit `.env.local` — key variables:
 | `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | (Optional) Sentry DSN for error tracking |
 | `SENTRY_AUTH_TOKEN` | (Optional) Sentry auth token for source map upload |
+| `KEY_PROVIDER` | (Optional) Key provider backend: `env` (default), `aws-sm`, `azure-kv`, or `gcp-sm`. See [KMS Setup](docs/operations/key-provider-setup.md) |
+| `SM_CACHE_TTL_MS` | (Optional) TTL for KMS decrypted key cache in ms (default: 300000 = 5 min) |
 
 </details>
 

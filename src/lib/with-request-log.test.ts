@@ -27,12 +27,18 @@ const mocks = vi.hoisted(() => {
     return fn();
   });
 
-  return { reqLogger, child, run };
+  const captureException = vi.fn();
+
+  return { reqLogger, child, run, captureException };
 });
 
 vi.mock("@/lib/logger", () => ({
   default: { child: mocks.child },
   requestContext: { run: mocks.run },
+}));
+
+vi.mock("@sentry/nextjs", () => ({
+  captureException: mocks.captureException,
 }));
 
 // Import the REAL withRequestLog (not the global passthrough mock).
@@ -54,6 +60,7 @@ describe("withRequestLog", () => {
     mocks.reqLogger.info.mockClear();
     mocks.reqLogger.error.mockClear();
     mocks.reqLogger.warn.mockClear();
+    mocks.captureException.mockClear();
   });
 
   it("returns the handler response on success", async () => {
@@ -175,5 +182,52 @@ describe("withRequestLog", () => {
     const res = await wrapped(makeRequest());
     // Should still return a response with X-Request-Id (via clone path)
     expect(res.headers.get("X-Request-Id")).toBeTruthy();
+  });
+
+  it("captures exception to Sentry when SENTRY_DSN is set", async () => {
+    const originalDsn = process.env.SENTRY_DSN;
+    process.env.SENTRY_DSN = "https://fake@sentry.io/123";
+
+    const err = new Error("sentry test error");
+    const handler = vi.fn().mockRejectedValue(err);
+    const wrapped = withRequestLog(handler);
+
+    await expect(wrapped(makeRequest("POST", "http://localhost/api/test"))).rejects.toThrow(
+      "sentry test error",
+    );
+
+    // Wait for the fire-and-forget dynamic import to resolve
+    await vi.waitFor(() => {
+      expect(mocks.captureException).toHaveBeenCalledOnce();
+    });
+
+    const [capturedErr, capturedContext] = mocks.captureException.mock.calls[0];
+    expect(capturedErr).toBeInstanceOf(Error);
+    expect(capturedContext).toMatchObject({
+      tags: expect.objectContaining({
+        method: "POST",
+        path: "/api/test",
+      }),
+    });
+
+    process.env.SENTRY_DSN = originalDsn;
+  });
+
+  it("does not capture to Sentry when SENTRY_DSN is not set", async () => {
+    const originalDsn = process.env.SENTRY_DSN;
+    delete process.env.SENTRY_DSN;
+
+    const err = new Error("no sentry");
+    const handler = vi.fn().mockRejectedValue(err);
+    const wrapped = withRequestLog(handler);
+
+    await expect(wrapped(makeRequest())).rejects.toThrow("no sentry");
+
+    // Give any async work time to settle
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(mocks.captureException).not.toHaveBeenCalled();
+
+    process.env.SENTRY_DSN = originalDsn;
   });
 });

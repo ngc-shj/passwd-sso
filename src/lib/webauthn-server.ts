@@ -32,6 +32,7 @@ import type {
   AuthenticatorDevice,
 } from "@simplewebauthn/types";
 import { hkdfSync } from "node:crypto";
+import { getKeyProviderSync } from "@/lib/key-provider";
 
 // ── Env helpers ──────────────────────────────────────────────
 
@@ -63,13 +64,7 @@ export function getRpOrigin(rpId: string): string {
 }
 
 function getPrfSecret(): Buffer {
-  const hex = process.env.WEBAUTHN_PRF_SECRET;
-  if (!hex || hex.length !== 64) {
-    throw new Error(
-      "WEBAUTHN_PRF_SECRET must be a 64-character hex string (32 bytes)",
-    );
-  }
-  return Buffer.from(hex, "hex");
+  return getKeyProviderSync().getKeySync("webauthn-prf");
 }
 
 // ── Existing-credential descriptor ──────────────────────────

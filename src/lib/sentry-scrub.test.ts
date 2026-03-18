@@ -166,6 +166,29 @@ describe("scrubSentryEvent", () => {
     expect(result.breadcrumbs![1]).toEqual({ category: "ui", message: "click" });
   });
 
+  it("scrubs breadcrumb data in { values: [] } format (Sentry SDK format)", () => {
+    const event = {
+      breadcrumbs: {
+        values: [
+          {
+            category: "api",
+            data: { url: "/api/vault", token: "abc123" },
+          },
+          {
+            category: "ui",
+            message: "click",
+          },
+        ],
+      },
+    };
+    const result = scrubSentryEvent(event);
+    const bcs = result.breadcrumbs as { values: Array<Record<string, unknown>> };
+    const data = bcs.values[0].data as Record<string, unknown>;
+    expect(data.url).toBe("/api/vault");
+    expect(data.token).toBe("[Redacted]");
+    expect(bcs.values[1]).toEqual({ category: "ui", message: "click" });
+  });
+
   it("scrubs request.data", () => {
     const event = {
       request: {
