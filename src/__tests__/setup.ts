@@ -1,4 +1,5 @@
 import { vi, beforeEach } from "vitest";
+import { _resetKeyProvider, getKeyProvider } from "@/lib/key-provider";
 
 // Passthrough mock for withRequestLog — prevents wrapper from accessing
 // request.headers when tests call handlers without arguments.
@@ -21,3 +22,10 @@ process.env.WEBAUTHN_RP_ID = "localhost";
 process.env.WEBAUTHN_RP_NAME = "Test App";
 process.env.WEBAUTHN_PRF_SECRET = "c".repeat(64);
 process.env.DIRECTORY_SYNC_MASTER_KEY = "d".repeat(64);
+
+// Initialize the EnvKeyProvider singleton so getKeyProviderSync() works in tests.
+// Tests that exercise provider selection (key-provider/index.test.ts) reset and
+// re-initialize the singleton themselves via _resetKeyProvider() + getKeyProvider().
+_resetKeyProvider();
+delete process.env.KEY_PROVIDER; // ensure "env" provider is selected
+await getKeyProvider();

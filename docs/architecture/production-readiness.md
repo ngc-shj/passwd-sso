@@ -136,7 +136,7 @@ Assuming OSS-first public operation, the following are out of immediate scope:
 1. ~~`5.2` Dependency license audit~~ ✅
 2. ~~`4.4` Automated security scanning~~ ✅
 3. ~~`2.5` Concurrent session management~~ ✅
-4. `1.6` Error tracking (#218)
+4. ~~`1.6` Error tracking~~ ✅ (#218: global error boundary, Sentry capture, Prisma error util)
 5. ~~`4.2` Coverage expansion~~ ✅
 
 ### P3 (Mid/Long Term) — All Complete ✅

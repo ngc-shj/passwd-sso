@@ -146,6 +146,10 @@ const envSchema = z
       .default("true")
       .transform((v) => v === "true"),
 
+    // --- Key provider ---
+    KEY_PROVIDER: z.enum(["env", "aws-kms"]).default("env"),
+    KMS_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
+
     // --- DB connection pool tuning (optional) ---
     DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),
     DB_POOL_CONNECTION_TIMEOUT_MS: z.coerce
@@ -344,6 +348,25 @@ const envSchema = z
           path: ["GCS_ATTACHMENTS_BUCKET"],
           message:
             "GCS_ATTACHMENTS_BUCKET is required when BLOB_BACKEND=gcs",
+        });
+      }
+    }
+
+    // ── KMS provider: required env vars ─────────────────────
+    if (data.KEY_PROVIDER === "aws-kms") {
+      if (!data.AWS_REGION) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AWS_REGION"],
+          message: "AWS_REGION is required when KEY_PROVIDER=aws-kms",
+        });
+      }
+      if (!process.env.KMS_ENCRYPTED_KEY_SHARE_MASTER) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["KEY_PROVIDER"],
+          message:
+            "KMS_ENCRYPTED_KEY_SHARE_MASTER is required when KEY_PROVIDER=aws-kms",
         });
       }
     }
