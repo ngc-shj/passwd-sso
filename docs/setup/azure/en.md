@@ -28,6 +28,7 @@ If `BLOB_BACKEND=azure`:
 
 Optional:
 - `BLOB_OBJECT_PREFIX` (object key prefix)
+- `KEY_PROVIDER=azure-kv` (use Azure Key Vault for master key management — see [KMS Setup](../../operations/kms-setup.md#azure-key-vault-provider-azure-kv))
 
 ## Blob storage design (attachments)
 

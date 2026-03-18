@@ -24,10 +24,20 @@ export async function getKeyProvider(): Promise<KeyProvider> {
       });
       break;
     }
+    case "azure-kv": {
+      const { AzureKvKeyProvider } = await import("./azure-kv-provider");
+      _provider = new AzureKvKeyProvider({
+        vaultUrl: process.env.AZURE_KV_URL ?? "",
+        ttlMs: process.env.KMS_CACHE_TTL_MS
+          ? Number(process.env.KMS_CACHE_TTL_MS)
+          : undefined,
+      });
+      break;
+    }
     default:
       throw new Error(
         `Unknown KEY_PROVIDER: "${providerType}". ` +
-        `Supported providers: "env" (default), "aws-kms"`
+        `Supported providers: "env" (default), "aws-kms", "azure-kv"`
       );
   }
 

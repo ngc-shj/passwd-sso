@@ -21,7 +21,7 @@ if (rawBasePath && !/^\/[\w-]+(?:\/[\w-]+)*$/.test(rawBasePath)) {
 const nextConfig: NextConfig = {
   basePath: rawBasePath || undefined,
   output: "standalone",
-  serverExternalPackages: ["file-type", "argon2-browser", "@aws-sdk/client-kms"],
+  serverExternalPackages: ["file-type", "argon2-browser", "@aws-sdk/client-kms", "@azure/keyvault-secrets", "@azure/identity"],
 
   env: {
     NEXT_PUBLIC_BUILD_SHA: getGitSha(),

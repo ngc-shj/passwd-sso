@@ -2,7 +2,12 @@
 
 ## 1. Overview
 
-passwd-sso uses four server-side master keys for cryptographic operations. By default these are loaded directly from environment variables (`KEY_PROVIDER=env`). The `aws-kms` provider adds envelope encryption: each master key is stored as a KMS-encrypted data key in an environment variable. At runtime the application calls AWS KMS to decrypt the data key into memory, caches it, and uses it for cryptographic operations. Plaintext key material never appears in configuration files or version control.
+passwd-sso uses four server-side master keys for cryptographic operations. By default these are loaded directly from environment variables (`KEY_PROVIDER=env`). Two cloud KMS providers are available:
+
+- **`aws-kms`** — Envelope encryption via AWS KMS
+- **`azure-kv`** — Secret storage via Azure Key Vault
+
+Both providers cache decrypted keys in memory with a configurable TTL.
 
 **Envelope encryption flow:**
 
@@ -229,4 +234,109 @@ KMS has been unreachable for longer than `maxStaleTtlMs`. The application refuse
 
 ### `Unknown KEY_PROVIDER: <value>`
 
-`KEY_PROVIDER` is set to an unrecognized value. Valid values are `env` and `aws-kms`.
+`KEY_PROVIDER` is set to an unrecognized value. Valid values are `env`, `aws-kms`, and `azure-kv`.
+
+---
+
+## Azure Key Vault Provider (`azure-kv`)
+
+### Overview
+
+The `azure-kv` provider stores master keys as **Key Vault secrets** (64-char hex strings). Authentication uses `DefaultAzureCredential`, which supports managed identity, workload identity, Azure CLI, and other credential sources.
+
+**Flow:**
+
+```
+Azure Key Vault
+    └─ stores ─► secret (64-char hex)
+                     │
+              SecretClient.getSecret()
+                     │
+                     ▼
+              plaintext key Buffer  ← held in memory cache
+```
+
+### Prerequisites
+
+```bash
+npm install @azure/keyvault-secrets @azure/identity
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `KEY_PROVIDER` | Yes | Set to `azure-kv` |
+| `AZURE_KV_URL` | Yes | Key Vault URL (e.g. `https://my-vault.vault.azure.net`) |
+| `KMS_CACHE_TTL_MS` | No | TTL for cached keys in ms (default: 300000 = 5 min) |
+| `KV_SECRET_SHARE_MASTER` | No | Secret name for share master key (default: `share-master-key`) |
+| `KV_SECRET_VERIFIER_PEPPER` | No | Secret name for verifier pepper (default: `verifier-pepper-key`) |
+| `KV_SECRET_DIRECTORY_SYNC` | No | Secret name for directory sync key (default: `directory-sync-key`) |
+| `KV_SECRET_WEBAUTHN_PRF` | No | Secret name for WebAuthn PRF (default: `webauthn-prf-secret`) |
+
+### Setup Steps
+
+1. **Create a Key Vault:**
+
+```bash
+az keyvault create --name my-vault --resource-group my-rg --location japaneast
+```
+
+2. **Generate and store secrets:**
+
+```bash
+# Generate a 256-bit key
+KEY=$(openssl rand -hex 32)
+
+# Store in Key Vault
+az keyvault secret set --vault-name my-vault --name share-master-key --value "$KEY"
+az keyvault secret set --vault-name my-vault --name verifier-pepper-key --value "$(openssl rand -hex 32)"
+az keyvault secret set --vault-name my-vault --name directory-sync-key --value "$(openssl rand -hex 32)"
+az keyvault secret set --vault-name my-vault --name webauthn-prf-secret --value "$(openssl rand -hex 32)"
+```
+
+3. **Grant access to the application:**
+
+```bash
+# For managed identity (App Service / AKS)
+az keyvault set-policy --name my-vault \
+  --object-id <managed-identity-object-id> \
+  --secret-permissions get
+
+# Or use RBAC (recommended)
+az role assignment create \
+  --role "Key Vault Secrets User" \
+  --assignee <managed-identity-client-id> \
+  --scope /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.KeyVault/vaults/my-vault
+```
+
+4. **Configure the application:**
+
+```env
+KEY_PROVIDER=azure-kv
+AZURE_KV_URL=https://my-vault.vault.azure.net
+```
+
+### Key Rotation
+
+1. Create a new secret version in Key Vault
+2. Restart the application to pick up the new value
+3. For share master key versioning, use the `-v{N}` suffix pattern (e.g. `share-master-key-v2`)
+
+### Troubleshooting
+
+**`AZURE_KV_URL is required for KEY_PROVIDER=azure-kv`**
+
+`AZURE_KV_URL` env var is not set or empty.
+
+**`Azure Key Vault secret "..." has no value`**
+
+The secret exists but has an empty value. Re-create with a valid 64-char hex string.
+
+**`Azure Key Vault secret "..." is not a valid 64-char hex string`**
+
+The secret value is not in the expected format. Key Vault secrets must contain exactly 64 hexadecimal characters (256 bits).
+
+**`@azure/keyvault-secrets and @azure/identity are required`**
+
+Install the required packages: `npm install @azure/keyvault-secrets @azure/identity`
