@@ -153,29 +153,9 @@ describe("env validation", () => {
     expect(env.AUTH_JACKSON_ID).toBe("jackson-id");
   });
 
-  // ─── Blob backend conditional checks ───────────────────
-
-  it("requires S3 vars when BLOB_BACKEND=s3", async () => {
-    setMinimalDevEnv();
-    process.env.BLOB_BACKEND = "s3";
-    await expect(import("@/lib/env")).rejects.toThrow("AWS_REGION");
-  });
-
-  it("requires Azure vars when BLOB_BACKEND=azure", async () => {
-    setMinimalDevEnv();
-    process.env.BLOB_BACKEND = "azure";
-    await expect(import("@/lib/env")).rejects.toThrow(
-      "AZURE_STORAGE_ACCOUNT",
-    );
-  });
-
-  it("requires GCS vars when BLOB_BACKEND=gcs", async () => {
-    setMinimalDevEnv();
-    process.env.BLOB_BACKEND = "gcs";
-    await expect(import("@/lib/env")).rejects.toThrow(
-      "GCS_ATTACHMENTS_BUCKET",
-    );
-  });
+  // Blob backend validation is handled by each store's validateConfig()
+  // in src/lib/blob-store/config.ts — not by env.ts superRefine.
+  // See src/lib/blob-store/*.test.ts for those checks.
 
   // ─── Whitespace and format checks ──────────────────────
 

@@ -292,69 +292,11 @@ const envSchema = z
       });
     }
 
-    // ── Conditional: Blob backend ───────────────────────────
-
-    if (data.BLOB_BACKEND === "s3") {
-      if (!data.AWS_REGION) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AWS_REGION"],
-          message: "AWS_REGION is required when BLOB_BACKEND=s3",
-        });
-      }
-      if (!data.S3_ATTACHMENTS_BUCKET) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["S3_ATTACHMENTS_BUCKET"],
-          message: "S3_ATTACHMENTS_BUCKET is required when BLOB_BACKEND=s3",
-        });
-      }
-    }
-
-    if (data.BLOB_BACKEND === "azure") {
-      if (!data.AZURE_STORAGE_ACCOUNT) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AZURE_STORAGE_ACCOUNT"],
-          message:
-            "AZURE_STORAGE_ACCOUNT is required when BLOB_BACKEND=azure",
-        });
-      }
-      if (!data.AZURE_BLOB_CONTAINER) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AZURE_BLOB_CONTAINER"],
-          message:
-            "AZURE_BLOB_CONTAINER is required when BLOB_BACKEND=azure",
-        });
-      }
-      if (
-        !data.AZURE_STORAGE_CONNECTION_STRING &&
-        !data.AZURE_STORAGE_SAS_TOKEN
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AZURE_STORAGE_CONNECTION_STRING"],
-          message:
-            "AZURE_STORAGE_CONNECTION_STRING or AZURE_STORAGE_SAS_TOKEN " +
-            "is required when BLOB_BACKEND=azure",
-        });
-      }
-    }
-
-    if (data.BLOB_BACKEND === "gcs") {
-      if (!data.GCS_ATTACHMENTS_BUCKET) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["GCS_ATTACHMENTS_BUCKET"],
-          message:
-            "GCS_ATTACHMENTS_BUCKET is required when BLOB_BACKEND=gcs",
-        });
-      }
-    }
-
-    // Key provider validation is delegated to each provider's validateKeys()
-    // in instrumentation.ts — no vendor-specific checks here.
+    // Blob backend and key provider validation is delegated to each
+    // provider's own validateConfig()/validateKeys() — no vendor-specific
+    // checks in env.ts. See:
+    //   - src/lib/blob-store/config.ts (blob backend)
+    //   - src/lib/key-provider/*.ts (key provider)
   });
 
 // ─── Type export ────────────────────────────────────────────
