@@ -1,0 +1,74 @@
+import { EnvKeyProvider } from "./env-provider";
+import type { KeyProvider } from "./types";
+export type { KeyName, KeyProvider } from "./types";
+
+let _provider: KeyProvider | null = null;
+
+export async function getKeyProvider(): Promise<KeyProvider> {
+  if (_provider) return _provider;
+
+  const providerType = process.env.KEY_PROVIDER || "env";
+
+  switch (providerType) {
+    case "env": {
+      const { EnvKeyProvider } = await import("./env-provider");
+      _provider = new EnvKeyProvider();
+      break;
+    }
+    case "aws-sm": {
+      const { AwsSmKeyProvider } = await import("./aws-sm-provider");
+      _provider = new AwsSmKeyProvider({
+        region: process.env.AWS_REGION ?? "",
+        ttlMs: process.env.SM_CACHE_TTL_MS
+          ? Number(process.env.SM_CACHE_TTL_MS)
+          : undefined,
+      });
+      break;
+    }
+    case "azure-kv": {
+      const { AzureKvKeyProvider } = await import("./azure-kv-provider");
+      _provider = new AzureKvKeyProvider({
+        vaultUrl: process.env.AZURE_KV_URL ?? "",
+        ttlMs: process.env.SM_CACHE_TTL_MS
+          ? Number(process.env.SM_CACHE_TTL_MS)
+          : undefined,
+      });
+      break;
+    }
+    case "gcp-sm": {
+      const { GcpSmKeyProvider } = await import("./gcp-sm-provider");
+      _provider = new GcpSmKeyProvider({
+        projectId: process.env.GCP_PROJECT_ID ?? "",
+        ttlMs: process.env.SM_CACHE_TTL_MS
+          ? Number(process.env.SM_CACHE_TTL_MS)
+          : undefined,
+      });
+      break;
+    }
+    default:
+      throw new Error(
+        `Unknown KEY_PROVIDER: "${providerType}". ` +
+        `Supported providers: "env" (default), "aws-sm", "azure-kv", "gcp-sm"`
+      );
+  }
+
+  return _provider!;
+}
+
+export function getKeyProviderSync(): KeyProvider {
+  if (!_provider) {
+    // Lazy fallback for env provider — safe because EnvKeyProvider is synchronous.
+    // Cloud providers require async init via getKeyProvider() at startup.
+    if (!process.env.KEY_PROVIDER || process.env.KEY_PROVIDER === "env") {
+      _provider = new EnvKeyProvider();
+    } else {
+      throw new Error("KeyProvider not initialized. Call getKeyProvider() at startup.");
+    }
+  }
+  return _provider;
+}
+
+/** Reset singleton — for testing only. */
+export function _resetKeyProvider(): void {
+  _provider = null;
+}

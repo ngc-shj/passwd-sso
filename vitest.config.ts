@@ -40,6 +40,10 @@ export default defineConfig({
         "src/lib/webhook-dispatcher.ts",
         "src/proxy.ts",
         "src/components/**/*.{ts,tsx}",
+        "src/app/global-error.tsx",
+        "src/lib/key-provider/**/*.ts",
+        "src/lib/prisma-error.ts",
+        "src/lib/sentry-sanitize.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",

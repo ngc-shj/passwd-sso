@@ -1,4 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+async function reinitKeyProvider() {
+  const { _resetKeyProvider, getKeyProvider } = await import("@/lib/key-provider");
+  _resetKeyProvider();
+  delete process.env.KEY_PROVIDER;
+  await getKeyProvider();
+}
 
 describe("getRpOrigin", () => {
   beforeEach(() => {
@@ -62,10 +68,11 @@ describe("generateDiscoverableAuthOpts", () => {
 });
 
 describe("derivePrfSalt", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.resetModules();
     delete process.env.WEBAUTHN_RP_ID;
     delete process.env.WEBAUTHN_PRF_SECRET;
+    await reinitKeyProvider();
   });
 
   it("derives deterministic 64-char hex salt", async () => {
