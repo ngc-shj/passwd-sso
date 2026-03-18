@@ -37,11 +37,15 @@ export class EnvKeyProvider implements KeyProvider {
     if (!Number.isFinite(version) || version < 1) {
       throw new Error("SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer");
     }
-    // Validate all keys — throws if missing or invalid
+    // Always validate the share master key (required in all environments)
     this.getShareMasterKey(version);
-    this.getVerifierPepper();
-    this.getDirectorySyncKey();
-    this.getPrfSecret();
+
+    // Validate optional keys only when their env vars are configured.
+    // Production enforcement for missing keys happens at call time in each getter,
+    // not here — this avoids blocking startup when only a subset of features is used.
+    if (process.env.VERIFIER_PEPPER_KEY) this.getVerifierPepper();
+    if (process.env.DIRECTORY_SYNC_MASTER_KEY) this.getDirectorySyncKey();
+    if (process.env.WEBAUTHN_PRF_SECRET) this.getPrfSecret();
   }
 
   private getShareMasterKey(version: number): Buffer {
