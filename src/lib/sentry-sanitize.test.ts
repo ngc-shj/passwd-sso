@@ -70,6 +70,15 @@ describe("sanitizeErrorForSentry", () => {
     expect(sanitized.stack).toContain("[redacted-key]");
   });
 
+  it("does not scrub long base64 from stack trace (preserves file paths)", () => {
+    const b64 = "dGhpcyBpcyBhIHZlcnkgbG9uZ2Jhc2U2NHN0cmluZw=="; // 44 chars, >40
+    const err = new Error("test");
+    err.stack = `Error: test\n    at /app/.next/server/${b64}/route.js:1:1`;
+    const sanitized = sanitizeErrorForSentry(err);
+    expect(sanitized.stack).toContain(b64);
+    expect(sanitized.stack).not.toContain("[redacted-b64]");
+  });
+
   it("does not mutate the original error", () => {
     const key = "c".repeat(64);
     const err = new Error(`key: ${key}`);

@@ -1,8 +1,9 @@
 /**
  * Error-level sanitization for Sentry.
  *
- * Scrubs sensitive patterns (hex keys, base64) from Error.message and
- * Error.stack BEFORE passing to captureException(). Used in:
+ * Scrubs hex keys from Error.message and Error.stack, and base64 from
+ * Error.message only (stack excluded to avoid mangling file paths).
+ * Applied BEFORE passing to captureException(). Used in:
  *   - src/lib/with-request-log.ts (server-side catch block)
  *   - src/app/global-error.tsx (client-side error boundary)
  *   - src/instrumentation.ts (onRequestError hook)
@@ -20,7 +21,7 @@ const BASE64_LONG_RE = /[A-Za-z0-9+/]{40,}={0,2}/g;
 /**
  * Creates a sanitized copy of an error before sending to Sentry.
  * - Scrubs 64-char hex strings (encryption keys, hashes) from message and stack
- * - Scrubs long base64 strings (>40 chars) from message and stack
+ * - Scrubs long base64 strings (>40 chars) from message only (stack: hex only)
  * - Recursively sanitizes the cause chain
  *
  * Note: Prisma meta fields are NOT copied because `new Error()` does not
