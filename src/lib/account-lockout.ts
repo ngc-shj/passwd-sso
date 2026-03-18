@@ -14,6 +14,7 @@ import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { notifyAdminsOfLockout } from "@/lib/lockout-admin-notify";
 import type { NextRequest } from "next/server";
 
 /** Observation window: reset counter if last failure was this long ago */
@@ -143,6 +144,14 @@ export async function recordFailure(
           now < existingLockedUntil ? existingLockedUntil : null;
       }
 
+      // True only when newAttempts first reaches a threshold prevAttempts hadn't
+      const matchedThreshold = LOCKOUT_THRESHOLDS.find(
+        (t) => newAttempts >= t.attempts,
+      );
+      const thresholdCrossed =
+        matchedThreshold !== undefined &&
+        prevAttempts < matchedThreshold.attempts;
+
       await tx.user.update({
         where: { id: userId },
         data: {
@@ -157,6 +166,7 @@ export async function recordFailure(
         locked: finalLockedUntil !== null && now < finalLockedUntil,
         lockedUntil: finalLockedUntil,
         lockMinutes,
+        thresholdCrossed,
       };
     });
 
@@ -194,7 +204,14 @@ export async function recordFailure(
           ip: meta.ip,
           userAgent: meta.userAgent,
         });
-        // IMPROVE(#40): implement admin notification (CloudWatch Alarm / SNS)
+        if (result.thresholdCrossed) {
+          void notifyAdminsOfLockout({
+            userId,
+            attempts: result.attempts,
+            lockMinutes: result.lockMinutes!,
+            ip: meta.ip,
+          });
+        }
         getLogger().warn(
           {
             userId,

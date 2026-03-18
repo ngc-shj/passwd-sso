@@ -52,6 +52,18 @@ const MESSAGES = {
         `${count} new breach(es) detected in your vault.`,
     },
   },
+  VAULT_LOCKOUT: {
+    ja: {
+      title: "保管庫ロックアウト通知",
+      body: (email: string, lockMinutes: string) =>
+        `${email} の保管庫が ${lockMinutes} 分間ロックされました`,
+    },
+    en: {
+      title: "Vault lockout alert",
+      body: (email: string, lockMinutes: string) =>
+        `Vault locked for ${email} — ${lockMinutes} minutes`,
+    },
+  },
 } as const;
 
 type MessageKey = keyof typeof MESSAGES;
