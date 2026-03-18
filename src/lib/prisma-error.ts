@@ -16,9 +16,8 @@ export function mapPrismaError(error: unknown): PrismaErrorMapping | null {
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     switch (error.code) {
-      case "P2002":
-        return { status: 409, code: API_ERROR.CONFLICT };
-      case "P2003":
+      case "P2002": // unique constraint violation
+      case "P2003": // foreign key constraint violation
         return { status: 409, code: API_ERROR.CONFLICT };
       case "P2025":
         return { status: 404, code: API_ERROR.NOT_FOUND };

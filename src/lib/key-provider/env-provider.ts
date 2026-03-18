@@ -9,8 +9,7 @@
 
 import { createHash } from "node:crypto";
 import type { KeyName, KeyProvider } from "./types";
-
-const HEX64_RE = /^[0-9a-fA-F]{64}$/;
+import { HEX64_RE } from "./base-cloud-provider";
 
 export class EnvKeyProvider implements KeyProvider {
   readonly name = "env";
@@ -64,12 +63,12 @@ export class EnvKeyProvider implements KeyProvider {
   }
 
   private getVerifierPepper(): Buffer {
-    const pepperHex = process.env.VERIFIER_PEPPER_KEY;
+    const pepperHex = process.env.VERIFIER_PEPPER_KEY?.trim();
     if (pepperHex) {
-      if (!HEX64_RE.test(pepperHex.trim())) {
+      if (!HEX64_RE.test(pepperHex)) {
         throw new Error("VERIFIER_PEPPER_KEY must be a 64-char hex string (256 bits)");
       }
-      return Buffer.from(pepperHex.trim(), "hex");
+      return Buffer.from(pepperHex, "hex");
     }
 
     if (process.env.NODE_ENV === "production") {
@@ -99,12 +98,12 @@ export class EnvKeyProvider implements KeyProvider {
   }
 
   private getPrfSecret(): Buffer {
-    const hex = process.env.WEBAUTHN_PRF_SECRET;
-    if (!hex || !HEX64_RE.test(hex.trim())) {
+    const hex = process.env.WEBAUTHN_PRF_SECRET?.trim();
+    if (!hex || !HEX64_RE.test(hex)) {
       throw new Error(
         "WEBAUTHN_PRF_SECRET must be a 64-character hex string (32 bytes)"
       );
     }
-    return Buffer.from(hex.trim(), "hex");
+    return Buffer.from(hex, "hex");
   }
 }
