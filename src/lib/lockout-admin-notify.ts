@@ -44,6 +44,7 @@ export async function notifyAdminsOfLockout(
         where: {
           tenantId: user.tenantId,
           role: { in: [TENANT_ROLE.OWNER, TENANT_ROLE.ADMIN] },
+          deactivatedAt: null,
         },
         select: {
           userId: true,

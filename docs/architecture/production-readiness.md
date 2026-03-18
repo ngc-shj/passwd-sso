@@ -111,9 +111,7 @@ Areas already considered at production level.
 
 ## Recommended Execution Order (Remaining Required Items)
 
-Required items completed: 8/9. Remaining:
-
-1. **5.1** Privacy policy / terms — legal requirement before release
+Required items completed: 9/9. All complete. ✅
 
 ---
 
@@ -121,7 +119,7 @@ Required items completed: 8/9. Remaining:
 
 Assuming OSS-first public operation, the following are out of immediate scope:
 
-- `5.1` Privacy policy / terms of service
+- ~~`5.1` Privacy policy / terms of service~~ ✅ (extension privacy policy page implemented)
 - `2.7` External third-party security audit
 - `5.4` SOC 2 / ISMAP certifications
 
@@ -137,8 +135,8 @@ Assuming OSS-first public operation, the following are out of immediate scope:
 
 1. ~~`5.2` Dependency license audit~~ ✅
 2. ~~`4.4` Automated security scanning~~ ✅
-3. `2.5` Concurrent session management
-4. `1.6` Error tracking
+3. ~~`2.5` Concurrent session management~~ ✅
+4. `1.6` Error tracking (#218)
 5. ~~`4.2` Coverage expansion~~ ✅
 
 ### P3 (Mid/Long Term) — All Complete ✅
