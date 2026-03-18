@@ -53,10 +53,7 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
     } catch (err) {
       if (cached && Date.now() - cached.fetchedAt < this.maxStaleTtlMs) {
         const elapsed = Math.round((Date.now() - cached.fetchedAt) / 1000);
-        console.warn(
-          `[key-provider] ${this.name} fetch failed for "${name}", using stale cached key (${elapsed}s old). ` +
-          `Max stale TTL: ${this.maxStaleTtlMs / 1000}s. Error: ${err instanceof Error ? err.message : err}`
-        );
+        this.logStaleWarning(name, elapsed, err);
         return cached.key;
       }
       throw err;
@@ -87,14 +84,23 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
   async validateKeys(): Promise<void> {
     this.validateConfig();
 
+    // Resolve current share-master version (same logic as EnvKeyProvider)
+    const currentVersion = parseInt(
+      process.env.SHARE_MASTER_KEY_CURRENT_VERSION ?? "1",
+      10
+    );
+    if (isNaN(currentVersion) || currentVersion < 1) {
+      throw new Error("SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer");
+    }
+
     const keysToValidate: Array<{ name: KeyName; version?: number }> = [
-      { name: "share-master" },
+      { name: "share-master", version: currentVersion },
     ];
 
-    for (const [name, envVar] of Object.entries(this.secretNameEnvMap)) {
-      if (name !== "share-master" && process.env[envVar]) {
-        keysToValidate.push({ name: name as KeyName });
-      }
+    // Validate all other key types (not just those with custom secret names)
+    const otherKeys: KeyName[] = ["verifier-pepper", "directory-sync", "webauthn-prf"];
+    for (const name of otherKeys) {
+      keysToValidate.push({ name });
     }
 
     await Promise.all(
@@ -121,6 +127,19 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
       throw new Error(`Secret "${secretName}" is not a valid 64-char hex string`);
     }
     return Buffer.from(hex, "hex");
+  }
+
+  private logStaleWarning(name: string, elapsedSec: number, err: unknown): void {
+    // Dynamic import to avoid bundling pino/node:async_hooks into SSR bundles
+    void import("@/lib/logger").then(({ default: log }) => {
+      log.warn(
+        { provider: this.name, keyName: name, elapsedSec, maxStaleTtlSec: this.maxStaleTtlMs / 1000 },
+        `[key-provider] fetch failed, using stale cached key: ${err instanceof Error ? err.message : err}`
+      );
+    }).catch(() => {
+      // Fallback if logger unavailable
+      console.warn(`[key-provider] ${this.name} stale key used for "${name}" (${elapsedSec}s old)`);
+    });
   }
 
   private buildCacheKey(name: KeyName, version?: number): string {

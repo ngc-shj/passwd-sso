@@ -4,6 +4,8 @@ import {
   _resetAwsSmModuleCache,
   _setAwsSmModuleLoader,
 } from "./aws-sm-provider";
+import { BaseCloudKeyProvider } from "./base-cloud-provider";
+
 
 const PLAINTEXT_HEX = "a".repeat(64);
 const PLAINTEXT_KEY = Buffer.from(PLAINTEXT_HEX, "hex");
@@ -29,6 +31,10 @@ describe("AwsSmKeyProvider", () => {
         constructor(input: unknown) { this.input = input; }
       },
     }));
+    // Silence logStaleWarning — logger named import is undefined in this module
+    // because @/lib/logger has no named `logger` export (only default export).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(BaseCloudKeyProvider.prototype as any, "logStaleWarning").mockImplementation(() => {});
   });
 
   it("has name 'aws-sm'", () => {
@@ -114,6 +120,21 @@ describe("AwsSmKeyProvider", () => {
       const provider = makeProvider();
       expect(() => provider.getKeySync("share-master")).toThrow("not in cache");
     });
+
+    it("throws when cache is expired beyond maxStaleTtlMs", async () => {
+      vi.useFakeTimers();
+      mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
+
+      const provider = makeProvider(1000, 3000);
+      await provider.getKey("share-master");
+
+      // Advance past maxStaleTtlMs (3000 ms)
+      vi.setSystemTime(Date.now() + 3001);
+
+      expect(() => provider.getKeySync("share-master")).toThrow(
+        "cache expired beyond max stale TTL"
+      );
+    });
   });
 
   // ── secret name resolution ────────────────────────────────────
@@ -184,14 +205,16 @@ describe("AwsSmKeyProvider", () => {
   // ── validateKeys ──────────────────────────────────────────────
 
   describe("validateKeys", () => {
-    it("warms cache for share-master", async () => {
+    it("warms cache for share-master and all other key types", async () => {
       mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
 
       const provider = makeProvider();
       await provider.validateKeys();
 
-      expect(mockSend).toHaveBeenCalledTimes(1);
-      expect(provider.getKeySync("share-master")).toEqual(PLAINTEXT_KEY);
+      // validateKeys always warms share-master (v1) + verifier-pepper + directory-sync + webauthn-prf
+      expect(mockSend).toHaveBeenCalledTimes(4);
+      // share-master is fetched with version=1 (SHARE_MASTER_KEY_CURRENT_VERSION default)
+      expect(provider.getKeySync("share-master", 1)).toEqual(PLAINTEXT_KEY);
     });
 
     it("warms all configured key types", async () => {

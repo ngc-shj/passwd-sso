@@ -13,8 +13,9 @@
 
 // Regex patterns for sensitive data that must be scrubbed from error messages
 const HEX64_RE = /[0-9a-fA-F]{64}/g;
-// Base64: alphabet + padding, more than 40 chars
-const BASE64_LONG_RE = /[A-Za-z0-9+/]{40,}={0,2}/g;
+// Base64: alphabet + padding, more than 40 chars.
+// Excludes '/' to avoid matching file paths in stack traces.
+const BASE64_LONG_RE = /[A-Za-z0-9+]{40,}={0,2}/g;
 
 /**
  * Creates a sanitized copy of an error before sending to Sentry.

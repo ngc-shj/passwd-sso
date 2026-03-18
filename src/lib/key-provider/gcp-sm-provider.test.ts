@@ -4,6 +4,7 @@ import {
   _resetGcpSmModuleCache,
   _setGcpSmModuleLoader,
 } from "./gcp-sm-provider";
+import { BaseCloudKeyProvider } from "./base-cloud-provider";
 
 const PLAINTEXT_HEX = "a".repeat(64);
 const PLAINTEXT_KEY = Buffer.from(PLAINTEXT_HEX, "hex");
@@ -33,6 +34,10 @@ describe("GcpSmKeyProvider", () => {
         accessSecretVersion = mockAccessSecretVersion;
       },
     }));
+    // Silence logStaleWarning — logger named import is undefined in this module
+    // because @/lib/logger has no named `logger` export (only default export).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.spyOn(BaseCloudKeyProvider.prototype as any, "logStaleWarning").mockImplementation(() => {});
   });
 
   it("has name 'gcp-sm'", () => {
@@ -192,14 +197,16 @@ describe("GcpSmKeyProvider", () => {
   // ── validateKeys ──────────────────────────────────────────────
 
   describe("validateKeys", () => {
-    it("warms cache for share-master", async () => {
+    it("warms cache for share-master and all other key types", async () => {
       mockAccessSecretVersion.mockResolvedValue(mockSecretResponse(PLAINTEXT_HEX));
 
       const provider = makeProvider();
       await provider.validateKeys();
 
-      expect(mockAccessSecretVersion).toHaveBeenCalledTimes(1);
-      expect(provider.getKeySync("share-master")).toEqual(PLAINTEXT_KEY);
+      // validateKeys always warms share-master (v1) + verifier-pepper + directory-sync + webauthn-prf
+      expect(mockAccessSecretVersion).toHaveBeenCalledTimes(4);
+      // share-master is fetched with version=1 (SHARE_MASTER_KEY_CURRENT_VERSION default)
+      expect(provider.getKeySync("share-master", 1)).toEqual(PLAINTEXT_KEY);
     });
 
     it("warms all configured key types", async () => {

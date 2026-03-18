@@ -227,10 +227,10 @@ npm install @azure/keyvault-secrets @azure/identity
 | `KEY_PROVIDER` | Yes | Set to `azure-kv` |
 | `AZURE_KV_URL` | Yes | Key Vault URL (e.g. `https://my-vault.vault.azure.net`) |
 | `SM_CACHE_TTL_MS` | No | TTL for cached keys in ms (default: 300000 = 5 min) |
-| `KV_SECRET_SHARE_MASTER` | No | Secret name for share master key (default: `share-master-key`) |
-| `KV_SECRET_VERIFIER_PEPPER` | No | Secret name for verifier pepper (default: `verifier-pepper-key`) |
-| `KV_SECRET_DIRECTORY_SYNC` | No | Secret name for directory sync key (default: `directory-sync-key`) |
-| `KV_SECRET_WEBAUTHN_PRF` | No | Secret name for WebAuthn PRF (default: `webauthn-prf-secret`) |
+| `AZ_KV_SECRET_SHARE_MASTER` | No | Secret name for share master key (default: `share-master-key`) |
+| `AZ_KV_SECRET_VERIFIER_PEPPER` | No | Secret name for verifier pepper (default: `verifier-pepper-key`) |
+| `AZ_KV_SECRET_DIRECTORY_SYNC` | No | Secret name for directory sync key (default: `directory-sync-key`) |
+| `AZ_KV_SECRET_WEBAUTHN_PRF` | No | Secret name for WebAuthn PRF (default: `webauthn-prf-secret`) |
 
 ### Setup Steps
 

@@ -79,14 +79,23 @@ export function scrubSentryEvent<T extends Record<string, unknown>>(event: T): T
     e.contexts = scrubObject(e.contexts);
   }
 
-  // Scrub breadcrumbs
-  if (Array.isArray(e.breadcrumbs)) {
-    e.breadcrumbs = (e.breadcrumbs as Array<Record<string, unknown>>).map((bc) => {
-      if (bc.data && typeof bc.data === "object") {
-        return { ...bc, data: scrubObject(bc.data) };
+  // Scrub breadcrumbs — Sentry uses { values: BreadcrumbItem[] } format
+  if (e.breadcrumbs && typeof e.breadcrumbs === "object") {
+    const bcs = e.breadcrumbs as { values?: Array<Record<string, unknown>> } | Array<Record<string, unknown>>;
+    const items = Array.isArray(bcs) ? bcs : bcs.values;
+    if (Array.isArray(items)) {
+      const scrubbed = items.map((bc) => {
+        if (bc.data && typeof bc.data === "object") {
+          return { ...bc, data: scrubObject(bc.data) };
+        }
+        return bc;
+      });
+      if (Array.isArray(bcs)) {
+        e.breadcrumbs = scrubbed;
+      } else {
+        bcs.values = scrubbed;
       }
-      return bc;
-    });
+    }
   }
 
   // Scrub request body (may be object or serialized JSON string)

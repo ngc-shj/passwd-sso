@@ -9,10 +9,10 @@
  *
  * Env vars:
  *   AZURE_KV_URL                   — Key Vault URL (e.g. https://my-vault.vault.azure.net)
- *   KV_SECRET_SHARE_MASTER         — secret name (default: "share-master-key")
- *   KV_SECRET_VERIFIER_PEPPER      — secret name for verifier pepper
- *   KV_SECRET_DIRECTORY_SYNC       — secret name for directory sync key
- *   KV_SECRET_WEBAUTHN_PRF         — secret name for WebAuthn PRF secret
+ *   AZ_KV_SECRET_SHARE_MASTER         — secret name (default: "share-master-key")
+ *   AZ_KV_SECRET_VERIFIER_PEPPER      — secret name for verifier pepper
+ *   AZ_KV_SECRET_DIRECTORY_SYNC       — secret name for directory sync key
+ *   AZ_KV_SECRET_WEBAUTHN_PRF         — secret name for WebAuthn PRF secret
  */
 
 import type { KeyName } from "./types";
@@ -71,10 +71,10 @@ export class AzureKvKeyProvider extends BaseCloudKeyProvider {
   private secretClient: KvSecretClient | null = null;
 
   protected readonly secretNameEnvMap: Record<KeyName, string> = {
-    "share-master": "KV_SECRET_SHARE_MASTER",
-    "verifier-pepper": "KV_SECRET_VERIFIER_PEPPER",
-    "directory-sync": "KV_SECRET_DIRECTORY_SYNC",
-    "webauthn-prf": "KV_SECRET_WEBAUTHN_PRF",
+    "share-master": "AZ_KV_SECRET_SHARE_MASTER",
+    "verifier-pepper": "AZ_KV_SECRET_VERIFIER_PEPPER",
+    "directory-sync": "AZ_KV_SECRET_DIRECTORY_SYNC",
+    "webauthn-prf": "AZ_KV_SECRET_WEBAUTHN_PRF",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {

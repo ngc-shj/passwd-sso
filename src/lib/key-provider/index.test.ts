@@ -27,6 +27,28 @@ vi.mock("./aws-sm-provider", () => {
   return { AwsSmKeyProvider };
 });
 
+vi.mock("./azure-kv-provider", () => {
+  class AzureKvKeyProvider {
+    name = "azure-kv";
+    getKey = vi.fn();
+    getKeySync = vi.fn();
+    validateKeys = vi.fn();
+    constructor(public config: unknown) {}
+  }
+  return { AzureKvKeyProvider };
+});
+
+vi.mock("./gcp-sm-provider", () => {
+  class GcpSmKeyProvider {
+    name = "gcp-sm";
+    getKey = vi.fn();
+    getKeySync = vi.fn();
+    validateKeys = vi.fn();
+    constructor(public config: unknown) {}
+  }
+  return { GcpSmKeyProvider };
+});
+
 describe("key-provider index", () => {
   beforeEach(() => {
     _resetKeyProvider();
@@ -79,6 +101,58 @@ describe("key-provider index", () => {
       expect((provider as { config?: { ttlMs?: number } }).config).toMatchObject({
         ttlMs: 60000,
       });
+    });
+
+    it("selects AzureKvKeyProvider when KEY_PROVIDER=azure-kv", async () => {
+      vi.stubEnv("KEY_PROVIDER", "azure-kv");
+      vi.stubEnv("AZURE_KV_URL", "https://test-vault.vault.azure.net");
+      const provider = await getKeyProvider();
+      expect(provider.name).toBe("azure-kv");
+    });
+
+    it("wires AZURE_KV_URL to AzureKvKeyProvider config", async () => {
+      vi.stubEnv("KEY_PROVIDER", "azure-kv");
+      vi.stubEnv("AZURE_KV_URL", "https://my-vault.vault.azure.net");
+
+      const provider = await getKeyProvider() as { config?: { vaultUrl?: string } };
+      expect(provider.name).toBe("azure-kv");
+      expect(provider.config).toMatchObject({ vaultUrl: "https://my-vault.vault.azure.net" });
+    });
+
+    it("passes SM_CACHE_TTL_MS to AzureKvKeyProvider when set", async () => {
+      vi.stubEnv("KEY_PROVIDER", "azure-kv");
+      vi.stubEnv("AZURE_KV_URL", "https://test-vault.vault.azure.net");
+      vi.stubEnv("SM_CACHE_TTL_MS", "90000");
+
+      const provider = await getKeyProvider() as { config?: { ttlMs?: number } };
+      expect(provider.name).toBe("azure-kv");
+      expect(provider.config).toMatchObject({ ttlMs: 90000 });
+    });
+
+    it("selects GcpSmKeyProvider when KEY_PROVIDER=gcp-sm", async () => {
+      vi.stubEnv("KEY_PROVIDER", "gcp-sm");
+      vi.stubEnv("GCP_PROJECT_ID", "my-project");
+      const provider = await getKeyProvider();
+      expect(provider.name).toBe("gcp-sm");
+    });
+
+    it("wires GCP_PROJECT_ID to GcpSmKeyProvider config", async () => {
+      vi.stubEnv("KEY_PROVIDER", "gcp-sm");
+      vi.stubEnv("GCP_PROJECT_ID", "prod-project-123");
+
+      const provider = await getKeyProvider() as { config?: { projectId?: string } };
+      expect(provider.name).toBe("gcp-sm");
+      expect(provider.config).toMatchObject({ projectId: "prod-project-123" });
+    });
+
+    it("passes SM_CACHE_TTL_MS to GcpSmKeyProvider when set", async () => {
+      vi.stubEnv("KEY_PROVIDER", "gcp-sm");
+      vi.stubEnv("GCP_PROJECT_ID", "my-project");
+      vi.stubEnv("SM_CACHE_TTL_MS", "45000");
+
+      const provider = await getKeyProvider() as { config?: { ttlMs?: number } };
+      expect(provider.name).toBe("gcp-sm");
+      expect(provider.config).toMatchObject({ ttlMs: 45000 });
     });
   });
 

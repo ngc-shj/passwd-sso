@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   captureRequestError: vi.fn(),
   sanitizeErrorForSentry: vi.fn((err: unknown) => err),
+  getKeyProvider: vi.fn(),
+  validateKeys: vi.fn(),
 }));
 
 vi.mock("@sentry/nextjs", () => ({
@@ -14,9 +16,17 @@ vi.mock("@/lib/sentry-sanitize", () => ({
   sanitizeErrorForSentry: mocks.sanitizeErrorForSentry,
 }));
 
+vi.mock("@/lib/key-provider", () => ({
+  getKeyProvider: mocks.getKeyProvider,
+}));
+
 // Dynamic import to avoid module-level side effects
+async function loadInstrumentation() {
+  return import("./instrumentation");
+}
+
 async function loadOnRequestError() {
-  const mod = await import("./instrumentation");
+  const mod = await loadInstrumentation();
   return mod.onRequestError;
 }
 
@@ -30,6 +40,48 @@ function makeMockArgs(err: unknown) {
   const context = { routerKind: "App Router" as const, routePath: "/api/test", routeType: "route" as const, renderSource: "react-server-components" as const, revalidateReason: undefined };
   return [err, request, context] as const;
 }
+
+describe("register", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.validateKeys.mockResolvedValue(undefined);
+    mocks.getKeyProvider.mockResolvedValue({ validateKeys: mocks.validateKeys });
+  });
+
+  it("calls getKeyProvider and validateKeys when NEXT_RUNTIME=nodejs", async () => {
+    const origRuntime = process.env.NEXT_RUNTIME;
+    process.env.NEXT_RUNTIME = "nodejs";
+
+    const { register } = await loadInstrumentation();
+    await register();
+
+    expect(mocks.getKeyProvider).toHaveBeenCalledTimes(1);
+    expect(mocks.validateKeys).toHaveBeenCalledTimes(1);
+
+    if (origRuntime !== undefined) {
+      process.env.NEXT_RUNTIME = origRuntime;
+    } else {
+      delete process.env.NEXT_RUNTIME;
+    }
+  });
+
+  it("does not call getKeyProvider when NEXT_RUNTIME is not nodejs", async () => {
+    const origRuntime = process.env.NEXT_RUNTIME;
+    process.env.NEXT_RUNTIME = "edge";
+
+    const { register } = await loadInstrumentation();
+    await register();
+
+    expect(mocks.getKeyProvider).not.toHaveBeenCalled();
+    expect(mocks.validateKeys).not.toHaveBeenCalled();
+
+    if (origRuntime !== undefined) {
+      process.env.NEXT_RUNTIME = origRuntime;
+    } else {
+      delete process.env.NEXT_RUNTIME;
+    }
+  });
+});
 
 describe("onRequestError", () => {
   beforeEach(() => {

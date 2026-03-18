@@ -252,33 +252,36 @@ const envSchema = z
       }
     }
 
-    // ── Key rotation: current version key must exist ───────
+    // ── Key rotation: current version key must exist (env provider only) ───────
     const currentVersion = data.SHARE_MASTER_KEY_CURRENT_VERSION;
-    const hex64Re = /^[0-9a-fA-F]{64}$/;
+    // Cloud providers (aws-sm, azure-kv, gcp-sm) manage keys externally
+    if (data.KEY_PROVIDER === "env") {
+      const hex64Re = /^[0-9a-fA-F]{64}$/;
 
-    if (currentVersion === 1) {
-      // V1: SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY must exist
-      const v1Raw =
-        process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY;
-      const v1Key = v1Raw?.trim();
-      if (!v1Key || !hex64Re.test(v1Key)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["SHARE_MASTER_KEY"],
-          message:
-            "SHARE_MASTER_KEY or SHARE_MASTER_KEY_V1 is required (64-char hex)",
-        });
-      }
-    } else {
-      // V2+: SHARE_MASTER_KEY_V{N} must exist
-      const vNRaw = process.env[`SHARE_MASTER_KEY_V${currentVersion}`];
-      const vNKey = vNRaw?.trim();
-      if (!vNKey || !hex64Re.test(vNKey)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["SHARE_MASTER_KEY_CURRENT_VERSION"],
-          message: `SHARE_MASTER_KEY_V${currentVersion} is required (64-char hex) when CURRENT_VERSION=${currentVersion}`,
-        });
+      if (currentVersion === 1) {
+        // V1: SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY must exist
+        const v1Raw =
+          process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY;
+        const v1Key = v1Raw?.trim();
+        if (!v1Key || !hex64Re.test(v1Key)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["SHARE_MASTER_KEY"],
+            message:
+              "SHARE_MASTER_KEY or SHARE_MASTER_KEY_V1 is required (64-char hex)",
+          });
+        }
+      } else {
+        // V2+: SHARE_MASTER_KEY_V{N} must exist
+        const vNRaw = process.env[`SHARE_MASTER_KEY_V${currentVersion}`];
+        const vNKey = vNRaw?.trim();
+        if (!vNKey || !hex64Re.test(vNKey)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["SHARE_MASTER_KEY_CURRENT_VERSION"],
+            message: `SHARE_MASTER_KEY_V${currentVersion} is required (64-char hex) when CURRENT_VERSION=${currentVersion}`,
+          });
+        }
       }
     }
 
