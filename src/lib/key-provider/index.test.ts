@@ -16,15 +16,15 @@ vi.mock("./env-provider", () => {
   return { EnvKeyProvider };
 });
 
-vi.mock("./aws-kms-provider", () => {
-  class AwsKmsKeyProvider {
-    name = "aws-kms";
+vi.mock("./aws-sm-provider", () => {
+  class AwsSmKeyProvider {
+    name = "aws-sm";
     getKey = vi.fn();
     getKeySync = vi.fn();
     validateKeys = vi.fn();
     constructor(public config: unknown) {}
   }
-  return { AwsKmsKeyProvider };
+  return { AwsSmKeyProvider };
 });
 
 describe("key-provider index", () => {
@@ -50,11 +50,11 @@ describe("key-provider index", () => {
       expect(provider.name).toBe("env");
     });
 
-    it("selects AwsKmsKeyProvider when KEY_PROVIDER=aws-kms", async () => {
-      vi.stubEnv("KEY_PROVIDER", "aws-kms");
+    it("selects AwsSmKeyProvider when KEY_PROVIDER=aws-sm", async () => {
+      vi.stubEnv("KEY_PROVIDER", "aws-sm");
       vi.stubEnv("AWS_REGION", "us-east-1");
       const provider = await getKeyProvider();
-      expect(provider.name).toBe("aws-kms");
+      expect(provider.name).toBe("aws-sm");
     });
 
     it("throws for unknown KEY_PROVIDER value", async () => {
@@ -69,14 +69,13 @@ describe("key-provider index", () => {
       expect(p1).toBe(p2);
     });
 
-    it("passes KMS_CACHE_TTL_MS to AwsKmsKeyProvider when set", async () => {
-      vi.stubEnv("KEY_PROVIDER", "aws-kms");
+    it("passes SM_CACHE_TTL_MS to AwsSmKeyProvider when set", async () => {
+      vi.stubEnv("KEY_PROVIDER", "aws-sm");
       vi.stubEnv("AWS_REGION", "eu-west-1");
-      vi.stubEnv("KMS_CACHE_TTL_MS", "60000");
+      vi.stubEnv("SM_CACHE_TTL_MS", "60000");
 
       const provider = await getKeyProvider() as { config?: unknown };
-      // The mock AwsKmsKeyProvider stores constructor arg as .config
-      expect(provider.name).toBe("aws-kms");
+      expect(provider.name).toBe("aws-sm");
       expect((provider as { config?: { ttlMs?: number } }).config).toMatchObject({
         ttlMs: 60000,
       });

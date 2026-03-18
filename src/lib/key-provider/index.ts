@@ -14,12 +14,12 @@ export async function getKeyProvider(): Promise<KeyProvider> {
       _provider = new EnvKeyProvider();
       break;
     }
-    case "aws-kms": {
-      const { AwsKmsKeyProvider } = await import("./aws-kms-provider");
-      _provider = new AwsKmsKeyProvider({
+    case "aws-sm": {
+      const { AwsSmKeyProvider } = await import("./aws-sm-provider");
+      _provider = new AwsSmKeyProvider({
         region: process.env.AWS_REGION ?? "",
-        ttlMs: process.env.KMS_CACHE_TTL_MS
-          ? Number(process.env.KMS_CACHE_TTL_MS)
+        ttlMs: process.env.SM_CACHE_TTL_MS
+          ? Number(process.env.SM_CACHE_TTL_MS)
           : undefined,
       });
       break;
@@ -28,8 +28,8 @@ export async function getKeyProvider(): Promise<KeyProvider> {
       const { AzureKvKeyProvider } = await import("./azure-kv-provider");
       _provider = new AzureKvKeyProvider({
         vaultUrl: process.env.AZURE_KV_URL ?? "",
-        ttlMs: process.env.KMS_CACHE_TTL_MS
-          ? Number(process.env.KMS_CACHE_TTL_MS)
+        ttlMs: process.env.SM_CACHE_TTL_MS
+          ? Number(process.env.SM_CACHE_TTL_MS)
           : undefined,
       });
       break;
@@ -38,8 +38,8 @@ export async function getKeyProvider(): Promise<KeyProvider> {
       const { GcpSmKeyProvider } = await import("./gcp-sm-provider");
       _provider = new GcpSmKeyProvider({
         projectId: process.env.GCP_PROJECT_ID ?? "",
-        ttlMs: process.env.KMS_CACHE_TTL_MS
-          ? Number(process.env.KMS_CACHE_TTL_MS)
+        ttlMs: process.env.SM_CACHE_TTL_MS
+          ? Number(process.env.SM_CACHE_TTL_MS)
           : undefined,
       });
       break;
@@ -47,7 +47,7 @@ export async function getKeyProvider(): Promise<KeyProvider> {
     default:
       throw new Error(
         `Unknown KEY_PROVIDER: "${providerType}". ` +
-        `Supported providers: "env" (default), "aws-kms", "azure-kv", "gcp-sm"`
+        `Supported providers: "env" (default), "aws-sm", "azure-kv", "gcp-sm"`
       );
   }
 

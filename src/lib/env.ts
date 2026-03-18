@@ -149,7 +149,7 @@ const envSchema = z
     // --- Key provider ---
     // Vendor-specific validation is handled by each provider's validateKeys().
     KEY_PROVIDER: z.string().default("env"),
-    KMS_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
+    SM_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
 
     // --- DB connection pool tuning (optional) ---
     DB_POOL_MAX: z.coerce.number().int().min(1).max(200).default(20),

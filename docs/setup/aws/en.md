@@ -83,7 +83,7 @@ Optional:
 - `AZURE_STORAGE_ACCOUNT`, `AZURE_BLOB_CONTAINER` (when `BLOB_BACKEND=azure`)
 - `GCS_ATTACHMENTS_BUCKET` (when `BLOB_BACKEND=gcs`)
 - `HEALTH_REDIS_REQUIRED=true` (fail health check when Redis is down)
-- `KEY_PROVIDER=aws-kms` (use AWS KMS instead of plaintext env vars for master keys — see [KMS Setup](../../operations/kms-setup.md))
+- `KEY_PROVIDER=aws-sm` (use AWS Secrets Manager for master key management — see [KMS Setup](../../operations/kms-setup.md#aws-secrets-manager-provider-aws-sm))
 
 Generate:
 ```
