@@ -34,10 +34,20 @@ export async function getKeyProvider(): Promise<KeyProvider> {
       });
       break;
     }
+    case "gcp-sm": {
+      const { GcpSmKeyProvider } = await import("./gcp-sm-provider");
+      _provider = new GcpSmKeyProvider({
+        projectId: process.env.GCP_PROJECT_ID ?? "",
+        ttlMs: process.env.KMS_CACHE_TTL_MS
+          ? Number(process.env.KMS_CACHE_TTL_MS)
+          : undefined,
+      });
+      break;
+    }
     default:
       throw new Error(
         `Unknown KEY_PROVIDER: "${providerType}". ` +
-        `Supported providers: "env" (default), "aws-kms", "azure-kv"`
+        `Supported providers: "env" (default), "aws-kms", "azure-kv", "gcp-sm"`
       );
   }
 

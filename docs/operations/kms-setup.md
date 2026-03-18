@@ -340,3 +340,109 @@ The secret value is not in the expected format. Key Vault secrets must contain e
 **`@azure/keyvault-secrets and @azure/identity are required`**
 
 Install the required packages: `npm install @azure/keyvault-secrets @azure/identity`
+
+---
+
+## GCP Secret Manager Provider (`gcp-sm`)
+
+### Overview
+
+The `gcp-sm` provider stores master keys as **Secret Manager secrets** (64-char hex strings). Authentication uses Application Default Credentials (ADC), which supports Workload Identity, service account keys, and gcloud CLI.
+
+**Flow:**
+
+```
+GCP Secret Manager
+    └─ stores ─► secret version (64-char hex)
+                     │
+         accessSecretVersion()
+                     │
+                     ▼
+              plaintext key Buffer  ← held in memory cache
+```
+
+### Prerequisites
+
+```bash
+npm install @google-cloud/secret-manager
+```
+
+### Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `KEY_PROVIDER` | Yes | Set to `gcp-sm` |
+| `GCP_PROJECT_ID` | Yes | GCP project ID |
+| `KMS_CACHE_TTL_MS` | No | TTL for cached keys in ms (default: 300000 = 5 min) |
+| `SM_SECRET_SHARE_MASTER` | No | Secret name for share master key (default: `share-master-key`) |
+| `SM_SECRET_VERIFIER_PEPPER` | No | Secret name for verifier pepper (default: `verifier-pepper-key`) |
+| `SM_SECRET_DIRECTORY_SYNC` | No | Secret name for directory sync key (default: `directory-sync-key`) |
+| `SM_SECRET_WEBAUTHN_PRF` | No | Secret name for WebAuthn PRF (default: `webauthn-prf-secret`) |
+
+### Setup Steps
+
+1. **Enable Secret Manager API:**
+
+```bash
+gcloud services enable secretmanager.googleapis.com --project=my-project
+```
+
+2. **Create secrets:**
+
+```bash
+# Generate and store a 256-bit key
+openssl rand -hex 32 | gcloud secrets create share-master-key \
+  --project=my-project --data-file=-
+
+openssl rand -hex 32 | gcloud secrets create verifier-pepper-key \
+  --project=my-project --data-file=-
+
+openssl rand -hex 32 | gcloud secrets create directory-sync-key \
+  --project=my-project --data-file=-
+
+openssl rand -hex 32 | gcloud secrets create webauthn-prf-secret \
+  --project=my-project --data-file=-
+```
+
+3. **Grant access to the application:**
+
+```bash
+# For Workload Identity (GKE / Cloud Run)
+gcloud secrets add-iam-policy-binding share-master-key \
+  --project=my-project \
+  --member="serviceAccount:my-sa@my-project.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+# Repeat for each secret
+```
+
+4. **Configure the application:**
+
+```env
+KEY_PROVIDER=gcp-sm
+GCP_PROJECT_ID=my-project
+```
+
+### Key Rotation
+
+1. Add a new secret version: `echo -n $(openssl rand -hex 32) | gcloud secrets versions add share-master-key --data-file=-`
+2. Restart the application to pick up the new version (the provider always fetches `versions/latest`)
+3. For share master key versioning, use the `-v{N}` suffix pattern (e.g. `share-master-key-v2`)
+
+### Troubleshooting
+
+**`GCP_PROJECT_ID is required for KEY_PROVIDER=gcp-sm`**
+
+`GCP_PROJECT_ID` env var is not set or empty.
+
+**`GCP Secret Manager secret "..." has no payload data`**
+
+The secret version exists but has empty payload. Re-create with a valid 64-char hex string.
+
+**`GCP Secret Manager secret "..." is not a valid 64-char hex string`**
+
+The secret value is not in the expected format. Secrets must contain exactly 64 hexadecimal characters (256 bits).
+
+**`@google-cloud/secret-manager is required`**
+
+Install the required package: `npm install @google-cloud/secret-manager`
