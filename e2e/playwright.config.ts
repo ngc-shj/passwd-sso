@@ -1,4 +1,3 @@
-// IMPROVE(#37): add ESLint rule to forbid conditional assertion skip in e2e/tests
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({

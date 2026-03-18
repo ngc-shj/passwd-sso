@@ -19,6 +19,8 @@ interface AuthState {
   lockout: AuthUser;
   /** Dedicated user for vault-reset tests (destructive: deletes vault) */
   reset: AuthUser;
+  /** Dedicated user for vault-reset validation tests (non-destructive) */
+  resetValidation: AuthUser;
 }
 
 let _authState: AuthState | null = null;

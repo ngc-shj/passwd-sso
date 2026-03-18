@@ -8,6 +8,8 @@ import { validateExtensionToken } from "@/lib/extension-token";
 import { EXTENSION_TOKEN_TTL_MS } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { TokenIssueResponseSchema } from "@/lib/validations/extension-token";
+import logger from "@/lib/logger";
 
 export const runtime = "nodejs";
 
@@ -68,7 +70,7 @@ async function handlePOST(req: NextRequest) {
         return null; // Already revoked by concurrent refresh
       }
 
-      await tx.extensionToken.create({
+      const newToken = await tx.extensionToken.create({
         data: {
           userId,
           tenantId: activeSession.tenantId,
@@ -76,9 +78,10 @@ async function handlePOST(req: NextRequest) {
           scope: scopeCsv,
           expiresAt,
         },
+        select: { expiresAt: true, scope: true },
       });
 
-      return true;
+      return newToken;
     }),
   );
 
@@ -86,11 +89,19 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.EXTENSION_TOKEN_REVOKED, 401);
   }
 
-  return NextResponse.json({
+  const body = {
     token: plaintext,
-    expiresAt: expiresAt.toISOString(),
-    scope: scopes,
-  });
+    expiresAt: created.expiresAt.toISOString(),
+    scope: created.scope.split(","),
+  };
+
+  const parsed = TokenIssueResponseSchema.safeParse(body);
+  if (!parsed.success) {
+    logger.error({ error: parsed.error.message }, "extension token refresh response validation failed");
+    return NextResponse.json({ error: "INTERNAL_ERROR" }, { status: 500 });
+  }
+
+  return NextResponse.json(parsed.data);
 }
 
 export const POST = withRequestLog(handlePOST);

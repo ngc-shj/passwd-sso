@@ -51,6 +51,30 @@ const eslintConfig = defineConfig([
       ],
     },
   },
+  {
+    // Forbid conditional assertion skip in E2E tests.
+    // Wrapping expect() in if-blocks silently skips assertions.
+    files: ["e2e/**/*.spec.ts"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "IfStatement > BlockStatement > ExpressionStatement > CallExpression[callee.object.name='expect']",
+          message:
+            "Do not wrap expect() in conditionals — this silently skips assertions. " +
+            "Assert unconditionally or use Playwright's built-in waiting/retry.",
+        },
+        {
+          selector:
+            "IfStatement > ExpressionStatement > CallExpression[callee.object.name='expect']",
+          message:
+            "Do not wrap expect() in conditionals — this silently skips assertions. " +
+            "Assert unconditionally or use Playwright's built-in waiting/retry.",
+        },
+      ],
+    },
+  },
 ]);
 
 export default eslintConfig;
