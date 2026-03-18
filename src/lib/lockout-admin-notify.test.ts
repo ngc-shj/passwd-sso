@@ -276,6 +276,29 @@ describe("notifyAdminsOfLockout", () => {
     );
   });
 
+  it("excludes deactivated admins", async () => {
+    setupBypassRls({
+      userEmail: "victim@test.com",
+      tenantId: "tenant-1",
+      admins: [
+        { userId: "active-admin", user: { email: "active@test.com", locale: "en" } },
+      ],
+    });
+
+    await notifyAdminsOfLockout(baseParams);
+
+    // Verify the query includes deactivatedAt: null filter
+    expect(mockPrismaTenantMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deactivatedAt: null,
+        }),
+      }),
+    );
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    expect(mockCreateNotification).toHaveBeenCalledTimes(1);
+  });
+
   it("uses 'Unknown' for ip when ip is null", async () => {
     setupBypassRls({
       userEmail: "victim@test.com",
