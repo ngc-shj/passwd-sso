@@ -1,4 +1,4 @@
-# KMS Setup Guide
+# Key Provider Setup Guide
 
 ## 1. Overview
 

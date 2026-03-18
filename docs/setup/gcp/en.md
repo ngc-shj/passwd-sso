@@ -24,7 +24,7 @@ If `BLOB_BACKEND=gcs`:
 
 Optional:
 - `BLOB_OBJECT_PREFIX` (object key prefix)
-- `KEY_PROVIDER=gcp-sm` (use GCP Secret Manager for master key management — see [KMS Setup](../../operations/kms-setup.md#gcp-secret-manager-provider-gcp-sm))
+- `KEY_PROVIDER=gcp-sm` (use GCP Secret Manager for master key management — see [KMS Setup](../../operations/key-provider-setup.md#gcp-secret-manager-provider-gcp-sm))
 
 ## Object storage design (attachments)
 
