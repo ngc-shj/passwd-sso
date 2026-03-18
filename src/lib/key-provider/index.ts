@@ -1,3 +1,4 @@
+import { EnvKeyProvider } from "./env-provider";
 import type { KeyProvider } from "./types";
 export type { KeyName, KeyProvider } from "./types";
 
@@ -56,7 +57,13 @@ export async function getKeyProvider(): Promise<KeyProvider> {
 
 export function getKeyProviderSync(): KeyProvider {
   if (!_provider) {
-    throw new Error("KeyProvider not initialized. Call getKeyProvider() at startup.");
+    // Lazy fallback for env provider — safe because EnvKeyProvider is synchronous.
+    // Cloud providers require async init via getKeyProvider() at startup.
+    if (!process.env.KEY_PROVIDER || process.env.KEY_PROVIDER === "env") {
+      _provider = new EnvKeyProvider();
+    } else {
+      throw new Error("KeyProvider not initialized. Call getKeyProvider() at startup.");
+    }
   }
   return _provider;
 }

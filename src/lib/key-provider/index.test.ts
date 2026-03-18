@@ -159,7 +159,14 @@ describe("key-provider index", () => {
   // ── getKeyProviderSync ────────────────────────────────────────
 
   describe("getKeyProviderSync", () => {
-    it("throws when called before getKeyProvider", () => {
+    it("lazy-initializes EnvKeyProvider when KEY_PROVIDER is env or unset", () => {
+      vi.stubEnv("KEY_PROVIDER", "env");
+      const provider = getKeyProviderSync();
+      expect(provider).toBeDefined();
+    });
+
+    it("throws when called before getKeyProvider for cloud providers", () => {
+      vi.stubEnv("KEY_PROVIDER", "aws-sm");
       expect(() => getKeyProviderSync()).toThrow(
         "KeyProvider not initialized. Call getKeyProvider() at startup."
       );
@@ -184,10 +191,20 @@ describe("key-provider index", () => {
       expect(p1).not.toBe(p2);
     });
 
-    it("causes getKeyProviderSync to throw after reset", async () => {
+    it("causes getKeyProviderSync to lazy-reinitialize for env provider after reset", async () => {
       vi.stubEnv("KEY_PROVIDER", "env");
       await getKeyProvider();
       _resetKeyProvider();
+      // For env provider, getKeyProviderSync lazy-initializes — does not throw
+      expect(() => getKeyProviderSync()).not.toThrow();
+    });
+
+    it("causes getKeyProviderSync to throw after reset for cloud provider", async () => {
+      vi.stubEnv("KEY_PROVIDER", "aws-sm");
+      vi.stubEnv("AWS_REGION", "us-east-1");
+      await getKeyProvider();
+      _resetKeyProvider();
+      vi.stubEnv("KEY_PROVIDER", "aws-sm");
       expect(() => getKeyProviderSync()).toThrow(
         "KeyProvider not initialized"
       );
