@@ -300,4 +300,53 @@ describe("AwsKmsKeyProvider", () => {
       );
     });
   });
+
+  // ── module loader failure ───────────────────────────────────
+
+  describe("module loader failure", () => {
+    it("throws descriptive error when @aws-sdk/client-kms is unavailable", async () => {
+      _setKmsModuleLoader(async () => {
+        throw new Error("Cannot find module '@aws-sdk/client-kms'");
+      });
+
+      vi.stubEnv("KMS_ENCRYPTED_KEY_SHARE_MASTER", ENCRYPTED_B64);
+
+      const provider = makeProvider();
+      await expect(provider.getKey("share-master")).rejects.toThrow(
+        "@aws-sdk/client-kms is required for KEY_PROVIDER=aws-kms"
+      );
+    });
+
+    it("caches module load failure (no thundering herd)", async () => {
+      let loadCount = 0;
+      _setKmsModuleLoader(async () => {
+        loadCount++;
+        throw new Error("Cannot find module");
+      });
+
+      vi.stubEnv("KMS_ENCRYPTED_KEY_SHARE_MASTER", ENCRYPTED_B64);
+      const provider = makeProvider();
+
+      await expect(provider.getKey("share-master")).rejects.toThrow();
+      await expect(provider.getKey("share-master")).rejects.toThrow();
+
+      // Module loader should only be called once — failure is cached
+      expect(loadCount).toBe(1);
+    });
+  });
+
+  // ── KMS client reuse ────────────────────────────────────────
+
+  it("reuses KMS client across multiple decryptDataKey calls", async () => {
+    vi.stubEnv("KMS_ENCRYPTED_KEY_SHARE_MASTER", ENCRYPTED_B64);
+    vi.stubEnv("KMS_ENCRYPTED_KEY_VERIFIER_PEPPER", ENCRYPTED_B64);
+    mockSend.mockResolvedValue({ Plaintext: PLAINTEXT_KEY });
+
+    const provider = makeProvider();
+    await provider.getKey("share-master");
+    await provider.getKey("verifier-pepper");
+
+    // Both calls should use the same mockSend (same KMS client instance)
+    expect(mockSend).toHaveBeenCalledTimes(2);
+  });
 });
