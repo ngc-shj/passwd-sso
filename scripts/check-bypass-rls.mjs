@@ -35,6 +35,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   ["src/app/api/teams/[teamId]/members/route.ts", ["tenantMember"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
+  ["src/lib/lockout-admin-notify.ts", ["user", "tenantMember"]],
   ["src/lib/new-device-detection.ts", ["session", "user"]],
   ["src/lib/notification.ts", ["user", "notification"]],
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],

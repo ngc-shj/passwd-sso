@@ -52,7 +52,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 ### Security & Compliance
 
 - **Security Audit (Watchtower)** — Breached (HIBP), weak, reused, old, HTTP-URL detection; dark-web monitoring with email alerts
-- **Account Lockout** — Progressive lockout (5→15min, 10→1h, 15→24h)
+- **Account Lockout** — Progressive lockout (5→15min, 10→1h, 15→24h) with tenant admin email & in-app alerts on threshold crossing
 - **Concurrent Session Limits** — Tenant-level max session cap with automatic oldest-session eviction
 - **Rate Limiting** — Redis-backed on sensitive endpoints; optional Sentinel HA for production
 - **CSP & Security Headers** — Nonce-based CSP, violation reporting, OWASP headers
