@@ -37,8 +37,11 @@ export class EnvKeyProvider implements KeyProvider {
     if (!Number.isFinite(version) || version < 1) {
       throw new Error("SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer");
     }
-    // Throws if the current version key is missing or invalid
+    // Validate all keys — throws if missing or invalid
     this.getShareMasterKey(version);
+    this.getVerifierPepper();
+    this.getDirectorySyncKey();
+    this.getPrfSecret();
   }
 
   private getShareMasterKey(version: number): Buffer {

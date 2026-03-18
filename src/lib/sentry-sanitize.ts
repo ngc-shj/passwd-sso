@@ -13,9 +13,9 @@
 
 // Regex patterns for sensitive data that must be scrubbed from error messages
 const HEX64_RE = /[0-9a-fA-F]{64}/g;
-// Base64: alphabet + padding, more than 40 chars.
-// Excludes '/' to avoid matching file paths in stack traces.
-const BASE64_LONG_RE = /[A-Za-z0-9+]{40,}={0,2}/g;
+// Base64: full RFC 4648 alphabet + padding, more than 40 chars.
+// Only applied to error messages (not stack traces) to avoid false positives on file paths.
+const BASE64_LONG_RE = /[A-Za-z0-9+/]{40,}={0,2}/g;
 
 /**
  * Creates a sanitized copy of an error before sending to Sentry.
@@ -35,7 +35,8 @@ export function sanitizeErrorForSentry(err: unknown): Error {
 
   const sanitized = new Error(sanitizedMessage);
   sanitized.name = err.name;
-  sanitized.stack = err.stack ? scrubSensitivePatterns(err.stack) : err.stack;
+  // Stack: only scrub hex keys, not base64 (to avoid mangling file paths)
+  sanitized.stack = err.stack ? scrubHexOnly(err.stack) : err.stack;
 
   // Recursively sanitize cause chain
   if (err.cause !== undefined) {
@@ -45,8 +46,12 @@ export function sanitizeErrorForSentry(err: unknown): Error {
   return sanitized;
 }
 
-function scrubSensitivePatterns(message: string): string {
-  return message
+function scrubSensitivePatterns(text: string): string {
+  return text
     .replace(HEX64_RE, "[redacted-key]")
     .replace(BASE64_LONG_RE, "[redacted-b64]");
+}
+
+function scrubHexOnly(text: string): string {
+  return text.replace(HEX64_RE, "[redacted-key]");
 }
