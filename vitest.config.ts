@@ -39,8 +39,12 @@ export default defineConfig({
         "src/lib/account-lockout.ts",
         "src/lib/webhook-dispatcher.ts",
         "src/proxy.ts",
+        "src/components/**/*.{ts,tsx}",
       ],
-      exclude: ["src/app/api/auth/\\[...nextauth\\]/**"],
+      exclude: [
+        "src/app/api/auth/\\[...nextauth\\]/**",
+        "src/components/**/*.test.{ts,tsx}",
+      ],
       thresholds: {
         lines: 60,
         "src/lib/auth-or-token.ts": { lines: 80 },

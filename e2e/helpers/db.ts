@@ -72,6 +72,12 @@ export const TEST_USERS = {
     email: "e2e-reset@test.local",
     name: "E2E Reset User",
   },
+  /** Vault set up — dedicated to vault-reset validation test (non-destructive) */
+  resetValidation: {
+    id: "e2e-user-reset-validation",
+    email: "e2e-reset-validation@test.local",
+    name: "E2E Reset Validation User",
+  },
 } as const;
 
 export const TEST_PASSPHRASE = "E2ETestPassphrase!2026";

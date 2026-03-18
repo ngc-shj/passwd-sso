@@ -191,6 +191,10 @@ Client(valid時):
 - Web アプリ:
   - Vault 復号鍵はランタイムメモリ中心で扱う
   - 自動ロック: 非操作 15 分 / 非表示 5 分
+- Web Crypto API の制約:
+  - `CryptoKey` オブジェクトは可能な限り `extractable: false` で生成する
+  - 鍵素材のライフタイムは参照クリア後の JavaScript ガベージコレクターが管理する
+  - ブラウザ環境では即時メモリゼロ化は保証されない（Web Crypto API の制限）
 - ブラウザ拡張:
   - token は `chrome.storage.session` に保持（ブラウザ終了でクリア）
   - vault 復号再導出用の `vaultSecretKey` も `chrome.storage.session` で保持
@@ -394,6 +398,14 @@ Client(valid時):
 - そのため、拡張では `chrome.storage.session` を限定採用し、  
   TTL・scope・revoke・auto-lock でリスクを制御する
 - ここは実装方針として将来再評価対象（ポリシー変更時は優先して見直す）
+- Web Crypto API はメモリの明示的ゼロ化プリミティブを提供しない。
+  ブラウザ管理の `CryptoKey` オブジェクトは不透明かつ非抽出であり、
+  意図しないエクスポートを防ぐ一方、鍵素材の解放タイミングはランタイムが制御する。
+- Web アプリでは、`secretKeyRef`（Uint8Array）をロック/アンロード時に明示クリアしており
+  （`vault-context.tsx:143`, `vault-context.tsx:280`）、これがブラウザ環境でのベストエフォート対応となる。
+- 拡張では `chrome.storage.session` 内の `vaultSecretKey` をロック時にクリアし、
+  ブラウザ終了時は Chrome が自動クリアする。15 分の自動ロックタイマーが時間的な補完制御を提供する。
+- 詳細な技術評価は `security-review.md` セクション 4（Crypto Primitives）を参照。
 
 ## 15. 鍵の共有機能（Emergency Access）
 

@@ -1,11 +1,12 @@
 /**
  * Playwright global setup — seed test users into the database.
  *
- * Creates four users:
- * 1. "vault-ready" — vault fully set up, for general unlock/CRUD/lock tests
- * 2. "fresh"       — no vault setup, for setup wizard tests
- * 3. "lockout"     — vault set up, dedicated to lockout test (destructive)
- * 4. "reset"       — vault set up, dedicated to vault-reset test (destructive)
+ * Creates five users:
+ * 1. "vault-ready"      — vault fully set up, for general unlock/CRUD/lock tests
+ * 2. "fresh"            — no vault setup, for setup wizard tests
+ * 3. "lockout"          — vault set up, dedicated to lockout test (destructive)
+ * 4. "reset"            — vault set up, dedicated to vault-reset test (destructive)
+ * 5. "resetValidation"  — vault set up, dedicated to vault-reset validation (non-destructive)
  *
  * Session tokens are written to .auth-state.json for test consumption.
  */
@@ -76,10 +77,11 @@ export default async function globalSetup(): Promise<void> {
   // Clean up any leftover data from previous runs
   await cleanup();
 
-  // ── Vault-ready users (3: general, lockout, reset) ────────────
+  // ── Vault-ready users (4: general, lockout, reset, resetValidation) ──
   const vaultReadyToken = await seedVaultReadyUser(TEST_USERS.vaultReady, pepper);
   const lockoutToken = await seedVaultReadyUser(TEST_USERS.lockout, pepper);
   const resetToken = await seedVaultReadyUser(TEST_USERS.reset, pepper);
+  const resetValidationToken = await seedVaultReadyUser(TEST_USERS.resetValidation, pepper);
 
   // ── Fresh user (no vault) ─────────────────────────────────────
   await seedUser(TEST_USERS.fresh);
@@ -107,11 +109,16 @@ export default async function globalSetup(): Promise<void> {
       sessionToken: resetToken,
       passphrase: TEST_PASSPHRASE,
     },
+    resetValidation: {
+      ...TEST_USERS.resetValidation,
+      sessionToken: resetValidationToken,
+      passphrase: TEST_PASSPHRASE,
+    },
   };
 
   writeFileSync(AUTH_STATE_PATH, JSON.stringify(authState, null, 2));
 
   await closePool();
 
-  console.log("[E2E Setup] Test users seeded successfully (4 users).");
+  console.log("[E2E Setup] Test users seeded successfully (5 users).");
 }

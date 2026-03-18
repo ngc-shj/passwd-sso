@@ -76,7 +76,10 @@ describe("POST /api/extension/token/refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExtTokenUpdateMany.mockResolvedValue({ count: 1 });
-    mockExtTokenCreate.mockResolvedValue({});
+    mockExtTokenCreate.mockResolvedValue({
+      expiresAt: new Date("2030-01-01"),
+      scope: "passwords:read,vault:unlock-data",
+    });
     // Interactive transaction: pass tx object with same mocks to the callback
     mockTransaction.mockImplementation(
       async (cb: (tx: unknown) => unknown) =>
@@ -202,6 +205,10 @@ describe("POST /api/extension/token/refresh", () => {
       validTokenResult({ scopes: ["passwords:read"] }),
     );
     mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockExtTokenCreate.mockResolvedValue({
+      expiresAt: new Date("2030-01-01"),
+      scope: "passwords:read",
+    });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
