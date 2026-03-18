@@ -276,20 +276,27 @@ describe("AwsKmsKeyProvider", () => {
 
     it("throws when encrypted key env var is not set", async () => {
       vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "1");
-      vi.stubEnv("KMS_ENCRYPTED_KEY_SHARE_MASTER", "");
-
+      // KMS_ENCRYPTED_KEY_SHARE_MASTER not set → prerequisite check fires
       const provider = makeProvider();
       await expect(provider.validateKeys()).rejects.toThrow(
-        "Encrypted data key not found in env"
+        "KMS_ENCRYPTED_KEY_SHARE_MASTER is required"
       );
     });
 
     it("throws when SHARE_MASTER_KEY_CURRENT_VERSION is invalid", async () => {
       vi.stubEnv("SHARE_MASTER_KEY_CURRENT_VERSION", "abc");
+      vi.stubEnv("KMS_ENCRYPTED_KEY_SHARE_MASTER", ENCRYPTED_B64);
 
       const provider = makeProvider();
       await expect(provider.validateKeys()).rejects.toThrow(
         "SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer"
+      );
+    });
+
+    it("throws when AWS_REGION is empty", async () => {
+      const provider = new AwsKmsKeyProvider({ region: "", ttlMs: 300_000 });
+      await expect(provider.validateKeys()).rejects.toThrow(
+        "AWS_REGION is required"
       );
     });
   });

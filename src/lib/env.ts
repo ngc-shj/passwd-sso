@@ -147,7 +147,8 @@ const envSchema = z
       .transform((v) => v === "true"),
 
     // --- Key provider ---
-    KEY_PROVIDER: z.enum(["env", "aws-kms"]).default("env"),
+    // Vendor-specific validation is handled by each provider's validateKeys().
+    KEY_PROVIDER: z.string().default("env"),
     KMS_CACHE_TTL_MS: z.coerce.number().int().min(10000).max(3600000).optional(),
 
     // --- DB connection pool tuning (optional) ---
@@ -352,24 +353,8 @@ const envSchema = z
       }
     }
 
-    // ── KMS provider: required env vars ─────────────────────
-    if (data.KEY_PROVIDER === "aws-kms") {
-      if (!data.AWS_REGION) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["AWS_REGION"],
-          message: "AWS_REGION is required when KEY_PROVIDER=aws-kms",
-        });
-      }
-      if (!process.env.KMS_ENCRYPTED_KEY_SHARE_MASTER) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["KEY_PROVIDER"],
-          message:
-            "KMS_ENCRYPTED_KEY_SHARE_MASTER is required when KEY_PROVIDER=aws-kms",
-        });
-      }
-    }
+    // Key provider validation is delegated to each provider's validateKeys()
+    // in instrumentation.ts — no vendor-specific checks here.
   });
 
 // ─── Type export ────────────────────────────────────────────

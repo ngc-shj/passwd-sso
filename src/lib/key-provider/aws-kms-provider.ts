@@ -134,14 +134,22 @@ export class AwsKmsKeyProvider implements KeyProvider {
   }
 
   async validateKeys(): Promise<void> {
+    // Validate AWS-specific prerequisites
+    if (!this.region) {
+      throw new Error("AWS_REGION is required for KEY_PROVIDER=aws-kms");
+    }
+    if (!process.env[KEY_ENV_MAP["share-master"]]) {
+      throw new Error(
+        `${KEY_ENV_MAP["share-master"]} is required for KEY_PROVIDER=aws-kms`
+      );
+    }
+
     const version = parseInt(process.env.SHARE_MASTER_KEY_CURRENT_VERSION ?? "1", 10);
     if (!Number.isFinite(version) || version < 1) {
       throw new Error("SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer");
     }
 
     const keysToValidate: Array<{ name: KeyName; version?: number }> = [
-      // Use version=undefined for share-master so env var is KMS_ENCRYPTED_KEY_SHARE_MASTER
-      // (not KMS_ENCRYPTED_KEY_SHARE_MASTER_V1). Versioned keys are resolved at request time.
       { name: "share-master" },
     ];
 

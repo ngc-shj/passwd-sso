@@ -17,7 +17,7 @@ export async function getKeyProvider(): Promise<KeyProvider> {
     case "aws-kms": {
       const { AwsKmsKeyProvider } = await import("./aws-kms-provider");
       _provider = new AwsKmsKeyProvider({
-        region: process.env.AWS_REGION!,
+        region: process.env.AWS_REGION ?? "",
         ttlMs: process.env.KMS_CACHE_TTL_MS
           ? Number(process.env.KMS_CACHE_TTL_MS)
           : undefined,
@@ -25,7 +25,10 @@ export async function getKeyProvider(): Promise<KeyProvider> {
       break;
     }
     default:
-      throw new Error(`Unknown KEY_PROVIDER: ${providerType}`);
+      throw new Error(
+        `Unknown KEY_PROVIDER: "${providerType}". ` +
+        `Supported providers: "env" (default), "aws-kms"`
+      );
   }
 
   return _provider!;

@@ -59,7 +59,7 @@ describe("key-provider index", () => {
 
     it("throws for unknown KEY_PROVIDER value", async () => {
       vi.stubEnv("KEY_PROVIDER", "gcp-kms");
-      await expect(getKeyProvider()).rejects.toThrow("Unknown KEY_PROVIDER: gcp-kms");
+      await expect(getKeyProvider()).rejects.toThrow("Unknown KEY_PROVIDER: \"gcp-kms\"");
     });
 
     it("returns same singleton on repeated calls", async () => {
