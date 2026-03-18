@@ -53,10 +53,10 @@ Standard AWS credential resolution applies (IAM role, instance profile, ECS task
 | Variable | Description |
 |----------|-------------|
 | `AWS_REGION` | AWS region (e.g. `ap-northeast-1`) |
-| `SM_SECRET_SHARE_MASTER` | Secret name/ARN (default: `passwd-sso/share-master-key`) |
-| `SM_SECRET_VERIFIER_PEPPER` | Secret name/ARN (default: `passwd-sso/verifier-pepper-key`) |
-| `SM_SECRET_DIRECTORY_SYNC` | Secret name/ARN (default: `passwd-sso/directory-sync-key`) |
-| `SM_SECRET_WEBAUTHN_PRF` | Secret name/ARN (default: `passwd-sso/webauthn-prf-secret`) |
+| `AWS_SM_SECRET_SHARE_MASTER` | Secret name/ARN (default: `passwd-sso/share-master-key`) |
+| `AWS_SM_SECRET_VERIFIER_PEPPER` | Secret name/ARN (default: `passwd-sso/verifier-pepper-key`) |
+| `AWS_SM_SECRET_DIRECTORY_SYNC` | Secret name/ARN (default: `passwd-sso/directory-sync-key`) |
+| `AWS_SM_SECRET_WEBAUTHN_PRF` | Secret name/ARN (default: `passwd-sso/webauthn-prf-secret`) |
 
 ---
 
@@ -131,7 +131,7 @@ If using a custom KMS CMK, also grant `kms:Decrypt` on the key ARN.
 KEY_PROVIDER=aws-sm
 AWS_REGION=ap-northeast-1
 # Optional: override default secret names
-# SM_SECRET_SHARE_MASTER=my-custom/share-key
+# AWS_SM_SECRET_SHARE_MASTER=my-custom/share-key
 ```
 
 ---
@@ -332,10 +332,10 @@ npm install @google-cloud/secret-manager
 | `KEY_PROVIDER` | Yes | Set to `gcp-sm` |
 | `GCP_PROJECT_ID` | Yes | GCP project ID |
 | `SM_CACHE_TTL_MS` | No | TTL for cached keys in ms (default: 300000 = 5 min) |
-| `SM_SECRET_SHARE_MASTER` | No | Secret name for share master key (default: `share-master-key`) |
-| `SM_SECRET_VERIFIER_PEPPER` | No | Secret name for verifier pepper (default: `verifier-pepper-key`) |
-| `SM_SECRET_DIRECTORY_SYNC` | No | Secret name for directory sync key (default: `directory-sync-key`) |
-| `SM_SECRET_WEBAUTHN_PRF` | No | Secret name for WebAuthn PRF (default: `webauthn-prf-secret`) |
+| `GCP_SM_SECRET_SHARE_MASTER` | No | Secret name for share master key (default: `share-master-key`) |
+| `GCP_SM_SECRET_VERIFIER_PEPPER` | No | Secret name for verifier pepper (default: `verifier-pepper-key`) |
+| `GCP_SM_SECRET_DIRECTORY_SYNC` | No | Secret name for directory sync key (default: `directory-sync-key`) |
+| `GCP_SM_SECRET_WEBAUTHN_PRF` | No | Secret name for WebAuthn PRF (default: `webauthn-prf-secret`) |
 
 ### Setup Steps
 

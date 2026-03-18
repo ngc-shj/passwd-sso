@@ -130,7 +130,7 @@ describe("AwsSmKeyProvider", () => {
     });
 
     it("uses custom secret name from env var", async () => {
-      vi.stubEnv("SM_SECRET_SHARE_MASTER", "my-custom-key");
+      vi.stubEnv("AWS_SM_SECRET_SHARE_MASTER", "my-custom-key");
       mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
 
       const provider = makeProvider();
@@ -195,9 +195,9 @@ describe("AwsSmKeyProvider", () => {
     });
 
     it("warms all configured key types", async () => {
-      vi.stubEnv("SM_SECRET_VERIFIER_PEPPER", "my-pepper");
-      vi.stubEnv("SM_SECRET_DIRECTORY_SYNC", "my-dir-sync");
-      vi.stubEnv("SM_SECRET_WEBAUTHN_PRF", "my-prf");
+      vi.stubEnv("AWS_SM_SECRET_VERIFIER_PEPPER", "my-pepper");
+      vi.stubEnv("AWS_SM_SECRET_DIRECTORY_SYNC", "my-dir-sync");
+      vi.stubEnv("AWS_SM_SECRET_WEBAUTHN_PRF", "my-prf");
       mockSend.mockResolvedValue({ SecretString: PLAINTEXT_HEX });
 
       const provider = makeProvider();

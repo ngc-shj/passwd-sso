@@ -1,3 +1,16 @@
+/**
+ * Error-level sanitization for Sentry.
+ *
+ * Scrubs sensitive patterns (hex keys, base64) from Error.message and
+ * Error.stack BEFORE passing to captureException(). Used in:
+ *   - src/lib/with-request-log.ts (server-side catch block)
+ *   - src/app/global-error.tsx (client-side error boundary)
+ *   - src/instrumentation.ts (onRequestError hook)
+ *
+ * Complementary to src/lib/sentry-scrub.ts which scrubs Sentry EVENT
+ * objects (extra, contexts, breadcrumbs) via the beforeSend hook.
+ */
+
 // Regex patterns for sensitive data that must be scrubbed from error messages
 const HEX64_RE = /[0-9a-fA-F]{64}/g;
 // Base64: alphabet + padding, more than 40 chars

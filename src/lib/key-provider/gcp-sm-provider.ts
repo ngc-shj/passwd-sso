@@ -9,10 +9,10 @@
  *
  * Env vars:
  *   GCP_PROJECT_ID                 — GCP project ID (required)
- *   SM_SECRET_SHARE_MASTER         — secret name (default: "share-master-key")
- *   SM_SECRET_VERIFIER_PEPPER      — secret name for verifier pepper
- *   SM_SECRET_DIRECTORY_SYNC       — secret name for directory sync key
- *   SM_SECRET_WEBAUTHN_PRF         — secret name for WebAuthn PRF secret
+ *   GCP_SM_SECRET_SHARE_MASTER     — secret name (default: "share-master-key")
+ *   GCP_SM_SECRET_VERIFIER_PEPPER  — secret name for verifier pepper
+ *   GCP_SM_SECRET_DIRECTORY_SYNC   — secret name for directory sync key
+ *   GCP_SM_SECRET_WEBAUTHN_PRF     — secret name for WebAuthn PRF secret
  */
 
 import type { KeyName } from "./types";
@@ -67,10 +67,10 @@ export class GcpSmKeyProvider extends BaseCloudKeyProvider {
   private smClient: SmClient | null = null;
 
   protected readonly secretNameEnvMap: Record<KeyName, string> = {
-    "share-master": "SM_SECRET_SHARE_MASTER",
-    "verifier-pepper": "SM_SECRET_VERIFIER_PEPPER",
-    "directory-sync": "SM_SECRET_DIRECTORY_SYNC",
-    "webauthn-prf": "SM_SECRET_WEBAUTHN_PRF",
+    "share-master": "GCP_SM_SECRET_SHARE_MASTER",
+    "verifier-pepper": "GCP_SM_SECRET_VERIFIER_PEPPER",
+    "directory-sync": "GCP_SM_SECRET_DIRECTORY_SYNC",
+    "webauthn-prf": "GCP_SM_SECRET_WEBAUTHN_PRF",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {

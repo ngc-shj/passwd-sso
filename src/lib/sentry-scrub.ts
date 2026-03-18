@@ -1,9 +1,12 @@
 /**
- * Sensitive data scrubbing utility for Sentry events.
+ * Event-level scrubbing for Sentry.
  *
- * Recursively strips values for keys matching sensitive patterns.
- * Used in Sentry's `beforeSend` hook to prevent leaking passwords,
- * encryption keys, tokens, and other secret data.
+ * Recursively strips values for keys matching sensitive patterns
+ * from Sentry EVENT objects (extra, contexts, breadcrumbs, request body).
+ * Used in Sentry's `beforeSend` hook (sentry.server.config.ts, sentry.client.config.ts).
+ *
+ * Complementary to src/lib/sentry-sanitize.ts which scrubs Error.message
+ * and Error.stack BEFORE passing to captureException().
  */
 
 const SENSITIVE_PATTERNS = [

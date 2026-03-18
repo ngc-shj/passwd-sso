@@ -9,10 +9,10 @@
  *
  * Env vars:
  *   AWS_REGION                     — AWS region (required)
- *   SM_SECRET_SHARE_MASTER         — secret name/ARN (default: "passwd-sso/share-master-key")
- *   SM_SECRET_VERIFIER_PEPPER      — secret name/ARN for verifier pepper
- *   SM_SECRET_DIRECTORY_SYNC       — secret name/ARN for directory sync key
- *   SM_SECRET_WEBAUTHN_PRF         — secret name/ARN for WebAuthn PRF secret
+ *   AWS_SM_SECRET_SHARE_MASTER     — secret name/ARN (default: "passwd-sso/share-master-key")
+ *   AWS_SM_SECRET_VERIFIER_PEPPER  — secret name/ARN for verifier pepper
+ *   AWS_SM_SECRET_DIRECTORY_SYNC   — secret name/ARN for directory sync key
+ *   AWS_SM_SECRET_WEBAUTHN_PRF     — secret name/ARN for WebAuthn PRF secret
  */
 
 import type { KeyName } from "./types";
@@ -65,10 +65,10 @@ export class AwsSmKeyProvider extends BaseCloudKeyProvider {
   private smClient: SmClient | null = null;
 
   protected readonly secretNameEnvMap: Record<KeyName, string> = {
-    "share-master": "SM_SECRET_SHARE_MASTER",
-    "verifier-pepper": "SM_SECRET_VERIFIER_PEPPER",
-    "directory-sync": "SM_SECRET_DIRECTORY_SYNC",
-    "webauthn-prf": "SM_SECRET_WEBAUTHN_PRF",
+    "share-master": "AWS_SM_SECRET_SHARE_MASTER",
+    "verifier-pepper": "AWS_SM_SECRET_VERIFIER_PEPPER",
+    "directory-sync": "AWS_SM_SECRET_DIRECTORY_SYNC",
+    "webauthn-prf": "AWS_SM_SECRET_WEBAUTHN_PRF",
   };
 
   protected readonly defaultSecretNames: Record<KeyName, string> = {
