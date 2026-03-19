@@ -10,7 +10,8 @@ export const HEX_SALT_LENGTH = 64;         // 32 bytes as hex
 export const HEX_HASH_LENGTH = 64;         // 32 bytes as hex (SHA-256)
 
 // ─── Shared Regex Patterns ───────────────────────────────────
-export const HEX64_RE = /^[0-9a-fA-F]{64}$/;   // 256-bit key as hex
+export const HEX64_PATTERN = "[0-9a-fA-F]{64}"; // 256-bit key as hex (base pattern)
+export const HEX64_RE = new RegExp(`^${HEX64_PATTERN}$`);
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
 // ─── Shared Enum Values ──────────────────────────────────────
