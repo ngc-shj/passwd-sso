@@ -12,6 +12,9 @@ const { mockSearchParams, mockFetch, mockGetTeamEncryptionKey, mockDecryptData }
   mockDecryptData: vi.fn(),
 }));
 
+const teamArchivedListMock = vi.fn();
+const teamTrashListMock = vi.fn();
+
 const teamEditDialogLoaderMock = vi.fn();
 
 vi.mock("next/navigation", () => ({
@@ -53,10 +56,16 @@ vi.mock("@/components/team/team-edit-dialog-loader", () => ({
   },
 }));
 vi.mock("@/components/team/team-archived-list", () => ({
-  TeamArchivedList: () => null,
+  TeamArchivedList: (props: unknown) => {
+    teamArchivedListMock(props);
+    return null;
+  },
 }));
 vi.mock("@/components/team/team-trash-list", () => ({
-  TeamTrashList: () => null,
+  TeamTrashList: (props: unknown) => {
+    teamTrashListMock(props);
+    return null;
+  },
 }));
 vi.mock("@/components/team/team-role-badge", () => ({
   TeamRoleBadge: () => <span>ROLE</span>,
@@ -389,6 +398,82 @@ describe("TeamDashboardPage — error handling", () => {
     await waitFor(() => {
       expect(view!.container.textContent).toContain("forbidden");
     });
+  });
+});
+
+describe("TeamDashboardPage — prop forwarding to archived/trash list", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    for (const key of [...mockSearchParams.keys()]) {
+      mockSearchParams.delete(key);
+    }
+    globalThis.fetch = mockFetch as unknown as typeof fetch;
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Entry One",
+        username: "alice",
+      }),
+    );
+  });
+
+  it("passes teamName and role from loaded team to TeamArchivedList when scope=archive", async () => {
+    mockSearchParams.set("scope", "archive");
+    setupFetch(makeTeamResponse("ADMIN"));
+
+    await act(async () => {
+      renderPage();
+    });
+
+    await waitFor(() => {
+      expect(teamArchivedListMock).toHaveBeenCalled();
+    });
+
+    expect(teamArchivedListMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamName: "Test Team",
+        role: "ADMIN",
+      }),
+    );
+  });
+
+  it("passes teamName and role from loaded team to TeamTrashList when scope=trash", async () => {
+    mockSearchParams.set("scope", "trash");
+    setupFetch(makeTeamResponse("MEMBER"));
+
+    await act(async () => {
+      renderPage();
+    });
+
+    await waitFor(() => {
+      expect(teamTrashListMock).toHaveBeenCalled();
+    });
+
+    expect(teamTrashListMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        teamName: "Test Team",
+        role: "MEMBER",
+      }),
+    );
+  });
+
+  it("does NOT render TeamArchivedList when scope=archive but team is not yet loaded (null guard)", async () => {
+    // Return a never-resolving team fetch so team stays null
+    mockSearchParams.set("scope", "archive");
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes("/api/teams/team-1") && !url.includes("/passwords")) {
+        return new Promise(() => {}); // never resolves
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
+
+    await act(async () => {
+      renderPage();
+    });
+
+    // Give React a moment to settle without the team resolving
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(teamArchivedListMock).not.toHaveBeenCalled();
   });
 });
 

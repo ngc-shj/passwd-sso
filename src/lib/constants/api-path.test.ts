@@ -17,9 +17,6 @@ describe("API_PATH", () => {
     expect(API_PATH.PASSWORDS_GENERATE).toBe("/api/passwords/generate");
     expect(API_PATH.TAGS).toBe("/api/tags");
     expect(API_PATH.TEAMS).toBe("/api/teams");
-    expect(API_PATH.TEAMS_ARCHIVED).toBe("/api/teams/archived");
-    expect(API_PATH.TEAMS_FAVORITES).toBe("/api/teams/favorites");
-    expect(API_PATH.TEAMS_TRASH).toBe("/api/teams/trash");
     expect(API_PATH.TEAMS_INVITATIONS_ACCEPT).toBe("/api/teams/invitations/accept");
     expect(API_PATH.AUDIT_LOGS).toBe("/api/audit-logs");
     expect(API_PATH.SHARE_LINKS).toBe("/api/share-links");

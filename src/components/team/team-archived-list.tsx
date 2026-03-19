@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
 import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
-import { Archive, Building2, RotateCcw, Trash2 } from "lucide-react";
+import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
-import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
 import {
@@ -29,9 +29,6 @@ import { notifyTeamDataChanged } from "@/lib/events";
 interface TeamArchivedEntry {
   id: string;
   entryType: EntryTypeValue;
-  teamId: string;
-  teamName: string;
-  role: string;
   title: string;
   username: string | null;
   urlHost: string | null;
@@ -55,7 +52,9 @@ export interface TeamArchivedListHandle {
 }
 
 interface TeamArchivedListProps {
-  teamId?: string;
+  teamId: string;
+  teamName: string;
+  role: string;
   searchQuery: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
@@ -66,7 +65,9 @@ interface TeamArchivedListProps {
 export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedListProps>(
   function TeamArchivedList(
     {
-      teamId: scopedTeamId,
+      teamId,
+      teamName,
+      role,
       searchQuery,
       refreshKey,
       sortBy = "updatedAt",
@@ -75,7 +76,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     },
     ref,
   ) {
-  const t = useTranslations("Team");
   const tl = useTranslations("PasswordList");
   const { getEntryDecryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamArchivedEntry[]>([]);
@@ -85,31 +85,30 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const [editTeamId, setEditTeamId] = useState<string | null>(null);
   const [editEntryId, setEditEntryId] = useState<string | null>(null);
 
-  const effectiveSelectionMode = scopedTeamId ? (selectionMode ?? false) : false;
+  const effectiveSelectionMode = selectionMode ?? false;
 
   const fetchArchived = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchApi(API_PATH.TEAMS_ARCHIVED);
+      const res = await fetchApi(`${apiPath.teamPasswords(teamId)}?archived=true`);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
 
-      // Decrypt overview blobs (entries span multiple teams)
+      // Decrypt overview blobs
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const entryTeamId = entry.teamId as string;
             const entryId = entry.id as string;
             const itemKeyVersion = (entry.itemKeyVersion as number) ?? 0;
-            const decryptKey = await getEntryDecryptionKey(entryTeamId, entryId, {
+            const decryptKey = await getEntryDecryptionKey(teamId, entryId, {
               itemKeyVersion,
               encryptedItemKey: entry.encryptedItemKey as string | undefined,
               itemKeyIv: entry.itemKeyIv as string | undefined,
               itemKeyAuthTag: entry.itemKeyAuthTag as string | undefined,
               teamKeyVersion: (entry.teamKeyVersion as number) ?? 1,
             });
-            const aad = buildTeamEntryAAD(entryTeamId, entryId, "overview", itemKeyVersion);
+            const aad = buildTeamEntryAAD(teamId, entryId, "overview", itemKeyVersion);
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
@@ -123,9 +122,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
             return {
               id: entry.id,
               entryType: entry.entryType,
-              teamId: entryTeamId,
-              teamName: entry.teamName,
-              role: entry.role,
               title: overview.title ?? "",
               username: overview.username ?? null,
               urlHost: overview.urlHost ?? null,
@@ -147,9 +143,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
             return {
               id: entry.id as string,
               entryType: entry.entryType as EntryTypeValue,
-              teamId: entry.teamId as string,
-              teamName: entry.teamName as string,
-              role: entry.role as string,
               title: "(decryption failed)",
               username: null,
               urlHost: null,
@@ -176,14 +169,13 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     } finally {
       setLoading(false);
     }
-  }, [getEntryDecryptionKey]);
+  }, [teamId, getEntryDecryptionKey]);
 
   useEffect(() => {
     fetchArchived();
   }, [fetchArchived, refreshKey]);
 
   const filtered = entries.filter((p) => {
-    if (scopedTeamId && p.teamId !== scopedTeamId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -196,7 +188,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
       p.brand?.toLowerCase().includes(q) ||
       p.lastFour?.includes(q) ||
       p.cardholderName?.toLowerCase().includes(q) ||
-      p.teamName.toLowerCase().includes(q)
+      teamName.toLowerCase().includes(q)
     );
   });
 
@@ -223,7 +215,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     executeAction,
   } = useBulkAction({
     selectedIds,
-    scope: { type: "team", teamId: scopedTeamId ?? "" },
+    scope: { type: "team", teamId },
     t: tl,
     onSuccess: () => {
       clearSelection();
@@ -239,7 +231,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
       prev.map((e) => (e.id === id ? { ...e, isFavorite: !e.isFavorite } : e))
     );
     try {
-      await fetchApi(apiPath.teamPasswordFavorite(entry.teamId, id), {
+      await fetchApi(apiPath.teamPasswordFavorite(teamId, id), {
         method: "POST",
       });
     } catch {
@@ -254,7 +246,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     // Unarchive: remove from this list
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isArchived: false }),
@@ -271,7 +263,7 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
     if (!entry) return;
     setEntries((prev) => prev.filter((e) => e.id !== id));
     try {
-      const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, id), {
+      const res = await fetchApi(apiPath.teamPasswordById(teamId, id), {
         method: "DELETE",
       });
       if (!res.ok) fetchArchived();
@@ -282,16 +274,16 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   };
 
   const decryptFullBlob = useCallback(
-    async (entryTeamId: string, id: string, raw: Record<string, unknown>) => {
+    async (id: string, raw: Record<string, unknown>) => {
       const itemKeyVersion = (raw.itemKeyVersion as number) ?? 0;
-      const decryptKey = await getEntryDecryptionKey(entryTeamId, id, {
+      const decryptKey = await getEntryDecryptionKey(teamId, id, {
         itemKeyVersion,
         encryptedItemKey: raw.encryptedItemKey as string | undefined,
         itemKeyIv: raw.itemKeyIv as string | undefined,
         itemKeyAuthTag: raw.itemKeyAuthTag as string | undefined,
         teamKeyVersion: (raw.teamKeyVersion as number) ?? 1,
       });
-      const aad = buildTeamEntryAAD(entryTeamId, id, "blob", itemKeyVersion);
+      const aad = buildTeamEntryAAD(teamId, id, "blob", itemKeyVersion);
       const json = await decryptData(
         {
           ciphertext: raw.encryptedBlob as string,
@@ -303,13 +295,11 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
       );
       return JSON.parse(json) as Record<string, unknown>;
     },
-    [getEntryDecryptionKey],
+    [teamId, getEntryDecryptionKey],
   );
 
-  const handleEdit = async (id: string) => {
-    const entry = entries.find((e) => e.id === id);
-    if (!entry) return;
-    setEditTeamId(entry.teamId);
+  const handleEdit = (id: string) => {
+    setEditTeamId(teamId);
     setEditEntryId(id);
     setFormOpen(true);
   };
@@ -317,10 +307,10 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   const createDetailFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
       async (): Promise<InlineDetailData> => {
-        const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, entry.id));
+        const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
-        const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
+        const blob = await decryptFullBlob(entry.id, raw);
         return {
           id: raw.id,
           title: (blob.title as string) ?? undefined,
@@ -373,31 +363,31 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           updatedAt: raw.updatedAt,
         };
       },
-    [decryptFullBlob]
+    [teamId, decryptFullBlob]
   );
 
   const createPasswordFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
       async (): Promise<string> => {
-        const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, entry.id));
+        const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
-        const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
+        const blob = await decryptFullBlob(entry.id, raw);
         return (blob.password as string) ?? (blob.content as string) ?? "";
       },
-    [decryptFullBlob]
+    [teamId, decryptFullBlob]
   );
 
   const createUrlFetcher = useCallback(
     (entry: TeamArchivedEntry) =>
       async (): Promise<string | null> => {
-        const res = await fetchApi(apiPath.teamPasswordById(entry.teamId, entry.id));
+        const res = await fetchApi(apiPath.teamPasswordById(teamId, entry.id));
         if (!res.ok) throw new Error("Failed");
         const raw = await res.json();
-        const blob = await decryptFullBlob(entry.teamId, entry.id, raw);
+        const blob = await decryptFullBlob(entry.id, raw);
         return (blob.url as string) ?? null;
       },
-    [decryptFullBlob]
+    [teamId, decryptFullBlob]
   );
 
   if (loading) return null;
@@ -423,14 +413,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
 
   return (
     <div className="mt-6">
-      {!scopedTeamId && (
-        <div className="mb-3 flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium text-muted-foreground">
-            {t("archive")}
-          </h2>
-        </div>
-      )}
       <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
         {sortedFiltered.map((entry) =>
           effectiveSelectionMode ? (
@@ -460,10 +442,10 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
                   getDetail={createDetailFetcher(entry)}
                   getUrl={createUrlFetcher(entry)}
                   onEditClick={() => handleEdit(entry.id)}
-                  canEdit={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN || entry.role === TEAM_ROLE.MEMBER}
-                  canDelete={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN}
-                  createdBy={entry.teamName}
-                  teamId={entry.teamId}
+                  canEdit={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER}
+                  canDelete={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN}
+                  createdBy={teamName}
+                  teamId={teamId}
                 />
               </div>
             </div>
@@ -486,10 +468,10 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
               getDetail={createDetailFetcher(entry)}
               getUrl={createUrlFetcher(entry)}
               onEditClick={() => handleEdit(entry.id)}
-              canEdit={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN || entry.role === TEAM_ROLE.MEMBER}
-              canDelete={entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN}
-              createdBy={entry.teamName}
-              teamId={entry.teamId}
+              canEdit={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER}
+              canDelete={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN}
+              createdBy={teamName}
+              teamId={teamId}
             />
           )
         )}

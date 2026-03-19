@@ -3,33 +3,45 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("team archived list bulk wiring", () => {
-  it("uses shared bulk hooks and components", () => {
-    const src = readFileSync(
-      join(process.cwd(), "src/components/team/team-archived-list.tsx"),
-      "utf8"
-    );
+  const src = readFileSync(
+    join(process.cwd(), "src/components/team/team-archived-list.tsx"),
+    "utf8"
+  );
 
+  it("uses shared bulk hooks and components", () => {
     expect(src).toContain("useBulkSelection");
     expect(src).toContain("useBulkAction");
     expect(src).toContain('scope: { type: "team"');
     expect(src).toContain("FloatingActionBar");
     expect(src).toContain("BulkActionConfirmDialog");
   });
+
+  it("fetches from team-specific endpoint with archived param", () => {
+    expect(src).toContain("apiPath.teamPasswords(teamId)");
+    expect(src).toContain("?archived=true");
+    expect(src).not.toContain("TEAMS_ARCHIVED");
+  });
 });
 
 describe("team trash list bulk wiring", () => {
-  it("uses shared bulk hooks and components", () => {
-    const src = readFileSync(
-      join(process.cwd(), "src/components/team/team-trash-list.tsx"),
-      "utf8"
-    );
+  const src = readFileSync(
+    join(process.cwd(), "src/components/team/team-trash-list.tsx"),
+    "utf8"
+  );
 
+  it("uses shared bulk hooks and components", () => {
     expect(src).toContain("useBulkSelection");
     expect(src).toContain("useBulkAction");
     expect(src).toContain('scope: { type: "team"');
     expect(src).toContain("FloatingActionBar");
     expect(src).toContain("BulkActionConfirmDialog");
     expect(src).toContain('requestAction("restore")');
+  });
+
+  it("fetches from team-specific endpoint with trash param", () => {
+    expect(src).toContain("apiPath.teamPasswords(teamId)");
+    expect(src).toContain("?trash=true");
+    expect(src).not.toContain("TEAMS_TRASH");
   });
 });
 
