@@ -741,10 +741,12 @@ export default function TeamDashboardPage({
           </Card>
         )}
 
-        {isTeamArchive ? (
+        {isTeamArchive && team ? (
           <TeamArchivedList
             ref={archivedListRef}
             teamId={teamId}
+            teamName={team.name}
+            role={team.role}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
@@ -755,10 +757,12 @@ export default function TeamDashboardPage({
               setChildAtLimit(limit);
             }}
           />
-        ) : isTeamTrash ? (
+        ) : isTeamTrash && team ? (
           <TeamTrashList
             ref={trashListRef}
             teamId={teamId}
+            teamName={team.name}
+            role={team.role}
             searchQuery={searchQuery}
             refreshKey={refreshKey}
             sortBy={sortBy}
