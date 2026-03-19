@@ -28,6 +28,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/scim-token.ts", ["scimToken"]],
   ["src/lib/extension-token.ts", ["extensionToken"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
+  ["src/app/api/maintenance/purge-history/route.ts", ["tenantMember", "passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember", "team"]],
   ["src/app/api/teams/archived/route.ts", ["teamMember", "teamPasswordEntry"]],
   ["src/app/api/teams/favorites/route.ts", ["teamMember", "teamPasswordFavorite"]],

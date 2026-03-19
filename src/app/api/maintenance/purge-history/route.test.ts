@@ -1,121 +1,303 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { createRequest } from "@/__tests__/helpers/request-builder";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { NextRequest } from "next/server";
+import { randomBytes } from "node:crypto";
 
-const { mockAuth, mockPrismaHistory, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaHistory: {
-    deleteMany: vi.fn(),
-  },
-  mockRateLimiter: {
-    check: vi.fn(),
-    clear: vi.fn(),
-  },
+const ADMIN_TOKEN = randomBytes(32).toString("hex");
+
+const {
+  mockDeleteMany,
+  mockCount,
+  mockTenantMemberFindFirst,
+  mockCheck,
+  mockLogAudit,
+  mockWithBypassRls,
+} = vi.hoisted(() => ({
+  mockDeleteMany: vi.fn(),
+  mockCount: vi.fn(),
+  mockTenantMemberFindFirst: vi.fn(),
+  mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockLogAudit: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { passwordEntryHistory: mockPrismaHistory },
+  prisma: {
+    passwordEntryHistory: { deleteMany: mockDeleteMany, count: mockCount },
+    tenantMember: { findFirst: mockTenantMemberFindFirst },
+  },
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
-  extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  extractRequestMeta: () => ({ ip: "10.0.0.1", userAgent: "Test" }),
 }));
-vi.mock("@/lib/tenant-context", () => ({
-  withUserTenantRls: mockWithUserTenantRls,
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
 }));
 
+// Set up env before importing route
+const savedEnv: Record<string, string | undefined> = {};
+
+function setEnv(vars: Record<string, string | undefined>) {
+  for (const [key, value] of Object.entries(vars)) {
+    savedEnv[key] = process.env[key];
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
+function restoreEnv() {
+  for (const [key, value] of Object.entries(savedEnv)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
+
 import { POST } from "./route";
+
+function createRequest(
+  body: unknown,
+  token?: string,
+): NextRequest {
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-forwarded-for": "10.0.0.1",
+  };
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+  return new NextRequest("http://localhost/api/maintenance/purge-history", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+}
 
 describe("POST /api/maintenance/purge-history", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue({ allowed: true });
+    mockCheck.mockResolvedValue({ allowed: true });
+    setEnv({ ADMIN_API_TOKEN: ADMIN_TOKEN });
   });
 
-  it("returns 401 when unauthenticated", async () => {
-    mockAuth.mockResolvedValue(null);
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
-    );
+  afterEach(() => {
+    restoreEnv();
+  });
+
+  // ─── Auth ──────────────────────────────────────────────────
+
+  it("returns 401 without authorization header", async () => {
+    const req = createRequest({ operatorId: "user-1" });
+    const res = await POST(req);
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 with invalid (non-hex) token", async () => {
+    const req = createRequest(
+      { operatorId: "user-1" },
+      "not-a-hex-token-at-all-should-fail!!",
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 when ADMIN_API_TOKEN is not set", async () => {
+    setEnv({ ADMIN_API_TOKEN: undefined });
+    const req = createRequest({ operatorId: "user-1" }, ADMIN_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(401);
+  });
+
+  // ─── Rate Limit ────────────────────────────────────────────
+
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue({ allowed: false });
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
-    );
+    mockCheck.mockResolvedValue({ allowed: false });
+    const req = createRequest({ operatorId: "user-1" }, ADMIN_TOKEN);
+    const res = await POST(req);
     expect(res.status).toBe(429);
-    const json = await res.json();
-    expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
   });
 
-  it("purges old history entries and returns count", async () => {
-    mockPrismaHistory.deleteMany.mockResolvedValue({ count: 5 });
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
-    );
-    const json = await res.json();
+  // ─── Body Validation ──────────────────────────────────────
+
+  it("returns 400 when operatorId is missing", async () => {
+    const req = createRequest({}, ADMIN_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when operatorId does not match an active admin", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const req = createRequest({ operatorId: "nonexistent" }, ADMIN_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("operatorId");
+  });
+
+  it("returns 400 when operatorId exists but has MEMBER role", async () => {
+    // findFirst with role filter returns null for MEMBER
+    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const req = createRequest({ operatorId: "member-user" }, ADMIN_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+
+    // Verify the query filters by admin roles
+    const where = mockTenantMemberFindFirst.mock.calls[0][0].where;
+    expect(where.role).toEqual({ in: ["OWNER", "ADMIN"] });
+  });
+
+  it("returns 400 when operatorId is deactivated admin", async () => {
+    // findFirst with deactivatedAt: null filter returns null for deactivated
+    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const req = createRequest({ operatorId: "deactivated-admin" }, ADMIN_TOKEN);
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+
+    // Verify the query filters out deactivated members
+    const where = mockTenantMemberFindFirst.mock.calls[0][0].where;
+    expect(where.deactivatedAt).toBeNull();
+  });
+
+  // ─── Purge Success ────────────────────────────────────────
+
+  it("purges history entries and returns count", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockDeleteMany.mockResolvedValue({ count: 42 });
+
+    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const res = await POST(req);
     expect(res.status).toBe(200);
-    expect(json.purged).toBe(5);
+
+    const body = await res.json();
+    expect(body.purged).toBe(42);
   });
 
-  it("logs audit with purgedCount when entries deleted", async () => {
-    mockPrismaHistory.deleteMany.mockResolvedValue({ count: 3 });
-    await POST(
-      createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
+  it("does not filter by userId (system-wide purge)", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    await POST(req);
+
+    const where = mockDeleteMany.mock.calls[0][0].where;
+    expect(where).not.toHaveProperty("entry");
+    expect(where).toHaveProperty("changedAt");
+  });
+
+  it("uses default retentionDays of 90", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockDeleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    await POST(req);
+
+    const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
+    const expectedMs = 90 * 24 * 60 * 60 * 1000;
+    const expectedDate = new Date(Date.now() - expectedMs);
+    expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
+  });
+
+  it("respects custom retentionDays parameter", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockDeleteMany.mockResolvedValue({ count: 10 });
+
+    const req = createRequest(
+      { operatorId: "admin-1", retentionDays: 30 },
+      ADMIN_TOKEN,
     );
+    await POST(req);
+
+    const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
+    const expectedMs = 30 * 24 * 60 * 60 * 1000;
+    const expectedDate = new Date(Date.now() - expectedMs);
+    expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
+  });
+
+  // ─── Dry Run ──────────────────────────────────────────────
+
+  it("returns matched count without deleting when dryRun is true", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockCount.mockResolvedValue(15);
+
+    const req = createRequest(
+      { operatorId: "admin-1", dryRun: true },
+      ADMIN_TOKEN,
+    );
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.purged).toBe(0);
+    expect(body.matched).toBe(15);
+    expect(body.dryRun).toBe(true);
+
+    expect(mockDeleteMany).not.toHaveBeenCalled();
+    expect(mockCount).toHaveBeenCalled();
+
+    // Verify count uses the same cutoff date as deleteMany would
+    const cutoff = mockCount.mock.calls[0][0].where.changedAt.lt as Date;
+    const expectedMs = 90 * 24 * 60 * 60 * 1000;
+    const expectedDate = new Date(Date.now() - expectedMs);
+    expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
+  });
+
+  // ─── Auth Order ───────────────────────────────────────────
+
+  it("checks rate limit after auth (429 only for authenticated requests)", async () => {
+    mockCheck.mockResolvedValue({ allowed: false });
+    // Unauthenticated request should get 401, not 429
+    const unauthReq = createRequest({ operatorId: "admin-1" });
+    const unauthRes = await POST(unauthReq);
+    expect(unauthRes.status).toBe(401);
+
+    // Authenticated request should get 429
+    const authReq = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const authRes = await POST(authReq);
+    expect(authRes.status).toBe(429);
+  });
+
+  // ─── Audit ────────────────────────────────────────────────
+
+  it("logs audit with scope TENANT on successful purge", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockDeleteMany.mockResolvedValue({ count: 5 });
+
+    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    await POST(req);
+
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
+        scope: "TENANT",
         action: "HISTORY_PURGE",
-        userId: "user-1",
+        userId: "admin-1",
+        tenantId: "tenant-1",
         metadata: expect.objectContaining({
-          purgedCount: 3,
+          purgedCount: 5,
+          retentionDays: 90,
+          systemWide: true,
         }),
       }),
     );
   });
 
-  it("logs audit with purgedCount=0 when no entries to delete", async () => {
-    mockPrismaHistory.deleteMany.mockResolvedValue({ count: 0 });
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
-    );
-    const json = await res.json();
-    expect(res.status).toBe(200);
-    expect(json.purged).toBe(0);
-    // Audit log is always emitted, even when nothing was purged
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "HISTORY_PURGE",
-        metadata: expect.objectContaining({
-          purgedCount: 0,
-        }),
-      }),
-    );
-  });
+  it("does not log audit on dryRun", async () => {
+    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
+    mockCount.mockResolvedValue(3);
 
-  it("only deletes entries older than 90 days", async () => {
-    mockPrismaHistory.deleteMany.mockResolvedValue({ count: 0 });
-    await POST(
-      createRequest("POST", "http://localhost:3000/api/maintenance/purge-history"),
+    const req = createRequest(
+      { operatorId: "admin-1", dryRun: true },
+      ADMIN_TOKEN,
     );
-    expect(mockPrismaHistory.deleteMany).toHaveBeenCalledWith({
-      where: {
-        entry: { userId: "user-1" },
-        changedAt: { lt: expect.any(Date) },
-      },
-    });
-    // Verify the date is approximately 90 days ago
-    const calledDate = mockPrismaHistory.deleteMany.mock.calls[0][0].where.changedAt.lt as Date;
-    const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
-    const expectedDate = new Date(Date.now() - ninetyDaysMs);
-    expect(Math.abs(calledDate.getTime() - expectedDate.getTime())).toBeLessThan(1000);
+    await POST(req);
+
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 });

@@ -13,8 +13,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { createHash, timingSafeEqual } from "node:crypto";
 import { z } from "zod";
+import { verifyAdminToken } from "@/lib/admin-token";
 import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import {
@@ -28,8 +28,6 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
 
-const HEX64_RE = /^[0-9a-fA-F]{64}$/;
-
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const bodySchema = z.object({
@@ -37,27 +35,6 @@ const bodySchema = z.object({
   operatorId: z.string().min(1),
   revokeShares: z.boolean().default(false),
 });
-
-function verifyAdminToken(req: NextRequest): boolean {
-  const expectedHex = process.env.ADMIN_API_TOKEN;
-  if (!expectedHex || !HEX64_RE.test(expectedHex)) return false;
-
-  const authHeader = req.headers.get("authorization");
-  if (!authHeader?.startsWith("Bearer ")) return false;
-
-  const provided = authHeader.slice(7);
-  if (!provided || !HEX64_RE.test(provided)) return false;
-
-  // SHA-256 hash comparison with timingSafeEqual to prevent timing attacks
-  const expectedHash = createHash("sha256")
-    .update(Buffer.from(expectedHex, "hex"))
-    .digest();
-  const providedHash = createHash("sha256")
-    .update(Buffer.from(provided, "hex"))
-    .digest();
-
-  return timingSafeEqual(expectedHash, providedHash);
-}
 
 async function handlePOST(req: NextRequest) {
   // Bearer token auth (checked before rate limit to prevent unauthenticated DoS)

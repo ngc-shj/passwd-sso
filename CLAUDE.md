@@ -302,7 +302,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/csp-report` | POST | CSP violation report endpoint |
 | `/api/user/locale` | PUT | Update user locale preference |
 | `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
-| `/api/maintenance/purge-history` | POST | Purge old entry history records |
+| `/api/maintenance/purge-history` | POST | System-wide history purge (admin-only, bearer token) |
 
 ### i18n
 
