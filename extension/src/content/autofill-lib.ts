@@ -141,6 +141,58 @@ function getHints(input: HTMLInputElement): string {
   return label.toLowerCase();
 }
 
+// Indexed name pattern for split OTP fields: "otp-code-0", "2fa-3", etc.
+// Keywords aligned with otpHintRe in findOtpInput.
+const indexedOtpNameRe =
+  /^(otp|totp|2fa|two[-_]?factor|mfa|verification[-_]?code|security[-_]?code|auth(?:entication)?[-_]?code|one[-_]?time|otp[-_]?code)[-_]?\d+$/i;
+
+function isSingleDigitOtp(input: HTMLInputElement): boolean {
+  if (!isUsableInput(input)) return false;
+  if (!["text", "tel"].includes(input.type)) return false;
+  if (input.maxLength === 1) return true;
+  // Detect by indexed name (e.g. "otp-code-0" … "otp-code-5")
+  return indexedOtpNameRe.test(input.name);
+}
+
+function findSplitOtpInputs(
+  inputs: HTMLInputElement[],
+  codeLength: number,
+): HTMLInputElement[] | null {
+  // Look for a group of consecutive single-digit inputs that match codeLength
+  for (let start = 0; start <= inputs.length - codeLength; start++) {
+    const candidate = inputs[start];
+    if (!isSingleDigitOtp(candidate)) continue;
+
+    const group: HTMLInputElement[] = [candidate];
+    // Collect consecutive single-digit inputs sharing the same parent container
+    const parent = candidate.parentElement?.closest(
+      "form, fieldset, [role='group'], section",
+    );
+    for (let j = start + 1; j < inputs.length && group.length < codeLength; j++) {
+      const next = inputs[j];
+      if (!isSingleDigitOtp(next)) break;
+      // Must share a common ancestor (not scattered across the page)
+      const nextParent = next.parentElement?.closest(
+        "form, fieldset, [role='group'], section",
+      );
+      if (!parent || !nextParent) break;
+      if (parent !== nextParent) {
+        // Allow if they share any ancestor up to 4 levels
+        let shared = false;
+        let el: Element | null = next;
+        for (let depth = 0; depth < 5 && el; depth++) {
+          if (el === parent) { shared = true; break; }
+          el = el.parentElement;
+        }
+        if (!shared) break;
+      }
+      group.push(next);
+    }
+    if (group.length === codeLength) return group;
+  }
+  return null;
+}
+
 function findOtpInput(inputs: HTMLInputElement[]): HTMLInputElement | null {
   const byAutocomplete = inputs.find(
     (i) => isUsableInput(i) && i.autocomplete === "one-time-code",
@@ -251,11 +303,24 @@ export function performAutofill(payload: AutofillPayload) {
     const otpScopedInputs = otpForm
       ? (Array.from(otpForm.querySelectorAll("input")) as HTMLInputElement[])
       : null;
-    const otpInput =
-      (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ??
-      findOtpInput(inputs);
-    if (otpInput) {
-      setInputValue(otpInput, payload.totpCode);
+
+    // Try split OTP fields first (e.g. 6 separate single-digit inputs)
+    const codeLen = payload.totpCode.length;
+    const splitInputs =
+      (otpScopedInputs ? findSplitOtpInputs(otpScopedInputs, codeLen) : null) ??
+      findSplitOtpInputs(inputs, codeLen);
+    if (splitInputs) {
+      for (let i = 0; i < codeLen; i++) {
+        setInputValue(splitInputs[i], payload.totpCode[i]);
+      }
+    } else {
+      // Fall back to single OTP field
+      const otpInput =
+        (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ??
+        findOtpInput(inputs);
+      if (otpInput) {
+        setInputValue(otpInput, payload.totpCode);
+      }
     }
   }
 }
