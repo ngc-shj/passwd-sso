@@ -14,13 +14,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Building2, Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
+import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
-import { TEAM_ROLE, ENTRY_TYPE, API_PATH, apiPath } from "@/lib/constants";
+import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { BulkSelectionHandle } from "@/hooks/use-bulk-selection";
 import {
@@ -36,9 +36,6 @@ import { notifyTeamDataChanged } from "@/lib/events";
 interface TeamTrashEntry {
   id: string;
   entryType: EntryTypeValue;
-  teamId: string;
-  teamName: string;
-  role: string;
   title: string;
   username: string | null;
   snippet: string | null;
@@ -52,7 +49,9 @@ interface TeamTrashEntry {
 export type TeamTrashListHandle = BulkSelectionHandle;
 
 interface TeamTrashListProps {
-  teamId?: string;
+  teamId: string;
+  teamName: string;
+  role: string;
   searchQuery?: string;
   refreshKey: number;
   sortBy?: EntrySortOption;
@@ -63,7 +62,9 @@ interface TeamTrashListProps {
 export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>(
   function TeamTrashList(
     {
-      teamId: scopedTeamId,
+      teamId,
+      teamName,
+      role,
       searchQuery = "",
       refreshKey,
       sortBy = "updatedAt",
@@ -73,20 +74,18 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     ref,
   ) {
   const t = useTranslations("Trash");
-  const tTeam = useTranslations("Team");
   const tl = useTranslations("PasswordList");
   const { getEntryDecryptionKey } = useTeamVault();
   const [entries, setEntries] = useState<TeamTrashEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [isEmptying, setIsEmptying] = useState(false);
 
-  // Selection only works when scoped to a single team
-  const effectiveSelectionMode = scopedTeamId ? (selectionModeProp ?? false) : false;
+  const effectiveSelectionMode = selectionModeProp ?? false;
 
   const fetchTrash = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetchApi(API_PATH.TEAMS_TRASH);
+      const res = await fetchApi(`${apiPath.teamPasswords(teamId)}?trash=true`);
       if (!res.ok) return;
       const data = await res.json();
       if (!Array.isArray(data)) return;
@@ -94,17 +93,16 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       const decrypted = await Promise.all(
         data.map(async (entry: Record<string, unknown>) => {
           try {
-            const entryTeamId = entry.teamId as string;
             const entryId = entry.id as string;
             const itemKeyVersion = (entry.itemKeyVersion as number) ?? 0;
-            const decryptKey = await getEntryDecryptionKey(entryTeamId, entryId, {
+            const decryptKey = await getEntryDecryptionKey(teamId, entryId, {
               itemKeyVersion,
               encryptedItemKey: entry.encryptedItemKey as string | undefined,
               itemKeyIv: entry.itemKeyIv as string | undefined,
               itemKeyAuthTag: entry.itemKeyAuthTag as string | undefined,
               teamKeyVersion: (entry.teamKeyVersion as number) ?? 1,
             });
-            const aad = buildTeamEntryAAD(entryTeamId, entryId, "overview", itemKeyVersion);
+            const aad = buildTeamEntryAAD(teamId, entryId, "overview", itemKeyVersion);
             const json = await decryptData(
               {
                 ciphertext: entry.encryptedOverview as string,
@@ -118,9 +116,6 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
             return {
               id: entry.id,
               entryType: entry.entryType,
-              teamId: entryTeamId,
-              teamName: entry.teamName,
-              role: entry.role,
               title: overview.title ?? "",
               username: overview.username ?? null,
               snippet: overview.snippet ?? null,
@@ -134,9 +129,6 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
             return {
               id: entry.id as string,
               entryType: entry.entryType as EntryTypeValue,
-              teamId: entry.teamId as string,
-              teamName: entry.teamName as string,
-              role: entry.role as string,
               title: "(decryption failed)",
               username: null,
               snippet: null,
@@ -155,14 +147,13 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     } finally {
       setLoading(false);
     }
-  }, [getEntryDecryptionKey]);
+  }, [teamId, getEntryDecryptionKey]);
 
   useEffect(() => {
     fetchTrash();
   }, [fetchTrash, refreshKey]);
 
   const filtered = entries.filter((entry) => {
-    if (scopedTeamId && entry.teamId !== scopedTeamId) return false;
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -173,7 +164,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
       entry.lastFour?.includes(q) ||
       entry.fullName?.toLowerCase().includes(q) ||
       entry.idNumberLast4?.includes(q) ||
-      entry.teamName.toLowerCase().includes(q)
+      teamName.toLowerCase().includes(q)
     );
   });
 
@@ -199,7 +190,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     executeAction,
   } = useBulkAction({
     selectedIds,
-    scope: { type: "team", teamId: scopedTeamId ?? "" },
+    scope: { type: "team", teamId },
     t,
     onSuccess: () => {
       clearSelection();
@@ -210,7 +201,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const handleRestore = async (entry: TeamTrashEntry) => {
     try {
       const res = await fetchApi(
-        apiPath.teamPasswordRestore(entry.teamId, entry.id),
+        apiPath.teamPasswordRestore(teamId, entry.id),
         { method: "POST" }
       );
       if (res.ok) {
@@ -226,10 +217,9 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   };
 
   const handleEmptyTrash = async () => {
-    if (!scopedTeamId) return;
     setIsEmptying(true);
     try {
-      const res = await fetchApi(apiPath.teamPasswordsEmptyTrash(scopedTeamId), {
+      const res = await fetchApi(apiPath.teamPasswordsEmptyTrash(teamId), {
         method: "POST",
       });
       if (!res.ok) {
@@ -250,7 +240,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
   const handleDeletePermanently = async (entry: TeamTrashEntry) => {
     try {
       const res = await fetchApi(
-        `${apiPath.teamPasswordById(entry.teamId, entry.id)}?permanent=true`,
+        `${apiPath.teamPasswordById(teamId, entry.id)}?permanent=true`,
         { method: "DELETE" }
       );
       if (res.ok) {
@@ -285,24 +275,10 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
     );
   }
 
-  // When scoped to a team, derive the user's role from any entry
-  const scopedRole = scopedTeamId
-    ? entries.find((e) => e.teamId === scopedTeamId)?.role
-    : undefined;
-  const canEmptyTrash =
-    scopedTeamId &&
-    (scopedRole === TEAM_ROLE.OWNER || scopedRole === TEAM_ROLE.ADMIN);
+  const canEmptyTrash = role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN;
 
   return (
     <div className="mt-6">
-      {!scopedTeamId && (
-        <div className="mb-3 flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-medium text-muted-foreground">
-            {tTeam("trash")}
-          </h2>
-        </div>
-      )}
       {canEmptyTrash && (
         <div className="mb-3 flex items-center justify-between">
           <p className="text-sm text-muted-foreground">{t("description")}</p>
@@ -375,11 +351,11 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
                     )
                   )}
                   <span className="text-xs text-muted-foreground">
-                    {entry.teamName}
+                    {teamName}
                   </span>
                 </div>
               </div>
-              {(entry.role === TEAM_ROLE.OWNER || entry.role === TEAM_ROLE.ADMIN) && (
+              {(role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN) && (
                 <div className="flex gap-2 shrink-0">
                   <Button
                     variant="outline"
