@@ -160,6 +160,65 @@ function getHints(input) {
   return label.toLowerCase();
 }
 
+// Indexed name pattern for split OTP fields: "otp-code-0", "2fa-3", etc.
+// Keywords aligned with otpHintRe in findOtpInput.
+var indexedOtpNameRe =
+  /^(otp|totp|2fa|two[-_]?factor|mfa|verification[-_]?code|security[-_]?code|auth(?:entication)?[-_]?code|one[-_]?time|otp[-_]?code)[-_]?\d+$/i;
+
+function isSingleDigitOtp(input) {
+  if (!isUsableInput(input)) return false;
+  if (["text", "tel"].indexOf(input.type) === -1) return false;
+  var ml = input.maxLength;
+  if (ml === 1) return true;
+  // Detect by indexed name (e.g. "otp-code-0" … "otp-code-5")
+  return indexedOtpNameRe.test(input.name);
+}
+
+function findSplitOtpInputs(inputs, codeLength) {
+  for (var start = 0; start <= inputs.length - codeLength; start++) {
+    var candidate = inputs[start];
+    if (!isSingleDigitOtp(candidate)) continue;
+
+    var group = [candidate];
+    var parent =
+      candidate.parentElement
+        ? candidate.parentElement.closest(
+            "form, fieldset, [role='group'], section"
+          )
+        : null;
+    for (
+      var j = start + 1;
+      j < inputs.length && group.length < codeLength;
+      j++
+    ) {
+      var next = inputs[j];
+      if (!isSingleDigitOtp(next)) break;
+      var nextParent =
+        next.parentElement
+          ? next.parentElement.closest(
+              "form, fieldset, [role='group'], section"
+            )
+          : null;
+      if (!parent || !nextParent) break;
+      if (parent !== nextParent) {
+        var shared = false;
+        var el = next;
+        for (var depth = 0; depth < 5 && el; depth++) {
+          if (el === parent) {
+            shared = true;
+            break;
+          }
+          el = el.parentElement;
+        }
+        if (!shared) break;
+      }
+      group.push(next);
+    }
+    if (group.length === codeLength) return group;
+  }
+  return null;
+}
+
 function findOtpInput(inputs) {
   var byAutocomplete = inputs.find(function (i) {
     return isUsableInput(i) && i.autocomplete === "one-time-code";
@@ -284,11 +343,24 @@ function performAutofill(payload) {
     var otpScopedInputs = otpForm
       ? Array.from(otpForm.querySelectorAll("input"))
       : null;
-    var otpInput =
-      (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ||
-      findOtpInput(inputs);
-    if (otpInput) {
-      setInputValue(otpInput, payload.totpCode);
+
+    // Try split OTP fields first (e.g. 6 separate single-digit inputs)
+    var codeLen = payload.totpCode.length;
+    var splitInputs =
+      (otpScopedInputs ? findSplitOtpInputs(otpScopedInputs, codeLen) : null) ||
+      findSplitOtpInputs(inputs, codeLen);
+    if (splitInputs) {
+      for (var idx = 0; idx < codeLen; idx++) {
+        setInputValue(splitInputs[idx], payload.totpCode[idx]);
+      }
+    } else {
+      // Fall back to single OTP field
+      var otpInput =
+        (otpScopedInputs ? findOtpInput(otpScopedInputs) : null) ||
+        findOtpInput(inputs);
+      if (otpInput) {
+        setInputValue(otpInput, payload.totpCode);
+      }
     }
   }
 }
