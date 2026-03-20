@@ -263,7 +263,7 @@ model VaultKey {
 }
 
 model PasswordEntry {
-  id String @id @default(cuid())
+  id String @id @default(uuid(4))
 
   // E2E encrypted fields (all data encrypted client-side)
   encryptedBlob     String    @map("encrypted_blob") @db.Text
@@ -347,7 +347,7 @@ enum InvitationStatus {
 }
 
 model Team {
-  id          String  @id @default(cuid())
+  id          String  @id @default(uuid(4))
   tenantId    String  @map("tenant_id")
   name        String
   slug        String  @unique
@@ -521,7 +521,7 @@ model TeamMemberKey {
 }
 
 model TeamPasswordEntry {
-  id String @id @default(cuid())
+  id String @id @default(uuid(4))
 
   // Server-side encrypted fields (encrypted with per-team key)
   encryptedBlob String @map("encrypted_blob") @db.Text
@@ -836,7 +836,7 @@ model AuditLog {
 // ─── Attachment Models ──────────────────────────────────────────
 
 model Attachment {
-  id            String @id @default(cuid())
+  id            String @id @default(uuid(4))
   filename      String @db.VarChar(255)
   contentType   String @map("content_type") @db.VarChar(100)
   sizeBytes     Int    @map("size_bytes")

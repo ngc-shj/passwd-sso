@@ -192,6 +192,7 @@ describe("teamMemberKeySchema", () => {
 
 describe("createTeamE2ESchema", () => {
   const valid = {
+    id: VALID_UUID,
     name: "Engineering",
     slug: "engineering",
     teamMemberKey: {
@@ -205,12 +206,17 @@ describe("createTeamE2ESchema", () => {
     },
   };
 
-  it("accepts valid input", () => {
+  it("accepts valid input with UUID v4 id", () => {
     expect(createTeamE2ESchema.safeParse(valid).success).toBe(true);
   });
 
-  it("accepts optional UUID id", () => {
-    expect(createTeamE2ESchema.safeParse({ ...valid, id: VALID_UUID }).success).toBe(true);
+  it("rejects missing id (id is required)", () => {
+    const { id: _, ...rest } = valid;
+    expect(createTeamE2ESchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("rejects CUID v1 format for id (id must be UUID v4)", () => {
+    expect(createTeamE2ESchema.safeParse({ ...valid, id: "tz4a98xxat96iws9zmbrgj3a" }).success).toBe(false);
   });
 
   it("rejects invalid UUID id", () => {
@@ -225,6 +231,7 @@ describe("createTeamE2ESchema", () => {
 
 describe("createTeamE2EPasswordSchema", () => {
   const valid = {
+    id: VALID_UUID,
     encryptedBlob: validEncryptedField,
     encryptedOverview: validEncryptedField,
     aadVersion: 1,
@@ -232,8 +239,17 @@ describe("createTeamE2EPasswordSchema", () => {
     itemKeyVersion: 0,
   };
 
-  it("accepts valid input with itemKeyVersion=0 and no encryptedItemKey", () => {
+  it("accepts valid input with UUID v4 id and itemKeyVersion=0 and no encryptedItemKey", () => {
     expect(createTeamE2EPasswordSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it("rejects missing id (id is required)", () => {
+    const { id: _, ...rest } = valid;
+    expect(createTeamE2EPasswordSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("rejects CUID v1 format for id (id must be UUID v4)", () => {
+    expect(createTeamE2EPasswordSchema.safeParse({ ...valid, id: "tz4a98xxat96iws9zmbrgj3a" }).success).toBe(false);
   });
 
   it("accepts itemKeyVersion>=1 with encryptedItemKey present", () => {

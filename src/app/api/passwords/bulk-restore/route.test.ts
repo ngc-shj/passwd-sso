@@ -94,6 +94,36 @@ describe("POST /api/passwords/bulk-restore", () => {
     expect(json.error).toBe("VALIDATION_ERROR");
   });
 
+  it("restores entries with UUID v4 IDs", async () => {
+    const uuid1 = "550e8400-e29b-41d4-a716-446655440000";
+    const uuid2 = "550e8400-e29b-41d4-a716-446655440001";
+    mockFindMany.mockResolvedValue([{ id: uuid1 }, { id: uuid2 }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { ids: [uuid1, uuid2] },
+    }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.restoredCount).toBe(2);
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: [uuid1, uuid2] },
+        }),
+      })
+    );
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: [uuid1, uuid2] },
+        }),
+      })
+    );
+  });
+
   it("restores entries: findMany → updateMany → audit, returns restoredCount", async () => {
     mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });

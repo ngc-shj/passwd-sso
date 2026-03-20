@@ -52,13 +52,13 @@ export const teamMemberKeySchema = z.object({
 });
 
 export const createTeamE2ESchema = createTeamSchema.extend({
-  id: z.string().uuid().optional(),
+  id: z.string().uuid(),
   teamMemberKey: teamMemberKeySchema,
 });
 
 /** Schema for E2E team password creation — client sends pre-encrypted blobs */
 export const createTeamE2EPasswordSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().uuid(),
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),

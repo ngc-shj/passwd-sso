@@ -260,6 +260,29 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     );
   });
 
+  it("rotates key successfully with UUID v4 entry IDs", async () => {
+    const uuidEntry = "550e8400-e29b-41d4-a716-446655440000";
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: uuidEntry }]);
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry(uuidEntry)],
+        memberKeys: [validMemberKey("user-1")],
+      }),
+      createParams("team-1"),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.teamKeyVersion).toBe(2);
+    expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledTimes(1);
+    expect(txMock.teamPasswordEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: uuidEntry }),
+      })
+    );
+  });
+
   it("returns 400 when entry count does not match team entries (F-17)", async () => {
     // Team has 3 entries but client submits only 1
     txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);

@@ -318,4 +318,34 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(status).toBe(201);
     expect(json.filename).toBe("test.pdf");
   });
+
+  it("normalizes uppercase UUID clientId to lowercase for AAD consistency", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockEntryFindUnique.mockResolvedValue({ userId: DEFAULT_SESSION.user.id });
+    mockAttachmentCount.mockResolvedValue(0);
+    mockPutObject.mockResolvedValue(Buffer.from("stored"));
+    const uppercaseId = "550E8400-E29B-41D4-A716-446655440000";
+    const created = {
+      id: uppercaseId.toLowerCase(),
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 100,
+      createdAt: new Date(),
+    };
+    mockAttachmentCreate.mockResolvedValue(created);
+    const fields = { ...validFormFields(), id: uppercaseId };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, createParams("e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(201);
+    expect(json.id).toBe(uppercaseId.toLowerCase());
+    // Verify the attachment was created with a lowercase ID (normalized)
+    expect(mockAttachmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: uppercaseId.toLowerCase(),
+        }),
+      })
+    );
+  });
 });

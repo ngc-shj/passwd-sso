@@ -412,6 +412,7 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
   });
 
   const validE2EBody = {
+    id: "660e8400-e29b-41d4-a716-446655440001",
     encryptedBlob: { ciphertext: "enc-blob", iv: "a".repeat(24), authTag: "b".repeat(32) },
     encryptedOverview: { ciphertext: "enc-overview", iv: "c".repeat(24), authTag: "d".repeat(32) },
     aadVersion: 1,
