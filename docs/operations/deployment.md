@@ -154,6 +154,7 @@ scripts/purge-history.sh
 |--------|---------|-------------|
 | `RETENTION_DAYS` | `90` | Purge history older than this many days |
 | `DRY_RUN` | `false` | Preview without deleting |
+| `INSECURE` | `false` | Skip TLS verification (dev only, **never use in production**) |
 
 ### Vault / Team Key Rotation
 
