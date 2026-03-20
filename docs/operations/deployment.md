@@ -115,6 +115,56 @@ When deploying at a sub-path (e.g., `https://example.com/passwd-sso`), set `NEXT
 - [ ] Health check passes after deployment
 - [ ] Verify app functionality in production
 
+## Admin Operations
+
+### Rotate ShareLink Master Key
+
+Rotate the server-side master key used to encrypt ShareLink data. Run after adding a new `SHARE_MASTER_KEY_V<N>` to the environment.
+
+**Prerequisites:**
+- `ADMIN_API_TOKEN` set in the app environment (64-char hex, generate with `openssl rand -hex 32`)
+- New master key version configured: `SHARE_MASTER_KEY_V<N>=<hex64>` and `SHARE_MASTER_KEY_CURRENT_VERSION=<N>`
+- App restarted to load the new environment variables
+
+```bash
+ADMIN_API_TOKEN=<hex64> \
+OPERATOR_ID=<user-cuid-or-uuid> \
+TARGET_VERSION=<N> \
+APP_URL=https://your-app-url \
+scripts/rotate-master-key.sh
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `REVOKE_SHARES` | `false` | Set `true` to revoke share links encrypted with older key versions |
+| `INSECURE` | `false` | Skip TLS verification (dev only, **never use in production**) |
+
+### Purge Password History
+
+System-wide purge of password entry history records older than the retention period.
+
+```bash
+ADMIN_API_TOKEN=<hex64> \
+OPERATOR_ID=<user-cuid-or-uuid> \
+APP_URL=https://your-app-url \
+scripts/purge-history.sh
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `RETENTION_DAYS` | `90` | Purge history older than this many days |
+| `DRY_RUN` | `false` | Preview without deleting |
+| `INSECURE` | `false` | Skip TLS verification (dev only, **never use in production**) |
+
+### Vault / Team Key Rotation
+
+Personal vault and team encryption key rotation are performed via the web UI:
+
+- **Personal vault**: Settings → Security → Key Rotation
+- **Team vault**: Team Settings → Security → Key Rotation
+
+These operations re-encrypt all entries client-side and submit the results atomically. No admin script is needed.
+
 ## Environment Variables
 
 The deploy script uses these environment variables:

@@ -28,6 +28,8 @@ export const API_PATH = {
   VAULT_UNLOCK_DATA: "/api/vault/unlock/data",
   VAULT_UNLOCK: "/api/vault/unlock",
   VAULT_CHANGE_PASSPHRASE: "/api/vault/change-passphrase",
+  VAULT_ROTATE_KEY: "/api/vault/rotate-key",
+  VAULT_ROTATE_KEY_DATA: "/api/vault/rotate-key/data",
   VAULT_RECOVERY_KEY_GENERATE: "/api/vault/recovery-key/generate",
   VAULT_RECOVERY_KEY_RECOVER: "/api/vault/recovery-key/recover",
   VAULT_RESET: "/api/vault/reset",
@@ -148,6 +150,8 @@ export const apiPath = {
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault`,
   tenantMemberResetVaultRevoke: (userId: string, resetId: string) =>
     `${API_PATH.TENANT_MEMBERS}/${userId}/reset-vault/${resetId}/revoke`,
+  teamRotateKey: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rotate-key`,
+  teamRotateKeyData: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/rotate-key/data`,
   teamWebhooks: (teamId: string) => `${API_PATH.TEAMS}/${teamId}/webhooks`,
   teamWebhookById: (teamId: string, webhookId: string) =>
     `${API_PATH.TEAMS}/${teamId}/webhooks/${webhookId}`,

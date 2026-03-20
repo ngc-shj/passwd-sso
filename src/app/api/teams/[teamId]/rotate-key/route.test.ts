@@ -48,6 +48,7 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 
 import { POST } from "./route";
 import { logAudit } from "@/lib/audit";

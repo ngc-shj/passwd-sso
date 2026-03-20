@@ -12,8 +12,10 @@
  * objects (extra, contexts, breadcrumbs) via the beforeSend hook.
  */
 
+import { HEX64_PATTERN } from "@/lib/validations/common";
+
 // Regex patterns for sensitive data that must be scrubbed from error messages
-const HEX64_RE = /[0-9a-fA-F]{64}/g;
+const HEX64_GLOBAL_RE = new RegExp(HEX64_PATTERN, "g");
 // Base64: full RFC 4648 alphabet + padding, more than 40 chars.
 // Only applied to error messages (not stack traces) to avoid false positives on file paths.
 const BASE64_LONG_RE = /[A-Za-z0-9+/]{40,}={0,2}/g;
@@ -49,10 +51,10 @@ export function sanitizeErrorForSentry(err: unknown): Error {
 
 function scrubSensitivePatterns(text: string): string {
   return text
-    .replace(HEX64_RE, "[redacted-key]")
+    .replace(HEX64_GLOBAL_RE, "[redacted-key]")
     .replace(BASE64_LONG_RE, "[redacted-b64]");
 }
 
 function scrubHexOnly(text: string): string {
-  return text.replace(HEX64_RE, "[redacted-key]");
+  return text.replace(HEX64_GLOBAL_RE, "[redacted-key]");
 }

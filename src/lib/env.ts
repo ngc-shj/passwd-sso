@@ -9,6 +9,7 @@
  */
 
 import { z } from "zod";
+import { HEX64_RE } from "@/lib/validations/common";
 
 // ─── Reusable validators ────────────────────────────────────
 
@@ -26,7 +27,7 @@ const hex64 = z
     z
       .string()
       .regex(
-        /^[0-9a-fA-F]{64}$/,
+        HEX64_RE,
         "Must be a 64-character hex string (256 bits)",
       ),
   );
@@ -256,14 +257,12 @@ const envSchema = z
     const currentVersion = data.SHARE_MASTER_KEY_CURRENT_VERSION;
     // Cloud providers (aws-sm, azure-kv, gcp-sm) manage keys externally
     if (data.KEY_PROVIDER === "env") {
-      const hex64Re = /^[0-9a-fA-F]{64}$/;
-
       if (currentVersion === 1) {
         // V1: SHARE_MASTER_KEY_V1 or SHARE_MASTER_KEY must exist
         const v1Raw =
           process.env.SHARE_MASTER_KEY_V1 ?? process.env.SHARE_MASTER_KEY;
         const v1Key = v1Raw?.trim();
-        if (!v1Key || !hex64Re.test(v1Key)) {
+        if (!v1Key || !HEX64_RE.test(v1Key)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["SHARE_MASTER_KEY"],
@@ -275,7 +274,7 @@ const envSchema = z
         // V2+: SHARE_MASTER_KEY_V{N} must exist
         const vNRaw = process.env[`SHARE_MASTER_KEY_V${currentVersion}`];
         const vNKey = vNRaw?.trim();
-        if (!vNKey || !hex64Re.test(vNKey)) {
+        if (!vNKey || !HEX64_RE.test(vNKey)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["SHARE_MASTER_KEY_CURRENT_VERSION"],

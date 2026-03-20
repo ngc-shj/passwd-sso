@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { UserRound, Monitor, Shield, Code } from "lucide-react";
+import { UserRound, Monitor, Shield, Code, Fingerprint, Plane, KeyRound } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -10,6 +10,7 @@ import { CliTokenCard } from "@/components/settings/cli-token-card";
 import { ApiKeyManager } from "@/components/settings/api-key-manager";
 import { TravelModeCard } from "@/components/settings/travel-mode-card";
 import { PasskeyCredentialsCard } from "@/components/settings/passkey-credentials-card";
+import { RotateKeyCard } from "@/components/settings/rotate-key-card";
 import { TabDescription } from "@/components/settings/tab-description";
 
 export default function SettingsPage() {
@@ -42,9 +43,22 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="security" className="mt-0 space-y-4">
             <TabDescription>{t("tabSecurityDesc")}</TabDescription>
-            <TravelModeCard />
-            <Separator />
-            <PasskeyCredentialsCard />
+            <Tabs defaultValue="passkey" className="space-y-4">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="passkey"><Fingerprint className="h-4 w-4 mr-2" />{t("subTabPasskey")}</TabsTrigger>
+                <TabsTrigger value="travel"><Plane className="h-4 w-4 mr-2" />{t("subTabTravelMode")}</TabsTrigger>
+                <TabsTrigger value="rotate"><KeyRound className="h-4 w-4 mr-2" />{t("subTabKeyRotation")}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="passkey" className="mt-0">
+                <PasskeyCredentialsCard />
+              </TabsContent>
+              <TabsContent value="travel" className="mt-0">
+                <TravelModeCard />
+              </TabsContent>
+              <TabsContent value="rotate" className="mt-0">
+                <RotateKeyCard />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
           <TabsContent value="developer" className="mt-0 space-y-4">
             <TabDescription>{t("tabDeveloperDesc")}</TabDescription>
