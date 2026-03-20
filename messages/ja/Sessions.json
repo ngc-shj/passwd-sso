@@ -25,6 +25,9 @@
   "unknownBrowser": "不明なブラウザ",
   "loading": "セッションを読み込み中...",
   "tabAccountDesc": "アクティブなセッションとサインインデバイスを管理します。",
-  "tabSecurityDesc": "パスキーとトラベルモードを管理して、保管庫を保護します。",
+  "tabSecurityDesc": "パスキー、トラベルモード、鍵のローテーションを管理して、保管庫を保護します。",
+  "subTabPasskey": "パスキー",
+  "subTabTravelMode": "トラベルモード",
+  "subTabKeyRotation": "鍵のローテーション",
   "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。"
 }

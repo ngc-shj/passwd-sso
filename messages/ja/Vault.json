@@ -61,5 +61,17 @@
   "recoveryKeyRegenerateWarning": "既に回復キーが設定されています。新しい鍵を生成すると、以前の鍵は無効になります。",
   "vaultMustBeUnlocked": "保管庫のロックを解除してください。",
   "or": "または",
-  "setupInviteContext": "招待を受け入れるには、まず保管庫のセットアップが必要です。以下でパスフレーズを設定してください。"
+  "setupInviteContext": "招待を受け入れるには、まず保管庫のセットアップが必要です。以下でパスフレーズを設定してください。",
+  "rotateKey": "暗号化キーをローテーション",
+  "rotateKeyDescription": "新しいシークレットキーを生成し、すべての保管庫エントリを再暗号化します。緊急アクセスの付与はすべて無効になります。",
+  "rotateKeyButton": "キーをローテーション",
+  "rotateKeySuccess": "暗号化キーをローテーションしました。",
+  "rotateKeyFailed": "暗号化キーのローテーションに失敗しました。",
+  "rotateKeyWarningEa": "すべての緊急アクセス付与が無効になり、再確認が必要になります。",
+  "rotateKeyWarningTime": "保管庫エントリの数によっては、この操作に時間がかかる場合があります。",
+  "rotateKeyPassphrase": "現在のパスフレーズ",
+  "rotateKeyPassphrasePlaceholder": "現在のパスフレーズを入力",
+  "rotateKeyProgressEntries": "エントリを再暗号化中…",
+  "rotateKeyProgressHistory": "履歴を再暗号化中…",
+  "rotateKeyProgress": "{current} / {total}"
 }

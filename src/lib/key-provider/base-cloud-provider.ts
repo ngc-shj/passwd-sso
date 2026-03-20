@@ -7,6 +7,9 @@
  */
 
 import type { KeyName, KeyProvider } from "./types";
+import { HEX64_RE } from "@/lib/validations/common";
+
+export { HEX64_RE };
 
 export interface CacheEntry {
   key: Buffer;
@@ -17,8 +20,6 @@ export interface CloudProviderConfig {
   ttlMs?: number;        // default 300_000 (5 min)
   maxStaleTtlMs?: number; // default 2× ttlMs
 }
-
-export const HEX64_RE = /^[0-9a-fA-F]{64}$/;
 
 export abstract class BaseCloudKeyProvider implements KeyProvider {
   abstract readonly name: string;

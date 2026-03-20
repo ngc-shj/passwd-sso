@@ -15,6 +15,12 @@ npm run db:studio        # Prisma Studio GUI
 npm run generate:key     # Generate 256-bit hex master key
 ```
 
+Admin scripts:
+```bash
+ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<uuid> scripts/purge-history.sh                    # System-wide history purge
+ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<uuid> TARGET_VERSION=<int> scripts/rotate-master-key.sh  # Rotate ShareLink master key
+```
+
 Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.yml up`
 
 ## Code Quality Rules
@@ -83,6 +89,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/status` | GET | Check vault initialization status |
 | `/api/vault/change-passphrase` | POST | Change master passphrase |
 | `/api/vault/rotate-key` | POST | Rotate encryption key |
+| `/api/vault/rotate-key/data` | GET | Bulk fetch entries for key rotation |
 | `/api/vault/admin-reset` | POST | Tenant admin vault reset |
 | `/api/vault/recovery-key/generate` | POST | Save recovery key encrypted data |
 | `/api/vault/recovery-key/recover` | POST | Recover vault with recovery key (2-step: verify/reset) |
@@ -157,6 +164,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/members/[memberId]/confirm-key` | POST | Confirm member key distribution |
 | `/api/teams/[teamId]/member-key` | GET, POST | Get/submit member encryption key |
 | `/api/teams/[teamId]/rotate-key` | POST | Rotate team encryption key |
+| `/api/teams/[teamId]/rotate-key/data` | GET | Bulk fetch entries for team key rotation |
 | `/api/teams/[teamId]/invitations` | GET, POST | List/create team invitations |
 | `/api/teams/[teamId]/invitations/[invId]` | DELETE | Cancel invitation |
 | `/api/teams/[teamId]/policy` | GET, PUT | Team security policy |
@@ -181,9 +189,6 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/audit-logs/download` | GET | Download team audit logs |
 | `/api/teams/[teamId]/webhooks` | GET, POST | Team webhooks |
 | `/api/teams/[teamId]/webhooks/[webhookId]` | PUT, DELETE | Update/delete team webhook |
-| `/api/teams/archived` | GET | List archived teams |
-| `/api/teams/favorites` | GET | List favorite teams |
-| `/api/teams/trash` | GET | List trashed teams |
 | `/api/teams/invitations/accept` | POST | Accept team invitation |
 | `/api/teams/pending-key-distributions` | GET | Pending key distributions |
 
@@ -302,7 +307,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/csp-report` | POST | CSP violation report endpoint |
 | `/api/user/locale` | PUT | Update user locale preference |
 | `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
-| `/api/maintenance/purge-history` | POST | Purge old entry history records |
+| `/api/maintenance/purge-history` | POST | System-wide history purge (admin-only, bearer token) |
 
 ### i18n
 

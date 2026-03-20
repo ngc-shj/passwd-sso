@@ -10,6 +10,8 @@ export const HEX_SALT_LENGTH = 64;         // 32 bytes as hex
 export const HEX_HASH_LENGTH = 64;         // 32 bytes as hex (SHA-256)
 
 // ─── Shared Regex Patterns ───────────────────────────────────
+export const HEX64_PATTERN = "[0-9a-fA-F]{64}"; // 256-bit key as hex (base pattern)
+export const HEX64_RE = new RegExp(`^${HEX64_PATTERN}$`);
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
 // ─── Shared Enum Values ──────────────────────────────────────
@@ -53,6 +55,11 @@ export const TEAM_KEY_VERSION_MAX = 10_000;
 export const TEAM_ROTATE_ENTRIES_MAX = 1000;
 export const TEAM_ROTATE_MEMBER_KEYS_MIN = 1;
 export const TEAM_ROTATE_MEMBER_KEYS_MAX = 1000;
+
+// ─── Vault Key Rotation ─────────────────────────────────────
+export const VAULT_ROTATE_ENTRIES_MAX = 5000;
+export const VAULT_ROTATE_HISTORY_MAX = 10_000;
+export const ECDH_PRIVATE_KEY_CIPHERTEXT_MAX = 512;  // P-256 PKCS8=138B → AES-GCM hex ≈ 308 chars
 
 // ─── General Limits ──────────────────────────────────────────
 export const EMAIL_MAX_LENGTH = 254;           // RFC 5321

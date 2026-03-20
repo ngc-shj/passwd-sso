@@ -23,6 +23,7 @@ export const NS_VAULT: readonly Namespace[] = ["Vault", "Extension", "Auth"];
 export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "Dashboard",
   "Team",
+  "Teams",
   "Tag",
   "Shortcuts",
   "CopyButton",

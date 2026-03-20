@@ -1,0 +1,20 @@
+{
+  "rotateKeyButton": "キーをローテーション",
+  "rotateKeyTitle": "チーム暗号化キーのローテーション",
+  "rotateKeyDescription": "新しいチーム暗号化キーを生成し、すべてのチームパスワードとエントリを再暗号化します。",
+  "rotateKeyWarning1": "すべてのチームエントリが再暗号化されます。大規模なチームでは時間がかかる場合があります。",
+  "rotateKeyWarning2": "オフラインのメンバーは、次回接続時に自動的に新しいキーを受け取ります。",
+  "rotateKeyWarning3": "この操作は元に戻せません。ローテーション前にすべてのメンバーがアクティブであることを確認してください。",
+  "rotateKeyConfirm": "ローテーション実行",
+  "rotateKeyCancel": "キャンセル",
+  "rotateKeyInProgress": "処理中...",
+  "rotateKeyProgressEncrypting": "暗号化中 {progress}...",
+  "rotateKeySuccess": "チームキーのローテーションが完了しました",
+  "rotateKeyFailed": "キーのローテーションに失敗しました。再試行してください。",
+  "rotateKeyFetchFailed": "ローテーション用のチームデータの読み込みに失敗しました。",
+  "rotateKeyRateLimited": "ローテーションの試行回数が多すぎます。しばらく待ってから再試行してください。",
+  "rotateKeyVersionConflict": "キーバージョンの競合が発生しました。別のローテーションが進行中の可能性があります。",
+  "rotateKeyEntryMismatch": "エントリ数の不一致が発生しました。ページを更新して再試行してください。",
+  "rotateKeyVaultRequired": "チームキーをローテーションするには、ボールトのロックを解除する必要があります。",
+  "rotateKeyNoMembers": "暗号化キーを持つアクティブなメンバーが見つかりません。"
+}

@@ -28,7 +28,7 @@
   "createdAtLabel": "Created: {date}",
   "settings": "Settings",
   "generalSettings": "General",
-  "securityPolicy": "Policy",
+  "securityPolicy": "Security",
   "teamSettings": "Team Settings",
   "updateTeam": "Update Team",
   "updated": "Team updated",
@@ -158,5 +158,10 @@
   "tabGeneralDesc": "Update team name and description.",
   "tabMembersDesc": "Manage team members, transfer ownership, or invite new members.",
   "tabPolicyDesc": "Set password requirements and security policies for the team.",
-  "tabWebhookDesc": "Configure webhook endpoints to receive team event notifications."
+  "subTabPolicy": "Policy",
+  "subTabKeyRotation": "Key Rotation",
+  "tabWebhookDesc": "Configure webhook endpoints to receive team event notifications.",
+  "dangerZone": "Danger Zone",
+  "rotateKeyTitle": "Rotate Team Encryption Key",
+  "rotateKeyDesc": "Generate a new team encryption key and re-encrypt all team data. All members must be online to receive the new key."
 }

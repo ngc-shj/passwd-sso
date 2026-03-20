@@ -24,6 +24,8 @@ import {
   verifyKey,
   encryptBinary,
   decryptBinary,
+  encryptData,
+  decryptData,
 } from "./crypto-client";
 import { TeamVaultProvider } from "./team-vault-context";
 import {
@@ -32,6 +34,7 @@ import {
   exportPrivateKey,
   deriveEcdhWrappingKey,
 } from "./crypto-team";
+import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -90,6 +93,7 @@ interface VaultContextValue {
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
   changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
+  rotateKey: (passphrase: string, onProgress?: (phase: string, current: number, total: number) => void) => Promise<void>;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
@@ -756,6 +760,180 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  // ─── Rotate Key ───────────────────────────────────────────────
+
+  const rotateKey = useCallback(
+    async (
+      passphrase: string,
+      onProgress?: (phase: string, current: number, total: number) => void,
+    ) => {
+      if (!secretKeyRef.current || !accountSaltRef.current || !encryptionKey) {
+        throw new Error("Vault must be unlocked to rotate key");
+      }
+
+      // 1. Compute currentAuthHash for server-side identity verification
+      const currentAuthKey = await deriveAuthKey(secretKeyRef.current);
+      const currentAuthHash = await computeAuthHash(currentAuthKey);
+
+      // 2. Fetch all entries and history via GET /api/vault/rotate-key/data
+      const dataRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
+      if (!dataRes.ok) {
+        const err = await dataRes.json().catch(() => ({}));
+        throw err;
+      }
+      const { entries, historyEntries } = await dataRes.json();
+
+      // 3. Generate new secret key
+      const newSecretKey = generateSecretKey();
+
+      // 4. Derive new encryption key
+      const newEncKey = await deriveEncryptionKey(newSecretKey);
+
+      // 5. Re-encrypt entries: decrypt with current encryptionKey, re-encrypt with newEncKey
+      const userId = session?.user?.id;
+      const totalEntries = entries.length;
+      const reencryptedEntries = [];
+      for (let i = 0; i < totalEntries; i++) {
+        const entry = entries[i];
+        onProgress?.("entries", i, totalEntries);
+
+        const entryAad = entry.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, entry.id)
+          : undefined;
+
+        const decryptedBlob = await decryptData(
+          {
+            ciphertext: entry.encryptedBlob,
+            iv: entry.blobIv,
+            authTag: entry.blobAuthTag,
+          },
+          encryptionKey!,
+          entryAad,
+        );
+        const newBlob = await encryptData(decryptedBlob, newEncKey, entryAad);
+
+        const decryptedOverview = await decryptData(
+          {
+            ciphertext: entry.encryptedOverview,
+            iv: entry.overviewIv,
+            authTag: entry.overviewAuthTag,
+          },
+          encryptionKey!,
+          entryAad,
+        );
+        const newOverview = await encryptData(decryptedOverview, newEncKey, entryAad);
+
+        reencryptedEntries.push({
+          id: entry.id,
+          encryptedBlob: newBlob,
+          encryptedOverview: newOverview,
+          aadVersion: entry.aadVersion,
+        });
+      }
+      onProgress?.("entries", totalEntries, totalEntries);
+
+      // 6. Re-encrypt history entries
+      const totalHistory = historyEntries.length;
+      const reencryptedHistory = [];
+      for (let i = 0; i < totalHistory; i++) {
+        const histEntry = historyEntries[i];
+        onProgress?.("history", i, totalHistory);
+
+        // History entries use the parent entry's AAD (entryId, not histEntry.id)
+        const histAad = histEntry.aadVersion >= 1 && userId
+          ? buildPersonalEntryAAD(userId, histEntry.entryId)
+          : undefined;
+
+        const decryptedBlob = await decryptData(
+          {
+            ciphertext: histEntry.encryptedBlob,
+            iv: histEntry.blobIv,
+            authTag: histEntry.blobAuthTag,
+          },
+          encryptionKey!,
+          histAad,
+        );
+        const newBlob = await encryptData(decryptedBlob, newEncKey, histAad);
+
+        reencryptedHistory.push({
+          id: histEntry.id,
+          encryptedBlob: newBlob,
+          aadVersion: histEntry.aadVersion,
+        });
+      }
+      onProgress?.("history", totalHistory, totalHistory);
+
+      // 7. Re-wrap ECDH private key with new secret key
+      const ecdhWrapKey = await deriveEcdhWrappingKey(newSecretKey);
+      if (!ecdhPrivateKeyBytesRef.current) {
+        throw new Error("ECDH_KEY_UNAVAILABLE");
+      }
+      const ecdhSourceBytes = ecdhPrivateKeyBytesRef.current;
+      const ecdhEncrypted = await encryptBinary(
+        ecdhSourceBytes.buffer.slice(
+          ecdhSourceBytes.byteOffset,
+          ecdhSourceBytes.byteOffset + ecdhSourceBytes.byteLength,
+        ) as ArrayBuffer,
+        ecdhWrapKey,
+      );
+
+      // 8. Generate new accountSalt, derive wrapping key, wrap new secretKey
+      const newAccountSalt = generateAccountSalt();
+      const newWrappingKey = await deriveWrappingKey(passphrase, newAccountSalt);
+      const newWrappedKey = await wrapSecretKey(newSecretKey, newWrappingKey);
+
+      // 9. Compute new auth credentials, verifier, and verification artifact
+      const newAuthKey = await deriveAuthKey(newSecretKey);
+      const newAuthHash = await computeAuthHash(newAuthKey);
+      const newVerifierHash = await computePassphraseVerifier(passphrase, newAccountSalt);
+      const verificationArtifact = await createVerificationArtifact(newEncKey);
+
+      // 10. POST to /api/vault/rotate-key
+      const res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentAuthHash,
+          encryptedSecretKey: newWrappedKey.ciphertext,
+          secretKeyIv: newWrappedKey.iv,
+          secretKeyAuthTag: newWrappedKey.authTag,
+          accountSalt: hexEncode(newAccountSalt),
+          newAuthHash,
+          newVerifierHash,
+          verificationArtifact,
+          entries: reencryptedEntries,
+          historyEntries: reencryptedHistory,
+          encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
+          ecdhPrivateKeyIv: ecdhEncrypted.iv,
+          ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
+        }),
+      });
+
+      if (!res.ok) {
+        newSecretKey.fill(0);
+        const err = await res.json().catch(() => ({}));
+        throw err;
+      }
+
+      const result = await res.json();
+
+      // 11. Update in-memory state
+      secretKeyRef.current = new Uint8Array(newSecretKey);
+      keyVersionRef.current = result.keyVersion ?? keyVersionRef.current + 1;
+      accountSaltRef.current = newAccountSalt;
+      wrappedKeyRef.current = {
+        ciphertext: newWrappedKey.ciphertext,
+        iv: newWrappedKey.iv,
+        authTag: newWrappedKey.authTag,
+      };
+      // ecdhPrivateKeyBytesRef remains valid — the private key bytes themselves
+      // did not change, only the wrapping key changed.
+      newSecretKey.fill(0);
+      setEncryptionKey(newEncKey);
+    },
+    [encryptionKey, session?.user?.id],
+  );
+
   const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {
     if (!accountSaltRef.current || !wrappedKeyRef.current) return false;
     try {
@@ -799,6 +977,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         lock,
         setup,
         changePassphrase,
+        rotateKey,
         verifyPassphrase,
         getSecretKey,
         getAccountSalt,

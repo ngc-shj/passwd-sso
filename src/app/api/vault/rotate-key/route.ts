@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
@@ -10,10 +10,21 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
-import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import {
+  hexIv,
+  hexAuthTag,
+  hexSalt,
+  hexHash,
+  encryptedFieldSchema,
+  VAULT_ROTATE_ENTRIES_MAX,
+  VAULT_ROTATE_HISTORY_MAX,
+  ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
+} from "@/lib/validations/common";
+import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
@@ -23,7 +34,7 @@ const rotateKeySchema = z.object({
   // Current passphrase verification
   currentAuthHash: hexHash,
   // New vault wrapping data
-  encryptedSecretKey: z.string().min(1),
+  encryptedSecretKey: z.string().min(1).max(512),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,
@@ -34,15 +45,32 @@ const rotateKeySchema = z.object({
     iv: hexIv,
     authTag: hexAuthTag,
   }),
+  // Entry re-encryption payload
+  entries: z.array(z.object({
+    id: z.string().min(1),
+    encryptedBlob: encryptedFieldSchema,
+    encryptedOverview: encryptedFieldSchema,
+    aadVersion: z.number().int().min(0).default(0),
+  })).max(VAULT_ROTATE_ENTRIES_MAX),
+  historyEntries: z.array(z.object({
+    id: z.string().min(1),
+    encryptedBlob: encryptedFieldSchema,
+    aadVersion: z.number().int().min(0).default(0),
+  })).max(VAULT_ROTATE_HISTORY_MAX),
+  // ECDH private key (re-wrapped with new secret key)
+  encryptedEcdhPrivateKey: z.string().min(1).max(ECDH_PRIVATE_KEY_CIPHERTEXT_MAX),
+  ecdhPrivateKeyIv: hexIv,
+  ecdhPrivateKeyAuthTag: hexAuthTag,
 });
 
 /**
  * POST /api/vault/rotate-key
  * Rotate the vault's secret key wrapping.
  * The client re-encrypts the secret key with a new passphrase and bumps keyVersion.
- * All EA grants with older keyVersion are marked STALE.
+ * All password entries and history entries are re-encrypted atomically in a single
+ * interactive transaction. All EA grants with older keyVersion are marked STALE.
  */
-async function handlePOST(request: Request) {
+async function handlePOST(request: NextRequest) {
   const originError = assertOrigin(request);
   if (originError) return originError;
 
@@ -67,9 +95,11 @@ async function handlePOST(request: Request) {
     return validationError(parsed.error.flatten());
   }
 
-  const user = await withUserTenantRls(session.user.id, async () =>
+  const userId = session.user.id;
+
+  const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
-      where: { id: session.user.id },
+      where: { id: userId },
       select: {
         tenantId: true,
         vaultSetupAt: true,
@@ -101,46 +131,184 @@ async function handlePOST(request: Request) {
     .update(parsed.data.newAuthHash + newServerSalt)
     .digest("hex");
 
-  // Update vault wrapping, bump keyVersion, and mark EA grants as STALE.
-  // All operations run within the same RLS context.
-  await withUserTenantRls(session.user.id, async () => {
-    await prisma.$transaction([
-      prisma.user.update({
-        where: { id: session.user.id },
-        data: {
-          encryptedSecretKey: parsed.data.encryptedSecretKey,
-          secretKeyIv: parsed.data.secretKeyIv,
-          secretKeyAuthTag: parsed.data.secretKeyAuthTag,
-          accountSalt: parsed.data.accountSalt,
-          masterPasswordServerHash: newServerHash,
-          masterPasswordServerSalt: newServerSalt,
-          keyVersion: newKeyVersion,
-          // Sync verifier with new accountSalt to keep change-passphrase working
-          ...(parsed.data.newVerifierHash
-            ? {
-                passphraseVerifierHmac: hmacVerifier(parsed.data.newVerifierHash),
-                passphraseVerifierVersion: VERIFIER_VERSION,
-              }
-            : {}),
-        },
-      }),
-      prisma.vaultKey.create({
-        data: {
-          userId: session.user.id,
-          tenantId: user.tenantId,
-          version: newKeyVersion,
-          verificationCiphertext: parsed.data.verificationArtifact.ciphertext,
-          verificationIv: parsed.data.verificationArtifact.iv,
-          verificationAuthTag: parsed.data.verificationArtifact.authTag,
-        },
-      }),
-    ]);
+  const {
+    entries,
+    historyEntries,
+    encryptedEcdhPrivateKey,
+    ecdhPrivateKeyIv,
+    ecdhPrivateKeyAuthTag,
+  } = parsed.data;
 
-    // Mark EA grants as STALE (best-effort, within RLS context)
-    await markGrantsStaleForOwner(session.user.id, newKeyVersion).catch(() => {});
+  // Update vault wrapping, bump keyVersion, re-encrypt all entries, and mark EA grants as STALE.
+  // Interactive transaction with advisory lock prevents concurrent rotations for the same user.
+  try {
+    await withUserTenantRls(userId, async () =>
+      prisma.$transaction(async (tx) => {
+        // Advisory lock prevents concurrent key rotations for the same user (S-17 equivalent)
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${userId}::text))`;
+
+        // Verify submitted entries exactly match ALL user entries (including trash/archived)
+        const allEntries = await tx.passwordEntry.findMany({
+          where: { userId },
+          select: { id: true },
+        });
+        if (entries.length !== allEntries.length) {
+          throw new Error("ENTRY_COUNT_MISMATCH");
+        }
+        const allEntryIdSet = new Set(allEntries.map((e) => e.id));
+        const submittedEntryIdSet = new Set(entries.map((e) => e.id));
+        if (
+          submittedEntryIdSet.size !== entries.length ||
+          submittedEntryIdSet.size !== allEntryIdSet.size
+        ) {
+          throw new Error("ENTRY_COUNT_MISMATCH");
+        }
+        for (const entryId of submittedEntryIdSet) {
+          if (!allEntryIdSet.has(entryId)) {
+            throw new Error("ENTRY_COUNT_MISMATCH");
+          }
+        }
+
+        // Verify submitted historyEntries exactly match ALL user history records.
+        // PasswordEntryHistory has no userId field — filter via nested relation.
+        const allHistory = await tx.passwordEntryHistory.findMany({
+          where: { entry: { userId } },
+          select: { id: true },
+        });
+        if (historyEntries.length !== allHistory.length) {
+          throw new Error("HISTORY_COUNT_MISMATCH");
+        }
+        const allHistoryIdSet = new Set(allHistory.map((h) => h.id));
+        const submittedHistoryIdSet = new Set(historyEntries.map((h) => h.id));
+        if (
+          submittedHistoryIdSet.size !== historyEntries.length ||
+          submittedHistoryIdSet.size !== allHistoryIdSet.size
+        ) {
+          throw new Error("HISTORY_COUNT_MISMATCH");
+        }
+        for (const historyId of submittedHistoryIdSet) {
+          if (!allHistoryIdSet.has(historyId)) {
+            throw new Error("HISTORY_COUNT_MISMATCH");
+          }
+        }
+
+        // Re-encrypt all password entries with the new key.
+        // updateMany + userId scope prevents cross-user updates.
+        // Process in chunks to avoid overwhelming the DB with too many parallel statements.
+        const ENTRY_BATCH_SIZE = 100;
+        for (let i = 0; i < entries.length; i += ENTRY_BATCH_SIZE) {
+          const batch = entries.slice(i, i + ENTRY_BATCH_SIZE);
+          await Promise.all(batch.map(async (entry) => {
+            const result = await tx.passwordEntry.updateMany({
+              where: { id: entry.id, userId },
+              data: {
+                encryptedBlob: entry.encryptedBlob.ciphertext,
+                blobIv: entry.encryptedBlob.iv,
+                blobAuthTag: entry.encryptedBlob.authTag,
+                encryptedOverview: entry.encryptedOverview.ciphertext,
+                overviewIv: entry.encryptedOverview.iv,
+                overviewAuthTag: entry.encryptedOverview.authTag,
+                aadVersion: entry.aadVersion,
+                keyVersion: newKeyVersion,
+              },
+            });
+            if (result.count !== 1) {
+              throw new Error("ENTRY_COUNT_MISMATCH");
+            }
+          }));
+        }
+
+        // Re-encrypt all history blobs with the new key.
+        // Filter via nested relation since PasswordEntryHistory has no userId field.
+        // Process in chunks to avoid overwhelming the DB with too many parallel statements.
+        const HISTORY_BATCH_SIZE = 100;
+        for (let i = 0; i < historyEntries.length; i += HISTORY_BATCH_SIZE) {
+          const batch = historyEntries.slice(i, i + HISTORY_BATCH_SIZE);
+          await Promise.all(batch.map(async (historyEntry) => {
+            const result = await tx.passwordEntryHistory.updateMany({
+              where: { id: historyEntry.id, entry: { userId } },
+              data: {
+                encryptedBlob: historyEntry.encryptedBlob.ciphertext,
+                blobIv: historyEntry.encryptedBlob.iv,
+                blobAuthTag: historyEntry.encryptedBlob.authTag,
+                aadVersion: historyEntry.aadVersion,
+                keyVersion: newKeyVersion,
+              },
+            });
+            if (result.count !== 1) {
+              throw new Error("HISTORY_COUNT_MISMATCH");
+            }
+          }));
+        }
+
+        // Update user vault wrapping keys and ECDH private key
+        await tx.user.update({
+          where: { id: userId },
+          data: {
+            encryptedSecretKey: parsed.data.encryptedSecretKey,
+            secretKeyIv: parsed.data.secretKeyIv,
+            secretKeyAuthTag: parsed.data.secretKeyAuthTag,
+            accountSalt: parsed.data.accountSalt,
+            masterPasswordServerHash: newServerHash,
+            masterPasswordServerSalt: newServerSalt,
+            keyVersion: newKeyVersion,
+            // Sync verifier with new accountSalt to keep change-passphrase working
+            ...(parsed.data.newVerifierHash
+              ? {
+                  passphraseVerifierHmac: hmacVerifier(parsed.data.newVerifierHash),
+                  passphraseVerifierVersion: VERIFIER_VERSION,
+                }
+              : {}),
+            // Re-wrapped ECDH private key
+            encryptedEcdhPrivateKey,
+            ecdhPrivateKeyIv,
+            ecdhPrivateKeyAuthTag,
+          },
+        });
+
+        await tx.vaultKey.create({
+          data: {
+            userId,
+            tenantId: user.tenantId,
+            version: newKeyVersion,
+            verificationCiphertext: parsed.data.verificationArtifact.ciphertext,
+            verificationIv: parsed.data.verificationArtifact.iv,
+            verificationAuthTag: parsed.data.verificationArtifact.authTag,
+          },
+        });
+      }, { timeout: 120_000 }),
+    );
+  } catch (e) {
+    if (e instanceof Error && e.message === "ENTRY_COUNT_MISMATCH") {
+      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
+    }
+    if (e instanceof Error && e.message === "HISTORY_COUNT_MISMATCH") {
+      return errorResponse(API_ERROR.ENTRY_COUNT_MISMATCH, 400);
+    }
+    throw e;
+  }
+
+  // Mark EA grants as STALE (best-effort, outside transaction)
+  await withUserTenantRls(userId, async () =>
+    markGrantsStaleForOwner(userId, newKeyVersion).catch(() => {}),
+  );
+
+  logAudit({
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.VAULT_KEY_ROTATION,
+    userId,
+    targetType: "User",
+    targetId: userId,
+    metadata: {
+      fromVersion: user.keyVersion,
+      toVersion: newKeyVersion,
+      entriesRotated: entries.length,
+      historyEntriesRotated: historyEntries.length,
+    },
+    ...extractRequestMeta(request),
   });
 
-  getLogger().info({ userId: session.user.id }, "vault.rotateKey.success");
+  getLogger().info({ userId }, "vault.rotateKey.success");
 
   return NextResponse.json({
     success: true,

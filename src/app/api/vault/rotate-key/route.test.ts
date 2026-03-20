@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls } = vi.hoisted(() => ({
+const mockPasswordEntry = {
+  findMany: vi.fn(),
+  updateMany: vi.fn(),
+};
+const mockPasswordEntryHistory = {
+  findMany: vi.fn(),
+  updateMany: vi.fn(),
+};
+
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -13,7 +22,17 @@ const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkS
   mockTransaction: vi.fn(),
   mockMarkStale: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRateLimiterCheck: vi.fn(),
 }));
+
+// Transaction mock (txMock) for interactive transaction pattern
+const txMock = {
+  $executeRaw: vi.fn(),
+  passwordEntry: mockPasswordEntry,
+  passwordEntryHistory: mockPasswordEntryHistory,
+  user: { update: vi.fn() },
+  vaultKey: { create: vi.fn() },
+};
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -27,7 +46,7 @@ vi.mock("@/lib/emergency-access-server", () => ({
   markGrantsStaleForOwner: mockMarkStale,
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }), clear: vi.fn() }),
+  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -38,6 +57,10 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/audit", () => ({
+  logAudit: vi.fn(),
+  extractRequestMeta: vi.fn(() => ({})),
+}));
 
 import { createHash } from "crypto";
 import { POST } from "./route";
@@ -47,6 +70,12 @@ const currentAuthHash = "b".repeat(64);
 const serverHash = createHash("sha256")
   .update(currentAuthHash + serverSalt)
   .digest("hex");
+
+const makeEncryptedField = () => ({
+  ciphertext: "c".repeat(10),
+  iv: "a".repeat(24),
+  authTag: "b".repeat(32),
+});
 
 const validBody = {
   currentAuthHash,
@@ -60,6 +89,11 @@ const validBody = {
     iv: "a".repeat(24),
     authTag: "b".repeat(32),
   },
+  entries: [],
+  historyEntries: [],
+  encryptedEcdhPrivateKey: "x".repeat(100),
+  ecdhPrivateKeyIv: "a".repeat(24),
+  ecdhPrivateKeyAuthTag: "b".repeat(32),
 };
 
 describe("POST /api/vault/rotate-key", () => {
@@ -73,8 +107,26 @@ describe("POST /api/vault/rotate-key", () => {
       masterPasswordServerSalt: serverSalt,
       keyVersion: 1,
     });
-    mockTransaction.mockResolvedValue([]);
+    // Interactive transaction mock: execute the callback with txMock
+    mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
+    // By default, DB has no entries/history (matches empty arrays in validBody)
+    mockPasswordEntry.findMany.mockResolvedValue([]);
+    mockPasswordEntryHistory.findMany.mockResolvedValue([]);
+    mockPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
+    mockPasswordEntryHistory.updateMany.mockResolvedValue({ count: 1 });
+    txMock.$executeRaw.mockResolvedValue(undefined);
+    txMock.user.update.mockResolvedValue({});
+    txMock.vaultKey.create.mockResolvedValue({});
     mockMarkStale.mockResolvedValue(0);
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    expect(res.status).toBe(429);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -138,7 +190,7 @@ describe("POST /api/vault/rotate-key", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rotates key successfully and bumps keyVersion", async () => {
+  it("rotates key successfully with empty vault", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
@@ -147,11 +199,134 @@ describe("POST /api/vault/rotate-key", () => {
     expect(json.success).toBe(true);
     expect(json.keyVersion).toBe(2);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
-    expect(mockPrismaVaultKey.create).toHaveBeenCalledWith({
+    expect(txMock.$executeRaw).toHaveBeenCalled();
+    expect(txMock.vaultKey.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         userId: "user-1",
         tenantId: "tenant-1",
         version: 2,
+      }),
+    });
+  });
+
+  it("rotates key with entries and history", async () => {
+    const entryId = "tz4a98xxat96iws9zmbrgj3a";
+    const historyId = "kx7b29yybu97jxt0amcshk4b";
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
+    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: historyId }]);
+
+    const bodyWithEntries = {
+      ...validBody,
+      entries: [{
+        id: entryId,
+        encryptedBlob: makeEncryptedField(),
+        encryptedOverview: makeEncryptedField(),
+        aadVersion: 1,
+      }],
+      historyEntries: [{
+        id: historyId,
+        encryptedBlob: makeEncryptedField(),
+        aadVersion: 1,
+      }],
+    };
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: bodyWithEntries })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.keyVersion).toBe(2);
+    expect(mockPasswordEntry.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPasswordEntryHistory.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 400 on entry count mismatch", async () => {
+    // DB has 1 entry but client sends 0
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: "some-id" }]);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 on history count mismatch", async () => {
+    const entryId = "tz4a98xxat96iws9zmbrgj3a";
+    // DB has 1 history entry but client sends 0
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
+    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: "kx7b29yybu97jxt0amcshk4b" }]);
+
+    const bodyWithEntry = {
+      ...validBody,
+      entries: [{
+        id: entryId,
+        encryptedBlob: makeEncryptedField(),
+        encryptedOverview: makeEncryptedField(),
+        aadVersion: 1,
+      }],
+      historyEntries: [], // client sends 0 but DB has 1
+    };
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: bodyWithEntry })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when submitted entry IDs do not match DB entry IDs", async () => {
+    const dbId = "tz4a98xxat96iws9zmbrgj3a";
+    const wrongId = "ab3c99zzbu11kxt0amcshi9c";
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: dbId }]);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: {
+          ...validBody,
+          entries: [{
+            id: wrongId,
+            encryptedBlob: makeEncryptedField(),
+            encryptedOverview: makeEncryptedField(),
+            aadVersion: 1,
+          }],
+        },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when entries exceed max limit", async () => {
+    const tooManyEntries = Array.from({ length: 5001 }, (_, i) => ({
+      id: `entry-${i}`,
+      encryptedBlob: makeEncryptedField(),
+      encryptedOverview: makeEncryptedField(),
+      aadVersion: 1,
+    }));
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: { ...validBody, entries: tooManyEntries },
+      })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("acquires advisory lock in transaction", async () => {
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    expect(txMock.$executeRaw).toHaveBeenCalled();
+  });
+
+  it("updates ECDH private key fields", async () => {
+    await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    expect(txMock.user.update).toHaveBeenCalledWith({
+      where: { id: "user-1" },
+      data: expect.objectContaining({
+        encryptedEcdhPrivateKey: validBody.encryptedEcdhPrivateKey,
+        ecdhPrivateKeyIv: validBody.ecdhPrivateKeyIv,
+        ecdhPrivateKeyAuthTag: validBody.ecdhPrivateKeyAuthTag,
       }),
     });
   });
@@ -173,6 +348,7 @@ describe("POST /api/vault/rotate-key", () => {
 
   it("increments keyVersion from current value", async () => {
     mockPrismaUser.findUnique.mockResolvedValue({
+      tenantId: "tenant-1",
       vaultSetupAt: new Date(),
       masterPasswordServerHash: serverHash,
       masterPasswordServerSalt: serverSalt,
@@ -190,9 +366,10 @@ describe("POST /api/vault/rotate-key", () => {
     await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
     );
-    // withUserTenantRls should be called twice: once for findUnique, once for rotation+stale
-    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(2);
+    // withUserTenantRls: once for findUnique, once for transaction, once for EA stale
+    expect(mockWithUserTenantRls).toHaveBeenCalledTimes(3);
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(1, "user-1", expect.any(Function));
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
+    expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(3, "user-1", expect.any(Function));
   });
 });
