@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -17,9 +16,6 @@ type Params = { params: Promise<{ teamId: string }> };
  * Requires TEAM_UPDATE permission (admin or owner).
  */
 async function handleGET(req: NextRequest, { params }: Params) {
-  const originError = assertOrigin(req);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,7 +35,7 @@ import { TeamRotateKeyButton } from "@/components/team/team-rotate-key-button";
 import { TeamWebhookCard } from "@/components/team/team-webhook-card";
 import { TabDescription } from "@/components/settings/tab-description";
 import { Link } from "@/i18n/navigation";
-import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Search, Shield, Webhook } from "lucide-react";
+import { Loader2, UserPlus, Trash2, X, LinkIcon, Crown, Settings2, Users, Mail, ShieldAlert, Search, Shield, Webhook, KeyRound, ListChecks } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, API_PATH, apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -459,24 +459,6 @@ export default function TeamSettingsPage({
               </Card>
             )}
 
-            {isAdmin && (
-              <Card className="rounded-xl border border-destructive/30 p-4">
-                <section className="space-y-4">
-                  <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
-                    <ShieldAlert className="h-5 w-5" />
-                    {t("dangerZone")}
-                  </h2>
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">{t("rotateKeyTitle")}</p>
-                      <p className="text-xs text-muted-foreground">{t("rotateKeyDesc")}</p>
-                    </div>
-                    <TeamRotateKeyButton teamId={teamId} />
-                  </div>
-                </section>
-              </Card>
-            )}
-
             {isOwner && (
               <Card className="rounded-xl border border-destructive/30 p-4">
                 <section className="space-y-4">
@@ -862,7 +844,31 @@ export default function TeamSettingsPage({
           {isAdmin && (
             <TabsContent value="policy" className="space-y-4 mt-0">
               <TabDescription>{t("tabPolicyDesc")}</TabDescription>
-              <TeamPolicySettings teamId={teamId} />
+              <Tabs defaultValue="policy-settings" className="space-y-4">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="policy-settings"><ListChecks className="h-4 w-4 mr-2" />{t("subTabPolicy")}</TabsTrigger>
+                  <TabsTrigger value="key-rotation"><KeyRound className="h-4 w-4 mr-2" />{t("subTabKeyRotation")}</TabsTrigger>
+                </TabsList>
+                <TabsContent value="policy-settings" className="mt-0">
+                  <TeamPolicySettings teamId={teamId} />
+                </TabsContent>
+                <TabsContent value="key-rotation" className="mt-0">
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center gap-2">
+                        <KeyRound className="h-5 w-5" />
+                        <div>
+                          <CardTitle>{t("rotateKeyTitle")}</CardTitle>
+                          <CardDescription>{t("rotateKeyDesc")}</CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <TeamRotateKeyButton teamId={teamId} />
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
             </TabsContent>
           )}
 

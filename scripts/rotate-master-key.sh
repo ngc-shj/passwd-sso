@@ -10,6 +10,7 @@
 #   TARGET_VERSION   (required) Target key version (must match SHARE_MASTER_KEY_CURRENT_VERSION)
 #   APP_URL          (optional) Application URL (default: http://localhost:3000)
 #   REVOKE_SHARES    (optional) Revoke shares encrypted with older versions (default: false)
+#   INSECURE         (optional) Skip TLS certificate verification (default: false)
 #
 # Exit codes:
 #   0 — success
@@ -33,8 +34,8 @@ if [[ -z "$OPERATOR_ID" ]]; then
   exit 1
 fi
 
-if ! [[ "$OPERATOR_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
-  echo "[ERROR] OPERATOR_ID must be a valid UUID" >&2
+if ! [[ "$OPERATOR_ID" =~ ^[a-zA-Z0-9_-]{1,128}$ ]]; then
+  echo "[ERROR] OPERATOR_ID must be alphanumeric (CUID or UUID format)" >&2
   exit 1
 fi
 
@@ -58,12 +59,16 @@ BODY=$(cat <<EOJSON
 EOJSON
 )
 
-RESPONSE=$(curl -sS -w "\n%{http_code}" \
-  -X POST \
+CURL_OPTS=(-sS -w "\n%{http_code}" -X POST \
   -H "Authorization: Bearer ${ADMIN_API_TOKEN}" \
   -H "Content-Type: application/json" \
-  --data "${BODY}" \
-  "${APP_URL}/api/admin/rotate-master-key")
+  --data "${BODY}")
+if [[ "${INSECURE:-false}" == "true" ]]; then
+  echo "[WARNING] TLS certificate verification is disabled. Do not use in production." >&2
+  CURL_OPTS+=(--insecure)
+fi
+
+RESPONSE=$(curl "${CURL_OPTS[@]}" "${APP_URL}/api/admin/rotate-master-key")
 
 HTTP_STATUS=$(printf '%s' "$RESPONSE" | tail -n1)
 BODY_RESPONSE=$(printf '%s' "$RESPONSE" | sed '$d')

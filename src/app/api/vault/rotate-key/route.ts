@@ -47,13 +47,13 @@ const rotateKeySchema = z.object({
   }),
   // Entry re-encryption payload
   entries: z.array(z.object({
-    id: z.string().cuid(),
+    id: z.string().min(1),
     encryptedBlob: encryptedFieldSchema,
     encryptedOverview: encryptedFieldSchema,
     aadVersion: z.number().int().min(0).default(0),
   })).max(VAULT_ROTATE_ENTRIES_MAX),
   historyEntries: z.array(z.object({
-    id: z.string().cuid(),
+    id: z.string().min(1),
     encryptedBlob: encryptedFieldSchema,
     aadVersion: z.number().int().min(0).default(0),
   })).max(VAULT_ROTATE_HISTORY_MAX),

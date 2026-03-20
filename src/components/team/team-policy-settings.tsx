@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Shield, Loader2 } from "lucide-react";
+import { ListChecks, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -141,7 +141,7 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
     <Card className="rounded-xl border bg-card/80 p-4">
       <section className="space-y-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <Shield className="h-5 w-5 text-muted-foreground" />
+          <ListChecks className="h-5 w-5 text-muted-foreground" />
           {t("title")}
         </h2>
         <p className="text-sm text-muted-foreground">{t("description")}</p>

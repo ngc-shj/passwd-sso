@@ -24,7 +24,6 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
@@ -34,7 +33,7 @@ vi.mock("@/lib/logger", () => ({
 import { GET } from "./route";
 
 const sampleEntry = {
-  id: "clentry00001",
+  id: "tz4a98xxat96iws9zmbrgj3a",
   encryptedBlob: "blob",
   blobIv: "a".repeat(24),
   blobAuthTag: "b".repeat(32),
@@ -46,8 +45,8 @@ const sampleEntry = {
 };
 
 const sampleHistory = {
-  id: "clhistory0001",
-  entryId: "clentry00001",
+  id: "kx7b29yybu97jxt0amcshk4b",
+  entryId: "tz4a98xxat96iws9zmbrgj3a",
   encryptedBlob: "blob",
   blobIv: "a".repeat(24),
   blobAuthTag: "b".repeat(32),
@@ -87,18 +86,6 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(res.status).toBe(429);
   });
 
-  it("returns CSRF error when origin is invalid", async () => {
-    const { assertOrigin } = await import("@/lib/csrf");
-    vi.mocked(assertOrigin).mockReturnValueOnce(
-      new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 })
-    );
-    const res = await GET(
-      createRequest("GET", "http://localhost/api/vault/rotate-key/data")
-    );
-    expect(res.status).toBe(403);
-    expect(mockAuth).not.toHaveBeenCalled();
-  });
-
   it("returns entries, historyEntries, and ecdhPrivateKey on success", async () => {
     const res = await GET(
       createRequest("GET", "http://localhost/api/vault/rotate-key/data")
@@ -106,9 +93,9 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.entries).toHaveLength(1);
-    expect(json.entries[0].id).toBe("clentry00001");
+    expect(json.entries[0].id).toBe("tz4a98xxat96iws9zmbrgj3a");
     expect(json.historyEntries).toHaveLength(1);
-    expect(json.historyEntries[0].id).toBe("clhistory0001");
+    expect(json.historyEntries[0].id).toBe("kx7b29yybu97jxt0amcshk4b");
     expect(json.ecdhPrivateKey).not.toBeNull();
     expect(json.ecdhPrivateKey.encryptedEcdhPrivateKey).toBe("x".repeat(100));
   });

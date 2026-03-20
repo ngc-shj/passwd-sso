@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { KeyRound } from "lucide-react";
+import { KeyRound, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -41,6 +41,7 @@ export function RotateKeyCard() {
             disabled={!vaultUnlocked}
             onClick={() => setOpen(true)}
           >
+            <RotateCcw className="h-4 w-4 mr-2" />
             {t("rotateKeyButton")}
           </Button>
           {!vaultUnlocked && (

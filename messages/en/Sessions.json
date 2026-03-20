@@ -25,6 +25,9 @@
   "unknownBrowser": "Unknown browser",
   "loading": "Loading sessions...",
   "tabAccountDesc": "Manage your active sessions and sign-in devices.",
-  "tabSecurityDesc": "Manage passkeys and travel mode to protect your vault.",
+  "tabSecurityDesc": "Manage passkeys, travel mode, and key rotation to protect your vault.",
+  "subTabPasskey": "Passkey",
+  "subTabTravelMode": "Travel Mode",
+  "subTabKeyRotation": "Key Rotation",
   "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access."
 }

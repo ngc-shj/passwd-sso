@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -21,9 +20,6 @@ const rotateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
  * rows for the authenticated user, plus ECDH private key fields.
  */
 async function handleGET(request: NextRequest) {
-  const originError = assertOrigin(request);
-  if (originError) return originError;
-
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();

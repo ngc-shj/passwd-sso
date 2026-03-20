@@ -3,7 +3,6 @@ import { NextRequest } from "next/server";
 
 const {
   mockAuth,
-  mockAssertOrigin,
   mockRequireTeamPermission,
   mockWithTeamTenantRls,
   MockTeamAuthError,
@@ -13,7 +12,6 @@ const {
   mockTeamMemberKeyFindMany,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockAssertOrigin: vi.fn(() => null),
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
   MockTeamAuthError: class MockTeamAuthError extends Error {
@@ -30,7 +28,6 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: mockAssertOrigin }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: MockTeamAuthError,
@@ -65,7 +62,7 @@ function createParams(teamId: string) {
 }
 
 const sampleEntry = {
-  id: "clentry00001",
+  id: "tz4a98xxat96iws9zmbrgj3a",
   encryptedBlob: "blob",
   blobIv: "a".repeat(24),
   blobAuthTag: "b".repeat(32),
@@ -93,13 +90,6 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     ]);
     // withTeamTenantRls is called 3 times: team, entries+members, member keys
     mockWithTeamTenantRls.mockImplementation(async (_teamId: string, fn: () => unknown) => fn());
-  });
-
-  it("returns 403 when CSRF origin check fails", async () => {
-    const { NextResponse } = await import("next/server");
-    mockAssertOrigin.mockReturnValueOnce(NextResponse.json({ error: "CSRF" }, { status: 403 }));
-    const res = await GET(createRequest("team-1"), createParams("team-1"));
-    expect(res.status).toBe(403);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -133,7 +123,7 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     const json = await res.json();
     expect(json.teamKeyVersion).toBe(1);
     expect(json.entries).toHaveLength(1);
-    expect(json.entries[0].id).toBe("clentry00001");
+    expect(json.entries[0].id).toBe("tz4a98xxat96iws9zmbrgj3a");
     expect(json.members).toHaveLength(1);
     expect(json.members[0].userId).toBe("user-1");
     expect(json.members[0].ecdhPublicKey).toBe("public-key-data");

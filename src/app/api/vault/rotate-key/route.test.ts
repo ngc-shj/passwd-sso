@@ -10,7 +10,7 @@ const mockPasswordEntryHistory = {
   updateMany: vi.fn(),
 };
 
-const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkStale, mockWithUserTenantRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: {
     findUnique: vi.fn(),
@@ -22,6 +22,7 @@ const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockMarkS
   mockTransaction: vi.fn(),
   mockMarkStale: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRateLimiterCheck: vi.fn(),
 }));
 
 // Transaction mock (txMock) for interactive transaction pattern
@@ -45,7 +46,7 @@ vi.mock("@/lib/emergency-access-server", () => ({
   markGrantsStaleForOwner: mockMarkStale,
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }), clear: vi.fn() }),
+  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -117,6 +118,15 @@ describe("POST /api/vault/rotate-key", () => {
     txMock.user.update.mockResolvedValue({});
     txMock.vaultKey.create.mockResolvedValue({});
     mockMarkStale.mockResolvedValue(0);
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+    );
+    expect(res.status).toBe(429);
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -200,8 +210,8 @@ describe("POST /api/vault/rotate-key", () => {
   });
 
   it("rotates key with entries and history", async () => {
-    const entryId = "clentry00001";
-    const historyId = "clhistory0001";
+    const entryId = "tz4a98xxat96iws9zmbrgj3a";
+    const historyId = "kx7b29yybu97jxt0amcshk4b";
     mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
     mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: historyId }]);
 
@@ -241,10 +251,10 @@ describe("POST /api/vault/rotate-key", () => {
   });
 
   it("returns 400 on history count mismatch", async () => {
-    const entryId = "clentry00001";
+    const entryId = "tz4a98xxat96iws9zmbrgj3a";
     // DB has 1 history entry but client sends 0
     mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
-    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: "clhistory0001" }]);
+    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: "kx7b29yybu97jxt0amcshk4b" }]);
 
     const bodyWithEntry = {
       ...validBody,
@@ -259,6 +269,27 @@ describe("POST /api/vault/rotate-key", () => {
 
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: bodyWithEntry })
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("returns 400 when submitted entry IDs do not match DB entry IDs", async () => {
+    const dbId = "tz4a98xxat96iws9zmbrgj3a";
+    const wrongId = "ab3c99zzbu11kxt0amcshi9c";
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: dbId }]);
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", {
+        body: {
+          ...validBody,
+          entries: [{
+            id: wrongId,
+            encryptedBlob: makeEncryptedField(),
+            encryptedOverview: makeEncryptedField(),
+            aadVersion: 1,
+          }],
+        },
+      })
     );
     expect(res.status).toBe(400);
   });

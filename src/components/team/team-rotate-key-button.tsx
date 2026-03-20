@@ -222,6 +222,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
             teamKeyAuthTag: escrow.teamKeyAuthTag,
             ephemeralPublicKey: escrow.ephemeralPublicKey,
             hkdfSalt: escrow.hkdfSalt,
+            keyVersion: newTeamKeyVersion,
             wrapVersion: escrow.wrapVersion,
           };
         }),
@@ -276,7 +277,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess }: TeamRotateKeyButtonPr
   return (
     <AlertDialog open={open} onOpenChange={(v) => { if (!loading) setOpen(v); }}>
       <AlertDialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="destructive" size="sm">
           <RotateCcw className="h-4 w-4 mr-2" />
           {t("rotateKeyButton")}
         </Button>
