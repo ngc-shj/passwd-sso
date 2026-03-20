@@ -181,9 +181,6 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/audit-logs/download` | GET | Download team audit logs |
 | `/api/teams/[teamId]/webhooks` | GET, POST | Team webhooks |
 | `/api/teams/[teamId]/webhooks/[webhookId]` | PUT, DELETE | Update/delete team webhook |
-| `/api/teams/archived` | GET | List archived teams |
-| `/api/teams/favorites` | GET | List favorite teams |
-| `/api/teams/trash` | GET | List trashed teams |
 | `/api/teams/invitations/accept` | POST | Accept team invitation |
 | `/api/teams/pending-key-distributions` | GET | Pending key distributions |
 
