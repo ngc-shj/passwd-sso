@@ -10,6 +10,7 @@ import { CliTokenCard } from "@/components/settings/cli-token-card";
 import { ApiKeyManager } from "@/components/settings/api-key-manager";
 import { TravelModeCard } from "@/components/settings/travel-mode-card";
 import { PasskeyCredentialsCard } from "@/components/settings/passkey-credentials-card";
+import { RotateKeyCard } from "@/components/settings/rotate-key-card";
 import { TabDescription } from "@/components/settings/tab-description";
 
 export default function SettingsPage() {
@@ -45,6 +46,8 @@ export default function SettingsPage() {
             <TravelModeCard />
             <Separator />
             <PasskeyCredentialsCard />
+            <Separator />
+            <RotateKeyCard />
           </TabsContent>
           <TabsContent value="developer" className="mt-0 space-y-4">
             <TabDescription>{t("tabDeveloperDesc")}</TabDescription>

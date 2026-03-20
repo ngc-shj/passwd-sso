@@ -63,6 +63,7 @@
   "ENTRY_HISTORY_RESTORE": "履歴版から復元",
   "HISTORY_PURGE": "履歴の期限削除",
   "MASTER_KEY_ROTATION": "マスターキーローテーション",
+  "VAULT_KEY_ROTATION": "保管庫キーローテーション",
   "SESSION_REVOKE": "セッションを取り消し",
   "SESSION_REVOKE_ALL": "他のすべてのセッションを取り消し",
   "SESSION_EVICTED": "セッション強制終了（同時接続制限）",

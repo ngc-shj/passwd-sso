@@ -1,0 +1,20 @@
+{
+  "rotateKeyButton": "Rotate Key",
+  "rotateKeyTitle": "Rotate Team Encryption Key",
+  "rotateKeyDescription": "This will generate a new team encryption key and re-encrypt all team passwords and entries with it.",
+  "rotateKeyWarning1": "All team entries will be re-encrypted. This may take a while for large teams.",
+  "rotateKeyWarning2": "Members who are not online will receive the new key automatically when they next connect.",
+  "rotateKeyWarning3": "This action cannot be undone. Ensure all members are active before rotating.",
+  "rotateKeyConfirm": "Rotate Key",
+  "rotateKeyCancel": "Cancel",
+  "rotateKeyInProgress": "Rotating...",
+  "rotateKeyProgressEncrypting": "Encrypting {progress}...",
+  "rotateKeySuccess": "Team key rotated successfully",
+  "rotateKeyFailed": "Key rotation failed. Please try again.",
+  "rotateKeyFetchFailed": "Failed to load team data for rotation.",
+  "rotateKeyRateLimited": "Too many rotation attempts. Please wait and try again.",
+  "rotateKeyVersionConflict": "Key version conflict. Another rotation may be in progress.",
+  "rotateKeyEntryMismatch": "Entry count mismatch. Please refresh and try again.",
+  "rotateKeyVaultRequired": "Your vault must be unlocked to rotate the team key.",
+  "rotateKeyNoMembers": "No active members with encryption keys found."
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
+import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -61,6 +62,9 @@ const rotateKeySchema = z.object({
 
 // POST /api/teams/[teamId]/rotate-key — Rotate team encryption key
 async function handlePOST(req: NextRequest, { params }: Params) {
+  const originError = assertOrigin(req);
+  if (originError) return originError;
+
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -117,7 +121,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
         // Verify all active members have a key in the payload (F-26: inside tx)
         const members = await tx.teamMember.findMany({
-          where: { teamId: teamId, deactivatedAt: null },
+          where: { teamId: teamId, deactivatedAt: null, keyDistributed: true },
           select: { userId: true },
         });
         const memberUserIds = new Set(members.map((m) => m.userId));

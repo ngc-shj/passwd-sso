@@ -61,5 +61,17 @@
   "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key.",
   "vaultMustBeUnlocked": "Vault must be unlocked.",
   "or": "or",
-  "setupInviteContext": "To accept this invitation, you need to set up your vault first. Please set a passphrase below."
+  "setupInviteContext": "To accept this invitation, you need to set up your vault first. Please set a passphrase below.",
+  "rotateKey": "Rotate Encryption Key",
+  "rotateKeyDescription": "Generate a new secret key and re-encrypt all vault entries. This invalidates all emergency access grants.",
+  "rotateKeyButton": "Rotate Key",
+  "rotateKeySuccess": "Encryption key rotated successfully.",
+  "rotateKeyFailed": "Failed to rotate encryption key.",
+  "rotateKeyWarningEa": "All emergency access grants will be invalidated and must be re-confirmed.",
+  "rotateKeyWarningTime": "This operation may take a while depending on the number of vault entries.",
+  "rotateKeyPassphrase": "Current Passphrase",
+  "rotateKeyPassphrasePlaceholder": "Enter your current passphrase",
+  "rotateKeyProgressEntries": "Re-encrypting entries…",
+  "rotateKeyProgressHistory": "Re-encrypting history…",
+  "rotateKeyProgress": "{current} / {total}"
 }

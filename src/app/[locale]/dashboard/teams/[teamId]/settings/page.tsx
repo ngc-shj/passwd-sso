@@ -31,6 +31,7 @@ import {
 import { MemberInfo } from "@/components/member-info";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { TeamPolicySettings } from "@/components/team/team-policy-settings";
+import { TeamRotateKeyButton } from "@/components/team/team-rotate-key-button";
 import { TeamWebhookCard } from "@/components/team/team-webhook-card";
 import { TabDescription } from "@/components/settings/tab-description";
 import { Link } from "@/i18n/navigation";
@@ -455,6 +456,24 @@ export default function TeamSettingsPage({
             ) : (
               <Card className="rounded-xl border bg-card/80 p-4">
                 <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
+              </Card>
+            )}
+
+            {isAdmin && (
+              <Card className="rounded-xl border border-destructive/30 p-4">
+                <section className="space-y-4">
+                  <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
+                    <ShieldAlert className="h-5 w-5" />
+                    {t("dangerZone")}
+                  </h2>
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">{t("rotateKeyTitle")}</p>
+                      <p className="text-xs text-muted-foreground">{t("rotateKeyDesc")}</p>
+                    </div>
+                    <TeamRotateKeyButton teamId={teamId} />
+                  </div>
+                </section>
               </Card>
             )}
 

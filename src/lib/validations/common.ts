@@ -56,6 +56,11 @@ export const TEAM_ROTATE_ENTRIES_MAX = 1000;
 export const TEAM_ROTATE_MEMBER_KEYS_MIN = 1;
 export const TEAM_ROTATE_MEMBER_KEYS_MAX = 1000;
 
+// ─── Vault Key Rotation ─────────────────────────────────────
+export const VAULT_ROTATE_ENTRIES_MAX = 5000;
+export const VAULT_ROTATE_HISTORY_MAX = 10_000;
+export const ECDH_PRIVATE_KEY_CIPHERTEXT_MAX = 512;  // P-256 PKCS8=138B → AES-GCM hex ≈ 308 chars
+
 // ─── General Limits ──────────────────────────────────────────
 export const EMAIL_MAX_LENGTH = 254;           // RFC 5321
 export const FILENAME_MAX_LENGTH = 255;
