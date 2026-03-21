@@ -9,9 +9,9 @@ datasource db {
 // ─── Auth.js Required Models ────────────────────────────────────
 
 model Account {
-  id                String  @id @default(uuid(4))
-  userId            String  @map("user_id")
-  tenantId          String  @map("tenant_id")
+  id                String  @id @default(uuid(4)) @db.Uuid
+  userId            String  @map("user_id") @db.Uuid
+  tenantId          String  @map("tenant_id") @db.Uuid
   type              String
   provider          String
   providerAccountId String  @map("provider_account_id")
@@ -32,10 +32,10 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(uuid(4))
+  id           String   @id @default(uuid(4)) @db.Uuid
   sessionToken String   @unique @map("session_token")
-  userId       String   @map("user_id")
-  tenantId     String   @map("tenant_id")
+  userId       String   @map("user_id") @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
   expires      DateTime
   createdAt    DateTime @default(now()) @map("created_at")
   lastActiveAt DateTime @default(now()) @map("last_active_at")
@@ -62,8 +62,8 @@ model VerificationToken {
 // ─── Application Models ─────────────────────────────────────────
 
 model User {
-  id            String    @id @default(uuid(4))
-  tenantId      String    @map("tenant_id")
+  id            String    @id @default(uuid(4)) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
   name          String?
   email         String?   @unique
   emailVerified DateTime? @map("email_verified")
@@ -169,9 +169,9 @@ model User {
 }
 
 model ExtensionToken {
-  id         String    @id @default(uuid(4))
-  userId     String    @map("user_id")
-  tenantId   String    @map("tenant_id")
+  id         String    @id @default(uuid(4)) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
   tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
   scope      String    @db.VarChar(255)
   expiresAt  DateTime  @map("expires_at")
@@ -189,15 +189,15 @@ model ExtensionToken {
 }
 
 model ScimToken {
-  id          String    @id @default(uuid(4))
-  tenantId    String    @map("tenant_id")
+  id          String    @id @default(uuid(4)) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
   description String?   @db.VarChar(255)
   expiresAt   DateTime? @map("expires_at")
   createdAt   DateTime  @default(now()) @map("created_at")
   revokedAt   DateTime? @map("revoked_at")
   lastUsedAt  DateTime? @map("last_used_at")
-  createdById String?   @map("created_by_id")
+  createdById String?   @map("created_by_id") @db.Uuid
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
@@ -207,8 +207,8 @@ model ScimToken {
 }
 
 model ScimExternalMapping {
-  id           String   @id @default(uuid(4))
-  tenantId     String   @map("tenant_id")
+  id           String   @id @default(uuid(4)) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
   externalId   String   @map("external_id")
   resourceType String   @map("resource_type") @db.VarChar(20)
   internalId   String   @map("internal_id")
@@ -224,12 +224,12 @@ model ScimExternalMapping {
 }
 
 model Tag {
-  id        String   @id @default(uuid(4))
+  id        String   @id @default(uuid(4)) @db.Uuid
   name      String
   color     String?
-  parentId  String?  @map("parent_id")
-  userId    String   @map("user_id")
-  tenantId  String   @map("tenant_id")
+  parentId  String?  @map("parent_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -245,9 +245,9 @@ model Tag {
 }
 
 model VaultKey {
-  id                     String   @id @default(uuid(4))
-  userId                 String   @map("user_id")
-  tenantId               String   @map("tenant_id")
+  id                     String   @id @default(uuid(4)) @db.Uuid
+  userId                 String   @map("user_id") @db.Uuid
+  tenantId               String   @map("tenant_id") @db.Uuid
   version                Int
   verificationCiphertext String   @map("verification_ciphertext") @db.Text
   verificationIv         String   @map("verification_iv") @db.VarChar(24)
@@ -263,7 +263,7 @@ model VaultKey {
 }
 
 model PasswordEntry {
-  id String @id @default(uuid(4))
+  id String @id @default(uuid(4)) @db.Uuid
 
   // E2E encrypted fields (all data encrypted client-side)
   encryptedBlob     String    @map("encrypted_blob") @db.Text
@@ -283,9 +283,9 @@ model PasswordEntry {
   expiresAt       DateTime? @map("expires_at")
   deletedAt       DateTime? @map("deleted_at")
 
-  userId    String   @map("user_id")
-  tenantId  String   @map("tenant_id")
-  folderId  String?  @map("folder_id")
+  userId    String   @map("user_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  folderId  String?  @map("folder_id") @db.Uuid
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -347,8 +347,8 @@ enum InvitationStatus {
 }
 
 model Team {
-  id          String  @id @default(uuid(4))
-  tenantId    String  @map("tenant_id")
+  id          String  @id @default(uuid(4)) @db.Uuid
+  tenantId    String  @map("tenant_id") @db.Uuid
   name        String
   slug        String  @unique
   description String? @db.Text
@@ -377,7 +377,7 @@ model Team {
 }
 
 model Tenant {
-  id          String   @id @default(uuid(4))
+  id          String   @id @default(uuid(4)) @db.Uuid
   externalId  String?  @unique @map("external_id") @db.VarChar(255)
   isBootstrap Boolean  @default(false) @map("is_bootstrap")
   name        String
@@ -436,9 +436,9 @@ model Tenant {
 }
 
 model TenantMember {
-  id                 String             @id @default(uuid(4))
-  tenantId           String             @map("tenant_id")
-  userId             String             @map("user_id")
+  id                 String             @id @default(uuid(4)) @db.Uuid
+  tenantId           String             @map("tenant_id") @db.Uuid
+  userId             String             @map("user_id") @db.Uuid
   role               TenantRole         @default(MEMBER)
   deactivatedAt      DateTime?          @map("deactivated_at")
   scimManaged        Boolean            @default(false) @map("scim_managed")
@@ -456,9 +456,9 @@ model TenantMember {
 }
 
 model ScimGroupMapping {
-  id              String   @id @default(uuid(4))
-  tenantId        String   @map("tenant_id")
-  teamId          String   @map("team_id")
+  id              String   @id @default(uuid(4)) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  teamId          String   @map("team_id") @db.Uuid
   externalGroupId String   @map("external_group_id")
   role            TeamRole @default(MEMBER)
   createdAt       DateTime @default(now()) @map("created_at")
@@ -474,10 +474,10 @@ model ScimGroupMapping {
 }
 
 model TeamMember {
-  id             String    @id @default(uuid(4))
-  teamId         String    @map("team_id")
-  userId         String    @map("user_id")
-  tenantId       String    @map("tenant_id")
+  id             String    @id @default(uuid(4)) @db.Uuid
+  teamId         String    @map("team_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
   role           TeamRole  @default(MEMBER)
   keyDistributed Boolean   @default(false) @map("key_distributed")
   deactivatedAt  DateTime? @map("deactivated_at")
@@ -496,10 +496,10 @@ model TeamMember {
 }
 
 model TeamMemberKey {
-  id                 String   @id @default(uuid(4))
-  teamId             String   @map("team_id")
-  userId             String   @map("user_id")
-  tenantId           String   @map("tenant_id")
+  id                 String   @id @default(uuid(4)) @db.Uuid
+  teamId             String   @map("team_id") @db.Uuid
+  userId             String   @map("user_id") @db.Uuid
+  tenantId           String   @map("tenant_id") @db.Uuid
   encryptedTeamKey   String   @map("encrypted_team_key") @db.Text
   teamKeyIv          String   @map("team_key_iv") @db.VarChar(24)
   teamKeyAuthTag     String   @map("team_key_auth_tag") @db.VarChar(32)
@@ -521,7 +521,7 @@ model TeamMemberKey {
 }
 
 model TeamPasswordEntry {
-  id String @id @default(uuid(4))
+  id String @id @default(uuid(4)) @db.Uuid
 
   // Server-side encrypted fields (encrypted with per-team key)
   encryptedBlob String @map("encrypted_blob") @db.Text
@@ -545,11 +545,11 @@ model TeamPasswordEntry {
   expiresAt      DateTime? @map("expires_at")
   deletedAt      DateTime? @map("deleted_at")
 
-  teamId       String  @map("team_id")
-  tenantId     String  @map("tenant_id")
-  createdById  String  @map("created_by_id")
-  updatedById  String  @map("updated_by_id")
-  teamFolderId String? @map("team_folder_id")
+  teamId       String  @map("team_id") @db.Uuid
+  tenantId     String  @map("tenant_id") @db.Uuid
+  createdById  String  @map("created_by_id") @db.Uuid
+  updatedById  String  @map("updated_by_id") @db.Uuid
+  teamFolderId String? @map("team_folder_id") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -571,13 +571,13 @@ model TeamPasswordEntry {
 }
 
 model TeamTag {
-  id       String  @id @default(uuid(4))
+  id       String  @id @default(uuid(4)) @db.Uuid
   name     String
   color    String?
-  parentId String? @map("parent_id")
+  parentId String? @map("parent_id") @db.Uuid
 
-  teamId   String @map("team_id")
-  tenantId String @map("tenant_id")
+  teamId   String @map("team_id") @db.Uuid
+  tenantId String @map("tenant_id") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -594,10 +594,10 @@ model TeamTag {
 }
 
 model TeamPasswordFavorite {
-  id                  String @id @default(uuid(4))
-  userId              String @map("user_id")
-  tenantId            String @map("tenant_id")
-  teamPasswordEntryId String @map("team_password_entry_id")
+  id                  String @id @default(uuid(4)) @db.Uuid
+  userId              String @map("user_id") @db.Uuid
+  tenantId            String @map("tenant_id") @db.Uuid
+  teamPasswordEntryId String @map("team_password_entry_id") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -611,16 +611,16 @@ model TeamPasswordFavorite {
 }
 
 model TeamInvitation {
-  id        String           @id @default(uuid(4))
-  teamId    String           @map("team_id")
-  tenantId  String           @map("tenant_id")
+  id        String           @id @default(uuid(4)) @db.Uuid
+  teamId    String           @map("team_id") @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
   email     String
   role      TeamRole         @default(MEMBER)
   status    InvitationStatus @default(PENDING)
   token     String           @unique
   expiresAt DateTime         @map("expires_at")
 
-  invitedById String @map("invited_by_id")
+  invitedById String @map("invited_by_id") @db.Uuid
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -636,8 +636,8 @@ model TeamInvitation {
 // ─── Share Link Models ─────────────────────────────────────────
 
 model PasswordShare {
-  id            String     @id @default(uuid(4))
-  tenantId      String     @map("tenant_id")
+  id            String     @id @default(uuid(4)) @db.Uuid
+  tenantId      String     @map("tenant_id") @db.Uuid
   tokenHash     String     @unique @map("token_hash") @db.VarChar(64)
   shareType     ShareType  @default(ENTRY_SHARE) @map("share_type")
   entryType     EntryType? @map("entry_type")
@@ -648,12 +648,12 @@ model PasswordShare {
   maxViews      Int?       @map("max_views")
   viewCount     Int        @default(0) @map("view_count")
   revokedAt     DateTime?  @map("revoked_at")
-  createdById   String     @map("created_by_id")
+  createdById   String     @map("created_by_id") @db.Uuid
   createdAt     DateTime   @default(now()) @map("created_at")
 
   // Entry share relations
-  passwordEntryId     String? @map("password_entry_id")
-  teamPasswordEntryId String? @map("team_password_entry_id")
+  passwordEntryId     String? @map("password_entry_id") @db.Uuid
+  teamPasswordEntryId String? @map("team_password_entry_id") @db.Uuid
 
   // Send-specific fields
   sendName        String? @map("send_name") @db.VarChar(200)
@@ -688,9 +688,9 @@ model PasswordShare {
 }
 
 model ShareAccessLog {
-  id        String   @id @default(uuid(4))
-  shareId   String   @map("share_id")
-  tenantId  String   @map("tenant_id")
+  id        String   @id @default(uuid(4)) @db.Uuid
+  shareId   String   @map("share_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
   ip        String?  @db.VarChar(45)
   userAgent String?  @map("user_agent") @db.VarChar(512)
   createdAt DateTime @default(now()) @map("created_at")
@@ -809,12 +809,12 @@ enum AuditScope {
 }
 
 model AuditLog {
-  id         String      @id @default(uuid(4))
-  tenantId   String      @map("tenant_id")
+  id         String      @id @default(uuid(4)) @db.Uuid
+  tenantId   String      @map("tenant_id") @db.Uuid
   scope      AuditScope
   action     AuditAction
-  userId     String      @map("user_id")
-  teamId     String?     @map("team_id")
+  userId     String      @map("user_id") @db.Uuid
+  teamId     String?     @map("team_id") @db.Uuid
   targetType String?     @map("target_type")
   targetId   String?     @map("target_id")
   metadata   Json?
@@ -836,7 +836,7 @@ model AuditLog {
 // ─── Attachment Models ──────────────────────────────────────────
 
 model Attachment {
-  id            String @id @default(uuid(4))
+  id            String @id @default(uuid(4)) @db.Uuid
   filename      String @db.VarChar(255)
   contentType   String @map("content_type") @db.VarChar(100)
   sizeBytes     Int    @map("size_bytes")
@@ -847,10 +847,10 @@ model Attachment {
   aadVersion     Int    @default(0) @map("aad_version")
   encryptionMode Int    @default(0) @map("encryption_mode")
 
-  tenantId            String   @map("tenant_id")
-  passwordEntryId     String?  @map("password_entry_id")
-  teamPasswordEntryId String?  @map("team_password_entry_id")
-  createdById         String   @map("created_by_id")
+  tenantId            String   @map("tenant_id") @db.Uuid
+  passwordEntryId     String?  @map("password_entry_id") @db.Uuid
+  teamPasswordEntryId String?  @map("team_password_entry_id") @db.Uuid
+  createdById         String   @map("created_by_id") @db.Uuid
   createdAt           DateTime @default(now()) @map("created_at")
 
   passwordEntry     PasswordEntry?     @relation(fields: [passwordEntryId], references: [id], onDelete: Cascade)
@@ -878,10 +878,10 @@ enum EmergencyAccessStatus {
 }
 
 model EmergencyAccessGrant {
-  id           String                @id @default(uuid(4))
-  tenantId     String                @map("tenant_id")
-  ownerId      String                @map("owner_id")
-  granteeId    String?               @map("grantee_id")
+  id           String                @id @default(uuid(4)) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  ownerId      String                @map("owner_id") @db.Uuid
+  granteeId    String?               @map("grantee_id") @db.Uuid
   granteeEmail String                @map("grantee_email")
   status       EmergencyAccessStatus @default(PENDING)
   waitDays     Int                   @map("wait_days")
@@ -927,11 +927,11 @@ model EmergencyAccessGrant {
 // ─── Folder Models ──────────────────────────────────────────
 
 model Folder {
-  id        String   @id @default(uuid(4))
+  id        String   @id @default(uuid(4)) @db.Uuid
   name      String   @db.VarChar(100)
-  parentId  String?  @map("parent_id")
-  userId    String   @map("user_id")
-  tenantId  String   @map("tenant_id")
+  parentId  String?  @map("parent_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -949,11 +949,11 @@ model Folder {
 }
 
 model TeamFolder {
-  id        String   @id @default(uuid(4))
+  id        String   @id @default(uuid(4)) @db.Uuid
   name      String   @db.VarChar(100)
-  parentId  String?  @map("parent_id")
-  teamId    String   @map("team_id")
-  tenantId  String   @map("tenant_id")
+  parentId  String?  @map("parent_id") @db.Uuid
+  teamId    String   @map("team_id") @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
   sortOrder Int      @default(0) @map("sort_order")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -973,9 +973,9 @@ model TeamFolder {
 // ─── Entry History Models ───────────────────────────────────
 
 model PasswordEntryHistory {
-  id            String   @id @default(uuid(4))
-  entryId       String   @map("entry_id")
-  tenantId      String   @map("tenant_id")
+  id            String   @id @default(uuid(4)) @db.Uuid
+  entryId       String   @map("entry_id") @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
   encryptedBlob String   @map("encrypted_blob") @db.Text
   blobIv        String   @map("blob_iv") @db.VarChar(24)
   blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
@@ -992,9 +992,9 @@ model PasswordEntryHistory {
 }
 
 model TeamPasswordEntryHistory {
-  id             String   @id @default(uuid(4))
-  entryId        String   @map("entry_id")
-  tenantId       String   @map("tenant_id")
+  id             String   @id @default(uuid(4)) @db.Uuid
+  entryId        String   @map("entry_id") @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
   encryptedBlob  String   @map("encrypted_blob") @db.Text
   blobIv         String   @map("blob_iv") @db.VarChar(24)
   blobAuthTag    String   @map("blob_auth_tag") @db.VarChar(32)
@@ -1004,7 +1004,7 @@ model TeamPasswordEntryHistory {
   encryptedItemKey String?  @map("encrypted_item_key") @db.Text
   itemKeyIv        String?  @map("item_key_iv") @db.VarChar(24)
   itemKeyAuthTag   String?  @map("item_key_auth_tag") @db.VarChar(32)
-  changedById      String   @map("changed_by_id")
+  changedById      String   @map("changed_by_id") @db.Uuid
   changedAt        DateTime @default(now()) @map("changed_at")
 
   entry     TeamPasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
@@ -1017,9 +1017,9 @@ model TeamPasswordEntryHistory {
 }
 
 model EmergencyAccessKeyPair {
-  id                  String @id @default(uuid(4))
-  grantId             String @unique @map("grant_id")
-  tenantId            String @map("tenant_id")
+  id                  String @id @default(uuid(4)) @db.Uuid
+  grantId             String @unique @map("grant_id") @db.Uuid
+  tenantId            String @map("tenant_id") @db.Uuid
   encryptedPrivateKey String @map("encrypted_private_key") @db.Text
   privateKeyIv        String @map("private_key_iv") @db.VarChar(24)
   privateKeyAuthTag   String @map("private_key_auth_tag") @db.VarChar(32)
@@ -1051,9 +1051,9 @@ enum NotificationType {
 }
 
 model Notification {
-  id        String           @id @default(uuid(4))
-  userId    String           @map("user_id")
-  tenantId  String           @map("tenant_id")
+  id        String           @id @default(uuid(4)) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  tenantId  String           @map("tenant_id") @db.Uuid
   type      NotificationType
   title     String           @db.VarChar(200)
   body      String           @db.Text
@@ -1072,9 +1072,9 @@ model Notification {
 // ─── Team Policy Models ─────────────────────────────────────
 
 model TeamPolicy {
-  id                        String  @id @default(uuid(4))
-  teamId                    String  @unique @map("team_id")
-  tenantId                  String  @map("tenant_id")
+  id                        String  @id @default(uuid(4)) @db.Uuid
+  teamId                    String  @unique @map("team_id") @db.Uuid
+  tenantId                  String  @map("tenant_id") @db.Uuid
   minPasswordLength         Int     @default(0) @map("min_password_length")
   requireUppercase          Boolean @default(false) @map("require_uppercase")
   requireLowercase          Boolean @default(false) @map("require_lowercase")
@@ -1097,9 +1097,9 @@ model TeamPolicy {
 }
 
 model TeamWebhook {
-  id              String   @id @default(uuid(4))
-  teamId          String   @map("team_id")
-  tenantId        String   @map("tenant_id")
+  id              String   @id @default(uuid(4)) @db.Uuid
+  teamId          String   @map("team_id") @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
   url             String   @db.VarChar(2048)
   secretEncrypted String   @map("secret_encrypted") @db.Text
   secretIv        String   @map("secret_iv") @db.VarChar(24)
@@ -1123,8 +1123,8 @@ model TeamWebhook {
 }
 
 model TenantWebhook {
-  id               String    @id @default(uuid(4))
-  tenantId         String    @map("tenant_id")
+  id               String    @id @default(uuid(4)) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
   url              String    @db.VarChar(2048)
   secretEncrypted  String    @map("secret_encrypted") @db.Text
   secretIv         String    @map("secret_iv") @db.VarChar(24)
@@ -1148,11 +1148,11 @@ model TenantWebhook {
 // ─── Admin Vault Reset ──────────────────────────────────────────
 
 model AdminVaultReset {
-  id            String    @id @default(uuid(4))
-  tenantId      String    @map("tenant_id")
-  teamId        String?   @map("team_id")
-  targetUserId  String    @map("target_user_id")
-  initiatedById String    @map("initiated_by_id")
+  id            String    @id @default(uuid(4)) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  teamId        String?   @map("team_id") @db.Uuid
+  targetUserId  String    @map("target_user_id") @db.Uuid
+  initiatedById String    @map("initiated_by_id") @db.Uuid
   tokenHash     String    @unique @map("token_hash") @db.VarChar(64)
   expiresAt     DateTime  @map("expires_at")
   executedAt    DateTime? @map("executed_at")
@@ -1172,9 +1172,9 @@ model AdminVaultReset {
 // ─── API Key Models ─────────────────────────────────────────
 
 model ApiKey {
-  id         String    @id @default(uuid(4))
-  userId     String    @map("user_id")
-  tenantId   String    @map("tenant_id")
+  id         String    @id @default(uuid(4)) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
   tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
   prefix     String    @map("prefix") @db.VarChar(8)
   name       String    @db.VarChar(100)
@@ -1195,9 +1195,9 @@ model ApiKey {
 // ─── WebAuthn Models ────────────────────────────────────────
 
 model WebAuthnCredential {
-  id                    String    @id @default(uuid(4))
-  userId                String    @map("user_id")
-  tenantId              String    @map("tenant_id")
+  id                    String    @id @default(uuid(4)) @db.Uuid
+  userId                String    @map("user_id") @db.Uuid
+  tenantId              String    @map("tenant_id") @db.Uuid
   credentialId          String    @unique @map("credential_id") @db.Text
   publicKey             String    @map("public_key") @db.Text
   counter               BigInt    @default(0)
@@ -1241,8 +1241,8 @@ enum DirectorySyncStatus {
 }
 
 model DirectorySyncConfig {
-  id                  String                @id @default(uuid(4))
-  tenantId            String                @map("tenant_id")
+  id                  String                @id @default(uuid(4)) @db.Uuid
+  tenantId            String                @map("tenant_id") @db.Uuid
   provider            DirectorySyncProvider
   displayName         String                @map("display_name") @db.VarChar(100)
   enabled             Boolean               @default(true)
@@ -1267,9 +1267,9 @@ model DirectorySyncConfig {
 }
 
 model DirectorySyncLog {
-  id               String              @id @default(uuid(4))
-  configId         String              @map("config_id")
-  tenantId         String              @map("tenant_id")
+  id               String              @id @default(uuid(4)) @db.Uuid
+  configId         String              @map("config_id") @db.Uuid
+  tenantId         String              @map("tenant_id") @db.Uuid
   status           DirectorySyncStatus
   startedAt        DateTime            @map("started_at")
   completedAt      DateTime?           @map("completed_at")
@@ -1290,10 +1290,10 @@ model DirectorySyncLog {
 // ─── Break-Glass Personal Log Access ─────────────────────────────────
 
 model PersonalLogAccessGrant {
-  id           String    @id @default(uuid(4))
-  tenantId     String    @map("tenant_id")
-  requesterId  String    @map("requester_id")
-  targetUserId String    @map("target_user_id")
+  id           String    @id @default(uuid(4)) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  requesterId  String    @map("requester_id") @db.Uuid
+  targetUserId String    @map("target_user_id") @db.Uuid
   reason       String    @db.Text
   incidentRef  String?   @map("incident_ref") @db.VarChar(500)
   expiresAt    DateTime  @map("expires_at")
