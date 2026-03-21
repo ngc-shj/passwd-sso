@@ -1,61 +1,73 @@
 # Code Review: unify-entry-id-to-uuid
 Date: 2026-03-21
-Review round: 1
+Review rounds: 2 (initial review from commits 1-3, then full branch review after commits 4-5)
 
-## Changes from Previous Round
-Initial review
+## Round 1 (Commits 1-3: 4-model UUID defaults)
+
+### CF1 (Major → Resolved): teams/route.ts optional guard remnant
+- **File**: `src/app/api/teams/route.ts:127`
+- **Action**: `...(clientId ? { id: clientId } : {})` → `id: clientId`
+
+### CF2 (Minor → Resolved): UUID_RE not v4-specific
+- **File**: `src/app/api/passwords/[id]/attachments/route.ts:174`
+- **Action**: Changed to UUID v4 regex
+
+### CT1-CT3 (Major/Minor → Resolved): Test assertion gaps
+- Added `updateMany` where clause assertions to bulk and rotate-key tests
+- Added `response.id` assertion to attachment tests
+
+## Round 2 (Commits 4-5: Full UUID unification + native uuid type)
+
+### Changes from Previous Round
+Scope expanded: all 39 models → UUID v4, all validations .cuid()→.uuid(), native PostgreSQL uuid type conversion
 
 ## Functionality Findings
 
-### CF1 (Major → Resolved): teams/route.ts の optional guard 残存
-- **File**: `src/app/api/teams/route.ts:127`
-- **Problem**: `id` を required にしたのに `...(clientId ? { id: clientId } : {})` の optional guard が残存。スキーマが再び optional に戻された場合、AAD ミスマッチにつながる
-- **Action**: `id: clientId` に変更
+### F1 [Critical] scim_external_mappings.internal_id not converted
+- **Status:** Not applicable — table empty after DB reset
+- **Note:** If SCIM data exists at migration time, internal_id must be updated via user/team mapping tables
 
-### CF2 (Minor → Resolved): 個人用ルートの UUID_RE が UUID v4 非限定
-- **File**: `src/app/api/passwords/[id]/attachments/route.ts:174`
-- **Problem**: UUID_RE がバージョン・バリアントビットを検証せず v1/v5 等も受け入れる。チーム用ルートとの非対称性
-- **Action**: UUID v4 専用正規表現に変更
+### F2 [Major] createTeamE2E*.id optional→required (API breaking)
+- **Status:** By design — optional was a latent bug (AAD mismatch on omission)
+
+### F3 [Minor] Attachment route validation asymmetry
+- **Status:** Deferred — functionally equivalent
 
 ## Security Findings
 
-### CS1 (Minor → Resolved): CF2 と同一（UUID_RE の v4 限定化）
+### S1 [Critical → Resolved] RLS policy rebuild replace() fragile
+- **Problem:** Dynamic `replace()` on `pg_policies.qual` depends on PostgreSQL internal text representation which varies across versions. Failure leaves tables without RLS policies.
+- **Action:** Replaced with static DROP/CREATE for all 38 policies
+- **Modified file:** `prisma/migrations/20260321110000_.../migration.sql`
+
+### S2 [Major] md5()::uuid bootstrap tenant ID predictable
+- **Status:** By design — deterministic generation required for idempotent bootstrap
+
+### S5 [Minor → Resolved] operatorId .min(1) → .uuid()
+- **Modified files:** `rotate-master-key/route.ts`, `purge-history/route.ts`
+
+### S6 [Minor → Resolved] team rotate-key userId .min(1) → .uuid()
+- **Modified file:** `teams/[teamId]/rotate-key/route.ts`
 
 ## Testing Findings
 
-### CT1 (Major → Resolved): bulk-* UUID テストに updateMany where clause assertion 追加
-- **Files**: `bulk-archive/trash/restore/route.test.ts`
-- **Action**: `expect(mockUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: ... }))` を追加
+### T1 [Major → Resolved] CUID IDs in rotate-key/data tests
+- **Modified files:** `vault/rotate-key/data/route.test.ts`, `teams/[teamId]/rotate-key/data/route.test.ts`
 
-### CT2 (Major → Resolved): rotate-key UUID テストに where clause assertion 追加
-- **Files**: `vault/rotate-key/route.test.ts`, `teams/[teamId]/rotate-key/route.test.ts`
-- **Action**: UUID ID が `updateMany` の where clause に渡されることを検証
+### T2 [Major → Resolved] Bulk 101-item tests using non-UUID strings
+- **Action:** Changed `id-${i}` to UUID v4 format in 6 bulk test files
 
-### CT3 (Minor → Resolved): attachment テストで response.id 未検証
-- **Files**: `attachments.test.ts`, `team-attachments.test.ts`
-- **Action**: `expect(json.id).toBe(uppercaseId.toLowerCase())` を追加
+### T3 [Major] Missing non-UUID rejection tests
+- **Status:** Deferred — unit tests in `common.test.ts` cover UUID validation
+
+### T4 [Minor] Duplicate test in vault/rotate-key
+- **Status:** Deferred — low impact
+
+### T5 [Minor] fixtures.ts non-UUID IDs
+- **Status:** Deferred — mock data not validated by Zod
 
 ## Adjacent Findings
-なし
+None
 
-## Resolution Status
-
-### CF1 Major — teams/route.ts optional guard
-- Action: `...(clientId ? { id: clientId } : {})` → `id: clientId`
-- Modified file: `src/app/api/teams/route.ts:127`
-
-### CF2 Minor — UUID_RE v4 限定化
-- Action: Regex を `/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i` に変更
-- Modified file: `src/app/api/passwords/[id]/attachments/route.ts:174`
-
-### CT1 Major — bulk-* where clause assertion
-- Action: `mockUpdateMany.toHaveBeenCalledWith` assertion 追加
-- Modified files: `bulk-archive/trash/restore/route.test.ts`
-
-### CT2 Major — rotate-key where clause assertion
-- Action: `updateMany.toHaveBeenCalledWith` assertion 追加
-- Modified files: `vault/rotate-key/route.test.ts`, `teams/[teamId]/rotate-key/route.test.ts`
-
-### CT3 Minor — attachment response.id assertion
-- Action: `expect(json.id).toBe(uppercaseId.toLowerCase())` 追加
-- Modified files: `attachments.test.ts`, `team-attachments.test.ts`
+## Additional Fix
+- Renamed `team_policies` RLS policy from `tenant_isolation` to `team_policies_tenant_isolation` for naming consistency with all other tables
