@@ -7,7 +7,7 @@ import {
 
 describe("createBreakglassGrantSchema", () => {
   const validInput = {
-    targetUserId: "cmmtargetuserid00001",
+    targetUserId: "00000000-0000-4000-a000-000000000001",
     reason: "Security incident investigation required",
     incidentRef: "INC-2026-001",
   };

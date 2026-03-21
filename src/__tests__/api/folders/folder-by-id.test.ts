@@ -125,8 +125,8 @@ describe("PUT /api/folders/[id]", () => {
 
   it("returns 409 when duplicate name exists under parent folder", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const parentCuid = "cm1234567890abcdefghijklmn";
-    const existing = { id: "f1", userId: DEFAULT_SESSION.user.id, parentId: parentCuid, name: "Old" };
+    const parentUuid = "00000000-0000-4000-a000-000000000010";
+    const existing = { id: "f1", userId: DEFAULT_SESSION.user.id, parentId: parentUuid, name: "Old" };
     mockFolderFindUnique
       .mockResolvedValueOnce(existing) // find existing
       .mockResolvedValueOnce({ id: "f2", name: "Dup" }); // dup check returns different id
@@ -150,30 +150,30 @@ describe("PUT /api/folders/[id]", () => {
 
   it("moves folder to a new parent", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentUuid = "00000000-0000-4000-a000-000000000010";
     const existing = { id: "f1", userId: DEFAULT_SESSION.user.id, parentId: null, name: "Folder" };
     mockFolderFindUnique
       .mockResolvedValueOnce(existing) // find existing
       .mockResolvedValueOnce(null); // dup check under new parent
-    const updated = { ...existing, parentId: parentCuid, sortOrder: 0, createdAt: new Date(), updatedAt: new Date() };
+    const updated = { ...existing, parentId: parentUuid, sortOrder: 0, createdAt: new Date(), updatedAt: new Date() };
     mockFolderUpdate.mockResolvedValue(updated);
 
-    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { parentId: parentCuid } });
+    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { parentId: parentUuid } });
     const res = await PUT(req, createParams({ id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
-    expect(json.parentId).toBe(parentCuid);
+    expect(json.parentId).toBe(parentUuid);
   });
 
   it("returns 400 for self-referencing parentId", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    // Use a CUID-format id so the Zod schema accepts it
-    const cuid = "cm1234567890abcdefghijklmn";
-    const existing = { id: cuid, userId: DEFAULT_SESSION.user.id, parentId: null, name: "Folder" };
+    // Use a UUID v4 format id so the Zod schema accepts it
+    const uuid = "00000000-0000-4000-a000-000000000011";
+    const existing = { id: uuid, userId: DEFAULT_SESSION.user.id, parentId: null, name: "Folder" };
     mockFolderFindUnique.mockResolvedValueOnce(existing);
 
-    const req = createRequest("PUT", `http://localhost/api/folders/${cuid}`, { body: { name: "Folder", parentId: cuid } });
-    const res = await PUT(req, createParams({ id: cuid }));
+    const req = createRequest("PUT", `http://localhost/api/folders/${uuid}`, { body: { name: "Folder", parentId: uuid } });
+    const res = await PUT(req, createParams({ id: uuid }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("FOLDER_CIRCULAR_REFERENCE");
@@ -181,11 +181,11 @@ describe("PUT /api/folders/[id]", () => {
 
   it("returns 400 when circular reference detected", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentUuid = "00000000-0000-4000-a000-000000000010";
     const existing = { id: "f1", userId: DEFAULT_SESSION.user.id, parentId: null, name: "Folder" };
     mockFolderFindUnique.mockResolvedValueOnce(existing);
     vi.mocked(checkCircularReference).mockResolvedValueOnce(true);
-    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { parentId: parentCuid } });
+    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { parentId: parentUuid } });
     const res = await PUT(req, createParams({ id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
@@ -194,11 +194,11 @@ describe("PUT /api/folders/[id]", () => {
 
   it("returns 400 when folder depth exceeded", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentUuid = "00000000-0000-4000-a000-000000000010";
     const existing = { id: "f1", userId: DEFAULT_SESSION.user.id, parentId: null, name: "Folder" };
     mockFolderFindUnique.mockResolvedValueOnce(existing);
     vi.mocked(validateFolderDepth).mockRejectedValueOnce(new Error("depth exceeded"));
-    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { parentId: parentCuid } });
+    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { parentId: parentUuid } });
     const res = await PUT(req, createParams({ id: "f1" }));
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);

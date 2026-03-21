@@ -33,7 +33,7 @@ class TxValidationError extends Error {
 
 // v0 (legacy): full re-encrypt of blob + overview
 const rotateEntryV0Schema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
   itemKeyVersion: z.literal(0).default(0),
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
@@ -42,7 +42,7 @@ const rotateEntryV0Schema = z.object({
 
 // v1+ (ItemKey): only rewrap the ItemKey with new TeamKey
 const rotateEntryV1Schema = z.object({
-  id: z.string().min(1),
+  id: z.string().uuid(),
   itemKeyVersion: z.number().int().min(1),
   encryptedItemKey: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),

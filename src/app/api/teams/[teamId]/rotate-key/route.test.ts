@@ -99,7 +99,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     txMock.team.update.mockResolvedValue({});
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100" }]);
     txMock.teamMemberKey.createMany.mockResolvedValue({ count: 1 });
     mockTransaction.mockImplementation(async (fn: (tx: typeof txMock) => unknown) => fn(txMock));
   });
@@ -109,7 +109,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -121,7 +121,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 5, // should be 2
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -136,7 +136,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")], // missing user-2
       }),
       createParams("team-1"),
@@ -151,7 +151,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -168,7 +168,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -177,7 +177,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when entries exceed max limit", async () => {
-    const tooManyEntries = Array.from({ length: 1001 }, (_, i) => validEntry(`e${i}`));
+    const tooManyEntries = Array.from({ length: 1001 }, (_, i) => validEntry(`660e8400-e29b-41d4-a716-${String(i).padStart(12, "0")}`));
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -206,7 +206,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1"), validMemberKey("non-member-user")],
       }),
       createParams("team-1"),
@@ -222,7 +222,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -236,7 +236,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -285,11 +285,15 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
 
   it("returns 400 when entry count does not match team entries (F-17)", async () => {
     // Team has 3 entries but client submits only 1
-    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }, { id: "e3" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([
+      { id: "660e8400-e29b-41d4-a716-446655440100" },
+      { id: "660e8400-e29b-41d4-a716-446655440101" },
+      { id: "660e8400-e29b-41d4-a716-446655440102" },
+    ]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -300,11 +304,11 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when submitted entry IDs do not exactly match team entries", async () => {
-    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("deleted-or-foreign-id")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440199")],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -318,7 +322,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [{ ...validMemberKey("user-1"), wrapVersion: 1 }],
       }),
       createParams("team-1"),
@@ -337,7 +341,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1")],
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [{
           ...validMemberKey("user-1"),
           keyVersion: 999, // intentionally wrong
@@ -356,15 +360,21 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("includes trashed entries in rotation (all-entries policy)", async () => {
-    // Team has 2 entries: one active (e1), one trashed (e-trash).
+    // Team has 2 entries: one active, one trashed.
     // rotate-key must cover ALL entries including trash.
-    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e-trash" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([
+      { id: "660e8400-e29b-41d4-a716-446655440100" },
+      { id: "660e8400-e29b-41d4-a716-446655440110" },
+    ]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1"), validEntry("e-trash")],
+        entries: [
+          validEntry("660e8400-e29b-41d4-a716-446655440100"),
+          validEntry("660e8400-e29b-41d4-a716-446655440110"),
+        ],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),
@@ -381,13 +391,19 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   it("succeeds with entries having mixed teamKeyVersions after history restore (F-29)", async () => {
     // Two entries exist — one may have been restored from history with a stale teamKeyVersion.
     // rotate-key should update all entries regardless of their current teamKeyVersion.
-    txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "e1" }, { id: "e2" }]);
+    txMock.teamPasswordEntry.findMany.mockResolvedValue([
+      { id: "660e8400-e29b-41d4-a716-446655440100" },
+      { id: "660e8400-e29b-41d4-a716-446655440101" },
+    ]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
-        entries: [validEntry("e1"), validEntry("e2")],
+        entries: [
+          validEntry("660e8400-e29b-41d4-a716-446655440100"),
+          validEntry("660e8400-e29b-41d4-a716-446655440101"),
+        ],
         memberKeys: [validMemberKey("user-1")],
       }),
       createParams("team-1"),

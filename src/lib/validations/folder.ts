@@ -5,13 +5,13 @@ import { NAME_MAX_LENGTH } from "./common";
 
 export const createFolderSchema = z.object({
   name: z.string().min(1).max(NAME_MAX_LENGTH).trim(),
-  parentId: z.string().cuid().optional().nullable(),
+  parentId: z.string().uuid().optional().nullable(),
   sortOrder: z.number().int().min(0).optional(),
 });
 
 export const updateFolderSchema = z.object({
   name: z.string().min(1).max(NAME_MAX_LENGTH).trim().optional(),
-  parentId: z.string().cuid().optional().nullable(),
+  parentId: z.string().uuid().optional().nullable(),
   sortOrder: z.number().int().min(0).optional(),
 });
 

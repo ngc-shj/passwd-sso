@@ -176,18 +176,37 @@ describe("encryptedFieldSchema", () => {
 
 describe("bulkIdsSchema", () => {
   it("accepts a valid list of IDs", () => {
-    const result = bulkIdsSchema.safeParse({ ids: ["id1", "id2", "id3"] });
+    const result = bulkIdsSchema.safeParse({
+      ids: [
+        "00000000-0000-4000-a000-000000000001",
+        "00000000-0000-4000-a000-000000000002",
+        "00000000-0000-4000-a000-000000000003",
+      ],
+    });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.ids).toEqual(["id1", "id2", "id3"]);
+      expect(result.data.ids).toEqual([
+        "00000000-0000-4000-a000-000000000001",
+        "00000000-0000-4000-a000-000000000002",
+        "00000000-0000-4000-a000-000000000003",
+      ]);
     }
   });
 
   it("deduplicates repeated IDs", () => {
-    const result = bulkIdsSchema.safeParse({ ids: ["id1", "id1", "id2"] });
+    const result = bulkIdsSchema.safeParse({
+      ids: [
+        "00000000-0000-4000-a000-000000000001",
+        "00000000-0000-4000-a000-000000000001",
+        "00000000-0000-4000-a000-000000000002",
+      ],
+    });
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.ids).toEqual(["id1", "id2"]);
+      expect(result.data.ids).toEqual([
+        "00000000-0000-4000-a000-000000000001",
+        "00000000-0000-4000-a000-000000000002",
+      ]);
     }
   });
 
@@ -197,22 +216,30 @@ describe("bulkIdsSchema", () => {
   });
 
   it(`rejects more than MAX_BULK_IDS (${MAX_BULK_IDS}) unique IDs`, () => {
-    const ids = Array.from({ length: MAX_BULK_IDS + 1 }, (_, i) => `id${i}`);
+    const ids = Array.from(
+      { length: MAX_BULK_IDS + 1 },
+      (_, i) => `00000000-0000-4000-a000-${String(i).padStart(12, "0")}`,
+    );
     const result = bulkIdsSchema.safeParse({ ids });
     expect(result.success).toBe(false);
   });
 
   it(`accepts exactly MAX_BULK_IDS (${MAX_BULK_IDS}) unique IDs`, () => {
-    const ids = Array.from({ length: MAX_BULK_IDS }, (_, i) => `id${i}`);
+    const ids = Array.from(
+      { length: MAX_BULK_IDS },
+      (_, i) => `00000000-0000-4000-a000-${String(i).padStart(12, "0")}`,
+    );
     const result = bulkIdsSchema.safeParse({ ids });
     expect(result.success).toBe(true);
   });
 
   it("deduplicates before capping at MAX_BULK_IDS", () => {
     // Provide MAX_BULK_IDS + 5 entries but only 2 unique — should pass after dedup
+    const sameId = "00000000-0000-4000-a000-000000000001";
+    const otherId = "00000000-0000-4000-a000-000000000002";
     const ids = [
-      ...Array.from({ length: MAX_BULK_IDS + 5 }, () => "same-id"),
-      "other-id",
+      ...Array.from({ length: MAX_BULK_IDS + 5 }, () => sameId),
+      otherId,
     ];
     const result = bulkIdsSchema.safeParse({ ids });
     expect(result.success).toBe(true);

@@ -199,13 +199,13 @@ export const pinLengthSchema = z.number().int().min(PIN_LENGTH_MIN).max(PIN_LENG
 // ─── Bulk Operation Schemas ─────────────────────────────────
 
 export const bulkIdsSchema = z.object({
-  ids: z.array(z.string().min(1))
+  ids: z.array(z.string().uuid())
     .transform(ids => [...new Set(ids)])
     .pipe(z.array(z.string()).min(1).max(MAX_BULK_IDS)),
 });
 
 export const bulkArchiveSchema = z.object({
-  ids: z.array(z.string().min(1))
+  ids: z.array(z.string().uuid())
     .transform(ids => [...new Set(ids)])
     .pipe(z.array(z.string()).min(1).max(MAX_BULK_IDS)),
   operation: z.enum(["archive", "unarchive"]).default("archive"),

@@ -66,8 +66,8 @@ vi.mock("@/lib/rate-limit", () => ({
 
 import { POST, GET } from "@/app/api/share-links/route";
 
-// Valid CUID for test (matches z.string().cuid() validation)
-const VALID_ENTRY_ID = "cm1234567890abcdefghijkl0";
+// Valid UUID v4 for test (matches z.string().uuid() validation)
+const VALID_ENTRY_ID = "00000000-0000-4000-a000-000000000020";
 
 describe("POST /api/share-links", () => {
   beforeEach(() => {

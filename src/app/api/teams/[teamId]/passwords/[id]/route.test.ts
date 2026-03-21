@@ -216,9 +216,9 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns teamFolderId in GET response when entry has a folder", async () => {
-    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    const FOLDER_UUID = "00000000-0000-4000-a000-000000000040";
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(
-      makeEntryForGET({ teamFolderId: FOLDER_CUID }),
+      makeEntryForGET({ teamFolderId: FOLDER_UUID }),
     );
 
     const res = await GET(
@@ -227,7 +227,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]", () => {
     );
     const json = await res.json();
     expect(res.status).toBe(200);
-    expect(json.teamFolderId).toBe(FOLDER_CUID);
+    expect(json.teamFolderId).toBe(FOLDER_UUID);
   });
 });
 
@@ -389,11 +389,11 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 when tagIds contains invalid CUID", async () => {
+  it("returns 400 when tagIds contains invalid UUID", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: { ...validE2EBody, tagIds: ["not-a-cuid"] },
+        body: { ...validE2EBody, tagIds: ["not-a-uuid"] },
       }),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
@@ -468,32 +468,32 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("updates entry with teamFolderId when folder belongs to same team", async () => {
-    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    const FOLDER_UUID = "00000000-0000-4000-a000-000000000040";
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaTeamFolder.findUnique.mockResolvedValue({ teamId: TEAM_ID });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: { ...validE2EBody, teamFolderId: FOLDER_CUID },
+        body: { ...validE2EBody, teamFolderId: FOLDER_UUID },
       }),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
     expect(res.status).toBe(200);
     expect(txMock.teamPasswordEntry.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ teamFolderId: FOLDER_CUID }),
+        data: expect.objectContaining({ teamFolderId: FOLDER_UUID }),
       }),
     );
   });
 
   it("returns 400 when teamFolderId belongs to a different team in PUT", async () => {
-    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    const FOLDER_UUID = "00000000-0000-4000-a000-000000000040";
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaTeamFolder.findUnique.mockResolvedValue({ teamId: "other-team-999" });
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: { ...validE2EBody, teamFolderId: FOLDER_CUID },
+        body: { ...validE2EBody, teamFolderId: FOLDER_UUID },
       }),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
@@ -503,13 +503,13 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   });
 
   it("returns 400 when teamFolderId does not exist in PUT", async () => {
-    const FOLDER_CUID = "cm1234567890abcdefghijkl1";
+    const FOLDER_UUID = "00000000-0000-4000-a000-000000000040";
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
     mockPrismaTeamFolder.findUnique.mockResolvedValue(null);
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: { ...validE2EBody, teamFolderId: FOLDER_CUID },
+        body: { ...validE2EBody, teamFolderId: FOLDER_UUID },
       }),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
@@ -521,10 +521,10 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
   it("updates metadata only without history snapshot (Q-8)", async () => {
     mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
 
-    const TAG_CUID = "cm1234567890abcdefghijkl0";
+    const TAG_UUID = "00000000-0000-4000-a000-000000000041";
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: { tagIds: [TAG_CUID], isArchived: true },
+        body: { tagIds: [TAG_UUID], isArchived: true },
       }),
       createParams({ teamId: TEAM_ID, id: PW_ID }),
     );
@@ -536,7 +536,7 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           isArchived: true,
-          tags: { set: [{ id: TAG_CUID }] },
+          tags: { set: [{ id: TAG_UUID }] },
         }),
       }),
     );

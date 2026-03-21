@@ -181,7 +181,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
     const res = await POST(
       createRequest("POST", BASE, {
-        body: { name: "Child", parentId: "cm000000000000000other01" },
+        body: { name: "Child", parentId: "00000000-0000-4000-a000-000000000001" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -197,7 +197,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
     const res = await POST(
       createRequest("POST", BASE, {
-        body: { name: "Deep", parentId: "cm000000000000000deep001" },
+        body: { name: "Deep", parentId: "00000000-0000-4000-a000-000000000002" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -223,7 +223,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
     const res = await POST(
       createRequest("POST", BASE, {
-        body: { name: "SubFolder", parentId: "cm000000000000000parent1" },
+        body: { name: "SubFolder", parentId: "00000000-0000-4000-a000-000000000003" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -237,7 +237,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
     mockPrismaTeamFolder.create.mockResolvedValue({
       id: "new-folder-id",
       name: "Child",
-      parentId: "cm000000000000000parent1",
+      parentId: "00000000-0000-4000-a000-000000000003",
       sortOrder: 0,
       createdAt: now,
       updatedAt: now,
@@ -245,13 +245,13 @@ describe("POST /api/teams/[teamId]/folders", () => {
 
     await POST(
       createRequest("POST", BASE, {
-        body: { name: "Child", parentId: "cm000000000000000parent1" },
+        body: { name: "Child", parentId: "00000000-0000-4000-a000-000000000003" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
 
     expect(vi.mocked(validateFolderDepth)).toHaveBeenCalledWith(
-      "cm000000000000000parent1",
+      "00000000-0000-4000-a000-000000000003",
       TEAM_ID, // must be teamId ("team-1"), NOT session.user.id ("user-1")
       expect.any(Function),
     );

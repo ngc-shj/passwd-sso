@@ -9,7 +9,7 @@ datasource db {
 // ─── Auth.js Required Models ────────────────────────────────────
 
 model Account {
-  id                String  @id @default(cuid())
+  id                String  @id @default(uuid(4))
   userId            String  @map("user_id")
   tenantId          String  @map("tenant_id")
   type              String
@@ -32,7 +32,7 @@ model Account {
 }
 
 model Session {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid(4))
   sessionToken String   @unique @map("session_token")
   userId       String   @map("user_id")
   tenantId     String   @map("tenant_id")
@@ -62,7 +62,7 @@ model VerificationToken {
 // ─── Application Models ─────────────────────────────────────────
 
 model User {
-  id            String    @id @default(cuid())
+  id            String    @id @default(uuid(4))
   tenantId      String    @map("tenant_id")
   name          String?
   email         String?   @unique
@@ -169,7 +169,7 @@ model User {
 }
 
 model ExtensionToken {
-  id         String    @id @default(cuid())
+  id         String    @id @default(uuid(4))
   userId     String    @map("user_id")
   tenantId   String    @map("tenant_id")
   tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
@@ -189,7 +189,7 @@ model ExtensionToken {
 }
 
 model ScimToken {
-  id          String    @id @default(cuid())
+  id          String    @id @default(uuid(4))
   tenantId    String    @map("tenant_id")
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
   description String?   @db.VarChar(255)
@@ -207,7 +207,7 @@ model ScimToken {
 }
 
 model ScimExternalMapping {
-  id           String   @id @default(cuid())
+  id           String   @id @default(uuid(4))
   tenantId     String   @map("tenant_id")
   externalId   String   @map("external_id")
   resourceType String   @map("resource_type") @db.VarChar(20)
@@ -224,7 +224,7 @@ model ScimExternalMapping {
 }
 
 model Tag {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid(4))
   name      String
   color     String?
   parentId  String?  @map("parent_id")
@@ -245,7 +245,7 @@ model Tag {
 }
 
 model VaultKey {
-  id                     String   @id @default(cuid())
+  id                     String   @id @default(uuid(4))
   userId                 String   @map("user_id")
   tenantId               String   @map("tenant_id")
   version                Int
@@ -377,7 +377,7 @@ model Team {
 }
 
 model Tenant {
-  id          String   @id @default(cuid())
+  id          String   @id @default(uuid(4))
   externalId  String?  @unique @map("external_id") @db.VarChar(255)
   isBootstrap Boolean  @default(false) @map("is_bootstrap")
   name        String
@@ -436,7 +436,7 @@ model Tenant {
 }
 
 model TenantMember {
-  id                 String             @id @default(cuid())
+  id                 String             @id @default(uuid(4))
   tenantId           String             @map("tenant_id")
   userId             String             @map("user_id")
   role               TenantRole         @default(MEMBER)
@@ -456,7 +456,7 @@ model TenantMember {
 }
 
 model ScimGroupMapping {
-  id              String   @id @default(cuid())
+  id              String   @id @default(uuid(4))
   tenantId        String   @map("tenant_id")
   teamId          String   @map("team_id")
   externalGroupId String   @map("external_group_id")
@@ -474,7 +474,7 @@ model ScimGroupMapping {
 }
 
 model TeamMember {
-  id             String    @id @default(cuid())
+  id             String    @id @default(uuid(4))
   teamId         String    @map("team_id")
   userId         String    @map("user_id")
   tenantId       String    @map("tenant_id")
@@ -496,7 +496,7 @@ model TeamMember {
 }
 
 model TeamMemberKey {
-  id                 String   @id @default(cuid())
+  id                 String   @id @default(uuid(4))
   teamId             String   @map("team_id")
   userId             String   @map("user_id")
   tenantId           String   @map("tenant_id")
@@ -571,7 +571,7 @@ model TeamPasswordEntry {
 }
 
 model TeamTag {
-  id       String  @id @default(cuid())
+  id       String  @id @default(uuid(4))
   name     String
   color    String?
   parentId String? @map("parent_id")
@@ -594,7 +594,7 @@ model TeamTag {
 }
 
 model TeamPasswordFavorite {
-  id                  String @id @default(cuid())
+  id                  String @id @default(uuid(4))
   userId              String @map("user_id")
   tenantId            String @map("tenant_id")
   teamPasswordEntryId String @map("team_password_entry_id")
@@ -611,7 +611,7 @@ model TeamPasswordFavorite {
 }
 
 model TeamInvitation {
-  id        String           @id @default(cuid())
+  id        String           @id @default(uuid(4))
   teamId    String           @map("team_id")
   tenantId  String           @map("tenant_id")
   email     String
@@ -636,7 +636,7 @@ model TeamInvitation {
 // ─── Share Link Models ─────────────────────────────────────────
 
 model PasswordShare {
-  id            String     @id @default(cuid())
+  id            String     @id @default(uuid(4))
   tenantId      String     @map("tenant_id")
   tokenHash     String     @unique @map("token_hash") @db.VarChar(64)
   shareType     ShareType  @default(ENTRY_SHARE) @map("share_type")
@@ -688,7 +688,7 @@ model PasswordShare {
 }
 
 model ShareAccessLog {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid(4))
   shareId   String   @map("share_id")
   tenantId  String   @map("tenant_id")
   ip        String?  @db.VarChar(45)
@@ -809,7 +809,7 @@ enum AuditScope {
 }
 
 model AuditLog {
-  id         String      @id @default(cuid())
+  id         String      @id @default(uuid(4))
   tenantId   String      @map("tenant_id")
   scope      AuditScope
   action     AuditAction
@@ -878,7 +878,7 @@ enum EmergencyAccessStatus {
 }
 
 model EmergencyAccessGrant {
-  id           String                @id @default(cuid())
+  id           String                @id @default(uuid(4))
   tenantId     String                @map("tenant_id")
   ownerId      String                @map("owner_id")
   granteeId    String?               @map("grantee_id")
@@ -927,7 +927,7 @@ model EmergencyAccessGrant {
 // ─── Folder Models ──────────────────────────────────────────
 
 model Folder {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid(4))
   name      String   @db.VarChar(100)
   parentId  String?  @map("parent_id")
   userId    String   @map("user_id")
@@ -949,7 +949,7 @@ model Folder {
 }
 
 model TeamFolder {
-  id        String   @id @default(cuid())
+  id        String   @id @default(uuid(4))
   name      String   @db.VarChar(100)
   parentId  String?  @map("parent_id")
   teamId    String   @map("team_id")
@@ -973,7 +973,7 @@ model TeamFolder {
 // ─── Entry History Models ───────────────────────────────────
 
 model PasswordEntryHistory {
-  id            String   @id @default(cuid())
+  id            String   @id @default(uuid(4))
   entryId       String   @map("entry_id")
   tenantId      String   @map("tenant_id")
   encryptedBlob String   @map("encrypted_blob") @db.Text
@@ -992,7 +992,7 @@ model PasswordEntryHistory {
 }
 
 model TeamPasswordEntryHistory {
-  id             String   @id @default(cuid())
+  id             String   @id @default(uuid(4))
   entryId        String   @map("entry_id")
   tenantId       String   @map("tenant_id")
   encryptedBlob  String   @map("encrypted_blob") @db.Text
@@ -1017,7 +1017,7 @@ model TeamPasswordEntryHistory {
 }
 
 model EmergencyAccessKeyPair {
-  id                  String @id @default(cuid())
+  id                  String @id @default(uuid(4))
   grantId             String @unique @map("grant_id")
   tenantId            String @map("tenant_id")
   encryptedPrivateKey String @map("encrypted_private_key") @db.Text
@@ -1051,7 +1051,7 @@ enum NotificationType {
 }
 
 model Notification {
-  id        String           @id @default(cuid())
+  id        String           @id @default(uuid(4))
   userId    String           @map("user_id")
   tenantId  String           @map("tenant_id")
   type      NotificationType
@@ -1072,7 +1072,7 @@ model Notification {
 // ─── Team Policy Models ─────────────────────────────────────
 
 model TeamPolicy {
-  id                        String  @id @default(cuid())
+  id                        String  @id @default(uuid(4))
   teamId                    String  @unique @map("team_id")
   tenantId                  String  @map("tenant_id")
   minPasswordLength         Int     @default(0) @map("min_password_length")
@@ -1097,7 +1097,7 @@ model TeamPolicy {
 }
 
 model TeamWebhook {
-  id              String   @id @default(cuid())
+  id              String   @id @default(uuid(4))
   teamId          String   @map("team_id")
   tenantId        String   @map("tenant_id")
   url             String   @db.VarChar(2048)
@@ -1123,7 +1123,7 @@ model TeamWebhook {
 }
 
 model TenantWebhook {
-  id               String    @id @default(cuid())
+  id               String    @id @default(uuid(4))
   tenantId         String    @map("tenant_id")
   url              String    @db.VarChar(2048)
   secretEncrypted  String    @map("secret_encrypted") @db.Text
@@ -1148,7 +1148,7 @@ model TenantWebhook {
 // ─── Admin Vault Reset ──────────────────────────────────────────
 
 model AdminVaultReset {
-  id            String    @id @default(cuid())
+  id            String    @id @default(uuid(4))
   tenantId      String    @map("tenant_id")
   teamId        String?   @map("team_id")
   targetUserId  String    @map("target_user_id")
@@ -1172,7 +1172,7 @@ model AdminVaultReset {
 // ─── API Key Models ─────────────────────────────────────────
 
 model ApiKey {
-  id         String    @id @default(cuid())
+  id         String    @id @default(uuid(4))
   userId     String    @map("user_id")
   tenantId   String    @map("tenant_id")
   tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
@@ -1195,7 +1195,7 @@ model ApiKey {
 // ─── WebAuthn Models ────────────────────────────────────────
 
 model WebAuthnCredential {
-  id                    String    @id @default(cuid())
+  id                    String    @id @default(uuid(4))
   userId                String    @map("user_id")
   tenantId              String    @map("tenant_id")
   credentialId          String    @unique @map("credential_id") @db.Text
@@ -1241,7 +1241,7 @@ enum DirectorySyncStatus {
 }
 
 model DirectorySyncConfig {
-  id                  String                @id @default(cuid())
+  id                  String                @id @default(uuid(4))
   tenantId            String                @map("tenant_id")
   provider            DirectorySyncProvider
   displayName         String                @map("display_name") @db.VarChar(100)
@@ -1267,7 +1267,7 @@ model DirectorySyncConfig {
 }
 
 model DirectorySyncLog {
-  id               String              @id @default(cuid())
+  id               String              @id @default(uuid(4))
   configId         String              @map("config_id")
   tenantId         String              @map("tenant_id")
   status           DirectorySyncStatus
@@ -1290,7 +1290,7 @@ model DirectorySyncLog {
 // ─── Break-Glass Personal Log Access ─────────────────────────────────
 
 model PersonalLogAccessGrant {
-  id           String    @id @default(cuid())
+  id           String    @id @default(uuid(4))
   tenantId     String    @map("tenant_id")
   requesterId  String    @map("requester_id")
   targetUserId String    @map("target_user_id")

@@ -74,7 +74,7 @@ import { validateParentFolder, validateFolderDepth, checkCircularReference } fro
 import { TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-1";
-const FOLDER_ID = "cm000000000000000folder1";
+const FOLDER_ID = "00000000-0000-4000-a000-000000000001";
 const BASE = `http://localhost:3000/api/teams/${TEAM_ID}/folders/${FOLDER_ID}`;
 const now = new Date("2025-06-01T00:00:00Z");
 const ownedFolder = {
@@ -158,7 +158,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", BASE, {
-        body: { parentId: "cm000000000000000other01" },
+        body: { parentId: "00000000-0000-4000-a000-000000000002" },
       }),
       createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
@@ -173,7 +173,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", BASE, {
-        body: { parentId: "cm000000000000000child00" },
+        body: { parentId: "00000000-0000-4000-a000-000000000003" },
       }),
       createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
@@ -202,7 +202,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", BASE, {
-        body: { parentId: "cm000000000000000deep001" },
+        body: { parentId: "00000000-0000-4000-a000-000000000004" },
       }),
       createParams({ teamId: TEAM_ID, id: FOLDER_ID }),
     );
@@ -293,7 +293,7 @@ describe("DELETE /api/teams/[teamId]/folders/[id]", () => {
     const parentFolder = { ...ownedFolder, name: "テスト" };
     mockPrismaTeamFolder.findUnique.mockResolvedValue(parentFolder);
 
-    const childId = "cm000000000000000child01";
+    const childId = "00000000-0000-4000-a000-000000000005";
 
     const txUpdates: Array<{ where: unknown; data: unknown }> = [];
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {

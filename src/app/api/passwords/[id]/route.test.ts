@@ -551,7 +551,7 @@ describe("PUT /api/passwords/[id]", () => {
   it("updates tagIds with set semantics", async () => {
     mockPrismaPasswordEntry.findUnique.mockResolvedValue(ownedEntry);
     mockPrismaTag.count.mockResolvedValue(2);
-    const tagIds = ["ctag123456789012345678901", "ctag223456789012345678901"];
+    const tagIds = ["00000000-0000-4000-a000-000000000001", "00000000-0000-4000-a000-000000000002"];
     mockPrismaPasswordEntry.update.mockResolvedValue({
       id: PW_ID,
       encryptedOverview: "overview-cipher",

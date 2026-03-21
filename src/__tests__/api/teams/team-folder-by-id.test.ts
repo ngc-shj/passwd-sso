@@ -144,7 +144,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("moves folder to a new parent", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentCuid = "00000000-0000-4000-a000-000000000001";
     const existing = { id: "f1", teamId: "o1", parentId: null, name: "Folder" };
     mockTeamFolderFindUnique
       .mockResolvedValueOnce(existing) // find existing
@@ -162,7 +162,7 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   it("returns 409 for dup name under parent", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentCuid = "00000000-0000-4000-a000-000000000001";
     const existing = { id: "f1", teamId: "o1", parentId: parentCuid, name: "Old" };
     mockTeamFolderFindUnique
       .mockResolvedValueOnce(existing) // find existing

@@ -88,10 +88,8 @@ const validEncryptedField = {
   authTag: HEX_AUTH_TAG,
 };
 
-// Valid CUID for optional relational IDs
-const VALID_CUID = "cmmtargetuserid00001";
-// Valid UUID v4
-const VALID_UUID = "550e8400-e29b-41d4-a716-446655440000";
+// Valid UUID v4 for optional relational IDs
+const VALID_UUID = "00000000-0000-4000-a000-000000000001";
 
 // ═══════════════════════════════════════════════════════════════
 // team.ts
@@ -285,8 +283,8 @@ describe("createTeamE2EPasswordSchema", () => {
     expect(createTeamE2EPasswordSchema.safeParse({ ...valid, aadVersion: 0 }).success).toBe(false);
   });
 
-  it("accepts optional tagIds as CUID array", () => {
-    expect(createTeamE2EPasswordSchema.safeParse({ ...valid, tagIds: [VALID_CUID] }).success).toBe(true);
+  it("accepts optional tagIds as UUID array", () => {
+    expect(createTeamE2EPasswordSchema.safeParse({ ...valid, tagIds: [VALID_UUID] }).success).toBe(true);
   });
 });
 
@@ -414,15 +412,15 @@ describe("inviteSchema", () => {
 
 describe("addMemberSchema", () => {
   it("accepts valid userId and role", () => {
-    expect(addMemberSchema.safeParse({ userId: VALID_CUID, role: "ADMIN" }).success).toBe(true);
+    expect(addMemberSchema.safeParse({ userId: VALID_UUID, role: "ADMIN" }).success).toBe(true);
   });
 
-  it("rejects non-CUID userId", () => {
-    expect(addMemberSchema.safeParse({ userId: "not-a-cuid", role: "MEMBER" }).success).toBe(false);
+  it("rejects non-UUID userId", () => {
+    expect(addMemberSchema.safeParse({ userId: "not-a-uuid", role: "MEMBER" }).success).toBe(false);
   });
 
   it("rejects OWNER role (not an invite role)", () => {
-    expect(addMemberSchema.safeParse({ userId: VALID_CUID, role: "OWNER" }).success).toBe(false);
+    expect(addMemberSchema.safeParse({ userId: VALID_UUID, role: "OWNER" }).success).toBe(false);
   });
 });
 
@@ -510,13 +508,13 @@ describe("invitationAcceptSchema", () => {
 
 describe("createShareLinkSchema", () => {
   const personalBase = {
-    passwordEntryId: "entry-id-1",
+    passwordEntryId: "00000000-0000-4000-a000-000000000050",
     data: { title: "My Login" },
     expiresIn: "7d" as const,
   };
 
   const teamBase = {
-    teamPasswordEntryId: "team-entry-id-1",
+    teamPasswordEntryId: "00000000-0000-4000-a000-000000000051",
     encryptedShareData: validEncryptedField,
     entryType: "LOGIN" as const,
     expiresIn: "1d" as const,
@@ -533,7 +531,7 @@ describe("createShareLinkSchema", () => {
   it("rejects when both passwordEntryId and teamPasswordEntryId are provided", () => {
     expect(createShareLinkSchema.safeParse({
       ...personalBase,
-      teamPasswordEntryId: "team-entry-id-1",
+      teamPasswordEntryId: "00000000-0000-4000-a000-000000000051",
     }).success).toBe(false);
   });
 
@@ -716,8 +714,8 @@ describe("createE2EPasswordSchema", () => {
     expect(createE2EPasswordSchema.safeParse(rest).success).toBe(false);
   });
 
-  it("accepts optional folderId as CUID", () => {
-    expect(createE2EPasswordSchema.safeParse({ ...valid, folderId: VALID_CUID }).success).toBe(true);
+  it("accepts optional folderId as UUID", () => {
+    expect(createE2EPasswordSchema.safeParse({ ...valid, folderId: VALID_UUID }).success).toBe(true);
   });
 
   it("accepts null folderId", () => {
@@ -1123,7 +1121,7 @@ describe("createFolderSchema", () => {
   it("accepts name with optional parentId and sortOrder", () => {
     expect(createFolderSchema.safeParse({
       name: "Work",
-      parentId: VALID_CUID,
+      parentId: VALID_UUID,
       sortOrder: 0,
     }).success).toBe(true);
   });
@@ -1144,7 +1142,7 @@ describe("createFolderSchema", () => {
     expect(createFolderSchema.safeParse({ name: "Work", parentId: null }).success).toBe(true);
   });
 
-  it("rejects non-CUID parentId", () => {
+  it("rejects non-UUID parentId", () => {
     expect(createFolderSchema.safeParse({ name: "Work", parentId: "invalid" }).success).toBe(false);
   });
 });
@@ -1200,8 +1198,8 @@ describe("createTagSchema", () => {
     expect(createTagSchema.safeParse({ name: "x".repeat(51) }).success).toBe(false);
   });
 
-  it("accepts optional CUID parentId", () => {
-    expect(createTagSchema.safeParse({ name: "personal", parentId: VALID_CUID }).success).toBe(true);
+  it("accepts optional UUID parentId", () => {
+    expect(createTagSchema.safeParse({ name: "personal", parentId: VALID_UUID }).success).toBe(true);
   });
 });
 

@@ -11,7 +11,7 @@ export const createTagSchema = z.object({
     .optional()
     .or(z.literal(""))
     .or(z.null().transform(() => undefined)),
-  parentId: z.string().cuid().optional().nullable(),
+  parentId: z.string().uuid().optional().nullable(),
 });
 
 export const updateTagSchema = z.object({
@@ -22,7 +22,7 @@ export const updateTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
-  parentId: z.string().cuid().optional().nullable(),
+  parentId: z.string().uuid().optional().nullable(),
 });
 
 // ─── Type Exports ──────────────────────────────────────────

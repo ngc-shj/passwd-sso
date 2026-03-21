@@ -57,7 +57,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.ADMIN });
-    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+    mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([{ id: "00000000-0000-4000-a000-000000000001" }, { id: "00000000-0000-4000-a000-000000000002" }]);
     mockPrismaTeamPasswordEntry.updateMany.mockResolvedValue({ count: 2 });
     // Default: $transaction invokes callback with a tx object that delegates to top-level mocks
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
@@ -128,8 +128,10 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
   });
 
   it("soft-deletes matching entries and returns moved count", async () => {
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
     const res = await POST(
-      createRequest("POST", BASE_URL, { body: { ids: ["p1", "p2", "p1"] } }),
+      createRequest("POST", BASE_URL, { body: { ids: [id1, id2, id1] } }),
       createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
@@ -141,7 +143,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           teamId: TEAM_ID,
-          id: { in: ["p1", "p2"] },
+          id: { in: [id1, id2] },
           deletedAt: null,
         }),
         data: expect.objectContaining({
@@ -152,8 +154,10 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
   });
 
   it("logs audit with scope=TEAM and teamId", async () => {
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
     await POST(
-      createRequest("POST", BASE_URL, { body: { ids: ["p1", "p2"] } }),
+      createRequest("POST", BASE_URL, { body: { ids: [id1, id2] } }),
       createParams({ teamId: TEAM_ID }),
     );
 
@@ -168,7 +172,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
           bulk: true,
           requestedCount: 2,
           movedCount: 2,
-          entryIds: ["p1", "p2"],
+          entryIds: [id1, id2],
         }),
       }),
     );
@@ -181,7 +185,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
           scope: AUDIT_SCOPE.TEAM,
           action: "ENTRY_TRASH",
           teamId: TEAM_ID,
-          targetId: "p1",
+          targetId: id1,
           metadata: expect.objectContaining({
             source: "bulk-trash",
             parentAction: "ENTRY_BULK_TRASH",
@@ -191,7 +195,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
           scope: AUDIT_SCOPE.TEAM,
           action: "ENTRY_TRASH",
           teamId: TEAM_ID,
-          targetId: "p2",
+          targetId: id2,
           metadata: expect.objectContaining({
             source: "bulk-trash",
             parentAction: "ENTRY_BULK_TRASH",

@@ -48,7 +48,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
 import { PUT, DELETE } from "./route";
 import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
 
-const FOLDER_ID = "cm000000000000000folder1";
+const FOLDER_ID = "00000000-0000-4000-a000-000000000001";
 const now = new Date("2025-06-01T00:00:00Z");
 const ownedFolder = {
   id: FOLDER_ID,
@@ -129,7 +129,7 @@ describe("PUT /api/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/folders/${FOLDER_ID}`, {
-        body: { parentId: "cm000000000000000other01" },
+        body: { parentId: "00000000-0000-4000-a000-000000000002" },
       }),
       createParams({ id: FOLDER_ID }),
     );
@@ -144,7 +144,7 @@ describe("PUT /api/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/folders/${FOLDER_ID}`, {
-        body: { parentId: "cm000000000000000child00" },
+        body: { parentId: "00000000-0000-4000-a000-000000000003" },
       }),
       createParams({ id: FOLDER_ID }),
     );
@@ -175,7 +175,7 @@ describe("PUT /api/folders/[id]", () => {
 
     const res = await PUT(
       createRequest("PUT", `http://localhost:3000/api/folders/${FOLDER_ID}`, {
-        body: { parentId: "cm000000000000000deep001" },
+        body: { parentId: "00000000-0000-4000-a000-000000000004" },
       }),
       createParams({ id: FOLDER_ID }),
     );
@@ -266,7 +266,7 @@ describe("DELETE /api/folders/[id]", () => {
     const parentFolder = { ...ownedFolder, name: "テスト" };
     mockPrismaFolder.findUnique.mockResolvedValue(parentFolder);
 
-    const childId = "cm000000000000000child01";
+    const childId = "00000000-0000-4000-a000-000000000005";
 
     const txUpdates: Array<{ where: unknown; data: unknown }> = [];
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<void>) => {

@@ -8,7 +8,7 @@ import {
 // ─── Break-Glass Personal Log Access Schemas ──────────────
 
 export const createBreakglassGrantSchema = z.object({
-  targetUserId: z.string().cuid(),
+  targetUserId: z.string().uuid(),
   reason: z.string().trim().min(BREAKGLASS_REASON_MIN).max(BREAKGLASS_REASON_MAX),
   incidentRef: z.string().trim().max(BREAKGLASS_INCIDENT_REF_MAX).optional(),
 });
