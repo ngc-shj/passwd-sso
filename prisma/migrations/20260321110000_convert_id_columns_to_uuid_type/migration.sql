@@ -35,31 +35,8 @@ JOIN pg_constraint c
 WHERE tc.constraint_type = 'FOREIGN KEY'
   AND tc.table_schema = 'public';
 
--- ─────────────────────────────────────────────────────────────────────────────
--- STEP 1b: Save RLS policy definitions
--- ─────────────────────────────────────────────────────────────────────────────
-
-CREATE TEMP TABLE _saved_policies (
-  table_name TEXT NOT NULL,
-  policy_name TEXT NOT NULL,
-  cmd TEXT NOT NULL,
-  permissive TEXT NOT NULL,
-  roles TEXT NOT NULL,
-  qual TEXT,
-  with_check TEXT
-);
-
-INSERT INTO _saved_policies (table_name, policy_name, cmd, permissive, roles, qual, with_check)
-SELECT
-  p.tablename,
-  p.policyname,
-  p.cmd,
-  p.permissive,
-  p.roles::TEXT,
-  p.qual,
-  p.with_check
-FROM pg_policies p
-WHERE p.schemaname = 'public';
+-- STEP 1b: RLS policies are handled statically (no save needed).
+-- They are dropped in STEP 2 and recreated in STEP 5 with explicit ::uuid casts.
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STEP 1c: Save trigger definitions
@@ -110,9 +87,45 @@ BEGIN
   FOR r IN SELECT * FROM _saved_checks LOOP
     EXECUTE format('ALTER TABLE %I DROP CONSTRAINT %I', r.table_name, r.constraint_name);
   END LOOP;
-  FOR r IN SELECT * FROM _saved_policies LOOP
-    EXECUTE format('DROP POLICY %I ON %I', r.policy_name, r.table_name);
-  END LOOP;
+  -- RLS policies: drop statically (37 policies)
+  EXECUTE 'DROP POLICY IF EXISTS accounts_tenant_isolation ON accounts';
+  EXECUTE 'DROP POLICY IF EXISTS admin_vault_resets_tenant_isolation ON admin_vault_resets';
+  EXECUTE 'DROP POLICY IF EXISTS api_keys_tenant_isolation ON api_keys';
+  EXECUTE 'DROP POLICY IF EXISTS attachments_tenant_isolation ON attachments';
+  EXECUTE 'DROP POLICY IF EXISTS audit_logs_tenant_isolation ON audit_logs';
+  EXECUTE 'DROP POLICY IF EXISTS directory_sync_configs_tenant_isolation ON directory_sync_configs';
+  EXECUTE 'DROP POLICY IF EXISTS directory_sync_logs_tenant_isolation ON directory_sync_logs';
+  EXECUTE 'DROP POLICY IF EXISTS emergency_access_grants_tenant_isolation ON emergency_access_grants';
+  EXECUTE 'DROP POLICY IF EXISTS emergency_access_key_pairs_tenant_isolation ON emergency_access_key_pairs';
+  EXECUTE 'DROP POLICY IF EXISTS extension_tokens_tenant_isolation ON extension_tokens';
+  EXECUTE 'DROP POLICY IF EXISTS folders_tenant_isolation ON folders';
+  EXECUTE 'DROP POLICY IF EXISTS notifications_tenant_isolation ON notifications';
+  EXECUTE 'DROP POLICY IF EXISTS password_entries_tenant_isolation ON password_entries';
+  EXECUTE 'DROP POLICY IF EXISTS password_entry_histories_tenant_isolation ON password_entry_histories';
+  EXECUTE 'DROP POLICY IF EXISTS password_shares_tenant_isolation ON password_shares';
+  EXECUTE 'DROP POLICY IF EXISTS personal_log_access_grants_tenant_isolation ON personal_log_access_grants';
+  EXECUTE 'DROP POLICY IF EXISTS scim_external_mappings_tenant_isolation ON scim_external_mappings';
+  EXECUTE 'DROP POLICY IF EXISTS scim_group_mappings_tenant_isolation ON scim_group_mappings';
+  EXECUTE 'DROP POLICY IF EXISTS scim_tokens_tenant_isolation ON scim_tokens';
+  EXECUTE 'DROP POLICY IF EXISTS sessions_tenant_isolation ON sessions';
+  EXECUTE 'DROP POLICY IF EXISTS share_access_logs_tenant_isolation ON share_access_logs';
+  EXECUTE 'DROP POLICY IF EXISTS tags_tenant_isolation ON tags';
+  EXECUTE 'DROP POLICY IF EXISTS team_folders_tenant_isolation ON team_folders';
+  EXECUTE 'DROP POLICY IF EXISTS team_invitations_tenant_isolation ON team_invitations';
+  EXECUTE 'DROP POLICY IF EXISTS team_member_keys_tenant_isolation ON team_member_keys';
+  EXECUTE 'DROP POLICY IF EXISTS team_members_tenant_isolation ON team_members';
+  EXECUTE 'DROP POLICY IF EXISTS team_password_entries_tenant_isolation ON team_password_entries';
+  EXECUTE 'DROP POLICY IF EXISTS team_password_entry_histories_tenant_isolation ON team_password_entry_histories';
+  EXECUTE 'DROP POLICY IF EXISTS team_password_favorites_tenant_isolation ON team_password_favorites';
+  EXECUTE 'DROP POLICY IF EXISTS team_tags_tenant_isolation ON team_tags';
+  EXECUTE 'DROP POLICY IF EXISTS team_webhooks_tenant_isolation ON team_webhooks';
+  EXECUTE 'DROP POLICY IF EXISTS teams_tenant_isolation ON teams';
+  EXECUTE 'DROP POLICY IF EXISTS tenant_isolation ON team_policies';  -- renamed below to team_policies_tenant_isolation
+  EXECUTE 'DROP POLICY IF EXISTS tenant_members_tenant_isolation ON tenant_members';
+  EXECUTE 'DROP POLICY IF EXISTS tenant_webhooks_tenant_isolation ON tenant_webhooks';
+  EXECUTE 'DROP POLICY IF EXISTS users_tenant_isolation ON users';
+  EXECUTE 'DROP POLICY IF EXISTS vault_keys_tenant_isolation ON vault_keys';
+  EXECUTE 'DROP POLICY IF EXISTS webauthn_credentials_tenant_isolation ON webauthn_credentials';
   FOR r IN SELECT * FROM _saved_triggers LOOP
     EXECUTE format('DROP TRIGGER %I ON %I', r.trigger_name, r.table_name);
   END LOOP;
@@ -375,35 +388,169 @@ END $$;
 DROP TABLE _saved_checks;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- STEP 5: Recreate all RLS policies
+-- STEP 5: Recreate all RLS policies (static definitions)
+--
+-- All 37 policies follow the same pattern: bypass_rls OR tenant_id match.
+-- Static listing avoids dependence on pg_policies internal representation
+-- (e.g. roles format, ::text casts) which varies across PostgreSQL versions.
+-- The only change from the original definitions is the ::uuid cast on
+-- current_setting('app.tenant_id', true) to match the new uuid column type.
 -- ─────────────────────────────────────────────────────────────────────────────
 
-DO $$
-DECLARE r RECORD; sql TEXT; q TEXT; wc TEXT;
-BEGIN
-  FOR r IN SELECT * FROM _saved_policies LOOP
-    sql := format('CREATE POLICY %I ON %I AS %s FOR %s TO %s',
-      r.policy_name, r.table_name, r.permissive, r.cmd, r.roles);
-    -- Fix type mismatch: tenant_id is now uuid, but current_setting returns text
-    q := r.qual;
-    wc := r.with_check;
-    IF q IS NOT NULL THEN
-      q := replace(q,
-        $x$tenant_id = current_setting('app.tenant_id'::text, true)$x$,
-        $x$tenant_id = current_setting('app.tenant_id'::text, true)::uuid$x$);
-      sql := sql || ' USING (' || q || ')';
-    END IF;
-    IF wc IS NOT NULL THEN
-      wc := replace(wc,
-        $x$tenant_id = current_setting('app.tenant_id'::text, true)$x$,
-        $x$tenant_id = current_setting('app.tenant_id'::text, true)::uuid$x$);
-      sql := sql || ' WITH CHECK (' || wc || ')';
-    END IF;
-    EXECUTE sql;
-  END LOOP;
-END $$;
+-- Macro: standard bypass_rls + tenant isolation policy
+-- All policies use: USING (...) WITH CHECK (...)
 
-DROP TABLE _saved_policies;
+CREATE POLICY accounts_tenant_isolation ON accounts
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY admin_vault_resets_tenant_isolation ON admin_vault_resets
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY api_keys_tenant_isolation ON api_keys
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY attachments_tenant_isolation ON attachments
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY audit_logs_tenant_isolation ON audit_logs
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY directory_sync_configs_tenant_isolation ON directory_sync_configs
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY directory_sync_logs_tenant_isolation ON directory_sync_logs
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY emergency_access_grants_tenant_isolation ON emergency_access_grants
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY emergency_access_key_pairs_tenant_isolation ON emergency_access_key_pairs
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY extension_tokens_tenant_isolation ON extension_tokens
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY folders_tenant_isolation ON folders
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY notifications_tenant_isolation ON notifications
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY password_entries_tenant_isolation ON password_entries
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY password_entry_histories_tenant_isolation ON password_entry_histories
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY password_shares_tenant_isolation ON password_shares
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY personal_log_access_grants_tenant_isolation ON personal_log_access_grants
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY scim_external_mappings_tenant_isolation ON scim_external_mappings
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY scim_group_mappings_tenant_isolation ON scim_group_mappings
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY scim_tokens_tenant_isolation ON scim_tokens
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY sessions_tenant_isolation ON sessions
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY share_access_logs_tenant_isolation ON share_access_logs
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY tags_tenant_isolation ON tags
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_folders_tenant_isolation ON team_folders
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_invitations_tenant_isolation ON team_invitations
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_member_keys_tenant_isolation ON team_member_keys
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_members_tenant_isolation ON team_members
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_password_entries_tenant_isolation ON team_password_entries
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_password_entry_histories_tenant_isolation ON team_password_entry_histories
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_password_favorites_tenant_isolation ON team_password_favorites
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_tags_tenant_isolation ON team_tags
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_webhooks_tenant_isolation ON team_webhooks
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY teams_tenant_isolation ON teams
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY team_policies_tenant_isolation ON team_policies
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY tenant_members_tenant_isolation ON tenant_members
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY users_tenant_isolation ON users
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY vault_keys_tenant_isolation ON vault_keys
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY webauthn_credentials_tenant_isolation ON webauthn_credentials
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY tenant_webhooks_tenant_isolation ON tenant_webhooks
+  USING (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK (COALESCE(current_setting('app.bypass_rls', true), '') = 'on' OR tenant_id = current_setting('app.tenant_id', true)::uuid);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STEP 6: Update trigger functions for UUID-typed columns

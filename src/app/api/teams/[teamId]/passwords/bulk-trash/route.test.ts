@@ -119,7 +119,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
   });
 
   it("returns 400 when ids exceed max limit", async () => {
-    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+    const ids = Array.from({ length: 101 }, (_, i) => `00000000-0000-4000-a000-${String(i + 1).padStart(12, "0")}`);
     const res = await POST(
       createRequest("POST", BASE_URL, { body: { ids } }),
       createParams({ teamId: TEAM_ID }),

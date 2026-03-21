@@ -87,7 +87,7 @@ describe("POST /api/passwords/bulk-trash", () => {
   });
 
   it("returns 400 VALIDATION_ERROR when ids exceed 100 limit", async () => {
-    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+    const ids = Array.from({ length: 101 }, (_, i) => `00000000-0000-4000-a000-${String(i + 1).padStart(12, "0")}`);
     const res = await POST(createRequest("POST", URL, { body: { ids } }));
     expect(res.status).toBe(400);
     const json = await res.json();

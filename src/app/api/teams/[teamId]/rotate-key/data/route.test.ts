@@ -62,7 +62,7 @@ function createParams(teamId: string) {
 }
 
 const sampleEntry = {
-  id: "tz4a98xxat96iws9zmbrgj3a",
+  id: "00000000-0000-4000-a000-000000000001",
   encryptedBlob: "blob",
   blobIv: "a".repeat(24),
   blobAuthTag: "b".repeat(32),
@@ -123,7 +123,7 @@ describe("GET /api/teams/[teamId]/rotate-key/data", () => {
     const json = await res.json();
     expect(json.teamKeyVersion).toBe(1);
     expect(json.entries).toHaveLength(1);
-    expect(json.entries[0].id).toBe("tz4a98xxat96iws9zmbrgj3a");
+    expect(json.entries[0].id).toBe("00000000-0000-4000-a000-000000000001");
     expect(json.members).toHaveLength(1);
     expect(json.members[0].userId).toBe("user-1");
     expect(json.members[0].ecdhPublicKey).toBe("public-key-data");

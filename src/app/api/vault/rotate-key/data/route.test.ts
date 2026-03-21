@@ -33,7 +33,7 @@ vi.mock("@/lib/logger", () => ({
 import { GET } from "./route";
 
 const sampleEntry = {
-  id: "tz4a98xxat96iws9zmbrgj3a",
+  id: "00000000-0000-4000-a000-000000000001",
   encryptedBlob: "blob",
   blobIv: "a".repeat(24),
   blobAuthTag: "b".repeat(32),
@@ -45,8 +45,8 @@ const sampleEntry = {
 };
 
 const sampleHistory = {
-  id: "kx7b29yybu97jxt0amcshk4b",
-  entryId: "tz4a98xxat96iws9zmbrgj3a",
+  id: "00000000-0000-4000-a000-000000000002",
+  entryId: "00000000-0000-4000-a000-000000000001",
   encryptedBlob: "blob",
   blobIv: "a".repeat(24),
   blobAuthTag: "b".repeat(32),
@@ -93,9 +93,9 @@ describe("GET /api/vault/rotate-key/data", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.entries).toHaveLength(1);
-    expect(json.entries[0].id).toBe("tz4a98xxat96iws9zmbrgj3a");
+    expect(json.entries[0].id).toBe("00000000-0000-4000-a000-000000000001");
     expect(json.historyEntries).toHaveLength(1);
-    expect(json.historyEntries[0].id).toBe("kx7b29yybu97jxt0amcshk4b");
+    expect(json.historyEntries[0].id).toBe("00000000-0000-4000-a000-000000000002");
     expect(json.ecdhPrivateKey).not.toBeNull();
     expect(json.ecdhPrivateKey.encryptedEcdhPrivateKey).toBe("x".repeat(100));
   });

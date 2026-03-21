@@ -89,7 +89,7 @@ function validMemberKey(userId: string) {
 describe("POST /api/teams/[teamId]/rotate-key", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockAuth.mockResolvedValue({ user: { id: "660e8400-e29b-41d4-a716-446655440001" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockTeamFindUnique.mockResolvedValue({
       teamKeyVersion: 1,
@@ -97,7 +97,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     // Interactive transaction: call the callback with tx proxy
     txMock.team.findUnique.mockResolvedValue({ teamKeyVersion: 1 });
     txMock.team.update.mockResolvedValue({});
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
     txMock.teamPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440100" }]);
     txMock.teamMemberKey.createMany.mockResolvedValue({ count: 1 });
@@ -110,7 +110,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -122,7 +122,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 5, // should be 2
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -132,18 +132,18 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when member key missing (F-26: checked inside tx)", async () => {
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }, { userId: "user-2" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }, { userId: "660e8400-e29b-41d4-a716-446655440002" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")], // missing user-2
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")], // missing user-2
       }),
       createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.details.missingKeyFor).toBe("user-2");
+    expect(json.details.missingKeyFor).toBe("660e8400-e29b-41d4-a716-446655440002");
   });
 
   it("returns 404 when team not found", async () => {
@@ -152,7 +152,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -169,7 +169,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -182,7 +182,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: tooManyEntries,
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -202,18 +202,18 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
   });
 
   it("returns 400 when memberKeys contain non-member userId (F-18/S-22, F-26: inside tx)", async () => {
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1"), validMemberKey("non-member-user")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001"), validMemberKey("660e8400-e29b-41d4-a716-446655440099")],
       }),
       createParams("team-1"),
     );
     const json = await res.json();
     expect(res.status).toBe(400);
-    expect(json.details.unknownUserId).toBe("non-member-user");
+    expect(json.details.unknownUserId).toBe("660e8400-e29b-41d4-a716-446655440099");
   });
 
   it("returns 409 when teamKeyVersion changed concurrently (S-17 optimistic lock)", async () => {
@@ -223,7 +223,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -237,7 +237,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -267,7 +267,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry(uuidEntry)],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -294,7 +294,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -309,7 +309,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440199")],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -323,7 +323,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       createRequest({
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
-        memberKeys: [{ ...validMemberKey("user-1"), wrapVersion: 1 }],
+        memberKeys: [{ ...validMemberKey("660e8400-e29b-41d4-a716-446655440001"), wrapVersion: 1 }],
       }),
       createParams("team-1"),
     );
@@ -343,7 +343,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         newTeamKeyVersion: 2,
         entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
         memberKeys: [{
-          ...validMemberKey("user-1"),
+          ...validMemberKey("660e8400-e29b-41d4-a716-446655440001"),
           keyVersion: 999, // intentionally wrong
         }],
       }),
@@ -367,7 +367,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       { id: "660e8400-e29b-41d4-a716-446655440110" },
     ]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -375,7 +375,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
           validEntry("660e8400-e29b-41d4-a716-446655440100"),
           validEntry("660e8400-e29b-41d4-a716-446655440110"),
         ],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );
@@ -396,7 +396,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       { id: "660e8400-e29b-41d4-a716-446655440101" },
     ]);
     txMock.teamPasswordEntry.updateMany.mockResolvedValue({ count: 1 });
-    txMock.teamMember.findMany.mockResolvedValue([{ userId: "user-1" }]);
+    txMock.teamMember.findMany.mockResolvedValue([{ userId: "660e8400-e29b-41d4-a716-446655440001" }]);
     const res = await POST(
       createRequest({
         newTeamKeyVersion: 2,
@@ -404,7 +404,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
           validEntry("660e8400-e29b-41d4-a716-446655440100"),
           validEntry("660e8400-e29b-41d4-a716-446655440101"),
         ],
-        memberKeys: [validMemberKey("user-1")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
       }),
       createParams("team-1"),
     );

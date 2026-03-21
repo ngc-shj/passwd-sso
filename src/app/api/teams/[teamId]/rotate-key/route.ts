@@ -55,7 +55,7 @@ const rotateKeySchema = z.object({
   entries: z.array(rotateEntrySchema).max(TEAM_ROTATE_ENTRIES_MAX),
   memberKeys: z.array(
     z.object({
-      userId: z.string().min(1),
+      userId: z.string().uuid(),
     }).merge(teamMemberKeySchema)
   ).min(TEAM_ROTATE_MEMBER_KEYS_MIN).max(TEAM_ROTATE_MEMBER_KEYS_MAX),
 });
