@@ -13,6 +13,8 @@ npm run db:push          # Push schema without migration
 npm run db:seed          # Seed data (tsx prisma/seed.ts)
 npm run db:studio        # Prisma Studio GUI
 npm run generate:key     # Generate 256-bit hex master key
+npm run version:bump     # Suggest next version from git log (interactive)
+npm run version:bump -- 0.3.0  # Bump to explicit version
 ```
 
 Admin scripts:
@@ -348,3 +350,71 @@ All password data is encrypted **client-side** before reaching the server. The s
 Five containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration)
 
 Dev override adds: `mailpit` (local email testing on port 8025)
+
+## Versioning
+
+### Rules (SemVer)
+
+Tags use `vX.Y.Z` format. Root `package.json` is the single source of truth — CLI and extension read from it automatically.
+
+| Bump | When | Example |
+|------|------|---------|
+| **Major** (`X`) | Breaking API/schema change, auth flow change, encryption format change | `0.2.1` → `1.0.0` |
+| **Minor** (`Y`) | New feature, new API endpoint, new UI page | `0.2.1` → `0.3.0` |
+| **Patch** (`Z`) | Bug fix, refactor, dependency update, docs, chore | `0.2.1` → `0.2.2` |
+
+While `0.x.y` (pre-1.0), Minor bumps may include breaking changes.
+
+### Commit Prefix → Bump Mapping
+
+| Prefix | Bump | Notes |
+|--------|------|-------|
+| `feat:` | Minor | New functionality |
+| `fix:` | Patch | Bug fix |
+| `refactor:` | Patch | No behavior change |
+| `perf:` | Patch | Performance improvement |
+| `chore:` | Patch | Tooling, deps, config |
+| `docs:` | Patch | Documentation only |
+| `feat!:` / `BREAKING CHANGE` | Major | Breaking change (any prefix with `!`) |
+
+The highest bump wins when multiple commits are included in a release.
+
+### Release Process (release-please)
+
+Automated via [release-please](https://github.com/googleapis/release-please). Feature branches do NOT change version numbers.
+
+```
+feature PR → merge to main → release-please auto-updates Release PR
+                            → merge Release PR → tag + GitHub Release created automatically
+```
+
+How it works:
+1. Every push to main, release-please analyzes new conventional commits
+2. It creates/updates a "Release PR" with version bump + CHANGELOG
+3. The Release PR updates `package.json`, `cli/package.json`, `extension/package.json` automatically
+4. When you merge the Release PR, a GitHub Release + git tag is created
+5. Lock files are synced automatically by the release workflow
+
+Config files: `release-please-config.json`, `.release-please-manifest.json`
+
+### Manual Fallback
+
+If release-please is unavailable, use `scripts/bump-version.sh`:
+
+```bash
+npm run version:bump           # Interactive — suggests version from git log
+npm run version:bump -- 0.3.0  # Explicit version
+```
+
+### Version Locations
+
+| Location | How it gets the version |
+|----------|------------------------|
+| `package.json` | Single source of truth (SSOT) |
+| `cli/package.json` | Synced by `bump-version.sh` |
+| `extension/package.json` | Synced by `bump-version.sh` |
+| `cli/src/index.ts` | Reads root `package.json` at runtime via `createRequire` |
+| `extension/manifest.config.ts` | Imports root `package.json` at build time |
+| `src/lib/openapi-spec.ts` | Independent API version (`1.0.0`) — not synced |
+
+CI `version-check` job validates consistency on every PR.
