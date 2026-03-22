@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    name: "Release Please"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # After release PR is merged and version is bumped,
+      # sync lock files on the release commit
+      - uses: actions/checkout@v4
+        if: steps.release.outputs.release_created == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.release.outputs.release_created == 'true'
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: Sync lock files
+        if: steps.release.outputs.release_created == 'true'
+        run: |
+          for DIR in . cli extension; do
+            if [ -f "$DIR/package-lock.json" ]; then
+              (cd "$DIR" && npm install --package-lock-only --ignore-scripts --loglevel=error)
+              echo "Synced: $DIR/package-lock.json"
+            fi
+          done
+
+          # Commit lock file changes if any
+          if ! git diff --quiet; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json cli/package-lock.json extension/package-lock.json
+            git commit -m "chore: sync lock files for ${{ steps.release.outputs.tag_name }}"
+            git push
+          fi

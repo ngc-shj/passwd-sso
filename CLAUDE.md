@@ -379,42 +379,31 @@ While `0.x.y` (pre-1.0), Minor bumps may include breaking changes.
 
 The highest bump wins when multiple commits are included in a release.
 
-### When to Bump
+### Release Process (release-please)
 
-Version bumps happen **after feature PRs are merged to main**, via a dedicated bump PR. Feature branches do NOT change version numbers.
+Automated via [release-please](https://github.com/googleapis/release-please). Feature branches do NOT change version numbers.
 
 ```
-feature PR → merge to main → bump PR (chore/bump-vX.Y.Z) → merge → tag on main
+feature PR → merge to main → release-please auto-updates Release PR
+                            → merge Release PR → tag + GitHub Release created automatically
 ```
 
-This avoids version conflicts when multiple PRs are in flight, and respects the no-direct-commit-to-main rule.
+How it works:
+1. Every push to main, release-please analyzes new conventional commits
+2. It creates/updates a "Release PR" with version bump + CHANGELOG
+3. The Release PR updates `package.json`, `cli/package.json`, `extension/package.json` automatically
+4. When you merge the Release PR, a GitHub Release + git tag is created
+5. Lock files are synced automatically by the release workflow
 
-### Release Process
+Config files: `release-please-config.json`, `.release-please-manifest.json`
+
+### Manual Fallback
+
+If release-please is unavailable, use `scripts/bump-version.sh`:
 
 ```bash
-# 1. Start from latest main
-git checkout main && git pull
-
-# 2. Create bump branch
-git checkout -b chore/bump-vX.Y.Z
-
-# 3. Auto-suggest version from git log (interactive)
-npm run version:bump
-# Or specify explicitly: npm run version:bump -- 0.3.0
-
-# 4. Commit
-git add package.json cli/package.json extension/package.json
-git add package-lock.json cli/package-lock.json extension/package-lock.json
-git commit -m 'chore: bump version to X.Y.Z'
-
-# 5. Push and create PR
-git push origin chore/bump-vX.Y.Z
-gh pr create --title 'chore: bump version to X.Y.Z' --body 'Version bump'
-
-# 6. After PR merge, tag on main
-git checkout main && git pull
-git tag vX.Y.Z
-git push origin main --tags
+npm run version:bump           # Interactive — suggests version from git log
+npm run version:bump -- 0.3.0  # Explicit version
 ```
 
 ### Version Locations
