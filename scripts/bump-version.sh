@@ -5,7 +5,7 @@ set -euo pipefail
 #   scripts/bump-version.sh           # Auto-suggest version from git log (interactive)
 #   scripts/bump-version.sh <X.Y.Z>   # Bump to explicit version
 #
-# Updates version in all package.json files, syncs lock files, and creates a git tag.
+# Updates version in all package.json files and syncs lock files.
 # Only strict X.Y.Z format is accepted (Chrome manifest compatibility).
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,7 +21,7 @@ validate_version() {
 }
 
 current_version() {
-  node -p "require('$ROOT/package.json').version"
+  node -e "process.stdout.write(require(process.argv[1]).version)" "$ROOT/package.json"
 }
 
 latest_tag() {
@@ -49,7 +49,7 @@ suggest_bump() {
     return
   fi
 
-  commits=$(git -C "$ROOT" log "$tag"..HEAD --format="%s" 2>/dev/null || true)
+  commits=$(git -C "$ROOT" log "$tag"..HEAD --format="%B" 2>/dev/null || true)
   if [ -z "$commits" ]; then
     echo "No new commits since $tag" >&2
     echo "none"

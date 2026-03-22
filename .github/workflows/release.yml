@@ -17,23 +17,28 @@ jobs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
         id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # After release PR is merged and version is bumped,
-      # sync lock files on the release commit
+  # Sync lock files after a release is created (via PR, not direct push)
+  sync-lock-files:
+    name: "Sync lock files"
+    runs-on: ubuntu-latest
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    timeout-minutes: 5
+    env:
+      TAG_NAME: ${{ needs.release-please.outputs.tag_name }}
+    steps:
       - uses: actions/checkout@v4
-        if: steps.release.outputs.release_created == 'true'
 
       - uses: actions/setup-node@v4
-        if: steps.release.outputs.release_created == 'true'
         with:
           node-version-file: ".nvmrc"
 
-      - name: Sync lock files
-        if: steps.release.outputs.release_created == 'true'
+      - name: Update lock files
         run: |
           for DIR in . cli extension; do
             if [ -f "$DIR/package-lock.json" ]; then
@@ -42,11 +47,25 @@ jobs:
             fi
           done
 
-          # Commit lock file changes if any
-          if ! git diff --quiet; then
-            git config user.name "github-actions[bot]"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json cli/package-lock.json extension/package-lock.json
-            git commit -m "chore: sync lock files for ${{ steps.release.outputs.tag_name }}"
-            git push
+      - name: Create lock file sync PR
+        if: ${{ !cancelled() }}
+        run: |
+          if git diff --quiet; then
+            echo "No lock file changes needed"
+            exit 0
           fi
+
+          BRANCH="chore/sync-lock-files-${TAG_NAME}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add package-lock.json cli/package-lock.json extension/package-lock.json
+          git commit -m "chore: sync lock files for ${TAG_NAME}"
+          git push origin "$BRANCH"
+          gh pr create \
+            --title "chore: sync lock files for ${TAG_NAME}" \
+            --body "Automated lock file sync after release ${TAG_NAME}." \
+            --base main \
+            --head "$BRANCH"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
