@@ -393,8 +393,6 @@ How it works:
 2. It creates/updates a "Release PR" with version bump + CHANGELOG
 3. The Release PR updates `package.json`, `cli/package.json`, `extension/package.json` automatically
 4. When you merge the Release PR, a GitHub Release + git tag is created
-5. Lock files are synced automatically by the release workflow
-
 Config files: `release-please-config.json`, `.release-please-manifest.json`
 
 ### Manual Fallback
