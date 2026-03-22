@@ -95,14 +95,14 @@ describe("POST /api/maintenance/purge-history", () => {
   // ─── Auth ──────────────────────────────────────────────────
 
   it("returns 401 without authorization header", async () => {
-    const req = createRequest({ operatorId: "user-1" });
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440001" });
     const res = await POST(req);
     expect(res.status).toBe(401);
   });
 
   it("returns 401 with invalid (non-hex) token", async () => {
     const req = createRequest(
-      { operatorId: "user-1" },
+      { operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       "not-a-hex-token-at-all-should-fail!!",
     );
     const res = await POST(req);
@@ -111,7 +111,7 @@ describe("POST /api/maintenance/purge-history", () => {
 
   it("returns 401 when ADMIN_API_TOKEN is not set", async () => {
     setEnv({ ADMIN_API_TOKEN: undefined });
-    const req = createRequest({ operatorId: "user-1" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440001" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(401);
   });
@@ -120,7 +120,7 @@ describe("POST /api/maintenance/purge-history", () => {
 
   it("returns 429 when rate limited", async () => {
     mockCheck.mockResolvedValue({ allowed: false });
-    const req = createRequest({ operatorId: "user-1" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440001" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(429);
   });
@@ -135,7 +135,7 @@ describe("POST /api/maintenance/purge-history", () => {
 
   it("returns 400 when operatorId does not match an active admin", async () => {
     mockTenantMemberFindFirst.mockResolvedValue(null);
-    const req = createRequest({ operatorId: "nonexistent" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440099" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
@@ -145,7 +145,7 @@ describe("POST /api/maintenance/purge-history", () => {
   it("returns 400 when operatorId exists but has MEMBER role", async () => {
     // findFirst with role filter returns null for MEMBER
     mockTenantMemberFindFirst.mockResolvedValue(null);
-    const req = createRequest({ operatorId: "member-user" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440002" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(400);
 
@@ -157,7 +157,7 @@ describe("POST /api/maintenance/purge-history", () => {
   it("returns 400 when operatorId is deactivated admin", async () => {
     // findFirst with deactivatedAt: null filter returns null for deactivated
     mockTenantMemberFindFirst.mockResolvedValue(null);
-    const req = createRequest({ operatorId: "deactivated-admin" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440003" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(400);
 
@@ -172,7 +172,7 @@ describe("POST /api/maintenance/purge-history", () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockDeleteMany.mockResolvedValue({ count: 42 });
 
-    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
@@ -184,7 +184,7 @@ describe("POST /api/maintenance/purge-history", () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockDeleteMany.mockResolvedValue({ count: 0 });
 
-    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     await POST(req);
 
     const where = mockDeleteMany.mock.calls[0][0].where;
@@ -196,7 +196,7 @@ describe("POST /api/maintenance/purge-history", () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockDeleteMany.mockResolvedValue({ count: 0 });
 
-    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     await POST(req);
 
     const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
@@ -210,7 +210,7 @@ describe("POST /api/maintenance/purge-history", () => {
     mockDeleteMany.mockResolvedValue({ count: 10 });
 
     const req = createRequest(
-      { operatorId: "admin-1", retentionDays: 30 },
+      { operatorId: "660e8400-e29b-41d4-a716-446655440010", retentionDays: 30 },
       ADMIN_TOKEN,
     );
     await POST(req);
@@ -228,7 +228,7 @@ describe("POST /api/maintenance/purge-history", () => {
     mockCount.mockResolvedValue(15);
 
     const req = createRequest(
-      { operatorId: "admin-1", dryRun: true },
+      { operatorId: "660e8400-e29b-41d4-a716-446655440010", dryRun: true },
       ADMIN_TOKEN,
     );
     const res = await POST(req);
@@ -254,12 +254,12 @@ describe("POST /api/maintenance/purge-history", () => {
   it("checks rate limit after auth (429 only for authenticated requests)", async () => {
     mockCheck.mockResolvedValue({ allowed: false });
     // Unauthenticated request should get 401, not 429
-    const unauthReq = createRequest({ operatorId: "admin-1" });
+    const unauthReq = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" });
     const unauthRes = await POST(unauthReq);
     expect(unauthRes.status).toBe(401);
 
     // Authenticated request should get 429
-    const authReq = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const authReq = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     const authRes = await POST(authReq);
     expect(authRes.status).toBe(429);
   });
@@ -270,14 +270,14 @@ describe("POST /api/maintenance/purge-history", () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockDeleteMany.mockResolvedValue({ count: 5 });
 
-    const req = createRequest({ operatorId: "admin-1" }, ADMIN_TOKEN);
+    const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     await POST(req);
 
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: "TENANT",
         action: "HISTORY_PURGE",
-        userId: "admin-1",
+        userId: "660e8400-e29b-41d4-a716-446655440010",
         tenantId: "tenant-1",
         metadata: expect.objectContaining({
           purgedCount: 5,
@@ -293,7 +293,7 @@ describe("POST /api/maintenance/purge-history", () => {
     mockCount.mockResolvedValue(3);
 
     const req = createRequest(
-      { operatorId: "admin-1", dryRun: true },
+      { operatorId: "660e8400-e29b-41d4-a716-446655440010", dryRun: true },
       ADMIN_TOKEN,
     );
     await POST(req);

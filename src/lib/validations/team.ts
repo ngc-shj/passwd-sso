@@ -52,13 +52,13 @@ export const teamMemberKeySchema = z.object({
 });
 
 export const createTeamE2ESchema = createTeamSchema.extend({
-  id: z.string().uuid().optional(),
+  id: z.string().uuid(),
   teamMemberKey: teamMemberKeySchema,
 });
 
 /** Schema for E2E team password creation — client sends pre-encrypted blobs */
 export const createTeamE2EPasswordSchema = z.object({
-  id: z.string().uuid().optional(),
+  id: z.string().uuid(),
   encryptedBlob: encryptedFieldSchema,
   encryptedOverview: encryptedFieldSchema,
   aadVersion: z.number().int().min(1),
@@ -66,8 +66,8 @@ export const createTeamE2EPasswordSchema = z.object({
   itemKeyVersion: z.number().int().min(0).default(0),
   encryptedItemKey: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional().default(ENTRY_TYPE.LOGIN),
-  tagIds: z.array(z.string().cuid()).optional(),
-  teamFolderId: z.string().cuid().nullable().optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
+  teamFolderId: z.string().uuid().nullable().optional(),
   requireReprompt: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
 }).refine(
@@ -87,8 +87,8 @@ export const updateTeamE2EPasswordSchema = z.object({
   teamKeyVersion: z.number().int().min(1).optional(),
   itemKeyVersion: z.number().int().min(0).optional(),
   encryptedItemKey: encryptedFieldSchema.optional(),
-  tagIds: z.array(z.string().cuid()).optional(),
-  teamFolderId: z.string().cuid().nullable().optional(),
+  tagIds: z.array(z.string().uuid()).optional(),
+  teamFolderId: z.string().uuid().nullable().optional(),
   isArchived: z.boolean().optional(),
   requireReprompt: z.boolean().optional(),
   expiresAt: z.string().datetime({ offset: true }).optional().nullable(),
@@ -137,7 +137,7 @@ export const inviteSchema = z.object({
 });
 
 export const addMemberSchema = z.object({
-  userId: z.string().cuid(),
+  userId: z.string().uuid(),
   role: z.enum(TEAM_INVITE_ROLE_VALUES).default(TEAM_ROLE.MEMBER),
 });
 
@@ -157,7 +157,7 @@ export const createTeamTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
-  parentId: z.string().cuid().optional().nullable(),
+  parentId: z.string().uuid().optional().nullable(),
 });
 
 export const updateTeamTagSchema = z.object({
@@ -168,7 +168,7 @@ export const updateTeamTagSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
-  parentId: z.string().cuid().optional().nullable(),
+  parentId: z.string().uuid().optional().nullable(),
 });
 
 export const invitationAcceptSchema = z.object({

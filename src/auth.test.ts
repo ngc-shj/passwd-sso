@@ -154,11 +154,11 @@ describe("ensureTenantMembershipForSignIn", () => {
     mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
     mockSlugifyTenant.mockReturnValue("tenant-acme");
     mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string; externalId?: string } }) => {
-      if (where.externalId === "tenant-acme") return { id: "cuid_acme_1" };
-      if (where.id === "cuid_bootstrap_1") return { isBootstrap: true };
+      if (where.externalId === "tenant-acme") return { id: "00000000-0000-4000-a000-000000000001" };
+      if (where.id === "00000000-0000-4000-a000-000000000002") return { isBootstrap: true };
       return null;
     });
-    mockPrisma.tenant.create.mockResolvedValue({ id: "cuid_acme_1" });
+    mockPrisma.tenant.create.mockResolvedValue({ id: "00000000-0000-4000-a000-000000000001" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({});
     mockPrisma.tenantMember.deleteMany.mockResolvedValue({ count: 1 });
@@ -212,7 +212,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("allows sign-in when tenant claim is missing but membership exists", async () => {
     mockExtractTenantClaimValue.mockReturnValue(null);
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_acme_1" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000001" }]);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, null);
 
@@ -230,7 +230,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 
   it("migrates bootstrap tenant identified by bootstrap slug", async () => {
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_bootstrap_1" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000002" }]);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -238,55 +238,55 @@ describe("ensureTenantMembershipForSignIn", () => {
     expect(mockPrisma.$transaction).toHaveBeenCalledTimes(1);
     expect(mockPrisma.user.update).toHaveBeenCalledWith({
       where: { id: "user-1" },
-      data: { tenantId: "cuid_acme_1" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.account.updateMany).toHaveBeenCalledWith({
       where: { userId: "user-1" },
-      data: { tenantId: "cuid_acme_1" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     // Verify all tenant-scoped data tables are migrated
     expect(mockPrisma.passwordEntry.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { userId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     for (const model of ["tag", "folder", "session", "extensionToken", "auditLog"] as const) {
       expect(mockPrisma[model].updateMany).toHaveBeenCalledWith({
-        where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
-        data: { tenantId: "cuid_acme_1" },
+        where: { userId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
+        data: { tenantId: "00000000-0000-4000-a000-000000000001" },
       });
     }
     // passwordEntryHistory has no userId — filtered by tenantId only
     expect(mockPrisma.passwordEntryHistory.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.vaultKey.updateMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { userId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     // Emergency access, password shares, attachments
     expect(mockPrisma.emergencyAccessGrant.updateMany).toHaveBeenCalledWith({
-      where: { ownerId: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { ownerId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.emergencyAccessKeyPair.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.passwordShare.updateMany).toHaveBeenCalledWith({
-      where: { createdById: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { createdById: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.shareAccessLog.updateMany).toHaveBeenCalledWith({
-      where: { tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.attachment.updateMany).toHaveBeenCalledWith({
-      where: { createdById: "user-1", tenantId: "cuid_bootstrap_1" },
-      data: { tenantId: "cuid_acme_1" },
+      where: { createdById: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
+      data: { tenantId: "00000000-0000-4000-a000-000000000001" },
     });
     expect(mockPrisma.tenantMember.deleteMany).toHaveBeenCalledWith({
-      where: { userId: "user-1", tenantId: "cuid_bootstrap_1" },
+      where: { userId: "user-1", tenantId: "00000000-0000-4000-a000-000000000002" },
     });
     // Bootstrap migration returns early — no redundant upsert
     expect(mockPrisma.tenantMember.upsert).toHaveBeenCalledTimes(1);
@@ -294,7 +294,7 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 
   it("keeps existing tenant when already in target tenant", async () => {
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_acme_1" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000001" }]);
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -311,7 +311,7 @@ describe("ensureTenantMembershipForSignIn", () => {
 
   it("creates tenant with externalId (not id) in data", async () => {
     mockPrisma.tenant.findUnique.mockResolvedValue(null);
-    mockPrisma.tenant.create.mockResolvedValue({ id: "cuid_acme_1" });
+    mockPrisma.tenant.create.mockResolvedValue({ id: "00000000-0000-4000-a000-000000000001" });
 
     await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -331,7 +331,7 @@ describe("ensureTenantMembershipForSignIn", () => {
     const { Prisma } = await import("@prisma/client");
     mockPrisma.tenant.findUnique
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "cuid_acme_1" });
+      .mockResolvedValueOnce({ id: "00000000-0000-4000-a000-000000000001" });
     mockPrisma.tenant.create.mockRejectedValueOnce(
       new Prisma.PrismaClientKnownRequestError("unique", {
         code: "P2002",
@@ -354,10 +354,10 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 
   it("rejects migration when isBootstrap is false even if slug resembles bootstrap", async () => {
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_fake_boot" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000003" }]);
     mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string; externalId?: string } }) => {
-      if (where.externalId === "tenant-acme") return { id: "cuid_acme_1" };
-      if (where.id === "cuid_fake_boot") return { isBootstrap: false };
+      if (where.externalId === "tenant-acme") return { id: "00000000-0000-4000-a000-000000000001" };
+      if (where.id === "00000000-0000-4000-a000-000000000003") return { isBootstrap: false };
       return null;
     });
 
@@ -368,10 +368,10 @@ describe("ensureTenantMembershipForSignIn", () => {
   });
 
   it("allows migration when isBootstrap is true regardless of slug pattern", async () => {
-    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "cuid_odd_slug" }]);
+    mockPrisma.tenantMember.findMany.mockResolvedValue([{ tenantId: "00000000-0000-4000-a000-000000000004" }]);
     mockPrisma.tenant.findUnique.mockImplementation(async ({ where }: { where: { id?: string; externalId?: string } }) => {
-      if (where.externalId === "tenant-acme") return { id: "cuid_acme_1" };
-      if (where.id === "cuid_odd_slug") return { isBootstrap: true };
+      if (where.externalId === "tenant-acme") return { id: "00000000-0000-4000-a000-000000000001" };
+      if (where.id === "00000000-0000-4000-a000-000000000004") return { isBootstrap: true };
       return null;
     });
 
@@ -394,7 +394,7 @@ describe("ensureTenantMembershipForSignIn", () => {
         }),
       )
       // Second create with fallback slug succeeds
-      .mockResolvedValueOnce({ id: "cuid_acme_2" });
+      .mockResolvedValueOnce({ id: "00000000-0000-4000-a000-000000000005" });
 
     const ok = await ensureTenantMembershipForSignIn("user-1", null, {});
 
@@ -534,7 +534,7 @@ describe("signIn callback", () => {
     mockPrisma.user.findUnique.mockResolvedValue({ id: "real-db-id" });
     mockExtractTenantClaimValue.mockReturnValue("tenant-acme");
     mockSlugifyTenant.mockReturnValue("tenant-acme");
-    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "cuid_acme_1" });
+    mockPrisma.tenant.findUnique.mockResolvedValue({ id: "00000000-0000-4000-a000-000000000001" });
     mockPrisma.tenantMember.findMany.mockResolvedValue([]);
     mockPrisma.tenantMember.upsert.mockResolvedValue({});
 

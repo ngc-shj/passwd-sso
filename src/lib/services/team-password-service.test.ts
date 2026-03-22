@@ -75,6 +75,10 @@ const USER_ID = "user-1";
 const TENANT_ID = "tenant-1";
 const FOLDER_ID = "folder-1";
 
+// UUID v4 variants for backward-compatibility coverage
+const TEAM_ID_UUID = "550e8400-e29b-41d4-a716-446655440000";
+const PASSWORD_ID_UUID = "550e8400-e29b-41d4-a716-446655440001";
+
 const ENCRYPTED_BLOB = { ciphertext: "blob-ct", iv: "blob-iv", authTag: "blob-tag" };
 const ENCRYPTED_OVERVIEW = { ciphertext: "ov-ct", iv: "ov-iv", authTag: "ov-tag" };
 const ENCRYPTED_ITEM_KEY = { ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-tag" };
@@ -222,6 +226,24 @@ describe("createTeamPassword", () => {
 
     const createCall = mockTeamPasswordEntryCreate.mock.calls[0][0];
     expect(createCall.data.id).toBe(clientId);
+  });
+
+  it("creates entry with UUID v4 teamId and entryId", async () => {
+    mockTeamFindUnique.mockResolvedValue(DEFAULT_TEAM);
+    const created = { id: PASSWORD_ID_UUID, tags: [] };
+    mockTeamPasswordEntryCreate.mockResolvedValue(created);
+
+    const result = await createTeamPassword(TEAM_ID_UUID, {
+      ...BASE_CREATE_INPUT,
+      id: PASSWORD_ID_UUID,
+    });
+
+    expect(result).toBe(created);
+    const createCall = mockTeamPasswordEntryCreate.mock.calls[0][0];
+    expect(createCall.data.id).toBe(PASSWORD_ID_UUID);
+    expect(mockTeamFindUnique).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: TEAM_ID_UUID } })
+    );
   });
 });
 

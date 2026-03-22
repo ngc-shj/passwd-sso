@@ -50,31 +50,31 @@ export async function closePool(): Promise<void> {
 export const TEST_USERS = {
   /** Vault fully set up — general unlock/CRUD/lock/relock/locale tests */
   vaultReady: {
-    id: "e2e-user-vault-ready",
+    id: "00000000-0000-4000-e2e0-000000000001",
     email: "e2e-vault-ready@test.local",
     name: "E2E Vault Ready",
   },
   /** No vault setup — setup wizard tests */
   fresh: {
-    id: "e2e-user-fresh",
+    id: "00000000-0000-4000-e2e0-000000000002",
     email: "e2e-fresh@test.local",
     name: "E2E Fresh User",
   },
   /** Vault set up — dedicated to lockout test (destructive: triggers account lock) */
   lockout: {
-    id: "e2e-user-lockout",
+    id: "00000000-0000-4000-e2e0-000000000003",
     email: "e2e-lockout@test.local",
     name: "E2E Lockout User",
   },
   /** Vault set up — dedicated to vault-reset test (destructive: deletes vault) */
   reset: {
-    id: "e2e-user-reset",
+    id: "00000000-0000-4000-e2e0-000000000004",
     email: "e2e-reset@test.local",
     name: "E2E Reset User",
   },
   /** Vault set up — dedicated to vault-reset validation test (non-destructive) */
   resetValidation: {
-    id: "e2e-user-reset-validation",
+    id: "00000000-0000-4000-e2e0-000000000005",
     email: "e2e-reset-validation@test.local",
     name: "E2E Reset Validation User",
   },
@@ -157,7 +157,7 @@ export async function seedSession(
      VALUES ($1, $2, $3, $4)
      ON CONFLICT (session_token) DO NOTHING`,
     [
-      `e2e-session-${userId}`,
+      crypto.randomUUID(),
       sessionToken,
       userId,
       expires.toISOString(),
@@ -182,7 +182,7 @@ export async function seedVaultKey(
     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     ON CONFLICT (id) DO NOTHING`,
     [
-      `e2e-vaultkey-${userId}`,
+      crypto.randomUUID(),
       userId,
       1,
       verificationArtifact.ciphertext,

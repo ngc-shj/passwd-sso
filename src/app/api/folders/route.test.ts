@@ -144,7 +144,7 @@ describe("POST /api/folders", () => {
 
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/folders", {
-        body: { name: "Child", parentId: "cm000000000000000other01" },
+        body: { name: "Child", parentId: "00000000-0000-4000-a000-000000000001" },
       }),
     );
     expect(res.status).toBe(404);
@@ -159,7 +159,7 @@ describe("POST /api/folders", () => {
 
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/folders", {
-        body: { name: "Deep", parentId: "cm000000000000000000deep1" },
+        body: { name: "Deep", parentId: "00000000-0000-4000-a000-000000000002" },
       }),
     );
     expect(res.status).toBe(400);
@@ -185,7 +185,7 @@ describe("POST /api/folders", () => {
 
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/folders", {
-        body: { name: "SubFolder", parentId: "cm000000000000000parent1" },
+        body: { name: "SubFolder", parentId: "00000000-0000-4000-a000-000000000003" },
       }),
     );
     expect(res.status).toBe(409);
@@ -226,7 +226,7 @@ describe("POST /api/folders", () => {
     mockPrismaFolder.create.mockResolvedValue({
       id: "child-folder-id",
       name: "SubFolder",
-      parentId: "cm000000000000000parent1",
+      parentId: "00000000-0000-4000-a000-000000000003",
       sortOrder: 5,
       createdAt: now,
       updatedAt: now,
@@ -234,12 +234,12 @@ describe("POST /api/folders", () => {
 
     const res = await POST(
       createRequest("POST", "http://localhost:3000/api/folders", {
-        body: { name: "SubFolder", parentId: "cm000000000000000parent1", sortOrder: 5 },
+        body: { name: "SubFolder", parentId: "00000000-0000-4000-a000-000000000003", sortOrder: 5 },
       }),
     );
     const json = await res.json();
     expect(res.status).toBe(201);
-    expect(json.parentId).toBe("cm000000000000000parent1");
+    expect(json.parentId).toBe("00000000-0000-4000-a000-000000000003");
     expect(json.sortOrder).toBe(5);
   });
 });

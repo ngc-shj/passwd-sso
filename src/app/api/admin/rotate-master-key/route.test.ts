@@ -102,14 +102,14 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("returns 401 without authorization header", async () => {
-    const req = createRequest({ targetVersion: 2, operatorId: "user-1" });
+    const req = createRequest({ targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" });
     const res = await POST(req);
     expect(res.status).toBe(401);
   });
 
   it("returns 401 with invalid token", async () => {
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       "0".repeat(64)
     );
     const res = await POST(req);
@@ -119,7 +119,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   it("returns 429 when rate limited", async () => {
     mockCheck.mockResolvedValue({ allowed: false });
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -134,7 +134,7 @@ describe("POST /api/admin/rotate-master-key", () => {
 
   it("returns 400 when targetVersion does not match current", async () => {
     const req = createRequest(
-      { targetVersion: 3, operatorId: "user-1" },
+      { targetVersion: 3, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -146,7 +146,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   it("returns 400 when operatorId does not exist", async () => {
     mockUserFindUnique.mockResolvedValue(null);
     const req = createRequest(
-      { targetVersion: 2, operatorId: "nonexistent" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440099" },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -156,10 +156,10 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("returns 200 with targetVersion and revokedShares=0 when no shares to revoke", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1", tenantId: "tenant-1" });
+    mockUserFindUnique.mockResolvedValue({ id: "660e8400-e29b-41d4-a716-446655440001", tenantId: "tenant-1" });
 
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -175,7 +175,7 @@ describe("POST /api/admin/rotate-master-key", () => {
         scope: "TENANT",
         tenantId: "tenant-1",
         action: "MASTER_KEY_ROTATION",
-        userId: "user-1",
+        userId: "660e8400-e29b-41d4-a716-446655440001",
         metadata: expect.objectContaining({
           targetVersion: 2,
           revokedShares: 0,
@@ -185,11 +185,11 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("revokes old shares when revokeShares is true", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1", tenantId: "tenant-1" });
+    mockUserFindUnique.mockResolvedValue({ id: "660e8400-e29b-41d4-a716-446655440001", tenantId: "tenant-1" });
     mockShareUpdateMany.mockResolvedValue({ count: 3 });
 
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1", revokeShares: true },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001", revokeShares: true },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -209,10 +209,10 @@ describe("POST /api/admin/rotate-master-key", () => {
   });
 
   it("does not call shareUpdateMany when revokeShares is false", async () => {
-    mockUserFindUnique.mockResolvedValue({ id: "user-1", tenantId: "tenant-1" });
+    mockUserFindUnique.mockResolvedValue({ id: "660e8400-e29b-41d4-a716-446655440001", tenantId: "tenant-1" });
 
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1", revokeShares: false },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001", revokeShares: false },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -223,7 +223,7 @@ describe("POST /api/admin/rotate-master-key", () => {
 
   it("returns 401 with non-hex token", async () => {
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       "not-a-hex-token-at-all-should-fail-immediately!!"
     );
     const res = await POST(req);
@@ -233,7 +233,7 @@ describe("POST /api/admin/rotate-master-key", () => {
   it("returns 401 when ADMIN_API_TOKEN is not set", async () => {
     setEnv({ ADMIN_API_TOKEN: undefined });
     const req = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       ADMIN_TOKEN
     );
     const res = await POST(req);
@@ -244,14 +244,14 @@ describe("POST /api/admin/rotate-master-key", () => {
     mockCheck.mockResolvedValue({ allowed: false });
     // Unauthenticated request should get 401, not 429
     const unauthReq = createRequest(
-      { targetVersion: 2, operatorId: "user-1" }
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" }
     );
     const unauthRes = await POST(unauthReq);
     expect(unauthRes.status).toBe(401);
 
     // Authenticated request should get 429
     const authReq = createRequest(
-      { targetVersion: 2, operatorId: "user-1" },
+      { targetVersion: 2, operatorId: "660e8400-e29b-41d4-a716-446655440001" },
       ADMIN_TOKEN
     );
     const authRes = await POST(authReq);

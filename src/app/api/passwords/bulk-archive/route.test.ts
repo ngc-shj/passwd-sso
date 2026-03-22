@@ -44,7 +44,7 @@ describe("POST /api/passwords/bulk-archive", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+    mockFindMany.mockResolvedValue([{ id: "00000000-0000-4000-a000-000000000001" }, { id: "00000000-0000-4000-a000-000000000002" }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
     mockAuditCreate.mockResolvedValue({});
     mockAuditCreateMany.mockResolvedValue({ count: 0 });
@@ -87,7 +87,7 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("returns 400 VALIDATION_ERROR when ids exceed 100 limit", async () => {
-    const ids = Array.from({ length: 101 }, (_, i) => `id-${i}`);
+    const ids = Array.from({ length: 101 }, (_, i) => `00000000-0000-4000-a000-${String(i + 1).padStart(12, "0")}`);
     const res = await POST(createRequest("POST", URL, { body: { ids } }));
     expect(res.status).toBe(400);
     const json = await res.json();
@@ -95,11 +95,13 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("archives entries when operation is omitted (defaults to archive)", async () => {
-    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
+    mockFindMany.mockResolvedValue([{ id: id1 }, { id: id2 }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const res = await POST(createRequest("POST", URL, {
-      body: { ids: ["p1", "p2"] },
+      body: { ids: [id1, id2] },
     }));
     const json = await res.json();
 
@@ -115,7 +117,7 @@ describe("POST /api/passwords/bulk-archive", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           userId: "user-1",
-          id: { in: ["p1", "p2"] },
+          id: { in: [id1, id2] },
           deletedAt: null,
           isArchived: false,
         }),
@@ -127,7 +129,7 @@ describe("POST /api/passwords/bulk-archive", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           userId: "user-1",
-          id: { in: ["p1", "p2"] },
+          id: { in: [id1, id2] },
           deletedAt: null,
           isArchived: false,
         }),
@@ -138,12 +140,46 @@ describe("POST /api/passwords/bulk-archive", () => {
     );
   });
 
-  it("unarchives entries when operation is 'unarchive'", async () => {
-    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+  it("archives entries with UUID v4 IDs", async () => {
+    const uuid1 = "550e8400-e29b-41d4-a716-446655440000";
+    const uuid2 = "550e8400-e29b-41d4-a716-446655440001";
+    mockFindMany.mockResolvedValue([{ id: uuid1 }, { id: uuid2 }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     const res = await POST(createRequest("POST", URL, {
-      body: { ids: ["p1", "p2"], operation: "unarchive" },
+      body: { ids: [uuid1, uuid2] },
+    }));
+    const json = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(json.operation).toBe("archive");
+    expect(json.processedCount).toBe(2);
+    expect(json.archivedCount).toBe(2);
+    expect(mockFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: [uuid1, uuid2] },
+        }),
+      })
+    );
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: { in: [uuid1, uuid2] },
+        }),
+      })
+    );
+  });
+
+  it("unarchives entries when operation is 'unarchive'", async () => {
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
+    mockFindMany.mockResolvedValue([{ id: id1 }, { id: id2 }]);
+    mockUpdateMany.mockResolvedValue({ count: 2 });
+
+    const res = await POST(createRequest("POST", URL, {
+      body: { ids: [id1, id2], operation: "unarchive" },
     }));
     const json = await res.json();
 
@@ -177,10 +213,12 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("logs ENTRY_BULK_ARCHIVE for archive operation", async () => {
-    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }]);
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
+    mockFindMany.mockResolvedValue([{ id: id1 }, { id: id2 }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
-    await POST(createRequest("POST", URL, { body: { ids: ["p1", "p2"] } }));
+    await POST(createRequest("POST", URL, { body: { ids: [id1, id2] } }));
 
     // 1 parent log via logAudit (create), per-entry logs via logAuditBatch (createMany)
     expect(mockAuditCreate).toHaveBeenCalledTimes(1);
@@ -196,7 +234,7 @@ describe("POST /api/passwords/bulk-archive", () => {
             processedCount: 2,
             archivedCount: 2,
             unarchivedCount: 0,
-            entryIds: ["p1", "p2"],
+            entryIds: [id1, id2],
           }),
         }),
       })
@@ -209,7 +247,7 @@ describe("POST /api/passwords/bulk-archive", () => {
         data: expect.arrayContaining([
           expect.objectContaining({
             action: "ENTRY_UPDATE",
-            targetId: "p1",
+            targetId: id1,
             metadata: expect.objectContaining({
               source: "bulk-archive",
               parentAction: "ENTRY_BULK_ARCHIVE",
@@ -217,7 +255,7 @@ describe("POST /api/passwords/bulk-archive", () => {
           }),
           expect.objectContaining({
             action: "ENTRY_UPDATE",
-            targetId: "p2",
+            targetId: id2,
             metadata: expect.objectContaining({
               source: "bulk-archive",
               parentAction: "ENTRY_BULK_ARCHIVE",
@@ -229,11 +267,12 @@ describe("POST /api/passwords/bulk-archive", () => {
   });
 
   it("logs ENTRY_BULK_UNARCHIVE for unarchive operation", async () => {
-    mockFindMany.mockResolvedValue([{ id: "p1" }]);
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    mockFindMany.mockResolvedValue([{ id: id1 }]);
     mockUpdateMany.mockResolvedValue({ count: 1 });
 
     await POST(createRequest("POST", URL, {
-      body: { ids: ["p1"], operation: "unarchive" },
+      body: { ids: [id1], operation: "unarchive" },
     }));
 
     // 1 parent log via logAudit (create), per-entry logs via logAuditBatch (createMany)
@@ -257,7 +296,7 @@ describe("POST /api/passwords/bulk-archive", () => {
         data: expect.arrayContaining([
           expect.objectContaining({
             action: "ENTRY_UPDATE",
-            targetId: "p1",
+            targetId: id1,
             metadata: expect.objectContaining({
               source: "bulk-archive",
               parentAction: "ENTRY_BULK_UNARCHIVE",
@@ -271,11 +310,14 @@ describe("POST /api/passwords/bulk-archive", () => {
   it("uses transaction findMany entry IDs for per-entry audit logs", async () => {
     // findMany inside transaction returns 3 entries, updateMany reports count: 2
     // entryIds for audit come from the findMany result (not updateMany count)
-    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }, { id: "p3" }]);
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
+    const id3 = "00000000-0000-4000-a000-000000000003";
+    mockFindMany.mockResolvedValue([{ id: id1 }, { id: id2 }, { id: id3 }]);
     mockUpdateMany.mockResolvedValue({ count: 2 });
 
     await POST(createRequest("POST", URL, {
-      body: { ids: ["p1", "p2", "p3"] },
+      body: { ids: [id1, id2, id3] },
     }));
 
     // 1 parent via logAudit (create), 3 per-entry batched via logAuditBatch (createMany)
@@ -285,7 +327,7 @@ describe("POST /api/passwords/bulk-archive", () => {
         data: expect.objectContaining({
           action: "ENTRY_BULK_ARCHIVE",
           metadata: expect.objectContaining({
-            entryIds: ["p1", "p2", "p3"],
+            entryIds: [id1, id2, id3],
           }),
         }),
       })
@@ -296,22 +338,25 @@ describe("POST /api/passwords/bulk-archive", () => {
     expect(mockAuditCreateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.arrayContaining([
-          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: "p1" }),
-          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: "p2" }),
-          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: "p3" }),
+          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id1 }),
+          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id2 }),
+          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id3 }),
         ]),
       })
     );
   });
 
   it("logAuditBatch receives per-entry data matching individual logAudit contract", async () => {
-    mockFindMany.mockResolvedValue([{ id: "p1" }, { id: "p2" }, { id: "p3" }]);
+    const id1 = "00000000-0000-4000-a000-000000000001";
+    const id2 = "00000000-0000-4000-a000-000000000002";
+    const id3 = "00000000-0000-4000-a000-000000000003";
+    mockFindMany.mockResolvedValue([{ id: id1 }, { id: id2 }, { id: id3 }]);
     mockUpdateMany.mockResolvedValue({ count: 3 });
 
     await POST(
       createRequest("POST", URL, {
         headers: { "user-agent": "TestAgent/1.0", "x-forwarded-for": "10.0.0.1" },
-        body: { ids: ["p1", "p2", "p3"] },
+        body: { ids: [id1, id2, id3] },
       })
     );
 
@@ -342,7 +387,7 @@ describe("POST /api/passwords/bulk-archive", () => {
 
     // targetId is unique per entry — not all the same
     const ids = batchData.map((e) => e.targetId);
-    expect(ids).toEqual(expect.arrayContaining(["p1", "p2", "p3"]));
+    expect(ids).toEqual(expect.arrayContaining([id1, id2, id3]));
     expect(new Set(ids).size).toBe(3);
   });
 });

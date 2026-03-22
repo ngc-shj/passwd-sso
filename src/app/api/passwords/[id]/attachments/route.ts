@@ -171,8 +171,8 @@ async function handlePOST(
   }
 
   const blobStore = getAttachmentBlobStore();
-  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  const attachmentId = (clientId && UUID_RE.test(clientId)) ? clientId : crypto.randomUUID();
+  const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const attachmentId = (clientId && UUID_V4_RE.test(clientId)) ? clientId.toLowerCase() : crypto.randomUUID();
   const blobContext = { attachmentId, entryId: id };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;

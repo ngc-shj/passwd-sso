@@ -85,8 +85,8 @@ const shareDataSchema = z.object({
 });
 
 export const createShareLinkSchema = z.object({
-  passwordEntryId: z.string().min(1).optional(),
-  teamPasswordEntryId: z.string().min(1).optional(),
+  passwordEntryId: z.string().uuid().optional(),
+  teamPasswordEntryId: z.string().uuid().optional(),
   data: shareDataSchema.optional(),
   encryptedShareData: encryptedFieldSchema.optional(),
   entryType: entryTypeSchema.optional(),

@@ -171,7 +171,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   it("returns 409 for duplicate name under parent", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentCuid = "00000000-0000-4000-a000-000000000001";
     mockTeamFolderFindUnique.mockResolvedValue({ id: "existing" });
     const req = createRequest("POST", undefined, { body: { name: "Dup", parentId: parentCuid } });
     const res = await POST(req, createParams({ teamId: "o1" }));
@@ -183,7 +183,7 @@ describe("POST /api/teams/[teamId]/folders", () => {
   it("returns 404 when parent folder validation fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
-    const parentCuid = "cm1234567890abcdefghijklmn";
+    const parentCuid = "00000000-0000-4000-a000-000000000001";
     vi.mocked(validateParentFolder).mockRejectedValue(new Error("not found"));
     const req = createRequest("POST", undefined, { body: { name: "New", parentId: parentCuid } });
     const res = await POST(req, createParams({ teamId: "o1" }));
