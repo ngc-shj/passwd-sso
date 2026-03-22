@@ -1,4 +1,5 @@
 import { defineManifest } from "@crxjs/vite-plugin";
+import rootPkg from "../package.json";
 import {
   CMD_TRIGGER_AUTOFILL,
   CMD_COPY_PASSWORD,
@@ -9,7 +10,7 @@ import {
 export default defineManifest({
   manifest_version: 3,
   name: "__MSG_extName__",
-  version: "0.2.1",
+  version: rootPkg.version,
   description: "__MSG_extDescription__",
   default_locale: "en",
   permissions: ["storage", "alarms", "activeTab", "scripting", "contextMenus", "clipboardWrite", "offscreen"],

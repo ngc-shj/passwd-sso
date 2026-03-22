@@ -8,6 +8,7 @@
  */
 
 import { Command } from "commander";
+import { createRequire } from "node:module";
 import { createInterface } from "node:readline";
 import { loginCommand } from "./commands/login.js";
 import { statusCommand } from "./commands/status.js";
@@ -26,12 +27,15 @@ import { clearPendingClipboard } from "./lib/clipboard.js";
 import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
 import * as output from "./lib/output.js";
 
+const require = createRequire(import.meta.url);
+const rootPkg = require("../../package.json") as { version: string };
+
 const program = new Command();
 
 program
   .name("passwd-sso")
   .description("Password manager CLI")
-  .version("0.1.0")
+  .version(rootPkg.version)
   .option("-k, --insecure", "Allow self-signed TLS certificates")
   .hook("preAction", () => {
     if (program.opts().insecure) {
