@@ -146,24 +146,24 @@ describe("POST /api/tags", () => {
   });
 
   it("creates tag with parentId", async () => {
-    const parentCuid = "cm1234567890abcdefghijklmno";
-    const childCuid = "cm9876543210zyxwvutsrqponml";
+    const parentUuid = "00000000-0000-4000-a000-000000000001";
+    const childUuid = "00000000-0000-4000-a000-000000000002";
     mockPrismaTag.findMany.mockResolvedValue([
-      { id: parentCuid, name: "Work", parentId: null },
+      { id: parentUuid, name: "Work", parentId: null },
     ]);
     mockPrismaTag.findFirst.mockResolvedValue(null);
     mockPrismaTag.create.mockResolvedValue({
-      id: childCuid,
+      id: childUuid,
       name: "Projects",
       color: null,
-      parentId: parentCuid,
+      parentId: parentUuid,
     });
 
     const res = await POST(createRequest("POST", "http://localhost:3000/api/tags", {
-      body: { name: "Projects", parentId: parentCuid },
+      body: { name: "Projects", parentId: parentUuid },
     }));
     const json = await res.json();
     expect(res.status).toBe(201);
-    expect(json).toEqual({ id: childCuid, name: "Projects", color: null, parentId: parentCuid });
+    expect(json).toEqual({ id: childUuid, name: "Projects", color: null, parentId: parentUuid });
   });
 });

@@ -22,7 +22,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const bodySchema = z.object({
-  operatorId: z.string().min(1),
+  operatorId: z.string().uuid(),
   retentionDays: z.number().int().min(1).max(3650).default(90),
   dryRun: z.boolean().default(false),
 });

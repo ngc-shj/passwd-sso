@@ -124,7 +124,7 @@ async function handlePOST(req: NextRequest) {
     team = await withUserTenantRls(session.user.id, async () =>
       prisma.team.create({
         data: {
-          ...(clientId ? { id: clientId } : {}),
+          id: clientId,
           tenant: { connect: { id: tenantId } },
           name,
           slug,

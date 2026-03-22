@@ -209,9 +209,9 @@ describe("POST /api/vault/rotate-key", () => {
     });
   });
 
-  it("rotates key with entries and history", async () => {
-    const entryId = "tz4a98xxat96iws9zmbrgj3a";
-    const historyId = "kx7b29yybu97jxt0amcshk4b";
+  it("rotates key with entries and history (UUID v4 IDs — legacy label kept for context)", async () => {
+    const entryId = "660e8400-e29b-41d4-a716-446655440020";
+    const historyId = "660e8400-e29b-41d4-a716-446655440021";
     mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
     mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: historyId }]);
 
@@ -240,9 +240,50 @@ describe("POST /api/vault/rotate-key", () => {
     expect(mockPasswordEntryHistory.updateMany).toHaveBeenCalledTimes(1);
   });
 
+  it("rotates key with entries and history (UUID v4 IDs)", async () => {
+    const entryId = "550e8400-e29b-41d4-a716-446655440000";
+    const historyId = "550e8400-e29b-41d4-a716-446655440001";
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
+    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: historyId }]);
+
+    const bodyWithEntries = {
+      ...validBody,
+      entries: [{
+        id: entryId,
+        encryptedBlob: makeEncryptedField(),
+        encryptedOverview: makeEncryptedField(),
+        aadVersion: 1,
+      }],
+      historyEntries: [{
+        id: historyId,
+        encryptedBlob: makeEncryptedField(),
+        aadVersion: 1,
+      }],
+    };
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: bodyWithEntries })
+    );
+    const json = await res.json();
+    expect(res.status).toBe(200);
+    expect(json.keyVersion).toBe(2);
+    expect(mockPasswordEntry.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPasswordEntry.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: entryId }),
+      })
+    );
+    expect(mockPasswordEntryHistory.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPasswordEntryHistory.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ id: historyId }),
+      })
+    );
+  });
+
   it("returns 400 on entry count mismatch", async () => {
     // DB has 1 entry but client sends 0
-    mockPasswordEntry.findMany.mockResolvedValue([{ id: "some-id" }]);
+    mockPasswordEntry.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440030" }]);
 
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
@@ -251,10 +292,10 @@ describe("POST /api/vault/rotate-key", () => {
   });
 
   it("returns 400 on history count mismatch", async () => {
-    const entryId = "tz4a98xxat96iws9zmbrgj3a";
+    const entryId = "660e8400-e29b-41d4-a716-446655440020";
     // DB has 1 history entry but client sends 0
     mockPasswordEntry.findMany.mockResolvedValue([{ id: entryId }]);
-    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: "kx7b29yybu97jxt0amcshk4b" }]);
+    mockPasswordEntryHistory.findMany.mockResolvedValue([{ id: "660e8400-e29b-41d4-a716-446655440021" }]);
 
     const bodyWithEntry = {
       ...validBody,
@@ -274,8 +315,8 @@ describe("POST /api/vault/rotate-key", () => {
   });
 
   it("returns 400 when submitted entry IDs do not match DB entry IDs", async () => {
-    const dbId = "tz4a98xxat96iws9zmbrgj3a";
-    const wrongId = "ab3c99zzbu11kxt0amcshi9c";
+    const dbId = "660e8400-e29b-41d4-a716-446655440040";
+    const wrongId = "660e8400-e29b-41d4-a716-446655440041";
     mockPasswordEntry.findMany.mockResolvedValue([{ id: dbId }]);
 
     const res = await POST(
@@ -296,7 +337,7 @@ describe("POST /api/vault/rotate-key", () => {
 
   it("returns 400 when entries exceed max limit", async () => {
     const tooManyEntries = Array.from({ length: 5001 }, (_, i) => ({
-      id: `entry-${i}`,
+      id: `660e8400-e29b-41d4-a716-${String(i).padStart(12, "0")}`,
       encryptedBlob: makeEncryptedField(),
       encryptedOverview: makeEncryptedField(),
       aadVersion: 1,

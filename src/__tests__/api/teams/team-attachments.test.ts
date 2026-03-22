@@ -432,6 +432,36 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     expect(status).toBe(201);
   });
 
+  it("normalizes uppercase UUID clientId to lowercase for AAD consistency", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockEntryFindUnique.mockResolvedValue(TEAM_ENTRY);
+    mockAttachmentCount.mockResolvedValue(0);
+    mockPutObject.mockResolvedValue(Buffer.from("stored"));
+    const uppercaseId = "550E8400-E29B-41D4-A716-446655440000";
+    mockAttachmentCreate.mockResolvedValue({
+      id: uppercaseId.toLowerCase(),
+      filename: "test.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 5,
+      createdAt: new Date(),
+    });
+    const fields = { ...validFormFields(), id: uppercaseId };
+    const req = createFormDataRequest(fields);
+    const res = await POST(req, makeParams("o1", "e1"));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(201);
+    expect(json.id).toBe(uppercaseId.toLowerCase());
+    // Verify the attachment was created with a lowercase ID (normalized)
+    expect(mockAttachmentCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          id: uppercaseId.toLowerCase(),
+        }),
+      })
+    );
+  });
+
   it("rejects invalid aadVersion", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);

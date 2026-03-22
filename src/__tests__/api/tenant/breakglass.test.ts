@@ -97,7 +97,7 @@ import { TenantAuthError } from "@/lib/tenant-auth";
 import { GRANT_STATUS } from "@/lib/constants/breakglass";
 
 const ACTOR = { tenantId: "tenant1", role: "ADMIN" };
-const TARGET_USER_ID = "cmmtargetuserid00001";
+const TARGET_USER_ID = "00000000-0000-4000-a000-000000000001";
 const GRANT_ID = "grant-id-123";
 
 const makeGrant = (overrides: Record<string, unknown> = {}) => ({

@@ -167,7 +167,7 @@ describe("updateE2EPasswordSchema", () => {
 
 describe("createShareLinkSchema – passkey fields", () => {
   const baseShare = {
-    passwordEntryId: "cm000000000000000000000aa",
+    passwordEntryId: "00000000-0000-4000-a000-000000000001",
     expiresIn: "1d" as const,
   };
 

@@ -129,30 +129,30 @@ describe("POST /api/tags", () => {
   });
 
   it("creates a child tag with parentId", async () => {
-    const parentCuid = "clparent00000001";
-    const childCuid = "clchild000000001";
+    const parentUuid = "00000000-0000-4000-a000-000000000001";
+    const childUuid = "00000000-0000-4000-a000-000000000002";
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     // findMany for validateParentChain
     mockFindMany.mockResolvedValue([
-      { id: parentCuid, name: "Parent", parentId: null },
+      { id: parentUuid, name: "Parent", parentId: null },
     ]);
     mockFindFirst.mockResolvedValue(null);
     mockCreate.mockResolvedValue({
-      id: childCuid,
+      id: childUuid,
       name: "Child",
       color: null,
-      parentId: parentCuid,
+      parentId: parentUuid,
     });
 
     const req = createRequest("POST", "http://localhost/api/tags", {
-      body: { name: "Child", parentId: parentCuid },
+      body: { name: "Child", parentId: parentUuid },
     });
     const res = await POST(req);
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(201);
-    expect(json.parentId).toBe(parentCuid);
+    expect(json.parentId).toBe(parentUuid);
   });
 
   it("returns 409 for duplicate name at same level", async () => {
@@ -175,13 +175,13 @@ describe("POST /api/tags", () => {
     mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
     // Chain: l1 -> l2 -> l3, trying to add under l3 (depth 4)
     mockFindMany.mockResolvedValue([
-      { id: "cllevel1000000001", name: "L1", parentId: null },
-      { id: "cllevel2000000001", name: "L2", parentId: "cllevel1000000001" },
-      { id: "cllevel3000000001", name: "L3", parentId: "cllevel2000000001" },
+      { id: "00000000-0000-4000-a000-000000000011", name: "L1", parentId: null },
+      { id: "00000000-0000-4000-a000-000000000012", name: "L2", parentId: "00000000-0000-4000-a000-000000000011" },
+      { id: "00000000-0000-4000-a000-000000000013", name: "L3", parentId: "00000000-0000-4000-a000-000000000012" },
     ]);
 
     const req = createRequest("POST", "http://localhost/api/tags", {
-      body: { name: "TooDeep", parentId: "cllevel3000000001" },
+      body: { name: "TooDeep", parentId: "00000000-0000-4000-a000-000000000013" },
     });
     const res = await POST(req);
     const { status, json } = await parseResponse(res);

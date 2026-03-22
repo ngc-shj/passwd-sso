@@ -105,10 +105,10 @@ describe("PUT /api/tags/[id]", () => {
 
   it("returns 400 when parent chain is invalid", async () => {
     mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
-    mockPrismaTag.findMany.mockResolvedValue([{ id: "cparent123456789012345678", name: "Parent", parentId: TAG_ID }]);
+    mockPrismaTag.findMany.mockResolvedValue([{ id: "00000000-0000-4000-a000-000000000001", name: "Parent", parentId: TAG_ID }]);
 
     const res = await PUT(
-      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { parentId: "cparent123456789012345678" } }),
+      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { parentId: "00000000-0000-4000-a000-000000000001" } }),
       createParams({ id: TAG_ID }),
     );
     expect(res.status).toBe(400);
@@ -116,12 +116,12 @@ describe("PUT /api/tags/[id]", () => {
 
   it("updates parentId successfully when no duplicate exists", async () => {
     mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
-    mockPrismaTag.findMany.mockResolvedValue([{ id: "cparent123456789012345678", name: "Parent", parentId: null }]);
+    mockPrismaTag.findMany.mockResolvedValue([{ id: "00000000-0000-4000-a000-000000000001", name: "Parent", parentId: null }]);
     mockPrismaTag.findFirst.mockResolvedValue(null);
-    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "Old", color: null, parentId: "cparent123456789012345678" });
+    mockPrismaTag.update.mockResolvedValue({ id: TAG_ID, name: "Old", color: null, parentId: "00000000-0000-4000-a000-000000000001" });
 
     const res = await PUT(
-      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { parentId: "cparent123456789012345678" } }),
+      createRequest("PUT", "http://localhost:3000/api/tags/tag-123", { body: { parentId: "00000000-0000-4000-a000-000000000001" } }),
       createParams({ id: TAG_ID }),
     );
     expect(res.status).toBe(200);

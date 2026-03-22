@@ -86,7 +86,7 @@ import { GET, POST } from "./route";
 
 const TENANT_ID = "tenant-1";
 const ACTOR_USER_ID = "test-user-id";
-const TARGET_USER_ID = "clh1q2r3s4t5u6v7w8x9y0abc"; // valid cuid
+const TARGET_USER_ID = "00000000-0000-4000-a000-000000000030"; // valid uuid v4
 const GRANT_ID = "grant-abc-123";
 
 const ACTOR = {

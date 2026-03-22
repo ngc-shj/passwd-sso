@@ -169,7 +169,7 @@ describe("GET /api/teams/[teamId]/members", () => {
 });
 
 describe("POST /api/teams/[teamId]/members", () => {
-  const TARGET_USER_ID = "cjld2cjxh0000qzrmn831i7rn";
+  const TARGET_USER_ID = "00000000-0000-4000-a000-000000000001";
 
   beforeEach(() => {
     vi.clearAllMocks();
