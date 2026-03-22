@@ -381,34 +381,38 @@ The highest bump wins when multiple commits are included in a release.
 
 ### When to Bump
 
-Version bumps happen **after merging to main**, not inside feature branches.
+Version bumps happen **after feature PRs are merged to main**, via a dedicated bump PR. Feature branches do NOT change version numbers.
 
 ```
-feature branch → PR → merge to main → bump on main → commit → tag → push
+feature PR → merge to main → bump PR (chore/bump-vX.Y.Z) → merge → tag on main
 ```
 
-- Feature branches do NOT change version numbers
-- After merge, run `npm run version:bump` on main to determine the next version
-- Tag is always created on main
-
-This avoids version conflicts when multiple PRs are in flight.
+This avoids version conflicts when multiple PRs are in flight, and respects the no-direct-commit-to-main rule.
 
 ### Release Process
 
 ```bash
-# On main, after merging feature branch(es):
+# 1. Start from latest main
 git checkout main && git pull
 
-# 1. Auto-suggest version from git log (interactive)
+# 2. Create bump branch
+git checkout -b chore/bump-vX.Y.Z
+
+# 3. Auto-suggest version from git log (interactive)
 npm run version:bump
+# Or specify explicitly: npm run version:bump -- 0.3.0
 
-# 2. Or specify explicitly
-npm run version:bump -- 0.3.0
-
-# 3. Commit and tag (printed by the script)
+# 4. Commit
 git add package.json cli/package.json extension/package.json
 git add package-lock.json cli/package-lock.json extension/package-lock.json
 git commit -m 'chore: bump version to X.Y.Z'
+
+# 5. Push and create PR
+git push origin chore/bump-vX.Y.Z
+gh pr create --title 'chore: bump version to X.Y.Z' --body 'Version bump'
+
+# 6. After PR merge, tag on main
+git checkout main && git pull
 git tag vX.Y.Z
 git push origin main --tags
 ```
