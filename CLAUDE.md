@@ -379,9 +379,26 @@ While `0.x.y` (pre-1.0), Minor bumps may include breaking changes.
 
 The highest bump wins when multiple commits are included in a release.
 
+### When to Bump
+
+Version bumps happen **after merging to main**, not inside feature branches.
+
+```
+feature branch → PR → merge to main → bump on main → commit → tag → push
+```
+
+- Feature branches do NOT change version numbers
+- After merge, run `npm run version:bump` on main to determine the next version
+- Tag is always created on main
+
+This avoids version conflicts when multiple PRs are in flight.
+
 ### Release Process
 
 ```bash
+# On main, after merging feature branch(es):
+git checkout main && git pull
+
 # 1. Auto-suggest version from git log (interactive)
 npm run version:bump
 
@@ -393,7 +410,7 @@ git add package.json cli/package.json extension/package.json
 git add package-lock.json cli/package-lock.json extension/package-lock.json
 git commit -m 'chore: bump version to X.Y.Z'
 git tag vX.Y.Z
-git push origin <branch> --tags
+git push origin main --tags
 ```
 
 ### Version Locations
