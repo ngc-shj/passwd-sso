@@ -13,6 +13,6 @@
     "isolatedModules": true,
     "types": ["chrome"]
   },
-  "include": ["src"],
+  "include": ["src", "manifest.config.ts"],
   "exclude": ["node_modules", "dist", "src/__tests__"]
 }
