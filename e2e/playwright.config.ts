@@ -1,5 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Derive base URL from E2E_BASE_URL or AUTH_URL (same env the app uses).
+// Falls back to http://localhost:3000 for CI where neither is set.
+const baseURL =
+  process.env.E2E_BASE_URL ??
+  process.env.AUTH_URL ??
+  "http://localhost:3000";
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false, // vault state is per-browser — run serially for safety
@@ -11,7 +18,8 @@ export default defineConfig({
   timeout: 30_000, // PBKDF2 600k iterations ≈ 1-3s in browser
 
   use: {
-    baseURL: "http://localhost:3000",
+    baseURL,
+    ignoreHTTPSErrors: baseURL.startsWith("https://"),
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },
@@ -28,12 +36,11 @@ export default defineConfig({
 
   webServer: {
     // CI: production build for parity; local: dev server for speed.
-    // Skip --experimental-https so Playwright can connect over plain HTTP.
     command: process.env.CI
       ? "npm run build && npm start"
       : "npx next dev --turbopack",
     cwd: "..",
-    url: "http://localhost:3000",
+    url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },
