@@ -6,7 +6,7 @@
  *
  * The token_hash is deterministic so tests can reference it if needed.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { createHash } from "node:crypto";
 import { E2E_TENANT, getPool } from "./db";
 
 export interface SeedEmergencyGrantOptions {
