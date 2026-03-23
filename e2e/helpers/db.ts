@@ -48,7 +48,7 @@ export async function closePool(): Promise<void> {
 // ─── Test Tenant Constant ────────────────────────────────────────
 
 export const E2E_TENANT = {
-  id: "00000000-0000-4000-e2e0-tenant0000001",
+  id: "00000000-0000-4000-a000-00000000e2e0",
   name: "E2E Test Tenant",
   slug: "e2e-test-tenant",
 } as const;
@@ -280,10 +280,8 @@ export async function seedVaultKey(
       verification_ciphertext, verification_iv, verification_auth_tag,
       created_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-    ON CONFLICT (id) DO UPDATE SET
-      user_id = EXCLUDED.user_id,
+    ON CONFLICT (user_id, version) DO UPDATE SET
       tenant_id = EXCLUDED.tenant_id,
-      version = EXCLUDED.version,
       verification_ciphertext = EXCLUDED.verification_ciphertext,
       verification_iv = EXCLUDED.verification_iv,
       verification_auth_tag = EXCLUDED.verification_auth_tag`,

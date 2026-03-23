@@ -23,6 +23,7 @@ test.describe("Share Link", () => {
     page = await context.newPage();
     await page.goto("/ja/dashboard");
     const lockPage = new VaultLockPage(page);
+    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
   });
 

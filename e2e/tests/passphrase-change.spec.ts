@@ -10,7 +10,7 @@ import { VaultLockPage } from "../page-objects/vault-lock.page";
  * The passphrase is permanently changed, so this test must not be retried
  * without resetting state first.
  */
-test.describe("Passphrase Change", () => {
+test.describe.serial("Passphrase Change", () => {
   const NEW_PASSPHRASE = "E2E-NewPassphrase-2025!";
 
   test("change passphrase and re-unlock with new passphrase", async ({

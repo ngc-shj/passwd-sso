@@ -58,8 +58,8 @@ export class SidebarNavPage {
   }
 
   get createFolderMenuItem() {
-    // t("createFolder") = "New Folder" / "新規フォルダー"
-    return this.page.getByRole("menuitem", { name: /New Folder|新規フォルダー/i });
+    // t("createFolder") = "New Folder" / "新規フォルダ"
+    return this.page.getByRole("menuitem", { name: /New Folder|新規フォルダ/i });
   }
 
   get createTagMenuItem() {

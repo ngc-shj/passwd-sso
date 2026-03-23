@@ -53,14 +53,14 @@ test("Key rotation preserves existing vault entries", async ({
     // The rotate key card should be visible
     await expect(
       page.getByRole("button", {
-        name: /Rotate Key|キーを回転|ローテーション/i,
+        name: /Rotate Key|キーをローテーション/i,
       })
     ).toBeVisible({ timeout: 5_000 });
   });
 
   await test.step("trigger key rotation", async () => {
     await page
-      .getByRole("button", { name: /Rotate Key|キーを回転|ローテーション/i })
+      .getByRole("button", { name: /Rotate Key|キーをローテーション/i })
       .click();
 
     // Rotation dialog opens
@@ -72,7 +72,7 @@ test("Key rotation preserves existing vault entries", async ({
     await page
       .locator("[role='dialog']")
       .getByRole("button", {
-        name: /Rotate Key|キーを回転|ローテーション/i,
+        name: /Rotate Key|キーをローテーション/i,
       })
       .click();
 

@@ -60,10 +60,10 @@ export class SettingsPage {
 
   /**
    * "Key Rotation" sub-tab trigger inside the Security tab.
-   * t("subTabKeyRotation") = "Key Rotation" / "キーローテーション"
+   * t("subTabKeyRotation") = "Key Rotation" / "鍵のローテーション"
    */
   get keyRotationSubTab() {
-    return this.page.getByRole("tab", { name: /Key Rotation|キーローテーション/i });
+    return this.page.getByRole("tab", { name: /Key Rotation|鍵のローテーション/i });
   }
 
   // --- Content accessors ---

@@ -173,7 +173,7 @@ export default async function globalSetup(): Promise<void> {
     },
   };
 
-  writeFileSync(AUTH_STATE_PATH, JSON.stringify(authState, null, 2));
+  writeFileSync(AUTH_STATE_PATH, JSON.stringify(authState, null, 2), { mode: 0o600 });
 
   await closePool();
 

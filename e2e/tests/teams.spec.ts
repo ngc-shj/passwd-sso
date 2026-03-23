@@ -14,7 +14,7 @@ const TEAM_ENTRY = {
   password: "TeamSecret!456",
 };
 
-test.describe("Teams", () => {
+test.describe.serial("Teams", () => {
   let ownerContext: BrowserContext;
   let memberContext: BrowserContext;
   let ownerPage: Page;
@@ -126,7 +126,8 @@ test.describe("Teams", () => {
     // The member should see either the team list (already a member) or a notification
     // about a pending invitation. Both indicate the invitation was processed.
     // We look for either the team name in the list, or a pending invitations indicator.
-    await memberPage.waitForTimeout(2_000); // allow data to load
+    // Wait for the page to finish loading data
+    await memberPage.waitForLoadState("domcontentloaded");
 
     const hasTeam = await memberPage.getByText(TEAM_NAME).isVisible();
     const hasPendingInvite = await memberPage
@@ -136,23 +137,14 @@ test.describe("Teams", () => {
     expect(hasTeam || hasPendingInvite).toBe(true);
   });
 
-  test("teamMember: can see the team entry after joining", async () => {
-    // Navigate to the team page to verify membership / entry visibility
-    // This test assumes the teamMember is already a member (pre-seeded or accepted)
-    const { teamMember } = getAuthState();
-
-    // If the teamMember has a pre-existing relationship, verify via the teams list
+  test("teamMember: teams page renders without errors", async () => {
+    // Navigate to the teams list to verify the page renders for the member role.
+    // Full invite acceptance requires a token URL exchange out of scope for this test.
     await memberPage.goto("/ja/dashboard/teams");
-    await memberPage.waitForTimeout(2_000);
+    await memberPage.waitForLoadState("domcontentloaded");
 
-    // At minimum, the page should load without errors
     await expect(
       memberPage.locator("h1").filter({ hasText: /Teams|チーム/i }),
     ).toBeVisible({ timeout: 10_000 });
-
-    // Skip entry visibility assertion when member is not yet added to the new team —
-    // full invite acceptance requires a token URL exchange which is out of scope here.
-    // The purpose is to verify the page renders correctly for the member role.
-    expect(teamMember.email).toBeTruthy();
   });
 });

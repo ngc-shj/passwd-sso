@@ -38,7 +38,7 @@ export class TeamDashboardPage {
   }
 
   get inviteSendButton() {
-    return this.page.getByRole("button", { name: /Send Invite|招待を送る|inviteSend/i });
+    return this.page.getByRole("button", { name: /Send Invitation|招待を送信/i });
   }
 
   /**

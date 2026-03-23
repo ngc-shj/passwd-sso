@@ -41,8 +41,8 @@ test.describe("Favorites", () => {
     // Open ⋮ menu and confirm no "Favorite" menu item — star button toggles inline.
     // The star button is a ghost icon button on the card; click it to mark as favorite.
     const card = entryPage.card(entryTitle);
-    // Star button is the second button (first is chevron, second is star)
-    const starButton = card.getByRole("button").nth(1);
+    // Star button contains the Star SVG icon — locate via the SVG's parent button
+    const starButton = card.locator("button:has(svg.lucide-star)");
     await starButton.click();
 
     // After clicking star, the star icon should become yellow (filled)
@@ -63,7 +63,7 @@ test.describe("Favorites", () => {
     // Already on /favorites — click star to unfavorite
     const entryPage = new PasswordEntryPage(page);
     const card = entryPage.card(entryTitle);
-    const starButton = card.getByRole("button").nth(1);
+    const starButton = card.locator("button:has(svg.lucide-star)");
     await starButton.click();
 
     // The entry should disappear from the favorites list
