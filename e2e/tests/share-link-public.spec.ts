@@ -4,6 +4,7 @@
  * Note: the share route has no locale prefix (it's in src/app/s/, not src/app/[locale]/s/).
  */
 import { test, expect } from "@playwright/test";
+import { getAuthState } from "../helpers/fixtures";
 
 test.describe("Share Link Public Page", () => {
   test("non-existent token shows not-found error", async ({ page }) => {
@@ -63,5 +64,30 @@ test.describe("Share Link Public Page", () => {
 
     // Must NOT have been redirected to the sign-in page
     expect(page.url()).not.toContain("/auth/signin");
+  });
+
+  test("valid pre-seeded token renders shared entry content", async ({
+    context,
+    page,
+  }) => {
+    const { shareLinkToken } = getAuthState();
+    if (!shareLinkToken) {
+      test.skip(true, "shareLinkToken not available in auth state");
+      return;
+    }
+
+    // No session cookie required — share links are public
+    await context.clearCookies();
+    await page.goto(`/s/${shareLinkToken}`);
+
+    // The share page should NOT redirect to sign-in
+    await page.waitForURL((url) => !url.pathname.includes("/auth/signin"), {
+      timeout: 10_000,
+    });
+
+    // The shared entry title or a share-specific heading should be visible
+    await expect(
+      page.getByText(/E2E Seeded Entry|Shared Item|共有アイテム/i),
+    ).toBeVisible({ timeout: 15_000 });
   });
 });

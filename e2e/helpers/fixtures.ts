@@ -35,6 +35,8 @@ interface AuthState {
   passphraseChange: AuthUser;
   /** Dedicated to key rotation test (destructive) */
   keyRotation: AuthUser;
+  /** Raw 64-char hex token for the pre-seeded share link (vaultReady user's entry) */
+  shareLinkToken?: string;
 }
 
 let _authState: AuthState | null = null;

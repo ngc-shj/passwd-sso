@@ -37,6 +37,10 @@ import {
   TEST_USERS,
   TEST_PASSPHRASE,
 } from "./helpers/db";
+import { seedPasswordEntry } from "./helpers/password-entry";
+import { seedShareLink } from "./helpers/share-link";
+import { seedTeam, seedTeamMember } from "./helpers/team";
+import { seedEmergencyGrant } from "./helpers/emergency-access";
 
 const AUTH_STATE_PATH = join(__dirname, ".auth-state.json");
 
@@ -44,7 +48,7 @@ const AUTH_STATE_PATH = join(__dirname, ".auth-state.json");
 async function seedVaultReadyUser(
   user: { id: string; email: string; name: string },
   pepper: string
-): Promise<string> {
+): Promise<{ sessionToken: string; encryptionKey: Buffer }> {
   const vault = setupVaultCrypto(TEST_PASSPHRASE, pepper);
 
   const serverSalt = randomBytes(32).toString("hex");
@@ -68,10 +72,10 @@ async function seedVaultReadyUser(
 
   await seedVaultKey(user.id, vault.verificationArtifact);
 
-  const token = `e2e-token-${randomBytes(16).toString("hex")}`;
-  await seedSession(user.id, token);
+  const sessionToken = `e2e-token-${randomBytes(16).toString("hex")}`;
+  await seedSession(user.id, sessionToken);
 
-  return token;
+  return { sessionToken, encryptionKey: vault.encryptionKey };
 }
 
 export default async function globalSetup(): Promise<void> {
@@ -90,17 +94,18 @@ export default async function globalSetup(): Promise<void> {
   await seedTenant();
 
   // ── Vault-ready users ─────────────────────────────────────────
-  const vaultReadyToken = await seedVaultReadyUser(TEST_USERS.vaultReady, pepper);
-  const lockoutToken = await seedVaultReadyUser(TEST_USERS.lockout, pepper);
-  const resetToken = await seedVaultReadyUser(TEST_USERS.reset, pepper);
-  const resetValidationToken = await seedVaultReadyUser(TEST_USERS.resetValidation, pepper);
-  const teamOwnerToken = await seedVaultReadyUser(TEST_USERS.teamOwner, pepper);
-  const teamMemberToken = await seedVaultReadyUser(TEST_USERS.teamMember, pepper);
-  const eaGrantorToken = await seedVaultReadyUser(TEST_USERS.eaGrantor, pepper);
-  const eaGranteeToken = await seedVaultReadyUser(TEST_USERS.eaGrantee, pepper);
-  const tenantAdminToken = await seedVaultReadyUser(TEST_USERS.tenantAdmin, pepper);
-  const passphraseChangeToken = await seedVaultReadyUser(TEST_USERS.passphraseChange, pepper);
-  const keyRotationToken = await seedVaultReadyUser(TEST_USERS.keyRotation, pepper);
+  const { sessionToken: vaultReadyToken, encryptionKey: vaultReadyKey } =
+    await seedVaultReadyUser(TEST_USERS.vaultReady, pepper);
+  const { sessionToken: lockoutToken } = await seedVaultReadyUser(TEST_USERS.lockout, pepper);
+  const { sessionToken: resetToken } = await seedVaultReadyUser(TEST_USERS.reset, pepper);
+  const { sessionToken: resetValidationToken } = await seedVaultReadyUser(TEST_USERS.resetValidation, pepper);
+  const { sessionToken: teamOwnerToken } = await seedVaultReadyUser(TEST_USERS.teamOwner, pepper);
+  const { sessionToken: teamMemberToken } = await seedVaultReadyUser(TEST_USERS.teamMember, pepper);
+  const { sessionToken: eaGrantorToken } = await seedVaultReadyUser(TEST_USERS.eaGrantor, pepper);
+  const { sessionToken: eaGranteeToken } = await seedVaultReadyUser(TEST_USERS.eaGrantee, pepper);
+  const { sessionToken: tenantAdminToken } = await seedVaultReadyUser(TEST_USERS.tenantAdmin, pepper);
+  const { sessionToken: passphraseChangeToken } = await seedVaultReadyUser(TEST_USERS.passphraseChange, pepper);
+  const { sessionToken: keyRotationToken } = await seedVaultReadyUser(TEST_USERS.keyRotation, pepper);
 
   // tenantAdmin requires an explicit ADMIN role in the tenant
   await seedTenantMember(TEST_USERS.tenantAdmin.id, "ADMIN");
@@ -109,6 +114,50 @@ export default async function globalSetup(): Promise<void> {
   await seedUser(TEST_USERS.fresh);
   const freshToken = `e2e-token-${randomBytes(16).toString("hex")}`;
   await seedSession(TEST_USERS.fresh.id, freshToken);
+
+  // ── Team: pre-seed teamOwner as OWNER and teamMember as MEMBER ────
+  const E2E_TEAM_ID = "00000000-0000-4000-e2e0-000000e2e000";
+  await seedTeam({
+    id: E2E_TEAM_ID,
+    name: "E2E Pre-seeded Team",
+    slug: "e2e-preseeded-team",
+    createdById: TEST_USERS.teamOwner.id,
+  });
+  await seedTeamMember({
+    teamId: E2E_TEAM_ID,
+    userId: TEST_USERS.teamOwner.id,
+    role: "OWNER",
+  });
+  await seedTeamMember({
+    teamId: E2E_TEAM_ID,
+    userId: TEST_USERS.teamMember.id,
+    role: "MEMBER",
+  });
+
+  // ── Emergency access: pre-seed grant at IDLE status ───────────
+  const E2E_EA_GRANT_ID = "00000000-0000-4000-e2e0-00000ea00001";
+  await seedEmergencyGrant({
+    id: E2E_EA_GRANT_ID,
+    ownerId: TEST_USERS.eaGrantor.id,
+    granteeId: TEST_USERS.eaGrantee.id,
+    granteeEmail: TEST_USERS.eaGrantee.email,
+    status: "IDLE",
+    waitDays: 3,
+  });
+
+  // ── Password entry + share link for vaultReady user ───────────
+  const E2E_ENTRY_ID = "00000000-0000-4000-e2e0-000000e2e001";
+  await seedPasswordEntry({
+    id: E2E_ENTRY_ID,
+    userId: TEST_USERS.vaultReady.id,
+    title: "E2E Seeded Entry",
+    encryptionKey: vaultReadyKey,
+  });
+  const shareLinkToken = await seedShareLink({
+    createdById: TEST_USERS.vaultReady.id,
+    entryId: E2E_ENTRY_ID,
+    title: "E2E Seeded Entry",
+  });
 
   // Write auth state for tests
   const authState = {
@@ -171,6 +220,7 @@ export default async function globalSetup(): Promise<void> {
       sessionToken: keyRotationToken,
       passphrase: TEST_PASSPHRASE,
     },
+    shareLinkToken,
   };
 
   writeFileSync(AUTH_STATE_PATH, JSON.stringify(authState, null, 2), { mode: 0o600 });

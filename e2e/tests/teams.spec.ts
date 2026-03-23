@@ -6,6 +6,7 @@ import { TeamsPage } from "../page-objects/teams.page";
 import { TeamDashboardPage } from "../page-objects/team-dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
 
+// Name for a newly created team during the test run
 const TEAM_NAME = `E2E Team ${Date.now()}`;
 const TEAM_SLUG = `e2e-team-${Date.now()}`;
 const TEAM_ENTRY = {
@@ -13,6 +14,9 @@ const TEAM_ENTRY = {
   username: "team-user@example.com",
   password: "TeamSecret!456",
 };
+
+// Name of the team pre-seeded in global-setup
+const PRE_SEEDED_TEAM_NAME = "E2E Pre-seeded Team";
 
 test.describe.serial("Teams", () => {
   let ownerContext: BrowserContext;
@@ -45,6 +49,31 @@ test.describe.serial("Teams", () => {
     await memberContext.close();
   });
 
+  // ── Pre-seeded team assertions ───────────────────────────────
+
+  test("teamOwner: pre-seeded team is visible in teams list", async () => {
+    await ownerPage.goto("/ja/dashboard/teams");
+
+    const teamsPage = new TeamsPage(ownerPage);
+    await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
+      timeout: 10_000,
+    });
+    await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible();
+  });
+
+  test("teamMember: pre-seeded team is visible without invitation flow", async () => {
+    await memberPage.goto("/ja/dashboard/teams");
+
+    const teamsPage = new TeamsPage(memberPage);
+    // teamMember was seeded directly as MEMBER in global-setup — no invitation needed
+    await expect(
+      memberPage.locator("a.rounded-xl").first()
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible();
+  });
+
+  // ── Dynamic team creation ────────────────────────────────────
+
   test("teamOwner: navigate to /teams and create a new team", async () => {
     await ownerPage.goto("/ja/dashboard/teams");
 
@@ -63,7 +92,6 @@ test.describe.serial("Teams", () => {
     await ownerPage.goto("/ja/dashboard/teams");
 
     const teamsPage = new TeamsPage(ownerPage);
-    // Wait for loading to finish
     await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
       timeout: 10_000,
     });
@@ -120,26 +148,8 @@ test.describe.serial("Teams", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("teamMember: pending invitation is visible in teams page", async () => {
-    await memberPage.goto("/ja/dashboard/teams");
-
-    // The member should see either the team list (already a member) or a notification
-    // about a pending invitation. Both indicate the invitation was processed.
-    // We look for either the team name in the list, or a pending invitations indicator.
-    // Wait for the page to finish loading data
-    await memberPage.waitForLoadState("domcontentloaded");
-
-    const hasTeam = await memberPage.getByText(TEAM_NAME).isVisible();
-    const hasPendingInvite = await memberPage
-      .getByText(/pending invitation|Pending Invitation|招待/i)
-      .isVisible();
-
-    expect(hasTeam || hasPendingInvite).toBe(true);
-  });
-
   test("teamMember: teams page renders without errors", async () => {
     // Navigate to the teams list to verify the page renders for the member role.
-    // Full invite acceptance requires a token URL exchange out of scope for this test.
     await memberPage.goto("/ja/dashboard/teams");
     await memberPage.waitForLoadState("domcontentloaded");
 
