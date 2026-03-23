@@ -1,4 +1,9 @@
+import { config } from "dotenv";
+import { join } from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+
+// Load .env.local so AUTH_URL is available at config time
+config({ path: join(__dirname, "..", ".env.local") });
 
 // Derive base URL from E2E_BASE_URL or AUTH_URL (same env the app uses).
 // Falls back to http://localhost:3000 for CI where neither is set.
@@ -34,14 +39,19 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
-    // CI: production build for parity; local: dev server for speed.
-    command: process.env.CI
-      ? "npm run build && npm start"
-      : "npx next dev --turbopack",
-    cwd: "..",
-    url: baseURL,
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  // webServer auto-starts a dev server when needed.
+  // Skip entirely when E2E_BASE_URL is set (external server already running).
+  ...(process.env.E2E_BASE_URL
+    ? {}
+    : {
+        webServer: {
+          command: process.env.CI
+            ? "npm run build && npm start"
+            : "npx next dev --turbopack",
+          cwd: "..",
+          url: baseURL,
+          reuseExistingServer: !process.env.CI,
+          timeout: 120_000,
+        },
+      }),
 });
