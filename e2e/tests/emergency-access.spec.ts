@@ -4,7 +4,7 @@ import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { EmergencyAccessPage } from "../page-objects/emergency-access.page";
 
-test.describe("Emergency Access", () => {
+test.describe.serial("Emergency Access", () => {
   let grantorContext: BrowserContext;
   let granteeContext: BrowserContext;
   let grantorPage: Page;
@@ -64,7 +64,10 @@ test.describe("Emergency Access", () => {
     await granteePage.goto("/ja/dashboard/emergency-access");
 
     const eaPage = new EmergencyAccessPage(granteePage);
-    await granteePage.waitForTimeout(2_000);
+    // Wait for the section to load before asserting the card
+    await expect(
+      granteePage.getByText(/Trusted by Others|他のユーザーから信頼/i),
+    ).toBeVisible({ timeout: 10_000 });
 
     const card = eaPage.grantByEmail(eaGrantor.email);
     await expect(card).toBeVisible({ timeout: 10_000 });
