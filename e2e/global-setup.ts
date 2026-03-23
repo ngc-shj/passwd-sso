@@ -1,12 +1,19 @@
 /**
  * Playwright global setup — seed test users into the database.
  *
- * Creates five users:
- * 1. "vault-ready"      — vault fully set up, for general unlock/CRUD/lock tests
- * 2. "fresh"            — no vault setup, for setup wizard tests
- * 3. "lockout"          — vault set up, dedicated to lockout test (destructive)
- * 4. "reset"            — vault set up, dedicated to vault-reset test (destructive)
- * 5. "resetValidation"  — vault set up, dedicated to vault-reset validation (non-destructive)
+ * Creates twelve users:
+ *  1. "vault-ready"      — vault fully set up, for general unlock/CRUD/lock tests
+ *  2. "fresh"            — no vault setup, for setup wizard tests
+ *  3. "lockout"          — vault set up, dedicated to lockout test (destructive)
+ *  4. "reset"            — vault set up, dedicated to vault-reset test (destructive)
+ *  5. "resetValidation"  — vault set up, dedicated to vault-reset validation (non-destructive)
+ *  6. "teamOwner"        — vault set up, team owner for team tests
+ *  7. "teamMember"       — vault set up, team member for invitation tests
+ *  8. "eaGrantor"        — vault set up, emergency access grantor
+ *  9. "eaGrantee"        — vault set up, emergency access grantee
+ * 10. "tenantAdmin"      — vault set up, tenant admin (ADMIN role)
+ * 11. "passphraseChange" — vault set up, dedicated to passphrase change test (destructive)
+ * 12. "keyRotation"      — vault set up, dedicated to key rotation test (destructive)
  *
  * Session tokens are written to .auth-state.json for test consumption.
  */
@@ -22,6 +29,8 @@ import {
   assertTestDatabase,
   cleanup,
   closePool,
+  seedTenant,
+  seedTenantMember,
   seedUser,
   seedSession,
   seedVaultKey,
@@ -77,11 +86,24 @@ export default async function globalSetup(): Promise<void> {
   // Clean up any leftover data from previous runs
   await cleanup();
 
-  // ── Vault-ready users (4: general, lockout, reset, resetValidation) ──
+  // ── Seed tenant first (all users depend on it) ────────────────
+  await seedTenant();
+
+  // ── Vault-ready users ─────────────────────────────────────────
   const vaultReadyToken = await seedVaultReadyUser(TEST_USERS.vaultReady, pepper);
   const lockoutToken = await seedVaultReadyUser(TEST_USERS.lockout, pepper);
   const resetToken = await seedVaultReadyUser(TEST_USERS.reset, pepper);
   const resetValidationToken = await seedVaultReadyUser(TEST_USERS.resetValidation, pepper);
+  const teamOwnerToken = await seedVaultReadyUser(TEST_USERS.teamOwner, pepper);
+  const teamMemberToken = await seedVaultReadyUser(TEST_USERS.teamMember, pepper);
+  const eaGrantorToken = await seedVaultReadyUser(TEST_USERS.eaGrantor, pepper);
+  const eaGranteeToken = await seedVaultReadyUser(TEST_USERS.eaGrantee, pepper);
+  const tenantAdminToken = await seedVaultReadyUser(TEST_USERS.tenantAdmin, pepper);
+  const passphraseChangeToken = await seedVaultReadyUser(TEST_USERS.passphraseChange, pepper);
+  const keyRotationToken = await seedVaultReadyUser(TEST_USERS.keyRotation, pepper);
+
+  // tenantAdmin requires an explicit ADMIN role in the tenant
+  await seedTenantMember(TEST_USERS.tenantAdmin.id, "ADMIN");
 
   // ── Fresh user (no vault) ─────────────────────────────────────
   await seedUser(TEST_USERS.fresh);
@@ -114,11 +136,46 @@ export default async function globalSetup(): Promise<void> {
       sessionToken: resetValidationToken,
       passphrase: TEST_PASSPHRASE,
     },
+    teamOwner: {
+      ...TEST_USERS.teamOwner,
+      sessionToken: teamOwnerToken,
+      passphrase: TEST_PASSPHRASE,
+    },
+    teamMember: {
+      ...TEST_USERS.teamMember,
+      sessionToken: teamMemberToken,
+      passphrase: TEST_PASSPHRASE,
+    },
+    eaGrantor: {
+      ...TEST_USERS.eaGrantor,
+      sessionToken: eaGrantorToken,
+      passphrase: TEST_PASSPHRASE,
+    },
+    eaGrantee: {
+      ...TEST_USERS.eaGrantee,
+      sessionToken: eaGranteeToken,
+      passphrase: TEST_PASSPHRASE,
+    },
+    tenantAdmin: {
+      ...TEST_USERS.tenantAdmin,
+      sessionToken: tenantAdminToken,
+      passphrase: TEST_PASSPHRASE,
+    },
+    passphraseChange: {
+      ...TEST_USERS.passphraseChange,
+      sessionToken: passphraseChangeToken,
+      passphrase: TEST_PASSPHRASE,
+    },
+    keyRotation: {
+      ...TEST_USERS.keyRotation,
+      sessionToken: keyRotationToken,
+      passphrase: TEST_PASSPHRASE,
+    },
   };
 
   writeFileSync(AUTH_STATE_PATH, JSON.stringify(authState, null, 2));
 
   await closePool();
 
-  console.log("[E2E Setup] Test users seeded successfully (5 users).");
+  console.log("[E2E Setup] Test users seeded successfully (12 users).");
 }
