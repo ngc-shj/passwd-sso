@@ -21,6 +21,22 @@ interface AuthState {
   reset: AuthUser;
   /** Dedicated user for vault-reset validation tests (non-destructive) */
   resetValidation: AuthUser;
+  /** Team owner for team creation/management tests */
+  teamOwner: AuthUser;
+  /** Team member for invitation acceptance tests */
+  teamMember: AuthUser;
+  /** Emergency access grantor */
+  eaGrantor: AuthUser;
+  /** Emergency access grantee */
+  eaGrantee: AuthUser;
+  /** Tenant admin (ADMIN role) */
+  tenantAdmin: AuthUser;
+  /** Dedicated to passphrase change test (destructive) */
+  passphraseChange: AuthUser;
+  /** Dedicated to key rotation test (destructive) */
+  keyRotation: AuthUser;
+  /** Raw 64-char hex token for the pre-seeded share link (vaultReady user's entry) */
+  shareLinkToken?: string;
 }
 
 let _authState: AuthState | null = null;

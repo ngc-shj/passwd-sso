@@ -29,11 +29,27 @@ export class VaultLockPage {
   }
 
   async unlockAndWait(passphrase: string): Promise<void> {
+    // Register the response waiter BEFORE clicking unlock to avoid missing the
+    // response if PBKDF2 completes and the fetch fires before waitForResponse is set.
+    // This resolves once the dashboard fetches the password list, guaranteeing
+    // encryptionKey is fully propagated through the React tree. Pages that don't
+    // render the password list (e.g. /settings) won't fire this request, so we
+    // race against a short timeout and proceed regardless.
+    const passwordsFetched = this.page
+      .waitForResponse(
+        (r) => /\/api\/passwords(?:[?#]|$)/.test(r.url()) && r.request().method() === "GET",
+        { timeout: 10_000 }
+      )
+      .catch(() => null); // non-fatal: some pages don't load the password list
     await this.unlock(passphrase);
-    // Wait for PBKDF2 processing + dashboard load
+    // Wait for PBKDF2 processing + lock screen to disappear
     await this.page.waitForSelector("#unlock-passphrase", {
       state: "hidden",
       timeout: 15_000,
     });
+    // Wait for the initial fetchPasswords() triggered by VaultContext switching to
+    // UNLOCKED state. This guarantees encryptionKey is fully propagated through the
+    // React tree before any test starts creating or editing entries.
+    await passwordsFetched;
   }
 }

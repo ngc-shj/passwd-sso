@@ -236,7 +236,8 @@ async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
       headers: { cookie },
     });
     if (!res.ok) {
-      setSessionCache(cacheKey, { valid: false });
+      // Non-200 from auth session endpoint is a transient server error,
+      // not a definitive "session invalid" signal — do NOT cache.
       return { valid: false };
     }
     const data = await res.json();

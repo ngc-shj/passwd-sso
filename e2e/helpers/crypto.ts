@@ -8,6 +8,7 @@ import {
   createCipheriv,
   createHash,
   createHmac,
+  generateKeyPairSync,
   hkdfSync,
   pbkdf2Sync,
   randomBytes,
@@ -180,6 +181,58 @@ export function computeVerifierHmac(
     .digest("hex");
 }
 
+// ─── ECDH Key Generation (P-256, for team E2E encryption) ───────
+
+/** HKDF info for ECDH private key wrapping (matches HKDF_ECDH_WRAP_INFO in crypto-team.ts) */
+const HKDF_ECDH_WRAP_INFO = "passwd-sso-ecdh-v1";
+
+export interface EcdhKeyData {
+  ecdhPublicKey: string;         // JSON-serialized JWK
+  encryptedEcdhPrivateKey: string; // hex
+  ecdhPrivateKeyIv: string;      // hex
+  ecdhPrivateKeyAuthTag: string; // hex
+}
+
+/**
+ * Generate an ECDH P-256 key pair, wrap the private key with an HKDF-derived
+ * wrapping key (same derivation as vault-context.ts), and return all fields
+ * needed to seed the user table.
+ */
+export function generateEcdhKeysForVault(secretKey: Buffer): EcdhKeyData {
+  // Generate P-256 key pair
+  const { privateKey, publicKey } = generateKeyPairSync("ec", {
+    namedCurve: "P-256",
+  });
+
+  // Export public key as JWK (matches exportPublicKey in crypto-emergency.ts)
+  const pubJwk = publicKey.export({ format: "jwk" });
+  const ecdhPublicKey = JSON.stringify(pubJwk);
+
+  // Export private key as PKCS8 DER bytes.
+  // The browser's crypto.subtle.exportKey("pkcs8", key) produces PKCS8 DER, and
+  // crypto.subtle.importKey("pkcs8", bytes, ...) in team-vault-core.tsx expects the
+  // same format. Use Node.js DER export to match.
+  const privBytes = privateKey.export({ type: "pkcs8", format: "der" }) as Buffer;
+
+  // Derive ECDH wrapping key: HKDF(secretKey, empty-salt, HKDF_ECDH_WRAP_INFO) → 32 bytes
+  const ecdhWrapKey = Buffer.from(
+    hkdfSync("sha256", secretKey, Buffer.alloc(32), HKDF_ECDH_WRAP_INFO, 32)
+  );
+
+  // Encrypt private key bytes with AES-256-GCM
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", ecdhWrapKey, iv);
+  const encrypted = Buffer.concat([cipher.update(privBytes), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return {
+    ecdhPublicKey,
+    encryptedEcdhPrivateKey: hexEncode(encrypted),
+    ecdhPrivateKeyIv: hexEncode(iv),
+    ecdhPrivateKeyAuthTag: hexEncode(authTag),
+  };
+}
+
 // ─── Full Vault Setup (convenience) ─────────────────────────────
 
 export interface VaultSetupData {
@@ -193,6 +246,10 @@ export interface VaultSetupData {
   verifierHmac: string; // hex
   verificationArtifact: EncryptedData;
   encryptionKey: Buffer;
+  ecdhPublicKey: string;
+  encryptedEcdhPrivateKey: string; // hex
+  ecdhPrivateKeyIv: string; // hex
+  ecdhPrivateKeyAuthTag: string; // hex
 }
 
 /**
@@ -224,6 +281,9 @@ export function setupVaultCrypto(
   // Verification artifact
   const verificationArtifact = createVerificationArtifact(encryptionKey);
 
+  // ECDH key pair for team E2E encryption
+  const ecdhKeys = generateEcdhKeysForVault(secretKey);
+
   return {
     accountSalt: hexEncode(accountSalt),
     secretKey,
@@ -235,5 +295,6 @@ export function setupVaultCrypto(
     verifierHmac,
     verificationArtifact,
     encryptionKey,
+    ...ecdhKeys,
   };
 }

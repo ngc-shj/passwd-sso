@@ -254,10 +254,15 @@ export function PasswordList({
   });
 
   const handleToggleFavorite = async (id: string, current: boolean) => {
-    // Optimistic update
-    setAllEntries((prev) =>
-      prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
-    );
+    // Optimistic update: on the favorites-only view, unfavoriting removes the entry
+    // immediately so the list reflects the new state without waiting for a re-fetch.
+    if (favoritesOnly && current) {
+      setAllEntries((prev) => prev.filter((e) => e.id !== id));
+    } else {
+      setAllEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, isFavorite: !current } : e))
+      );
+    }
 
     try {
       const res = await fetchApi(apiPath.passwordById(id), {
@@ -266,15 +271,12 @@ export function PasswordList({
         body: JSON.stringify({ isFavorite: !current }),
       });
       if (!res.ok) {
-        setAllEntries((prev) =>
-          prev.map((e) => (e.id === id ? { ...e, isFavorite: current } : e))
-        );
+        fetchPasswords();
       }
     } catch {
-      setAllEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, isFavorite: current } : e))
-      );
+      fetchPasswords();
     }
+    onDataChange?.();
   };
 
   const handleToggleArchive = async (id: string, current: boolean) => {
