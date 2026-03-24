@@ -24,7 +24,7 @@ export default defineConfig({
 
   use: {
     baseURL,
-    ignoreHTTPSErrors: baseURL.startsWith("https://"),
+    ignoreHTTPSErrors: /^https:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(baseURL),
     trace: "on-first-retry",
     screenshot: "only-on-failure",
   },

@@ -1,41 +1,43 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
+import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
 
 test.describe("Tenant Admin", () => {
-  test.beforeEach(async ({ context }) => {
+  let context: BrowserContext;
+  let page: Page;
+
+  test.beforeAll(async ({ browser }) => {
     const { tenantAdmin } = getAuthState();
+    context = await browser.newContext();
     await injectSession(context, tenantAdmin.sessionToken);
-  });
-
-  test("navigate to /tenant page and verify admin access", async ({ page }) => {
-    const { tenantAdmin } = getAuthState();
-    await page.goto("/ja/dashboard");
-
+    page = await context.newPage();
+    // Navigate directly to the tenant settings page so the vault unlock and the
+    // target page share the same React tree — no full reload needed after unlock.
+    await page.goto("/ja/dashboard/tenant");
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(tenantAdmin.passphrase!);
+  });
 
-    await page.goto("/ja/dashboard/tenant");
+  test.afterAll(async () => {
+    await context.close();
+  });
 
-    // The tenant settings page heading should be visible (not the "no access" message)
+  test("navigate to /tenant page and verify admin access", async () => {
+    // beforeAll already unlocked on /ja/dashboard/tenant — we are already here.
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("members tab is active by default and shows member list", async ({
-    page,
-  }) => {
+  test("members tab is active by default and shows member list", async () => {
     const { tenantAdmin } = getAuthState();
-    await page.goto("/ja/dashboard");
+    // Navigate back via sidebar click to preserve vault state.
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("tenantSettings");
 
-    const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
-    await lockPage.unlockAndWait(tenantAdmin.passphrase!);
-
-    await page.goto("/ja/dashboard/tenant");
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
     ).toBeVisible({ timeout: 10_000 });
@@ -51,15 +53,11 @@ test.describe("Tenant Admin", () => {
     ).toBeVisible({ timeout: 10_000 });
   });
 
-  test("current user appears in the members list", async ({ page }) => {
+  test("current user appears in the members list", async () => {
     const { tenantAdmin } = getAuthState();
-    await page.goto("/ja/dashboard");
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("tenantSettings");
 
-    const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
-    await lockPage.unlockAndWait(tenantAdmin.passphrase!);
-
-    await page.goto("/ja/dashboard/tenant");
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
     ).toBeVisible({ timeout: 10_000 });
@@ -70,17 +68,10 @@ test.describe("Tenant Admin", () => {
     });
   });
 
-  test("navigate to security policy tab and verify controls are displayed", async ({
-    page,
-  }) => {
-    const { tenantAdmin } = getAuthState();
-    await page.goto("/ja/dashboard");
+  test("navigate to security policy tab and verify controls are displayed", async () => {
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("tenantSettings");
 
-    const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
-    await lockPage.unlockAndWait(tenantAdmin.passphrase!);
-
-    await page.goto("/ja/dashboard/tenant");
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
     ).toBeVisible({ timeout: 10_000 });
@@ -93,21 +84,16 @@ test.describe("Tenant Admin", () => {
       page.getByText(/Session Policy|セッションポリシー/i),
     ).toBeVisible({ timeout: 5_000 });
 
-    // The tab panel should contain a Save button for policy changes
+    // The tab panel should contain at least one Save button for policy changes
     await expect(
-      page.getByRole("tabpanel").getByRole("button", { name: /Save|保存/i }),
+      page.getByRole("tabpanel").getByRole("button", { name: /Save|保存/i }).first(),
     ).toBeVisible({ timeout: 5_000 });
   });
 
-  test("provisioning tab renders SCIM section", async ({ page }) => {
-    const { tenantAdmin } = getAuthState();
-    await page.goto("/ja/dashboard");
+  test("provisioning tab renders SCIM section", async () => {
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("tenantSettings");
 
-    const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
-    await lockPage.unlockAndWait(tenantAdmin.passphrase!);
-
-    await page.goto("/ja/dashboard/tenant");
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
     ).toBeVisible({ timeout: 10_000 });
@@ -115,9 +101,9 @@ test.describe("Tenant Admin", () => {
     // Click Provisioning tab
     await page.getByRole("tab", { name: /Provisioning|プロビジョニング/i }).click();
 
-    // SCIM sub-tab content should render
+    // SCIM sub-tab should be selected and its content visible
     await expect(
-      page.getByText(/SCIM/i),
+      page.getByRole("tab", { name: /^SCIM$/i }),
     ).toBeVisible({ timeout: 5_000 });
   });
 });

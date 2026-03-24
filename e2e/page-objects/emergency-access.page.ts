@@ -5,7 +5,7 @@ export class EmergencyAccessPage {
 
   get addTrustedContactButton() {
     return this.page.getByRole("button", {
-      name: /Add Trusted Contact|信頼できる連絡先を追加/i,
+      name: /Add Trusted Contact|信頼(できる|する)連絡先を追加/i,
     });
   }
 
@@ -20,7 +20,7 @@ export class EmergencyAccessPage {
   get createGrantButton() {
     return this.page
       .locator("[role='dialog']")
-      .getByRole("button", { name: /Create Grant|グラントを作成/i });
+      .getByRole("button", { name: /Create Grant|グラントを作成|作成/i });
   }
 
   get grantList() {
@@ -29,11 +29,25 @@ export class EmergencyAccessPage {
   }
 
   /**
-   * Return a locator scoped to the grant card for a specific email address.
-   * Works for both owner and grantee views since the card displays the other party's name/email.
+   * Return a locator scoped to the grant card for a specific email address or display name.
+   * The grant card shows the other party's name if available, falling back to their email.
+   * This method matches cards by email text; use grantByText() for name-based matching.
    */
   grantByEmail(email: string): Locator {
     return this.page.locator("[data-slot='card']").filter({ hasText: email });
+  }
+
+  /**
+   * Return a locator scoped to the individual grant card matching either the display name
+   * or email. Excludes outer section container cards (which have an h2 heading) to avoid
+   * strict-mode violations from nested card matches.
+   */
+  grantByUser(nameOrEmail: string): Locator {
+    // Section container cards have an h2 heading; individual GrantCards do not.
+    return this.page
+      .locator("[data-slot='card']")
+      .filter({ hasText: nameOrEmail })
+      .filter({ hasNot: this.page.locator("h2") });
   }
 
   /**

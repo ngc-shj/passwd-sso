@@ -33,19 +33,19 @@ test.describe("Favorites", () => {
     const entryPage = new PasswordEntryPage(page);
 
     await dashboard.createNewPassword();
-    await entryPage.fill({ title: entryTitle, username: "fav-user@example.com" });
+    await entryPage.fill({ title: entryTitle, username: "fav-user@example.com", password: "E2eFavP@ss1!" });
     await entryPage.save();
 
-    await expect(dashboard.entryByTitle(entryTitle)).toBeVisible({ timeout: 10_000 });
-
-    // Open ⋮ menu and confirm no "Favorite" menu item — star button toggles inline.
-    // The star button is a ghost icon button on the card; click it to mark as favorite.
+    // Wait for the entry to appear in the list (dialog already closed by save())
     const card = entryPage.card(entryTitle);
-    // Star button contains the Star SVG icon — locate via the SVG's parent button
-    const starButton = card.locator("button:has(svg.lucide-star)");
+    await expect(card).toBeVisible({ timeout: 10_000 });
+
+    // The star button is the first button in the card (ChevronRight is a div, not a button).
+    // Clicking it marks the entry as favorite.
+    const starButton = card.getByRole("button").first();
     await starButton.click();
 
-    // After clicking star, the star icon should become yellow (filled)
+    // After clicking star, the star SVG gets fill-yellow-400 class
     await expect(card.locator("svg.fill-yellow-400")).toBeVisible({ timeout: 5_000 });
   });
 
@@ -63,7 +63,8 @@ test.describe("Favorites", () => {
     // Already on /favorites — click star to unfavorite
     const entryPage = new PasswordEntryPage(page);
     const card = entryPage.card(entryTitle);
-    const starButton = card.locator("button:has(svg.lucide-star)");
+    // The star button is the first button in the card
+    const starButton = card.getByRole("button").first();
     await starButton.click();
 
     // The entry should disappear from the favorites list

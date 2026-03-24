@@ -23,10 +23,14 @@ test.describe("Settings - Sessions", () => {
   });
 
   test("active session is listed in Account tab", async () => {
+    const { vaultReady } = getAuthState();
     const settingsPage = new SettingsPage(page);
+    const lockPage = new VaultLockPage(page);
 
-    await test.step("navigate to settings", async () => {
+    await test.step("navigate to settings and unlock vault", async () => {
       await page.goto("/ja/dashboard/settings");
+      // Navigating to a new page resets React state; re-unlock the vault
+      await lockPage.unlockAndWait(vaultReady.passphrase!);
       await expect(settingsPage.accountTab).toBeVisible({ timeout: 10_000 });
     });
 

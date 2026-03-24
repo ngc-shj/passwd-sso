@@ -21,6 +21,7 @@ import { config } from "dotenv";
 import { createHash, randomBytes } from "node:crypto";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import Redis from "ioredis";
 
 // Load .env.local so DATABASE_URL / VERIFIER_PEPPER_KEY are available
 config({ path: join(__dirname, "..", ".env.local") });
@@ -67,6 +68,10 @@ async function seedVaultReadyUser(
       masterPasswordServerSalt: serverSalt,
       passphraseVerifierHmac: vault.verifierHmac,
       keyVersion: 1,
+      ecdhPublicKey: vault.ecdhPublicKey,
+      encryptedEcdhPrivateKey: vault.encryptedEcdhPrivateKey,
+      ecdhPrivateKeyIv: vault.ecdhPrivateKeyIv,
+      ecdhPrivateKeyAuthTag: vault.ecdhPrivateKeyAuthTag,
     },
   });
 
@@ -78,6 +83,31 @@ async function seedVaultReadyUser(
   return { sessionToken, encryptionKey: vault.encryptionKey };
 }
 
+/** Clear Redis rate limit keys for all E2E test users to avoid cooldown failures. */
+async function clearRateLimits(): Promise<void> {
+  const redisUrl = process.env.REDIS_URL;
+  if (!redisUrl) return;
+  const redis = new Redis(redisUrl, { lazyConnect: true, enableOfflineQueue: false });
+  try {
+    await redis.connect();
+    const userIds = Object.values(TEST_USERS).map((u) => u.id);
+    const keys = [
+      ...userIds.map((id) => `rl:watchtower:start:${id}`),
+      ...userIds.map((id) => `rl:watchtower:hibp:${id}`),
+      ...userIds.map((id) => `rl:ea_create:${id}`),
+      ...userIds.map((id) => `rl:vault_rotate:${id}`),
+      ...userIds.map((id) => `rl:vault_change_pass:${id}`),
+    ];
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+  } catch {
+    // Redis unavailable — rate limits will use in-memory fallback
+  } finally {
+    await redis.quit().catch(() => null);
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   // Safety guards
   assertTestDatabase();
@@ -86,6 +116,9 @@ export default async function globalSetup(): Promise<void> {
   if (!pepper) {
     throw new Error("VERIFIER_PEPPER_KEY is required for E2E tests.");
   }
+
+  // Clear Redis rate limits from previous runs (e.g. watchtower scan cooldown)
+  await clearRateLimits();
 
   // Clean up any leftover data from previous runs
   await cleanup();
@@ -109,6 +142,8 @@ export default async function globalSetup(): Promise<void> {
 
   // tenantAdmin requires an explicit ADMIN role in the tenant
   await seedTenantMember(TEST_USERS.tenantAdmin.id, "ADMIN");
+  // teamOwner needs ADMIN role to create teams via the teams page UI
+  await seedTenantMember(TEST_USERS.teamOwner.id, "ADMIN");
 
   // ── Fresh user (no vault) ─────────────────────────────────────
   await seedUser(TEST_USERS.fresh);

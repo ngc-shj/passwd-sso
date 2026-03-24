@@ -43,10 +43,12 @@ test.describe("Folders", () => {
     const entryPage = new PasswordEntryPage(page);
 
     await dashboard.createNewPassword();
-    await entryPage.fill({ title: entryTitle });
+    await entryPage.fill({ title: entryTitle, password: "E2eFolderP@ss1!" });
 
-    // Assign to the folder using the folder select dropdown
-    const folderSelect = page.getByRole("combobox");
+    // Assign to the folder using the folder select dropdown (scoped to dialog to avoid
+    // matching the VaultSelector combobox in the sidebar)
+    const dialog = page.locator("[role='dialog']");
+    const folderSelect = dialog.getByRole("combobox");
     await folderSelect.click();
     await page.getByRole("option", { name: folderName }).click();
 
@@ -55,13 +57,16 @@ test.describe("Folders", () => {
   });
 
   test("entry appears in folder filtered view via sidebar", async () => {
+    // Ensure the Manage section is expanded before clicking the folder link
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.expandManageSection();
+
     // Click the folder link in the sidebar
     const folderLink = page.getByRole("link", { name: folderName });
     await folderLink.click();
-    await page.waitForLoadState("networkidle");
 
     // URL should contain /folders/
-    await expect(page).toHaveURL(/\/folders\//);
+    await expect(page).toHaveURL(/\/folders\//, { timeout: 10_000 });
 
     // The entry assigned to the folder should be visible
     await expect(page.getByText(entryTitle)).toBeVisible({ timeout: 10_000 });

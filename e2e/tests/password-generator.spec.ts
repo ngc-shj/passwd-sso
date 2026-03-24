@@ -47,23 +47,28 @@ test.describe("Password Generator", () => {
       const lengthInput = page.locator("#gen-length");
       await expect(lengthInput).toBeVisible({ timeout: 5_000 });
 
-      await lengthInput.fill("");
-      await lengthInput.type("32");
-      // Trigger blur so the component clamps the value
+      // fill() clears the field and sets the value atomically, then blur triggers clamp
+      await lengthInput.fill("32");
       await lengthInput.blur();
+
+      // Wait for a new password to be generated at the updated length
+      await page.waitForTimeout(500);
     });
 
     let generatedPassword: string;
 
     await test.step("read the generated password text", async () => {
       // Generated password is displayed in a <p> with font-mono inside the
-      // generator panel.  We wait for it to be non-empty.
+      // generator panel.  Wait for it to be updated to the 32-char length.
       const passwordDisplay = page
         .locator("p.font-mono, p.\\!font-mono")
         .first();
       await expect(passwordDisplay).toBeVisible({ timeout: 10_000 });
-      generatedPassword = (await passwordDisplay.textContent()) ?? "";
-      expect(generatedPassword.length).toBeGreaterThan(0);
+      // Poll until the password matches the requested 32-character length
+      await expect(async () => {
+        generatedPassword = (await passwordDisplay.textContent()) ?? "";
+        expect(generatedPassword.length).toBe(32);
+      }).toPass({ timeout: 10_000 });
     });
 
     await test.step("click Use to apply the generated password", async () => {
@@ -109,8 +114,12 @@ test.describe("Password Generator", () => {
 
     const first = (await passwordDisplay.textContent()) ?? "";
 
-    // Click the refresh (↺) icon button inside the generator panel
-    await page.getByRole("button", { name: /Refresh|更新/i }).click();
+    // Click the refresh icon button in the generator top bar.
+    // It is icon-only (no accessible name) and sits between Cancel and Use.
+    await page
+      .getByRole("button", { name: /^Use$|^使用$/i })
+      .locator("xpath=preceding-sibling::button[1]")
+      .click();
 
     // Wait briefly for the API call to return a new password
     await page.waitForTimeout(500);

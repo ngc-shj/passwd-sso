@@ -142,7 +142,7 @@ describe("seedPasswordEntry", () => {
     const data = JSON.parse(plaintext);
 
     expect(data.title).toBe(BASE_OPTIONS.title);
-    expect(data.username).toBe("e2e-user@example.com");
+    expect(data.username).toBe("e2e-seeded@example.com");
     expect(data.password).toBe("E2ESeedPassword!999");
     expect(data.url).toBe("https://example.com");
     expect(data.notes).toBe("Seeded by E2E global-setup");
@@ -159,7 +159,7 @@ describe("seedPasswordEntry", () => {
     const data = JSON.parse(plaintext);
 
     expect(data.title).toBe(BASE_OPTIONS.title);
-    expect(data.username).toBe("e2e-user@example.com");
+    expect(data.username).toBe("e2e-seeded@example.com");
     expect(data.urlHost).toBe("example.com");
   });
 

@@ -26,11 +26,15 @@ export class WatchtowerPage {
 
   /**
    * The score gauge card shown after analysis completes.
-   * Contains the t("overallScore") = "Security Score" / "セキュリティスコア" heading.
+   * Identified by the h2 heading with t("overallScore") = "Security Score" / "セキュリティスコア".
+   * (The page header card also contains "セキュリティスコア" in its description text,
+   *  so we must narrow by the h2 role to avoid false matches.)
    */
   get scoreCard() {
     return this.page.locator("[data-slot='card']").filter({
-      hasText: /Security Score|セキュリティスコア/i,
+      has: this.page.locator("h2").filter({
+        hasText: /Security Score|セキュリティスコア/i,
+      }),
     });
   }
 
@@ -64,13 +68,16 @@ export class WatchtowerPage {
 
   /**
    * Click the scan/refresh button and wait for analysis to complete.
-   * Analysis is done when the loading card disappears and the score card appears.
+   * Waits up to 120s for the score card to appear (covers large vaults with
+   * many HIBP checks at 1.5s per unique password).
+   * The global setup clears server-side rate limits before each test run,
+   * so 429 responses should not occur in normal E2E test usage.
    */
   async startScan(): Promise<void> {
     await this.scanButton.click();
-    // Wait for analysis to start (loading indicator appears)
-    await this.loadingCard.waitFor({ timeout: 5_000 });
-    // Wait for analysis to finish (loading indicator disappears)
-    await this.loadingCard.waitFor({ state: "hidden", timeout: 120_000 });
+    // Wait for score card — covers both fast (< 1s) and slow (many HIBP checks) scans.
+    // The loading card may appear and disappear before we can observe it, so we
+    // skip waiting for it and go straight to the final result.
+    await this.scoreCard.waitFor({ timeout: 120_000 });
   }
 }

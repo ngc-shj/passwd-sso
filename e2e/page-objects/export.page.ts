@@ -21,11 +21,13 @@ export class ExportPage {
   }
 
   get exportCsvButton() {
-    return this.page.getByRole("button", { name: /Export CSV|CSVエクスポート/i });
+    // t("exportCsv") = "Export CSV" (EN) / "CSV でエクスポート" (JA)
+    return this.page.getByRole("button", { name: /Export CSV|CSV.*エクスポート/i });
   }
 
   get exportJsonButton() {
-    return this.page.getByRole("button", { name: /Export JSON|JSONエクスポート/i });
+    // t("exportJson") = "Export JSON" (EN) / "JSON でエクスポート" (JA)
+    return this.page.getByRole("button", { name: /Export JSON|JSON.*エクスポート/i });
   }
 
   /**

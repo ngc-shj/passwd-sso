@@ -20,7 +20,9 @@ test.describe("Archive", () => {
 
     await page.goto("/ja/dashboard");
     const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+    // Use a generous timeout: vault status check can be slow when the server
+    // is processing other requests (vault setup check → /api/vault/status).
+    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 20_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
   });
 
@@ -33,7 +35,7 @@ test.describe("Archive", () => {
     const entryPage = new PasswordEntryPage(page);
 
     await dashboard.createNewPassword();
-    await entryPage.fill({ title: entryTitle, username: "archive-user@example.com" });
+    await entryPage.fill({ title: entryTitle, username: "archive-user@example.com", password: "E2EArchiveP@ss1" });
     await entryPage.save();
 
     await expect(dashboard.entryByTitle(entryTitle)).toBeVisible({ timeout: 10_000 });

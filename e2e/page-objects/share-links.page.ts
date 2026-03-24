@@ -40,10 +40,10 @@ export class ShareLinksPage {
 
   /**
    * "New Send" button visible when not filtering by team.
-   * t("newSend") = "New Send" / "新規送信"
+   * t("newSend") = "New Send" (EN) / "新規Send" (JA)
    */
   get newSendButton() {
-    return this.page.getByRole("button", { name: /New Send|新規送信/i });
+    return this.page.getByRole("button", { name: /New Send|新規Send|新規送信/i });
   }
 
   /** "Load more" button at the bottom of the list. */
@@ -86,7 +86,8 @@ export class ShareLinksPage {
     const labelMap: Record<ShareLinkTypeFilter, RegExp> = {
       all: /All types|すべてのタイプ/i,
       entry: /Entry shares|エントリ共有/i,
-      send: /^Sends$|^送信$/i,
+      // t("sends") = "Sends" (EN) / "Send" (JA)
+      send: /^Sends?$/i,
     };
     await this.typeFilterTrigger.click();
     await this.page.getByRole("option", { name: labelMap[type] }).click();

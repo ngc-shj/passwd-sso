@@ -12,7 +12,8 @@ export class ImportPage {
   }
 
   get importButton() {
-    return this.page.getByRole("button", { name: /^Import$|^インポート$/i });
+    // t("importButton", { count }) = "Import {count} entries" (EN) / "{count} 件をインポート" (JA)
+    return this.page.getByRole("button", { name: /^Import \d+|件をインポート/i });
   }
 
   get resetButton() {

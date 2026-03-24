@@ -56,7 +56,7 @@ test.describe.serial("Passphrase Change", () => {
     await test.step("lock vault manually", async () => {
       await page.getByRole("button", { name: passphraseChange.name }).click();
       await page
-        .getByRole("menuitem", { name: /Lock Vault|Vaultをロック/i })
+        .getByRole("menuitem", { name: /Lock Vault|保管庫をロック/i })
         .click();
 
       // Vault lock screen should appear

@@ -3,6 +3,7 @@ import { getAuthState } from "../helpers/fixtures";
 import { injectSession } from "../helpers/auth";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { ShareLinksPage } from "../page-objects/share-links.page";
+import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
 
 const SEND_NAME = `E2E Text Send ${Date.now()}`;
 const SEND_CONTENT = "This is a secret E2E test message.\nLine two here.";
@@ -30,9 +31,10 @@ test.describe("Text Send", () => {
     let sendUrl: string;
 
     await test.step("navigate to share-links page", async () => {
-      await page.goto("/ja/dashboard/share-links");
+      const sidebar = new SidebarNavPage(page);
+      await sidebar.navigateTo("shareLinks");
       await expect(
-        page.getByRole("button", { name: /New Send|新規送信/i })
+        page.getByRole("button", { name: /New Send|新規Send|新規送信/i })
       ).toBeVisible({ timeout: 10_000 });
     });
 
@@ -98,14 +100,15 @@ test.describe("Text Send", () => {
     });
 
     await test.step("send appears in share-links list", async () => {
-      // Reload the page to see the newly created send
-      await page.reload();
-      const lockPage = new VaultLockPage(page);
-      // Vault will lock on reload — re-unlock
-      if (await lockPage.passphraseInput.isVisible({ timeout: 3_000 }).catch(() => false)) {
-        const { vaultReady } = getAuthState();
-        await lockPage.unlockAndWait(vaultReady.passphrase!);
-      }
+      // Navigate away and back via sidebar to trigger a list refresh without
+      // a full page reload (which would re-lock the vault).
+      const sidebar = new SidebarNavPage(page);
+      await sidebar.navigateTo("passwords");
+      await sidebar.navigateTo("shareLinks");
+
+      // Wait for the list to finish loading before applying the filter
+      await expect(page.locator(".animate-spin")).not.toBeVisible({ timeout: 10_000 });
+
       // Filter to sends only
       await shareLinksPage.filterByType("send");
 

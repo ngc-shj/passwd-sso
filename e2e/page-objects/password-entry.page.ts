@@ -4,27 +4,36 @@ export class PasswordEntryPage {
   constructor(private page: Page) {}
 
   get titleInput() {
-    return this.page.locator("#title");
+    // Personal vault forms use id="title"; team vault forms have no id on the title
+    // input (EntryLoginMainFields hides it and renders a separate title field).
+    // Use the first visible textbox inside the dialog as a fallback.
+    return this.page.locator("[role='dialog'] #title, [role='dialog'] input").first();
   }
 
   get usernameInput() {
-    return this.page.locator("#username");
+    // Personal: id="username", team: id="team-username"
+    return this.page.locator("#username, #team-username");
   }
 
   get passwordInput() {
-    return this.page.locator("#password");
+    // Personal: id="password", team: id="team-password"
+    return this.page.locator("#password, #team-password");
   }
 
   get urlInput() {
-    return this.page.locator("#url");
+    // Personal: id="url", team: id="team-url"
+    return this.page.locator("#url, #team-url");
   }
 
   get notesInput() {
-    return this.page.locator("#notes");
+    // Personal: id="notes", team: id="team-notes"
+    return this.page.locator("#notes, #team-notes");
   }
 
   get saveButton() {
-    return this.page.getByRole("button", { name: /Save|保存/i });
+    // Scope to the open dialog so we don't accidentally match other "保存"
+    // buttons that may be present elsewhere on the page.
+    return this.page.locator("[role='dialog']").getByRole("button", { name: /Save|保存/i });
   }
 
   get updateButton() {
@@ -102,6 +111,8 @@ export class PasswordEntryPage {
   /** Open ⋮ menu → Delete → confirm in dialog. Card-scoped when title given. */
   async deleteEntry(title?: string | RegExp): Promise<void> {
     await this.moreMenuButton(title).click();
+    // Wait for the dropdown to be open and the menu item to be visible
+    await this.deleteMenuItem.waitFor({ state: "visible", timeout: 5_000 });
     await this.deleteMenuItem.click();
     await this.deleteConfirmButton.click();
   }

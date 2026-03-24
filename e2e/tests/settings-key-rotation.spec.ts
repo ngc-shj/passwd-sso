@@ -47,6 +47,8 @@ test("Key rotation preserves existing vault entries", async ({
 
   await test.step("navigate to Settings > Security > Key Rotation", async () => {
     await page.goto("/ja/dashboard/settings");
+    // Navigating to a new page resets React state; re-unlock the vault
+    await lockPage.unlockAndWait(keyRotation.passphrase!);
     await settings.switchTab("security");
     await settings.switchSecuritySubTab("rotate");
 
@@ -85,6 +87,10 @@ test("Key rotation preserves existing vault entries", async ({
 
   await test.step("verify test entry is still accessible after rotation", async () => {
     await page.goto("/ja/dashboard");
+
+    // Full page navigation resets React state; re-unlock with the same passphrase
+    // (key rotation keeps the passphrase unchanged — only the derived key is rotated)
+    await lockPage.unlockAndWait(keyRotation.passphrase!);
 
     // Entry should still appear in the list
     await expect(dashboard.entryByTitle(testEntry.title)).toBeVisible({

@@ -20,10 +20,10 @@ export class TeamsPage {
   }
 
   get createButton() {
-    // Submit button inside the create team dialog
+    // Submit button inside the create team dialog — text is "Create" / "作成" (not "Create Team")
     return this.page
       .locator("[role='dialog']")
-      .getByRole("button", { name: /Create Team|チームを作成/i });
+      .getByRole("button", { name: /^Create$|^作成$/i });
   }
 
   /**
@@ -62,9 +62,28 @@ export class TeamsPage {
   }
 
   /**
-   * Click on a team card to navigate to its dashboard page.
+   * Click on a team card to navigate to its settings page.
+   * Note: team cards link to /settings. Use openTeamVault() to reach the vault page.
    */
   async openTeam(name: string): Promise<void> {
     await this.teamByName(name).click();
+  }
+
+  /**
+   * Navigate to the team vault (passwords) page for the named team.
+   * Clicks the team card (→ settings page), then clicks the sidebar
+   * "Passwords" link which in team context points to /teams/{id}.
+   * This avoids a full page reload that would lose the vault unlock state.
+   */
+  async openTeamVault(name: string): Promise<void> {
+    // Navigate to settings page first (card href goes to /settings)
+    await this.teamByName(name).click();
+    // Wait for navigation to complete (URL ends with /settings)
+    await this.page.waitForURL(/\/teams\/[^/]+\/settings/, { timeout: 10_000 });
+    // Click the sidebar "Passwords" link — in team vault context this navigates
+    // client-side to /dashboard/teams/{id}, preserving the React vault state.
+    const passwordsLink = this.page.getByRole("link", { name: /^Passwords$|^パスワード$/i });
+    await passwordsLink.click();
+    await this.page.waitForURL(/\/teams\/[^/]+$/, { timeout: 10_000 });
   }
 }

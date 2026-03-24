@@ -25,7 +25,7 @@ export async function seedPasswordEntry(
   // Encrypt the full entry blob (all sensitive fields)
   const blobData = {
     title: options.title,
-    username: "e2e-user@example.com",
+    username: "e2e-seeded@example.com",
     password: "E2ESeedPassword!999",
     url: "https://example.com",
     notes: "Seeded by E2E global-setup",
@@ -38,7 +38,7 @@ export async function seedPasswordEntry(
   // Encrypt the overview blob (summary for list view)
   const overviewData = {
     title: options.title,
-    username: "e2e-user@example.com",
+    username: "e2e-seeded@example.com",
     urlHost: "example.com",
     tags: [],
   };

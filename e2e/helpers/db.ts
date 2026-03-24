@@ -147,6 +147,11 @@ export interface SeedUserOptions {
     masterPasswordServerSalt: string;
     passphraseVerifierHmac: string;
     keyVersion: number;
+    // Optional ECDH fields for team E2E encryption
+    ecdhPublicKey?: string;
+    encryptedEcdhPrivateKey?: string;
+    ecdhPrivateKeyIv?: string;
+    ecdhPrivateKeyAuthTag?: string;
   };
 }
 
@@ -188,8 +193,10 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         account_salt, encrypted_secret_key, secret_key_iv, secret_key_auth_tag,
         master_password_server_hash, master_password_server_salt,
         passphrase_verifier_hmac, passphrase_verifier_version,
-        key_version
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        key_version,
+        ecdh_public_key, encrypted_ecdh_private_key,
+        ecdh_private_key_iv, ecdh_private_key_auth_tag
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
       ON CONFLICT (id) DO UPDATE SET
         email = EXCLUDED.email,
         name = EXCLUDED.name,
@@ -205,7 +212,11 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         master_password_server_salt = EXCLUDED.master_password_server_salt,
         passphrase_verifier_hmac = EXCLUDED.passphrase_verifier_hmac,
         passphrase_verifier_version = EXCLUDED.passphrase_verifier_version,
-        key_version = EXCLUDED.key_version`,
+        key_version = EXCLUDED.key_version,
+        ecdh_public_key = EXCLUDED.ecdh_public_key,
+        encrypted_ecdh_private_key = EXCLUDED.encrypted_ecdh_private_key,
+        ecdh_private_key_iv = EXCLUDED.ecdh_private_key_iv,
+        ecdh_private_key_auth_tag = EXCLUDED.ecdh_private_key_auth_tag`,
       [
         options.id,
         options.email,
@@ -224,9 +235,15 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         v.passphraseVerifierHmac,
         1, // verifier version
         v.keyVersion,
+        v.ecdhPublicKey ?? null,
+        v.encryptedEcdhPrivateKey ?? null,
+        v.ecdhPrivateKeyIv ?? null,
+        v.ecdhPrivateKeyAuthTag ?? null,
       ]
     );
   } else {
+    // Reset all vault fields to NULL so a "fresh" user stays fresh
+    // even if a previous test run set up their vault.
     await p.query(
       `INSERT INTO users (id, email, name, tenant_id, email_verified, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -235,10 +252,27 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
          name = EXCLUDED.name,
          tenant_id = EXCLUDED.tenant_id,
          email_verified = EXCLUDED.email_verified,
-         updated_at = EXCLUDED.updated_at`,
+         updated_at = EXCLUDED.updated_at,
+         vault_setup_at = NULL,
+         account_salt = NULL,
+         encrypted_secret_key = NULL,
+         secret_key_iv = NULL,
+         secret_key_auth_tag = NULL,
+         master_password_server_hash = NULL,
+         master_password_server_salt = NULL,
+         passphrase_verifier_hmac = NULL,
+         key_version = 0`,
       [options.id, options.email, options.name, E2E_TENANT.id, now, now, now]
     );
   }
+
+  // Ensure tenant_members row exists (required for RLS tenant resolution)
+  await p.query(
+    `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+     VALUES ($1, $2, $3, 'MEMBER', $4, $5)
+     ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+    [crypto.randomUUID(), E2E_TENANT.id, options.id, now, now]
+  );
 }
 
 export async function seedSession(

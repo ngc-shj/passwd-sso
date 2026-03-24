@@ -17,7 +17,7 @@ test.describe("Auth Error Page", () => {
 
     // Description: t("errorAccessDeniedDescription")
     await expect(
-      page.getByText(/Sign-in is not allowed for this account|このアカウントではサインインできません/i),
+      page.getByText(/Sign-in is not allowed for this account|このアカウントではサインインが許可されていません/i),
     ).toBeVisible({ timeout: 5_000 });
 
     // "Try again" button linking back to sign-in
@@ -55,7 +55,7 @@ test.describe("Auth Error Page", () => {
     // t("errorVerificationDescription")
     await expect(
       page.getByText(
-        /has expired or has already been used|期限切れまたは使用済みです/i,
+        /has expired or has already been used|有効期限が切れたか、既に使用されています/i,
       ),
     ).toBeVisible({ timeout: 5_000 });
   });

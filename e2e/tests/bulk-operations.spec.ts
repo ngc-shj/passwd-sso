@@ -25,7 +25,9 @@ test.describe("Bulk Operations", () => {
 
     await page.goto("/ja/dashboard");
     const lockPage = new VaultLockPage(page);
-    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+    // Use a generous timeout: vault status check can be slow when the server
+    // is processing other requests (vault setup check → /api/vault/status).
+    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 20_000 });
     await lockPage.unlockAndWait(vaultReady.passphrase!);
   });
 
@@ -39,9 +41,11 @@ test.describe("Bulk Operations", () => {
 
     for (const title of titles) {
       await dashboard.createNewPassword();
-      await entryPage.fill({ title });
+      await entryPage.fill({ title, password: "E2EBulkP@ss1" });
       await entryPage.save();
-      await expect(dashboard.entryByTitle(title)).toBeVisible({ timeout: 10_000 });
+      // After save, the list re-fetches (loading spinner → entries). Use a
+      // generous timeout to ride out the loading state reliably.
+      await expect(dashboard.entryByTitle(title)).toBeVisible({ timeout: 20_000 });
     }
   });
 
@@ -65,10 +69,10 @@ test.describe("Bulk Operations", () => {
     // Click "Move selected to archive" / "アーカイブへ移動" in the floating action bar
     await page.getByRole("button", { name: /Move selected to archive|アーカイブへ移動/i }).click();
 
-    // Confirm dialog appears — click Confirm
-    await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
-    await page.locator("[role='dialog']").getByRole("button", { name: /^Confirm$|^実行$/i }).click();
-    await page.locator("[role='dialog']").waitFor({ state: "hidden", timeout: 15_000 });
+    // Confirm dialog appears (AlertDialog uses role="alertdialog") — click Confirm
+    await page.locator("[role='alertdialog']").waitFor({ timeout: 5_000 });
+    await page.locator("[role='alertdialog']").getByRole("button", { name: /^Confirm$|^実行$/i }).click();
+    await page.locator("[role='alertdialog']").waitFor({ state: "hidden", timeout: 15_000 });
 
     // All 3 entries should disappear from main list
     for (const title of titles) {
@@ -99,10 +103,10 @@ test.describe("Bulk Operations", () => {
     // Click "Remove selected from archive" / "アーカイブ解除" in the floating action bar
     await page.getByRole("button", { name: /Remove selected from archive|アーカイブ解除/i }).click();
 
-    // Confirm dialog
-    await page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
-    await page.locator("[role='dialog']").getByRole("button", { name: /^Confirm$|^実行$/i }).click();
-    await page.locator("[role='dialog']").waitFor({ state: "hidden", timeout: 15_000 });
+    // Confirm dialog (AlertDialog uses role="alertdialog")
+    await page.locator("[role='alertdialog']").waitFor({ timeout: 5_000 });
+    await page.locator("[role='alertdialog']").getByRole("button", { name: /^Confirm$|^実行$/i }).click();
+    await page.locator("[role='alertdialog']").waitFor({ state: "hidden", timeout: 15_000 });
 
     // All entries should disappear from archive
     for (const title of titles) {

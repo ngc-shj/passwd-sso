@@ -133,9 +133,9 @@ describe("seedUser", () => {
   };
 
   describe("without vaultFields", () => {
-    it("calls pool.query once", async () => {
+    it("calls pool.query twice (users + tenant_members)", async () => {
       await seedUser(baseUser);
-      expect(mockQuery).toHaveBeenCalledOnce();
+      expect(mockQuery).toHaveBeenCalledTimes(2);
     });
 
     it("includes tenant_id (E2E_TENANT.id) in the INSERT", async () => {
@@ -153,11 +153,13 @@ describe("seedUser", () => {
       expect(sql).toMatch(/DO UPDATE SET/i);
     });
 
-    it("does not include vault column names in SQL", async () => {
+    it("nullifies vault fields in ON CONFLICT SET (fresh user reset)", async () => {
       await seedUser(baseUser);
       const [sql] = getCall(0);
-      expect(sql).not.toMatch(/account_salt/i);
-      expect(sql).not.toMatch(/encrypted_secret_key/i);
+      // The "without vaultFields" path nullifies vault columns to ensure
+      // a fresh user stays fresh even if a previous test run set up their vault.
+      expect(sql).toMatch(/account_salt = NULL/i);
+      expect(sql).toMatch(/encrypted_secret_key = NULL/i);
     });
   });
 

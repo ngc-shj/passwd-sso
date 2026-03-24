@@ -70,9 +70,11 @@ export class SettingsPage {
 
   /** Sessions list card rendered inside the Account tab. */
   get sessionsCard(): Locator {
-    return this.page.locator("[data-slot='card']").filter({
-      hasText: /Sessions|セッション/i,
-    });
+    // The sessions card is the only [data-slot='card'] in the Account tabpanel
+    return this.page
+      .getByRole("tabpanel", { name: /アカウント|Account/i })
+      .locator("[data-slot='card']")
+      .first();
   }
 
   /** CLI token card rendered inside the Developer tab. */
@@ -84,8 +86,9 @@ export class SettingsPage {
 
   /** API key manager section rendered inside the Developer tab. */
   get apiKeySection(): Locator {
+    // The API key manager renders a card with "API キー" or "API Key" heading
     return this.page.locator("[data-slot='card']").filter({
-      hasText: /API Key|APIキー/i,
+      hasText: /API\s*[Kk]ey|API\s*キー/i,
     });
   }
 
@@ -108,8 +111,10 @@ export class SettingsPage {
       developer: this.developerTab,
     };
     await tabMap[tab].click();
+    // Use first() to avoid strict mode violation when nested sub-tabs are also active
     await this.page
       .locator(`[role='tabpanel'][data-state='active']`)
+      .first()
       .waitFor({ timeout: 5_000 });
   }
 
@@ -124,8 +129,10 @@ export class SettingsPage {
       rotate: this.keyRotationSubTab,
     };
     await subTabMap[subTab].click();
+    // Use first() to avoid strict mode violation when multiple panels are active
     await this.page
       .locator(`[role='tabpanel'][data-state='active']`)
+      .first()
       .waitFor({ timeout: 5_000 });
   }
 }

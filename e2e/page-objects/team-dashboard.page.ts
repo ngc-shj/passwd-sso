@@ -12,7 +12,8 @@ export class TeamDashboardPage {
   }
 
   get membersTab() {
-    return this.page.getByRole("tab", { name: /Members|メンバー/i });
+    // Top-level "Members" / "メンバー" tab (exact match to avoid matching "Add Member" / "メンバー追加")
+    return this.page.getByRole("tab", { name: /^Members$|^メンバー$/i });
   }
 
   get settingsTab() {
@@ -24,7 +25,8 @@ export class TeamDashboardPage {
   }
 
   get addMemberTab() {
-    return this.page.getByRole("tab", { name: /Add Member|メンバーを追加/i });
+    // t("addMember") = "Add Member" (en) / "メンバー追加" (ja)
+    return this.page.getByRole("tab", { name: /Add Member|メンバー追加/i });
   }
 
   get inviteEmailInput() {
@@ -67,10 +69,13 @@ export class TeamDashboardPage {
 
   /**
    * Send an email invitation to a new team member.
-   * Navigates to the "Add Member" tab on the settings page, fills the email,
-   * optionally selects a role, and submits.
+   * Navigates to the "Members" top-level tab, then the "Add Member" sub-tab,
+   * fills the email, optionally selects a role, and submits.
    */
   async inviteMember(email: string, role?: string): Promise<void> {
+    // First click the "Members" top-level tab to make sub-tabs visible
+    await this.membersTab.click();
+    // Then click the nested "Add Member" sub-tab
     await this.addMemberTab.click();
 
     // Scroll to the invite-by-email section
@@ -80,7 +85,7 @@ export class TeamDashboardPage {
     if (role) {
       // The invite role select is the last combobox in the add-member tab
       const roleSelect = this.page
-        .getByRole("tabpanel", { name: /Add Member|メンバーを追加/i })
+        .getByRole("tabpanel", { name: /Add Member|メンバー追加/i })
         .getByRole("combobox")
         .last();
       await roleSelect.click();

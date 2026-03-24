@@ -25,10 +25,14 @@ test.describe("Settings - API Keys", () => {
   });
 
   test("create and delete API key", async () => {
+    const { vaultReady } = getAuthState();
     const settingsPage = new SettingsPage(page);
+    const lockPage = new VaultLockPage(page);
 
     await test.step("navigate to Developer tab in settings", async () => {
       await page.goto("/ja/dashboard/settings");
+      // Navigating to a new page resets React state; re-unlock the vault
+      await lockPage.unlockAndWait(vaultReady.passphrase!);
       await expect(settingsPage.developerTab).toBeVisible({ timeout: 10_000 });
       await settingsPage.switchTab("developer");
     });
@@ -52,8 +56,9 @@ test.describe("Settings - API Keys", () => {
         .click();
 
       // Newly created token section should appear (shown once)
+      // t("tokenReady") = "API キー（一度だけ表示されます）:"
       await expect(
-        page.getByText(/Token ready|トークンが準備|tokenReady/i)
+        page.getByText(/API key.*once|API\s*キー.*一度/i)
       ).toBeVisible({ timeout: 10_000 });
     });
 

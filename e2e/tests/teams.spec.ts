@@ -5,6 +5,7 @@ import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { TeamsPage } from "../page-objects/teams.page";
 import { TeamDashboardPage } from "../page-objects/team-dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
+import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
 
 // Name for a newly created team during the test run
 const TEAM_NAME = `E2E Team ${Date.now()}`;
@@ -28,9 +29,13 @@ test.describe.serial("Teams", () => {
     const { teamOwner, teamMember } = getAuthState();
 
     ownerContext = await browser.newContext();
+    // Grant clipboard-write so invitation URL copy succeeds inside handleInvite
+    await ownerContext.grantPermissions(["clipboard-read", "clipboard-write"]);
     await injectSession(ownerContext, teamOwner.sessionToken);
     ownerPage = await ownerContext.newPage();
-    await ownerPage.goto("/ja/dashboard");
+    // Navigate directly to the teams page so the vault unlock and the target
+    // page share the same React tree — no full reload needed after unlock.
+    await ownerPage.goto("/ja/dashboard/teams");
     const ownerLock = new VaultLockPage(ownerPage);
     await expect(ownerLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await ownerLock.unlockAndWait(teamOwner.passphrase!);
@@ -38,7 +43,7 @@ test.describe.serial("Teams", () => {
     memberContext = await browser.newContext();
     await injectSession(memberContext, teamMember.sessionToken);
     memberPage = await memberContext.newPage();
-    await memberPage.goto("/ja/dashboard");
+    await memberPage.goto("/ja/dashboard/teams");
     const memberLock = new VaultLockPage(memberPage);
     await expect(memberLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await memberLock.unlockAndWait(teamMember.passphrase!);
@@ -52,8 +57,7 @@ test.describe.serial("Teams", () => {
   // ── Pre-seeded team assertions ───────────────────────────────
 
   test("teamOwner: pre-seeded team is visible in teams list", async () => {
-    await ownerPage.goto("/ja/dashboard/teams");
-
+    // afterAll unlocked the vault directly on /ja/dashboard/teams — we are already here.
     const teamsPage = new TeamsPage(ownerPage);
     await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
       timeout: 10_000,
@@ -62,8 +66,7 @@ test.describe.serial("Teams", () => {
   });
 
   test("teamMember: pre-seeded team is visible without invitation flow", async () => {
-    await memberPage.goto("/ja/dashboard/teams");
-
+    // memberPage was also unlocked directly on /ja/dashboard/teams.
     const teamsPage = new TeamsPage(memberPage);
     // teamMember was seeded directly as MEMBER in global-setup — no invitation needed
     await expect(
@@ -75,7 +78,9 @@ test.describe.serial("Teams", () => {
   // ── Dynamic team creation ────────────────────────────────────
 
   test("teamOwner: navigate to /teams and create a new team", async () => {
-    await ownerPage.goto("/ja/dashboard/teams");
+    // Navigate back to teams list via sidebar click (client-side, vault stays unlocked).
+    const sidebar = new SidebarNavPage(ownerPage);
+    await sidebar.navigateTo("teams");
 
     const teamsPage = new TeamsPage(ownerPage);
     await expect(teamsPage.createTeamButton).toBeVisible({ timeout: 10_000 });
@@ -89,7 +94,9 @@ test.describe.serial("Teams", () => {
   });
 
   test("teamOwner: team appears in teams list", async () => {
-    await ownerPage.goto("/ja/dashboard/teams");
+    // Navigate back to teams list via sidebar click.
+    const sidebar = new SidebarNavPage(ownerPage);
+    await sidebar.navigateTo("teams");
 
     const teamsPage = new TeamsPage(ownerPage);
     await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
@@ -99,15 +106,18 @@ test.describe.serial("Teams", () => {
   });
 
   test("teamOwner: create a password entry in team vault", async () => {
-    // Navigate into the newly created team
-    await ownerPage.goto("/ja/dashboard/teams");
+    // Navigate back to teams list via sidebar click.
+    const sidebar = new SidebarNavPage(ownerPage);
+    await sidebar.navigateTo("teams");
+
     const teamsPage = new TeamsPage(ownerPage);
     await expect(teamsPage.teamByName(TEAM_NAME)).toBeVisible({
       timeout: 10_000,
     });
-    await teamsPage.openTeam(TEAM_NAME);
+    // openTeamVault: clicks card (→ settings), then sidebar Passwords link (→ team vault)
+    await teamsPage.openTeamVault(TEAM_NAME);
 
-    // On the team page, create a new password entry
+    // On the team vault page, create a new password entry
     const teamDashboard = new TeamDashboardPage(ownerPage);
     await expect(teamDashboard.newItemButton).toBeVisible({ timeout: 10_000 });
     await teamDashboard.createNewPassword();
@@ -125,33 +135,30 @@ test.describe.serial("Teams", () => {
   test("teamOwner: invite teamMember via email", async () => {
     const { teamMember } = getAuthState();
 
-    // Navigate to team settings page
-    await ownerPage.goto("/ja/dashboard/teams");
-    const teamsPage = new TeamsPage(ownerPage);
-    await expect(teamsPage.teamByName(TEAM_NAME)).toBeVisible({
-      timeout: 10_000,
+    // After test 5 we are on the team vault page (/teams/{id}).
+    // The sidebar "Team Settings" link (in team context) goes to /teams/{id}/settings
+    // — navigate there via client-side click to preserve vault state.
+    const teamSettingsLink = ownerPage.getByRole("link", {
+      name: /Team Settings|チーム設定/i,
     });
-    await teamsPage.openTeam(TEAM_NAME);
+    await teamSettingsLink.click();
+    await ownerPage.waitForURL(/\/teams\/[^/]+\/settings/, { timeout: 10_000 });
 
-    // Go to settings
     const teamDashboard = new TeamDashboardPage(ownerPage);
-    await ownerPage
-      .getByRole("link", { name: /Settings|設定/i })
-      .first()
-      .click();
-
     await teamDashboard.inviteMember(teamMember.email);
 
-    // Invitation sent toast should appear
+    // Invitation created — toast shows invitedWithLink or invited
+    // t("invitedWithLink") = "Invitation sent. Invite URL copied to clipboard." / "招待を送信しました。..."
+    // t("invited") = "Invitation sent" / "招待を送信しました"
     await expect(
-      ownerPage.getByText(/Invitation sent|invited|招待/i),
+      ownerPage.getByText(/Invitation sent|招待を送信しました/i).first(),
     ).toBeVisible({ timeout: 10_000 });
   });
 
   test("teamMember: teams page renders without errors", async () => {
-    // Navigate to the teams list to verify the page renders for the member role.
-    await memberPage.goto("/ja/dashboard/teams");
-    await memberPage.waitForLoadState("domcontentloaded");
+    // Navigate to the teams list via sidebar click to stay in the React tree.
+    const sidebar = new SidebarNavPage(memberPage);
+    await sidebar.navigateTo("teams");
 
     await expect(
       memberPage.locator("h1").filter({ hasText: /Teams|チーム/i }),

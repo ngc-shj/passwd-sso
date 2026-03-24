@@ -8,6 +8,7 @@ import { DashboardPage } from "../page-objects/dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
 import { ExportPage } from "../page-objects/export.page";
 import { ImportPage } from "../page-objects/import.page";
+import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
 
 /**
  * Import / Export roundtrip test.
@@ -48,7 +49,8 @@ test("Export CSV then import restores entries", async ({ context, page }) => {
   let csvPath: string;
 
   await test.step("export vault as CSV", async () => {
-    await page.goto("/ja/dashboard/export");
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("export");
 
     const exportPage = new ExportPage(page);
 
@@ -70,7 +72,8 @@ test("Export CSV then import restores entries", async ({ context, page }) => {
   });
 
   await test.step("import the downloaded CSV", async () => {
-    await page.goto("/ja/dashboard/import");
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("import");
 
     const importPage = new ImportPage(page);
 
@@ -86,7 +89,8 @@ test("Export CSV then import restores entries", async ({ context, page }) => {
   });
 
   await test.step("verify imported entry appears in the vault", async () => {
-    await page.goto("/ja/dashboard");
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.navigateTo("passwords");
 
     // Entry title should be visible in the list (may exist multiple times due
     // to the import; we only need at least one occurrence)

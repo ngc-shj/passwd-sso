@@ -4,6 +4,7 @@ import { injectSession } from "../helpers/auth";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { DashboardPage } from "../page-objects/dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
+import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
 
 test.describe("Tags", () => {
   let context: BrowserContext;
@@ -36,8 +37,8 @@ test.describe("Tags", () => {
     // Open new entry dialog
     await dashboard.createNewPassword();
 
-    // Fill in title
-    await entryPage.fill({ title: entryTitle });
+    // Fill in title and password (password is required for form submission)
+    await entryPage.fill({ title: entryTitle, password: "E2eTagP@ss1!" });
 
     // Open tag input dropdown and create a new tag
     await page.getByRole("button", { name: /Add tag|タグを追加/i }).click();
@@ -58,13 +59,16 @@ test.describe("Tags", () => {
 
   test("entry appears in tag filtered view via sidebar", async () => {
     // The tag should now appear in the sidebar under the Manage section.
+    // Expand the Manage section first (it is collapsed by default).
+    const sidebar = new SidebarNavPage(page);
+    await sidebar.expandManageSection();
+
     // Click the tag link in the sidebar to filter by it.
     const tagLink = page.getByRole("link", { name: tagName });
     await tagLink.click();
-    await page.waitForLoadState("networkidle");
 
     // URL should contain /tags/
-    await expect(page).toHaveURL(/\/tags\//);
+    await expect(page).toHaveURL(/\/tags\//, { timeout: 10_000 });
 
     // The tagged entry should be visible
     await expect(page.getByText(entryTitle)).toBeVisible({ timeout: 10_000 });
