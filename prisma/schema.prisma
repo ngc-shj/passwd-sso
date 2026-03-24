@@ -350,7 +350,7 @@ model Team {
   id          String  @id @default(uuid(4)) @db.Uuid
   tenantId    String  @map("tenant_id") @db.Uuid
   name        String
-  slug        String  @unique
+  slug        String
   description String? @db.Text
 
   // E2E encryption (ECDH-P256)
@@ -372,6 +372,7 @@ model Team {
   adminVaultResets     AdminVaultReset[]
   tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
+  @@unique([tenantId, slug])
   @@index([tenantId])
   @@map("teams")
 }
