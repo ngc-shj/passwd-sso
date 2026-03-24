@@ -7,6 +7,7 @@ import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { parseBody } from "@/lib/parse-body";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -126,6 +127,27 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: entry.id,
+    metadata: (() => {
+      if (req.headers.get("x-passwd-sso-source") !== "import") return undefined;
+      const rawFilename = req.headers.get("x-passwd-sso-filename")?.trim() ?? "";
+      const filename = rawFilename
+        ? rawFilename
+            .replace(/[\0\x01-\x1f\x7f-\x9f]/g, "")
+            .replace(/[/\\]/g, "_")
+            .trim()
+            .slice(0, FILENAME_MAX_LENGTH) || undefined
+        : undefined;
+      return filename
+        ? {
+            source: "import" as const,
+            filename,
+            parentAction: AUDIT_ACTION.ENTRY_IMPORT,
+          }
+        : {
+            source: "import" as const,
+            parentAction: AUDIT_ACTION.ENTRY_IMPORT,
+          };
+    })(),
     ...extractRequestMeta(req),
   });
 
