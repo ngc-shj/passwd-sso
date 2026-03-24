@@ -8,7 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { isIpAllowed, extractClientIp } from "@/lib/ip-access";
+import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/ip-access";
 import { verifyTailscalePeer } from "@/lib/tailscale-client";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -114,12 +114,17 @@ export async function checkAccessRestriction(
     return { allowed: true };
   }
 
-  // Check Tailscale
-  if (policy.tailscaleEnabled && policy.tailscaleTailnet) {
-    const verified = await verifyTailscalePeer(clientIp, policy.tailscaleTailnet);
-    if (verified) {
-      return { allowed: true };
-    }
+  // Check Tailscale: allow if client IP is in CGNAT range (100.64.0.0/10).
+  // This covers both direct Tailscale connections and Tailscale Serve proxied
+  // requests (Serve sets X-Forwarded-For with the peer's CGNAT IP, which
+  // extractClientIp resolves via rightmost-untrusted).
+  //
+  // CGNAT is exclusively used by Tailscale and unreachable from the public
+  // internet. This check runs in Edge runtime where tailscaled WhoIs (Unix
+  // socket) is unavailable. Full tailnet verification happens in
+  // enforceAccessRestriction (Node.js runtime route handlers).
+  if (policy.tailscaleEnabled && isTailscaleIp(clientIp)) {
+    return { allowed: true };
   }
 
   // Denied
@@ -222,6 +227,26 @@ export async function enforceAccessRestriction(
       metadata: { clientIp, reason: result.reason },
     });
     return NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 });
+  }
+
+  // Additional Tailscale tailnet verification via WhoIs (Node.js runtime only).
+  // checkAccessRestriction (Edge-compatible) allows any CGNAT IP. Here we verify
+  // the exact tailnet to prevent access from a different Tailscale account.
+  const policy = await getTenantAccessPolicy(tenantId);
+  if (policy.tailscaleEnabled && policy.tailscaleTailnet && clientIp && isTailscaleIp(clientIp)) {
+    const verified = await verifyTailscalePeer(clientIp, policy.tailscaleTailnet);
+    if (!verified) {
+      logAudit({
+        action: AUDIT_ACTION.ACCESS_DENIED,
+        scope: AUDIT_SCOPE.TENANT,
+        userId,
+        tenantId,
+        ip: clientIp,
+        userAgent: req.headers.get("user-agent"),
+        metadata: { clientIp, reason: "Tailscale tailnet mismatch" },
+      });
+      return NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 });
+    }
   }
 
   return null;
