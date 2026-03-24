@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls } = vi.hoisted(() => {
+const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -24,6 +24,8 @@ const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFo
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+    mockLogAudit: vi.fn(),
   };
 });
 
@@ -43,6 +45,13 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+  extractRequestMeta: () => ({}),
 }));
 
 import { GET, POST } from "./route";
@@ -647,6 +656,65 @@ describe("POST /api/teams/[teamId]/passwords (E2E)", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(res.status).toBe(400);
+  });
+
+  it("marks ENTRY_CREATE audit metadata when source is import", async () => {
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      entryType: "LOGIN",
+      tags: [],
+      createdAt: now,
+    });
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        body: validE2EBody,
+        headers: { "x-passwd-sso-source": "import" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ENTRY_CREATE",
+        metadata: {
+          source: "import",
+          parentAction: "ENTRY_IMPORT",
+        },
+      }),
+    );
+  });
+
+  it("includes filename in audit metadata when import header provides it", async () => {
+    mockPrismaTeamPasswordEntry.create.mockResolvedValue({
+      id: "new-pw",
+      entryType: "LOGIN",
+      tags: [],
+      createdAt: now,
+    });
+
+    const res = await POST(
+      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
+        body: validE2EBody,
+        headers: {
+          "x-passwd-sso-source": "import",
+          "x-passwd-sso-filename": "keepassxc-export.xml",
+        },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+
+    expect(res.status).toBe(201);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ENTRY_CREATE",
+        metadata: {
+          source: "import",
+          filename: "keepassxc-export.xml",
+          parentAction: "ENTRY_IMPORT",
+        },
+      }),
+    );
   });
 
   it("creates entry without folder validation when teamFolderId is not provided", async () => {
