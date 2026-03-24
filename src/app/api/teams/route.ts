@@ -96,25 +96,13 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
   const { id: clientId, name, slug, description, teamMemberKey } = result.data;
 
-  // Check slug uniqueness in tenant context
-  let existing;
-  try {
-    existing = await withUserTenantRls(session.user.id, async () =>
-      prisma.team.findUnique({
-        where: { slug },
-        select: { id: true },
-      }),
-    );
-  } catch (e) {
-    if (
-      e instanceof Error &&
-      (e.message === "TENANT_NOT_RESOLVED" ||
-        e.message === "MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED")
-    ) {
-      return forbidden();
-    }
-    throw e;
-  }
+  // Check slug uniqueness within the tenant
+  const existing = await withUserTenantRls(session.user.id, async () =>
+    prisma.team.findUnique({
+      where: { tenantId_slug: { tenantId, slug } },
+      select: { id: true },
+    }),
+  );
   if (existing) {
     return errorResponse(API_ERROR.SLUG_ALREADY_TAKEN, 409);
   }
