@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.0...passwd-sso-v0.3.1) (2026-03-24)
+
+
+### Bug Fixes
+
+* add import audit metadata to team password creation ([f0847e4](https://github.com/ngc-shj/passwd-sso/commit/f0847e4f2e2ce4929e15c10b4ec3ad62b439e916))
+
 ## [0.3.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.2.1...passwd-sso-v0.3.0) (2026-03-22)
 
 
