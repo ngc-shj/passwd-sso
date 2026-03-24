@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.1...passwd-sso-v0.3.2) (2026-03-24)
+
+
+### Bug Fixes
+
+* scope team slug uniqueness to tenant ([6daa165](https://github.com/ngc-shj/passwd-sso/commit/6daa165f5fd1c671b920c450d173b60fe6e0d64a))
+
 ## [0.3.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.0...passwd-sso-v0.3.1) (2026-03-24)
 
 
