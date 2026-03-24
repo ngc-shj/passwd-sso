@@ -45,6 +45,14 @@ export async function closePool(): Promise<void> {
   }
 }
 
+// ─── Test Tenant Constant ────────────────────────────────────────
+
+export const E2E_TENANT = {
+  id: "00000000-0000-4000-a000-00000000e2e0",
+  name: "E2E Test Tenant",
+  slug: "e2e-test-tenant",
+} as const;
+
 // ─── Test User Constants ────────────────────────────────────────
 
 export const TEST_USERS = {
@@ -78,6 +86,48 @@ export const TEST_USERS = {
     email: "e2e-reset-validation@test.local",
     name: "E2E Reset Validation User",
   },
+  /** Vault set up — team owner for team tests */
+  teamOwner: {
+    id: "00000000-0000-4000-e2e0-000000000006",
+    email: "e2e-team-owner@test.local",
+    name: "E2E Team Owner",
+  },
+  /** Vault set up — team member for invitation tests */
+  teamMember: {
+    id: "00000000-0000-4000-e2e0-000000000007",
+    email: "e2e-team-member@test.local",
+    name: "E2E Team Member",
+  },
+  /** Vault set up — emergency access grantor */
+  eaGrantor: {
+    id: "00000000-0000-4000-e2e0-000000000008",
+    email: "e2e-ea-grantor@test.local",
+    name: "E2E EA Grantor",
+  },
+  /** Vault set up — emergency access grantee */
+  eaGrantee: {
+    id: "00000000-0000-4000-e2e0-000000000009",
+    email: "e2e-ea-grantee@test.local",
+    name: "E2E EA Grantee",
+  },
+  /** Vault set up — tenant admin with ADMIN role */
+  tenantAdmin: {
+    id: "00000000-0000-4000-e2e0-00000000000a",
+    email: "e2e-tenant-admin@test.local",
+    name: "E2E Tenant Admin",
+  },
+  /** Vault set up — dedicated to passphrase change test (destructive) */
+  passphraseChange: {
+    id: "00000000-0000-4000-e2e0-00000000000b",
+    email: "e2e-passphrase-change@test.local",
+    name: "E2E Passphrase Change",
+  },
+  /** Vault set up — dedicated to key rotation test (destructive) */
+  keyRotation: {
+    id: "00000000-0000-4000-e2e0-00000000000c",
+    email: "e2e-key-rotation@test.local",
+    name: "E2E Key Rotation",
+  },
 } as const;
 
 export const TEST_PASSPHRASE = "E2ETestPassphrase!2026";
@@ -97,7 +147,37 @@ export interface SeedUserOptions {
     masterPasswordServerSalt: string;
     passphraseVerifierHmac: string;
     keyVersion: number;
+    // Optional ECDH fields for team E2E encryption
+    ecdhPublicKey?: string;
+    encryptedEcdhPrivateKey?: string;
+    ecdhPrivateKeyIv?: string;
+    ecdhPrivateKeyAuthTag?: string;
   };
+}
+
+export async function seedTenant(): Promise<void> {
+  const p = getPool();
+  const now = new Date().toISOString();
+  await p.query(
+    `INSERT INTO tenants (id, name, slug, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, slug = EXCLUDED.slug, updated_at = EXCLUDED.updated_at`,
+    [E2E_TENANT.id, E2E_TENANT.name, E2E_TENANT.slug, now, now]
+  );
+}
+
+export async function seedTenantMember(
+  userId: string,
+  role: "OWNER" | "ADMIN" | "MEMBER" = "MEMBER"
+): Promise<void> {
+  const p = getPool();
+  const now = new Date().toISOString();
+  await p.query(
+    `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     ON CONFLICT (tenant_id, user_id) DO UPDATE SET role = EXCLUDED.role, updated_at = EXCLUDED.updated_at`,
+    [crypto.randomUUID(), E2E_TENANT.id, userId, role, now, now]
+  );
 }
 
 export async function seedUser(options: SeedUserOptions): Promise<void> {
@@ -109,17 +189,39 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
     await p.query(
       `INSERT INTO users (
         id, email, name,
-        email_verified, vault_setup_at, created_at, updated_at,
+        tenant_id, email_verified, vault_setup_at, created_at, updated_at,
         account_salt, encrypted_secret_key, secret_key_iv, secret_key_auth_tag,
         master_password_server_hash, master_password_server_salt,
         passphrase_verifier_hmac, passphrase_verifier_version,
-        key_version
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-      ON CONFLICT (id) DO NOTHING`,
+        key_version,
+        ecdh_public_key, encrypted_ecdh_private_key,
+        ecdh_private_key_iv, ecdh_private_key_auth_tag
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+      ON CONFLICT (id) DO UPDATE SET
+        email = EXCLUDED.email,
+        name = EXCLUDED.name,
+        tenant_id = EXCLUDED.tenant_id,
+        email_verified = EXCLUDED.email_verified,
+        vault_setup_at = EXCLUDED.vault_setup_at,
+        updated_at = EXCLUDED.updated_at,
+        account_salt = EXCLUDED.account_salt,
+        encrypted_secret_key = EXCLUDED.encrypted_secret_key,
+        secret_key_iv = EXCLUDED.secret_key_iv,
+        secret_key_auth_tag = EXCLUDED.secret_key_auth_tag,
+        master_password_server_hash = EXCLUDED.master_password_server_hash,
+        master_password_server_salt = EXCLUDED.master_password_server_salt,
+        passphrase_verifier_hmac = EXCLUDED.passphrase_verifier_hmac,
+        passphrase_verifier_version = EXCLUDED.passphrase_verifier_version,
+        key_version = EXCLUDED.key_version,
+        ecdh_public_key = EXCLUDED.ecdh_public_key,
+        encrypted_ecdh_private_key = EXCLUDED.encrypted_ecdh_private_key,
+        ecdh_private_key_iv = EXCLUDED.ecdh_private_key_iv,
+        ecdh_private_key_auth_tag = EXCLUDED.ecdh_private_key_auth_tag`,
       [
         options.id,
         options.email,
         options.name,
+        E2E_TENANT.id,
         now, // email_verified
         now, // vault_setup_at
         now, // created_at
@@ -133,16 +235,44 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         v.passphraseVerifierHmac,
         1, // verifier version
         v.keyVersion,
+        v.ecdhPublicKey ?? null,
+        v.encryptedEcdhPrivateKey ?? null,
+        v.ecdhPrivateKeyIv ?? null,
+        v.ecdhPrivateKeyAuthTag ?? null,
       ]
     );
   } else {
+    // Reset all vault fields to NULL so a "fresh" user stays fresh
+    // even if a previous test run set up their vault.
     await p.query(
-      `INSERT INTO users (id, email, name, email_verified, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       ON CONFLICT (id) DO NOTHING`,
-      [options.id, options.email, options.name, now, now, now]
+      `INSERT INTO users (id, email, name, tenant_id, email_verified, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO UPDATE SET
+         email = EXCLUDED.email,
+         name = EXCLUDED.name,
+         tenant_id = EXCLUDED.tenant_id,
+         email_verified = EXCLUDED.email_verified,
+         updated_at = EXCLUDED.updated_at,
+         vault_setup_at = NULL,
+         account_salt = NULL,
+         encrypted_secret_key = NULL,
+         secret_key_iv = NULL,
+         secret_key_auth_tag = NULL,
+         master_password_server_hash = NULL,
+         master_password_server_salt = NULL,
+         passphrase_verifier_hmac = NULL,
+         key_version = 0`,
+      [options.id, options.email, options.name, E2E_TENANT.id, now, now, now]
     );
   }
+
+  // Ensure tenant_members row exists (required for RLS tenant resolution)
+  await p.query(
+    `INSERT INTO tenant_members (id, tenant_id, user_id, role, created_at, updated_at)
+     VALUES ($1, $2, $3, 'MEMBER', $4, $5)
+     ON CONFLICT (tenant_id, user_id) DO NOTHING`,
+    [crypto.randomUUID(), E2E_TENANT.id, options.id, now, now]
+  );
 }
 
 export async function seedSession(
@@ -153,13 +283,17 @@ export async function seedSession(
   const p = getPool();
   const expires = new Date(Date.now() + expiresHours * 60 * 60 * 1000);
   await p.query(
-    `INSERT INTO sessions (id, session_token, user_id, expires)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (session_token) DO NOTHING`,
+    `INSERT INTO sessions (id, session_token, user_id, tenant_id, expires)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (session_token) DO UPDATE SET
+       user_id = EXCLUDED.user_id,
+       tenant_id = EXCLUDED.tenant_id,
+       expires = EXCLUDED.expires`,
     [
       crypto.randomUUID(),
       sessionToken,
       userId,
+      E2E_TENANT.id,
       expires.toISOString(),
     ]
   );
@@ -176,14 +310,19 @@ export async function seedVaultKey(
   const p = getPool();
   await p.query(
     `INSERT INTO vault_keys (
-      id, user_id, version,
+      id, user_id, tenant_id, version,
       verification_ciphertext, verification_iv, verification_auth_tag,
       created_at
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-    ON CONFLICT (id) DO NOTHING`,
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    ON CONFLICT (user_id, version) DO UPDATE SET
+      tenant_id = EXCLUDED.tenant_id,
+      verification_ciphertext = EXCLUDED.verification_ciphertext,
+      verification_iv = EXCLUDED.verification_iv,
+      verification_auth_tag = EXCLUDED.verification_auth_tag`,
     [
       crypto.randomUUID(),
       userId,
+      E2E_TENANT.id,
       1,
       verificationArtifact.ciphertext,
       verificationArtifact.iv,
@@ -200,15 +339,32 @@ export async function seedVaultKey(
  * Order follows FK dependencies (children first).
  *
  * Table/column mapping (Prisma model → PostgreSQL):
- *   AuditLog     → audit_logs       (user_id)
- *   Attachment   → attachments      (created_by_id)
- *   PasswordShare→ password_shares  (created_by_id)
- *   PasswordEntry→ password_entries (user_id)
- *   Tag          → tags             (user_id)
- *   VaultKey     → vault_keys       (user_id)
- *   ExtensionToken→ extension_tokens(user_id)
- *   Session      → sessions         (user_id)
- *   User         → users
+ *   PersonalLogAccessGrant → personal_log_access_grants (requester_id, target_user_id) — onDelete: Restrict
+ *   WebAuthnCredential     → webauthn_credentials       (user_id)
+ *   PasswordEntryHistory   → password_entry_histories   (entry_id via password_entries)
+ *   TeamPasswordEntryHistory→team_password_entry_histories (entry_id via team_password_entries)
+ *   TeamPasswordEntry      → team_password_entries      (team_id)
+ *   TeamTag                → team_tags                  (team_id)
+ *   TeamFolder             → team_folders               (team_id)
+ *   TeamMemberKey          → team_member_keys           (team_id)
+ *   TeamInvitation         → team_invitations           (team_id)
+ *   TeamMember             → team_members               (team_id)
+ *   Team                   → teams                      (tenant_id)
+ *   EmergencyAccessGrant   → emergency_access_grants    (owner_id, grantee_id)
+ *   ApiKey                 → api_keys                   (user_id)
+ *   Notification           → notifications              (user_id)
+ *   Folder                 → folders                    (user_id)
+ *   AuditLog               → audit_logs                 (user_id)
+ *   Attachment             → attachments                (created_by_id)
+ *   PasswordShare          → password_shares            (created_by_id)
+ *   PasswordEntry          → password_entries           (user_id)
+ *   Tag                    → tags                       (user_id)
+ *   VaultKey               → vault_keys                 (user_id)
+ *   ExtensionToken         → extension_tokens           (user_id)
+ *   Session                → sessions                   (user_id)
+ *   User                   → users
+ *   TenantMember           → tenant_members             (tenant_id)
+ *   Tenant                 → tenants
  */
 export async function cleanup(): Promise<void> {
   const p = getPool();
@@ -217,11 +373,83 @@ export async function cleanup(): Promise<void> {
   const { rows } = await p.query<{ id: string }>(
     `SELECT id FROM users WHERE email LIKE 'e2e-%@test.local'`
   );
-  if (rows.length === 0) return;
+  if (rows.length === 0) {
+    // Still clean up tenant even if no users found
+    await p.query(
+      `DELETE FROM tenant_members WHERE tenant_id = $1`,
+      [E2E_TENANT.id]
+    );
+    await p.query(`DELETE FROM tenants WHERE id = $1`, [E2E_TENANT.id]);
+    return;
+  }
 
   const userIds = rows.map((r) => r.id);
 
-  // Delete in FK dependency order (children → parents)
+  // Phase 1: Leaf tables with onDelete: Restrict (must delete before users)
+  await p.query(
+    `DELETE FROM personal_log_access_grants WHERE requester_id = ANY($1) OR target_user_id = ANY($1)`,
+    [userIds]
+  );
+  await p.query(
+    `DELETE FROM webauthn_credentials WHERE user_id = ANY($1)`,
+    [userIds]
+  );
+
+  // Phase 1b: Team tables — find all teams belonging to the E2E tenant, then delete children
+  const { rows: teamRows } = await p.query<{ id: string }>(
+    `SELECT id FROM teams WHERE tenant_id = $1`,
+    [E2E_TENANT.id]
+  );
+  if (teamRows.length > 0) {
+    const teamIds = teamRows.map((r) => r.id);
+    await p.query(
+      `DELETE FROM team_password_entry_histories WHERE entry_id IN (
+        SELECT id FROM team_password_entries WHERE team_id = ANY($1)
+      )`,
+      [teamIds]
+    );
+    await p.query(
+      `DELETE FROM team_password_entries WHERE team_id = ANY($1)`,
+      [teamIds]
+    );
+    await p.query(`DELETE FROM team_tags WHERE team_id = ANY($1)`, [teamIds]);
+    await p.query(
+      `DELETE FROM team_folders WHERE team_id = ANY($1)`,
+      [teamIds]
+    );
+    await p.query(
+      `DELETE FROM team_member_keys WHERE team_id = ANY($1)`,
+      [teamIds]
+    );
+    await p.query(
+      `DELETE FROM team_invitations WHERE team_id = ANY($1)`,
+      [teamIds]
+    );
+    await p.query(
+      `DELETE FROM team_members WHERE team_id = ANY($1)`,
+      [teamIds]
+    );
+  }
+  await p.query(`DELETE FROM teams WHERE tenant_id = $1`, [E2E_TENANT.id]);
+
+  // Phase 1c: Other user-scoped tables
+  await p.query(
+    `DELETE FROM emergency_access_grants WHERE owner_id = ANY($1) OR grantee_id = ANY($1)`,
+    [userIds]
+  );
+  await p.query(`DELETE FROM api_keys WHERE user_id = ANY($1)`, [userIds]);
+  await p.query(`DELETE FROM notifications WHERE user_id = ANY($1)`, [userIds]);
+  await p.query(`DELETE FROM folders WHERE user_id = ANY($1)`, [userIds]);
+
+  // Phase 2: Existing cleanup (FK dependency order)
+  // password_entry_histories references password_entries, must delete first
+  await p.query(
+    `DELETE FROM password_entry_histories WHERE entry_id IN (
+      SELECT id FROM password_entries WHERE user_id = ANY($1)
+    )`,
+    [userIds]
+  );
+
   const deletions: Array<{ table: string; column: string }> = [
     { table: "audit_logs", column: "user_id" },
     { table: "attachments", column: "created_by_id" },
@@ -240,6 +468,13 @@ export async function cleanup(): Promise<void> {
     );
   }
 
-  // Delete the users themselves
+  // Phase 3: Delete users
   await p.query(`DELETE FROM users WHERE id = ANY($1)`, [userIds]);
+
+  // Phase 4: Tenant cleanup
+  await p.query(
+    `DELETE FROM tenant_members WHERE tenant_id = $1`,
+    [E2E_TENANT.id]
+  );
+  await p.query(`DELETE FROM tenants WHERE id = $1`, [E2E_TENANT.id]);
 }
