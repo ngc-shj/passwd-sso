@@ -87,17 +87,27 @@ async function seedVaultReadyUser(
 async function clearRateLimits(): Promise<void> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) return;
+  // Safety guard: refuse to SCAN+DEL on a non-test Redis instance
+  if (!/\b(test|ci|e2e|localhost|127\.0\.0\.1|::1|redis)\b/i.test(redisUrl)) {
+    throw new Error(
+      "E2E tests require a test/CI Redis instance. Current REDIS_URL does not match safety pattern. Aborting.",
+    );
+  }
   const redis = new Redis(redisUrl, { lazyConnect: true, enableOfflineQueue: false });
   try {
     await redis.connect();
+    // Scan for all rate-limit keys belonging to test users.
+    // Uses pattern matching so new rate-limit keys are cleared automatically.
     const userIds = Object.values(TEST_USERS).map((u) => u.id);
-    const keys = [
-      ...userIds.map((id) => `rl:watchtower:start:${id}`),
-      ...userIds.map((id) => `rl:watchtower:hibp:${id}`),
-      ...userIds.map((id) => `rl:ea_create:${id}`),
-      ...userIds.map((id) => `rl:vault_rotate:${id}`),
-      ...userIds.map((id) => `rl:vault_change_pass:${id}`),
-    ];
+    const keys: string[] = [];
+    for (const id of userIds) {
+      let cursor = "0";
+      do {
+        const [next, found] = await redis.scan(cursor, "MATCH", `rl:*:${id}`, "COUNT", 100);
+        cursor = next;
+        keys.push(...found);
+      } while (cursor !== "0");
+    }
     if (keys.length > 0) {
       await redis.del(...keys);
     }
