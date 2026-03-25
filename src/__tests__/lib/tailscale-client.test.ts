@@ -44,11 +44,14 @@ describe("verifyTailscalePeer", () => {
 
   beforeEach(() => {
     _clearWhoIsCache();
+    // Force TCP fallback so fetch mock works (Unix socket path is skipped)
+    vi.stubEnv("TAILSCALE_API_BASE", "http://127.0.0.1:41112");
     fetchSpy = vi.spyOn(globalThis, "fetch");
   });
 
   afterEach(() => {
     fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
   });
 
   it("returns false for non-Tailscale IP", async () => {
@@ -143,3 +146,4 @@ describe("verifyTailscalePeer", () => {
     expect(result).toBe(true);
   });
 });
+

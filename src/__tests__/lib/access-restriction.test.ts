@@ -1,9 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockTenantFindUnique, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => ({
+const { mockTenantFindUnique, mockWithBypassRls, mockLogAudit, mockVerifyTailscalePeer, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockTenantFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
+  mockVerifyTailscalePeer: vi.fn().mockResolvedValue(false),
+  mockResolveUserTenantId: vi.fn().mockResolvedValue("tenant1"),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -16,7 +18,10 @@ vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
 }));
 vi.mock("@/lib/tailscale-client", () => ({
-  verifyTailscalePeer: vi.fn().mockResolvedValue(false),
+  verifyTailscalePeer: mockVerifyTailscalePeer,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  resolveUserTenantId: mockResolveUserTenantId,
 }));
 vi.mock("@/lib/constants", () => ({
   AUDIT_ACTION: { ACCESS_DENIED: "ACCESS_DENIED" },
@@ -26,11 +31,11 @@ vi.mock("@/lib/constants", () => ({
 import {
   checkAccessRestriction,
   checkAccessRestrictionWithAudit,
+  enforceAccessRestriction,
   wouldIpBeAllowed,
   invalidateTenantPolicyCache,
   _clearPolicyCache,
 } from "@/lib/access-restriction";
-import { verifyTailscalePeer } from "@/lib/tailscale-client";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestriction", () => {
@@ -73,16 +78,36 @@ describe("checkAccessRestriction", () => {
     expect((result as { reason: string }).reason).toContain("IP not in allowed CIDRs");
   });
 
-  it("allows access when Tailscale verifies", async () => {
+  it("allows access when Tailscale enabled and IP is in CGNAT range", async () => {
     mockTenantFindUnique.mockResolvedValue({
       allowedCidrs: [],
       tailscaleEnabled: true,
       tailscaleTailnet: "my-tailnet",
     });
-    vi.mocked(verifyTailscalePeer).mockResolvedValueOnce(true);
 
     const result = await checkAccessRestriction("tenant1", "100.64.0.1");
     expect(result.allowed).toBe(true);
+  });
+
+  it("allows Tailscale Serve when extractClientIp resolves CGNAT from XFF", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+    // Serve sets XFF with CGNAT IP; extractClientIp resolves it as clientIp
+    const result = await checkAccessRestriction("tenant1", "100.64.0.1");
+    expect(result.allowed).toBe(true);
+  });
+
+  it("denies when clientIp is loopback and Tailscale enabled (no CGNAT)", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+    const result = await checkAccessRestriction("tenant1", "127.0.0.1");
+    expect(result.allowed).toBe(false);
   });
 
   it("denies when Tailscale verification fails and no CIDR match", async () => {
@@ -91,8 +116,7 @@ describe("checkAccessRestriction", () => {
       tailscaleEnabled: true,
       tailscaleTailnet: "my-tailnet",
     });
-    vi.mocked(verifyTailscalePeer).mockResolvedValueOnce(false);
-
+    // IP 192.168.1.1 is not in CGNAT range, so Tailscale check also fails
     const result = await checkAccessRestriction("tenant1", "192.168.1.1");
     expect(result.allowed).toBe(false);
   });
@@ -106,8 +130,6 @@ describe("checkAccessRestriction", () => {
 
     const result = await checkAccessRestriction("tenant1", "192.168.1.50");
     expect(result.allowed).toBe(true);
-    // Tailscale should not be called since CIDR matched
-    expect(verifyTailscalePeer).not.toHaveBeenCalled();
   });
 
   it("caches policy and uses invalidation", async () => {
@@ -252,5 +274,84 @@ describe("checkAccessRestrictionWithAudit", () => {
         metadata: expect.objectContaining({ clientIp: null }),
       }),
     );
+  });
+});
+
+describe("enforceAccessRestriction — WhoIs tailnet verification", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _clearPolicyCache();
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockVerifyTailscalePeer.mockResolvedValue(false);
+  });
+
+  it("allows CGNAT IP when WhoIs confirms tailnet match", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+    mockVerifyTailscalePeer.mockResolvedValue(true);
+
+    const req = new NextRequest("http://localhost/api/passwords", {
+      headers: { "x-forwarded-for": "100.64.0.1" },
+    });
+    const result = await enforceAccessRestriction(req, "user1");
+
+    expect(result).toBeNull(); // allowed
+    expect(mockVerifyTailscalePeer).toHaveBeenCalledWith("100.64.0.1", "my-tailnet");
+  });
+
+  it("denies CGNAT IP when WhoIs shows tailnet mismatch", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+    mockVerifyTailscalePeer.mockResolvedValue(false);
+
+    const req = new NextRequest("http://localhost/api/passwords", {
+      headers: { "x-forwarded-for": "100.64.0.1" },
+    });
+    const result = await enforceAccessRestriction(req, "user1");
+
+    expect(result).not.toBeNull(); // denied
+    expect(result!.status).toBe(403);
+    expect(mockVerifyTailscalePeer).toHaveBeenCalledWith("100.64.0.1", "my-tailnet");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ reason: "Tailscale tailnet mismatch" }),
+      }),
+    );
+  });
+
+  it("skips WhoIs when IP is not in CGNAT range", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: ["192.168.1.0/24"],
+      tailscaleEnabled: true,
+      tailscaleTailnet: "my-tailnet",
+    });
+
+    const req = new NextRequest("http://localhost/api/passwords", {
+      headers: { "x-forwarded-for": "192.168.1.50" },
+    });
+    const result = await enforceAccessRestriction(req, "user1");
+
+    expect(result).toBeNull(); // allowed by CIDR
+    expect(mockVerifyTailscalePeer).not.toHaveBeenCalled();
+  });
+
+  it("skips WhoIs when Tailscale is disabled", async () => {
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+    });
+
+    const req = new NextRequest("http://localhost/api/passwords");
+    const result = await enforceAccessRestriction(req, "user1");
+
+    expect(result).toBeNull(); // no restrictions
+    expect(mockVerifyTailscalePeer).not.toHaveBeenCalled();
   });
 });
