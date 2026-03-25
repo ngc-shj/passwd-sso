@@ -3,11 +3,19 @@
  *
  * Calls the tailscaled local API to verify that a Tailscale IP belongs
  * to the expected tailnet. Results are cached for 30 seconds.
+ *
+ * Supports two connection modes:
+ * 1. Unix socket (default on Linux): /run/tailscale/tailscaled.sock
+ * 2. TCP (fallback or Windows): http://127.0.0.1:41112
+ *
+ * Set TAILSCALE_SOCKET to override the socket path, or TAILSCALE_API_BASE
+ * to force TCP mode.
  */
 
 import { isTailscaleIp, isValidIpAddress } from "@/lib/ip-access";
+import http from "node:http";
 
-const TAILSCALE_API_BASE = "http://127.0.0.1:41112";
+const DEFAULT_TAILSCALE_SOCKET = "/run/tailscale/tailscaled.sock";
 const WHOIS_TIMEOUT_MS = 3_000;
 const CACHE_TTL_MS = 30_000;
 const CACHE_MAX_SIZE = 500;
@@ -67,6 +75,52 @@ function extractTailnetFromFqdn(fqdn: string): string | null {
   return parts[parts.length - 3];
 }
 
+// ─── Local API call ──────────────────────────────────────────
+
+/**
+ * Call tailscaled WhoIs API via Unix socket or TCP fallback.
+ */
+async function callWhoIs(ip: string): Promise<WhoIsResponse> {
+  const path = `/localapi/v0/whois?addr=${encodeURIComponent(ip)}:0`;
+
+  const tcpBase = process.env.TAILSCALE_API_BASE ?? "";
+  const socketPath = process.env.TAILSCALE_SOCKET ?? DEFAULT_TAILSCALE_SOCKET;
+
+  // Prefer Unix socket (default on Linux); fall back to TCP if configured
+  if (!tcpBase) {
+    return new Promise((resolve, reject) => {
+      const req = http.request(
+        { socketPath, path, method: "GET", timeout: WHOIS_TIMEOUT_MS },
+        (res) => {
+          let body = "";
+          res.on("data", (chunk: Buffer) => { body += chunk.toString(); });
+          res.on("end", () => {
+            if (res.statusCode !== 200) {
+              reject(new Error(`WhoIs returned ${res.statusCode}`));
+              return;
+            }
+            try { resolve(JSON.parse(body) as WhoIsResponse); }
+            catch { reject(new Error("Invalid JSON from WhoIs")); }
+          });
+        },
+      );
+      req.on("error", reject);
+      req.on("timeout", () => { req.destroy(); reject(new Error("WhoIs timeout")); });
+      req.end();
+    });
+  }
+
+  // TCP fallback
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), WHOIS_TIMEOUT_MS);
+  const res = await fetch(new URL(path, tcpBase).toString(), {
+    signal: controller.signal,
+  });
+  clearTimeout(timeoutId);
+  if (!res.ok) throw new Error(`WhoIs returned ${res.status}`);
+  return (await res.json()) as WhoIsResponse;
+}
+
 // ─── Public API ──────────────────────────────────────────────
 
 /**
@@ -97,25 +151,7 @@ export async function verifyTailscalePeer(
   }
 
   try {
-    const url = new URL(
-      `/localapi/v0/whois?addr=${encodeURIComponent(ip)}:0`,
-      TAILSCALE_API_BASE,
-    );
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), WHOIS_TIMEOUT_MS);
-
-    const res = await fetch(url.toString(), {
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      setCache(ip, null);
-      return false;
-    }
-
-    const data = (await res.json()) as WhoIsResponse;
+    const data = await callWhoIs(ip);
     const nodeName = data?.Node?.Name;
 
     if (!nodeName) {
