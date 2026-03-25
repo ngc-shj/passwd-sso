@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.4](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.3...passwd-sso-v0.3.4) (2026-03-25)
+
+
+### Bug Fixes
+
+* harden rate-limit architecture across all API endpoints ([#239](https://github.com/ngc-shj/passwd-sso/issues/239)) ([88b07ba](https://github.com/ngc-shj/passwd-sso/commit/88b07ba9342f36ccec1a1e9f7afc8ed93cee50a7))
+
 ## [0.3.3](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.2...passwd-sso-v0.3.3) (2026-03-25)
 
 
