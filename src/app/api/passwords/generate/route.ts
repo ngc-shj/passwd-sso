@@ -5,7 +5,7 @@ import { generateRequestSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 
 const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
@@ -17,8 +17,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await generateLimiter.check(`rl:pw_generate:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await generateLimiter.check(`rl:pw_generate:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const result = await parseBody(req, generateRequestSchema);

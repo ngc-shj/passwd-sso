@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -21,14 +20,9 @@ async function handlePOST() {
     return unauthorized();
   }
 
-  const { allowed } = await scanLimiter.check(`rl:watchtower:start:${session.user.id}`);
-  if (!allowed) {
-    return NextResponse.json(
-      {
-        error: API_ERROR.RATE_LIMIT_EXCEEDED,
-      },
-      { status: 429 }
-    );
+  const rl = await scanLimiter.check(`rl:watchtower:start:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   return NextResponse.json({ ok: true });

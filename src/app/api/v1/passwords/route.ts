@@ -13,15 +13,11 @@ import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from 
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import type { EntryType } from "@prisma/client";
-import { unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
-
-function retryAfterHeaders(ms: number): HeadersInit {
-  return { "Retry-After": String(Math.ceil(ms / 1000)) };
-}
 
 // GET /api/v1/passwords — List passwords (API key only)
 async function handleGET(req: NextRequest) {
@@ -43,10 +39,7 @@ async function handleGET(req: NextRequest) {
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
   if (!rl.allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429, headers: retryAfterHeaders(rl.retryAfterMs!) },
-    );
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { searchParams } = new URL(req.url);
@@ -131,10 +124,7 @@ async function handlePOST(req: NextRequest) {
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
   if (!rl.allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429, headers: retryAfterHeaders(rl.retryAfterMs!) },
-    );
+    return rateLimited(rl.retryAfterMs);
   }
 
   const result = await parseBody(req, createE2EPasswordSchema);

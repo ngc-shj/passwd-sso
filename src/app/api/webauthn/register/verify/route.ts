@@ -7,6 +7,7 @@ import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -57,12 +58,9 @@ async function handlePOST(req: NextRequest) {
   }
   const userId = session.user.id;
 
-  const rl = await rateLimiter.check(`webauthn:reg-verify:${userId}`);
+  const rl = await rateLimiter.check(`rl:webauthn_reg_verify:${userId}`);
   if (!rl.allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return rateLimited(rl.retryAfterMs);
   }
 
   const redis = getRedis();

@@ -8,6 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -47,11 +48,9 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:recovery_key_gen:${session.user.id}`;
-  if (!(await generateLimiter.check(rateKey)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+  const rl = await generateLimiter.check(rateKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   let body: unknown;

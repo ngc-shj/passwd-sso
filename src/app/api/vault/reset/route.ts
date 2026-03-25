@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { z } from "zod/v4";
@@ -39,11 +40,9 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:vault_reset:${session.user.id}`;
-  if (!(await resetLimiter.check(rateKey)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+  const rl = await resetLimiter.check(rateKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   let body: unknown;

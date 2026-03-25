@@ -1,5 +1,18 @@
-import { getRedis, validateRedisConfig } from "@/lib/redis";
+import { getRedis } from "@/lib/redis";
+import { getLogger } from "@/lib/logger";
 import { RATE_LIMIT_MAP_MAX_SIZE } from "@/lib/validations/common.server";
+
+// Throttled Redis error logger — avoids flooding logs during sustained outages.
+// Uses a fixed message to prevent REDIS_URL credentials from leaking via err.message.
+let lastRedisErrorLog = 0;
+const REDIS_ERROR_LOG_INTERVAL = 30_000;
+
+function logRedisError(): void {
+  const now = Date.now();
+  if (now - lastRedisErrorLog < REDIS_ERROR_LOG_INTERVAL) return;
+  lastRedisErrorLog = now;
+  getLogger().error("rate-limit.redis.fallback");
+}
 
 interface RateLimiterOptions {
   /** Time window in milliseconds */
@@ -20,8 +33,6 @@ interface RateLimiter {
   /** Clear the counter for a key (e.g. on successful auth) */
   clear(key: string): Promise<void>;
 }
-
-let redisConfigValidated = false;
 
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   const { windowMs, max } = options;
@@ -53,6 +64,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         retryAfterMs: ttl > 0 ? ttl : windowMs,
       };
     } catch {
+      logRedisError();
       return null; // fallback to in-memory
     }
   }
@@ -95,11 +107,6 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
   return {
     async check(key: string): Promise<RateLimitResult> {
-      // Validate Redis config on first request (not at module load / build time)
-      if (!redisConfigValidated) {
-        validateRedisConfig();
-        redisConfigValidated = true;
-      }
       const redisResult = await checkRedis(key);
       if (redisResult !== null) return redisResult;
       return checkMemory(key);

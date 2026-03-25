@@ -9,6 +9,7 @@ const {
   mockPrismaTeam,
   MockTeamAuthError,
   mockWithTeamTenantRls,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -31,9 +32,13 @@ const {
       this.status = status;
     }
   },
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
+}));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: MockTeamAuthError,
@@ -79,6 +84,7 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -148,6 +154,7 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
       teamKeyVersion: 1,
     });
     mockPrismaAttachment.count.mockResolvedValue(0);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -417,6 +424,24 @@ describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
     const json = await res.json();
     expect(res.status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(
+      createFormDataRequest("http://localhost/api/teams/team-1/passwords/pw-1/attachments", {
+        file: new Blob(["abc"]),
+        filename: "doc.pdf",
+        contentType: "application/pdf",
+        iv: VALID_IV,
+        authTag: VALID_AUTH_TAG,
+        sizeBytes: "3",
+        encryptionMode: "1",
+      }),
+      createParams("team-1", "pw-1"),
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("returns 400 when entry has itemKeyVersion=0", async () => {

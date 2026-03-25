@@ -8,6 +8,7 @@ const {
   mockTransaction,
   MockTeamAuthError,
   mockWithTeamTenantRls,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -21,6 +22,7 @@ const {
       this.status = status;
     }
   },
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 const txMock = {
@@ -49,6 +51,12 @@ vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
 vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn(() => ({
+    check: mockRateLimitCheck,
+    clear: vi.fn(),
+  })),
+}));
 
 import { POST } from "./route";
 import { logAudit } from "@/lib/audit";
@@ -91,6 +99,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "660e8400-e29b-41d4-a716-446655440001" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
     mockTeamFindUnique.mockResolvedValue({
       teamKeyVersion: 1,
     });
@@ -386,6 +395,20 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
       where: { teamId: "team-1" },
       select: { id: true },
     });
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("succeeds with entries having mixed teamKeyVersions after history restore (F-29)", async () => {

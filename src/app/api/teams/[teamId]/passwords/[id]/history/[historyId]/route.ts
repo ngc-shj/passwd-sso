@@ -9,7 +9,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { teamHistoryReencryptSchema } from "@/lib/validations";
 
@@ -79,8 +79,9 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return unauthorized();
   }
 
-  if (!(await reencryptLimiter.check(`rl:team_history_reencrypt:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await reencryptLimiter.check(`rl:team_history_reencrypt:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { teamId, id, historyId } = await params;

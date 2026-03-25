@@ -7,7 +7,7 @@ import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const contentLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -19,8 +19,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { id } = await params;
 
   const ip = extractClientIp(req) ?? "unknown";
-  if (!(await contentLimiter.check(`rl:share_content:${ip}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await contentLimiter.check(`rl:share_content:${ip}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Extract access token from Authorization header

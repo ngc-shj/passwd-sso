@@ -177,10 +177,11 @@ describe("POST /api/vault/unlock", () => {
   });
 
   it("returns 429 when rate limiter denies request", async () => {
-    mockRateLimiter.check.mockResolvedValue({ allowed: false });
+    mockRateLimiter.check.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
 
     const res = await POST(makeUnlockRequest());
     expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("clears rate limit on successful unlock", async () => {

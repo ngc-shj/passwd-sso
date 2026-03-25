@@ -11,7 +11,7 @@ import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/c
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
 
 const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
 
@@ -25,8 +25,9 @@ async function handlePOST(
     return unauthorized();
   }
 
-  if (!(await requestLimiter.check(`rl:ea_request:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await requestLimiter.check(`rl:ea_request:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { id } = await params;

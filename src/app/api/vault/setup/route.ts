@@ -11,7 +11,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import {
   hexIv,
   hexAuthTag,
@@ -78,8 +78,9 @@ async function handlePOST(request: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await setupLimiter.check(`rl:vault_setup:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await setupLimiter.check(`rl:vault_setup:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Prevent re-setup

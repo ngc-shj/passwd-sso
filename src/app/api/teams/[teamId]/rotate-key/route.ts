@@ -11,7 +11,8 @@ import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@
 import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, validationError, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 import {
   encryptedFieldSchema,
   TEAM_KEY_VERSION_MIN,
@@ -20,6 +21,8 @@ import {
   TEAM_ROTATE_MEMBER_KEYS_MIN,
   TEAM_ROTATE_MEMBER_KEYS_MAX,
 } from "@/lib/validations/common";
+
+const teamRotateKeyLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 1 });
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -80,6 +83,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
     throw e;
   }
+
+  const rl = await teamRotateKeyLimiter.check(`rl:team_rotate_key:${teamId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const team = await withTeamTenantRls(teamId, async () =>
     prisma.team.findUnique({

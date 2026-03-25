@@ -18,7 +18,7 @@ import {
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
@@ -37,8 +37,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await sendFileLimiter.check(`rl:send_file:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await sendFileLimiter.check(`rl:send_file:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   let formData: FormData;

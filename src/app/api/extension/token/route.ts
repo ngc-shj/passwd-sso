@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { validateExtensionToken } from "@/lib/extension-token";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
@@ -38,8 +38,9 @@ async function handlePOST() {
     return unauthorized();
   }
 
-  if (!(await tokenLimiter.check(`rl:ext_token:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await tokenLimiter.check(`rl:ext_token:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const now = new Date();

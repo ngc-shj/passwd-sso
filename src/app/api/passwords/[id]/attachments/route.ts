@@ -15,9 +15,12 @@ import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+const attachmentUploadLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
@@ -91,6 +94,9 @@ async function handlePOST(
   if (entry.userId !== session.user.id) {
     return forbidden();
   }
+
+  const rl = await attachmentUploadLimiter.check(`rl:attachment_upload:${session.user.id}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   // Check attachment count limit
   const count = await withUserTenantRls(session.user.id, async () =>

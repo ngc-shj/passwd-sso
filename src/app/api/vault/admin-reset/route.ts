@@ -13,9 +13,12 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+const vaultAdminResetLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
 
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
@@ -45,6 +48,10 @@ async function handlePOST(req: NextRequest) {
   if (!session?.user?.id) {
     return unauthorized();
   }
+
+  const userId = session.user.id;
+  const rl = await vaultAdminResetLimiter.check(`rl:vault_admin_reset:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   // Inline parsing: security-sensitive endpoint — do not expose schema details
   let body: unknown;

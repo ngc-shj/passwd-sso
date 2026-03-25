@@ -36,18 +36,11 @@ vi.mock("@/lib/crypto-server", () => ({
 vi.mock("@/lib/share-access-token", () => ({
   createShareAccessToken: mockCreateShareAccessToken,
 }));
-// Use a counter so first createRateLimiter call → ipLimiter, second → tokenLimiter
-vi.mock("@/lib/rate-limit", () => {
-  let callCount = 0;
-  return {
-    createRateLimiter: () => {
-      callCount++;
-      return callCount === 1
-        ? { check: mockIpCheck }
-        : { check: mockTokenCheck };
-    },
-  };
-});
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn()
+    .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
+    .mockReturnValueOnce({ check: mockTokenCheck, clear: vi.fn() }),
+}));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
 }));
@@ -131,7 +124,7 @@ describe("POST /api/share-links/verify-access", () => {
   });
 
   it("returns 429 when IP+token rate limit is exceeded", async () => {
-    mockIpCheck.mockResolvedValue({ allowed: false });
+    mockIpCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/share-links/verify-access", {
         body: validBody,
@@ -139,11 +132,12 @@ describe("POST /api/share-links/verify-access", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("returns 429 when global token rate limit is exceeded", async () => {
     mockIpCheck.mockResolvedValue({ allowed: true });
-    mockTokenCheck.mockResolvedValue({ allowed: false });
+    mockTokenCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
     const res = await POST(
       createRequest("POST", "http://localhost/api/share-links/verify-access", {
         body: validBody,
@@ -151,6 +145,7 @@ describe("POST /api/share-links/verify-access", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("returns 404 when share not found", async () => {

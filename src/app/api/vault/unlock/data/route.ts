@@ -5,8 +5,12 @@ import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/check-auth";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { rateLimited } from "@/lib/api-response";
 
 export const runtime = "nodejs";
+
+const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 20 });
 
 /**
  * GET /api/vault/unlock/data
@@ -18,6 +22,9 @@ async function handleGET(req: NextRequest) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
   if (!authResult.ok) return authResult.response;
   const userId = authResult.auth.userId;
+
+  const rl = await vaultUnlockDataLimiter.check(`rl:vault_unlock_data:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
