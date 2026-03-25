@@ -87,6 +87,12 @@ async function seedVaultReadyUser(
 async function clearRateLimits(): Promise<void> {
   const redisUrl = process.env.REDIS_URL;
   if (!redisUrl) return;
+  // Safety guard: refuse to SCAN+DEL on a non-test Redis instance
+  if (!/\b(test|ci|e2e|localhost|127\.0\.0\.1|::1|redis)\b/i.test(redisUrl)) {
+    throw new Error(
+      "E2E tests require a test/CI Redis instance. Current REDIS_URL does not match safety pattern. Aborting.",
+    );
+  }
   const redis = new Redis(redisUrl, { lazyConnect: true, enableOfflineQueue: false });
   try {
     await redis.connect();
