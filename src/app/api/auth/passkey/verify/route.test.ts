@@ -7,19 +7,21 @@ const {
   mockAssertOrigin,
   mockRateLimiterCheck,
   mockAuthorizeWebAuthn,
-  mockCreateSession,
-  mockSessionMetaRun,
   mockLogAudit,
   mockPrismaFindUnique,
+  mockPrismaSessionDeleteMany,
+  mockPrismaSessionCreate,
+  mockPrismaTransaction,
   mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockAssertOrigin: vi.fn(),
   mockRateLimiterCheck: vi.fn(),
   mockAuthorizeWebAuthn: vi.fn(),
-  mockCreateSession: vi.fn(),
-  mockSessionMetaRun: vi.fn(),
   mockLogAudit: vi.fn(),
   mockPrismaFindUnique: vi.fn(),
+  mockPrismaSessionDeleteMany: vi.fn(),
+  mockPrismaSessionCreate: vi.fn(),
+  mockPrismaTransaction: vi.fn(),
   mockWithBypassRls: vi.fn(),
 }));
 
@@ -35,14 +37,6 @@ vi.mock("@/lib/webauthn-authorize", () => ({
   authorizeWebAuthn: mockAuthorizeWebAuthn,
 }));
 
-vi.mock("@/lib/auth-adapter", () => ({
-  createCustomAdapter: () => ({ createSession: mockCreateSession }),
-}));
-
-vi.mock("@/lib/session-meta", () => ({
-  sessionMetaStorage: { run: mockSessionMetaRun },
-}));
-
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({
@@ -53,12 +47,22 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 vi.mock("@/lib/constants", () => ({
-  AUDIT_ACTION: { AUTH_LOGIN: "AUTH_LOGIN" },
+  AUDIT_ACTION: {
+    AUTH_LOGIN: "AUTH_LOGIN",
+    SESSION_REVOKE_ALL: "SESSION_REVOKE_ALL",
+  },
   AUDIT_SCOPE: { PERSONAL: "PERSONAL" },
 }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { user: { findUnique: mockPrismaFindUnique } },
+  prisma: {
+    user: { findUnique: mockPrismaFindUnique },
+    $transaction: mockPrismaTransaction,
+    session: {
+      deleteMany: mockPrismaSessionDeleteMany,
+      create: mockPrismaSessionCreate,
+    },
+  },
 }));
 
 vi.mock("@/lib/tenant-rls", () => ({
@@ -100,22 +104,35 @@ describe("POST /api/auth/passkey/verify", () => {
     mockAssertOrigin.mockReturnValue(null);
     mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockAuthorizeWebAuthn.mockResolvedValue(mockUser);
-    mockCreateSession.mockResolvedValue({
-      sessionToken: "tok",
-      userId: "user-1",
-      expires: new Date(),
-    });
-    // sessionMetaStorage.run: call the callback immediately
-    mockSessionMetaRun.mockImplementation(
-      (_meta: unknown, fn: () => unknown) => fn(),
-    );
+
     // withBypassRls: call the callback directly
     mockWithBypassRls.mockImplementation(
       (_prisma: unknown, fn: () => unknown) => fn(),
     );
+
     // SSO tenant guard: user is in bootstrap tenant (allowed)
     mockPrismaFindUnique.mockResolvedValue({
+      tenantId: "tenant-1",
       tenant: { isBootstrap: true },
+    });
+
+    // $transaction: execute callback with a mock tx that has session methods
+    mockPrismaTransaction.mockImplementation(
+      async (fn: (tx: unknown) => unknown) => {
+        const tx = {
+          session: {
+            deleteMany: mockPrismaSessionDeleteMany,
+            create: mockPrismaSessionCreate,
+          },
+        };
+        return fn(tx);
+      },
+    );
+    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
+    mockPrismaSessionCreate.mockResolvedValue({
+      sessionToken: "tok",
+      userId: "user-1",
+      expires: new Date(),
     });
   });
 
@@ -149,21 +166,79 @@ describe("POST /api/auth/passkey/verify", () => {
     });
   });
 
-  it("creates database session via adapter", async () => {
+  it("creates database session via atomic transaction", async () => {
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
     await POST(req);
 
-    expect(mockSessionMetaRun).toHaveBeenCalled();
-    expect(mockCreateSession).toHaveBeenCalledWith(
-      expect.objectContaining({
+    expect(mockPrismaTransaction).toHaveBeenCalledOnce();
+    expect(mockPrismaSessionDeleteMany).toHaveBeenCalledWith({
+      where: { userId: "user-1" },
+    });
+    expect(mockPrismaSessionCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
         sessionToken: expect.any(String),
         userId: "user-1",
+        tenantId: "tenant-1",
         expires: expect.any(Date),
       }),
+    });
+  });
+
+  it("calls deleteMany before create", async () => {
+    const callOrder: string[] = [];
+    mockPrismaSessionDeleteMany.mockImplementation(async () => {
+      callOrder.push("deleteMany");
+      return { count: 2 };
+    });
+    mockPrismaSessionCreate.mockImplementation(async () => {
+      callOrder.push("create");
+      return { sessionToken: "tok", userId: "user-1", expires: new Date() };
+    });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    expect(callOrder).toEqual(["deleteMany", "create"]);
+  });
+
+  it("logs SESSION_REVOKE_ALL when existing sessions are evicted", async () => {
+    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 3 });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: "PERSONAL",
+        action: "SESSION_REVOKE_ALL",
+        userId: "user-1",
+        metadata: { trigger: "passkey_signin", evictedCount: 3 },
+      }),
     );
+  });
+
+  it("does not log SESSION_REVOKE_ALL when no sessions evicted", async () => {
+    mockPrismaSessionDeleteMany.mockResolvedValue({ count: 0 });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    await POST(req);
+
+    const revokeAllCalls = mockLogAudit.mock.calls.filter(
+      ([arg]: [{ action: string }]) => arg.action === "SESSION_REVOKE_ALL",
+    );
+    expect(revokeAllCalls).toHaveLength(0);
   });
 
   it("logs audit event on success", async () => {
@@ -249,6 +324,7 @@ describe("POST /api/auth/passkey/verify", () => {
 
   it("returns 401 for SSO tenant user (non-bootstrap)", async () => {
     mockPrismaFindUnique.mockResolvedValue({
+      tenantId: "tenant-sso",
       tenant: { isBootstrap: false },
     });
 
@@ -262,26 +338,40 @@ describe("POST /api/auth/passkey/verify", () => {
     expect(json.error).toBe("AUTHENTICATION_FAILED");
   });
 
-  it("allows user without tenant record (null tenant)", async () => {
-    mockPrismaFindUnique.mockResolvedValue({ tenant: null });
+  it("returns 401 when tenant relation is null (orphaned FK)", async () => {
+    mockPrismaFindUnique.mockResolvedValue({ tenantId: "tenant-1", tenant: null });
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
-    const res = await POST(req);
-    expect(res.status).toBe(200);
+    const { status, json } = await parseResponse(await POST(req));
+    expect(status).toBe(401);
+    expect(json.error).toBe("AUTHENTICATION_FAILED");
   });
 
-  it("allows user not found in DB (null result)", async () => {
+  it("returns 401 when user not found in DB (null result)", async () => {
     mockPrismaFindUnique.mockResolvedValue(null);
 
     const req = createRequest("POST", ROUTE_URL, {
       body: validBody,
       headers: { origin: "http://localhost:3000" },
     });
-    const res = await POST(req);
-    expect(res.status).toBe(200);
+    const { status, json } = await parseResponse(await POST(req));
+    expect(status).toBe(401);
+    expect(json.error).toBe("AUTHENTICATION_FAILED");
+  });
+
+  it("returns 401 when user has no tenantId", async () => {
+    mockPrismaFindUnique.mockResolvedValue({ tenantId: null, tenant: null });
+
+    const req = createRequest("POST", ROUTE_URL, {
+      body: validBody,
+      headers: { origin: "http://localhost:3000" },
+    });
+    const { status, json } = await parseResponse(await POST(req));
+    expect(status).toBe(401);
+    expect(json.error).toBe("AUTHENTICATION_FAILED");
   });
 
   it("includes PRF data in response when credential supports PRF", async () => {

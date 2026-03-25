@@ -166,7 +166,14 @@ export function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
-/** Encrypt share data with the current master key (AES-256-GCM). Returns masterKeyVersion for DB storage. */
+/**
+ * Encrypt share data with the current server-side master key (AES-256-GCM).
+ *
+ * IMPORTANT: This is NOT end-to-end encryption. The server holds the master key
+ * and can decrypt this data. Used for Sends and personal share links where the
+ * server mediates access. For true E2E encryption, use the client-side crypto
+ * in crypto-client.ts (vault entries, team share links with masterKeyVersion=0).
+ */
 export function encryptShareData(plaintext: string): ServerEncryptedData & { masterKeyVersion: number } {
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
@@ -179,7 +186,11 @@ export function decryptShareData(encrypted: ServerEncryptedData, masterKeyVersio
   return decryptServerData(encrypted, masterKey);
 }
 
-/** Encrypt binary data with the current master key (AES-256-GCM). Returns masterKeyVersion for DB storage. */
+/**
+ * Encrypt binary data with the current server-side master key (AES-256-GCM).
+ *
+ * IMPORTANT: This is server-side encryption, not E2E. See encryptShareData() for details.
+ */
 export function encryptShareBinary(data: Buffer): ServerEncryptedBinary & { masterKeyVersion: number } {
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);

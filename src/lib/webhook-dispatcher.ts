@@ -16,6 +16,7 @@ import {
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
 import { resolve4, resolve6 } from "node:dns/promises";
+import { Agent as UndiciAgent } from "undici";
 import { isIpInCidr } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
@@ -117,6 +118,7 @@ const BLOCKED_CIDRS = [
   "::/128",             // unspecified
   "fe80::/10",          // link-local
   "fc00::/7",           // unique local (ULA)
+  "::ffff:0:0/96",      // IPv4-mapped IPv6 (prevents bypass via ::ffff:127.0.0.1)
 ];
 
 /**
@@ -128,15 +130,16 @@ function isPrivateIp(ip: string): boolean {
 }
 
 /**
- * Resolve hostname and reject private/reserved IPs to prevent SSRF via DNS rebinding.
+ * Resolve hostname and reject private/reserved IPs to prevent SSRF.
+ * Returns the list of validated public IPs for use in IP pinning.
  */
-async function assertPublicHostname(url: string): Promise<void> {
+async function resolveAndValidateIps(url: string): Promise<string[]> {
   const hostname = new URL(url).hostname;
 
   // Already an IP literal — check directly
   if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) {
     if (isPrivateIp(hostname)) throw new Error(`Private IP rejected: ${hostname}`);
-    return;
+    return [hostname];
   }
 
   const ips: string[] = [];
@@ -150,6 +153,27 @@ async function assertPublicHostname(url: string): Promise<void> {
       throw new Error(`Hostname ${hostname} resolves to private IP: ${ip}`);
     }
   }
+
+  return ips;
+}
+
+/**
+ * Create an undici Agent that pins connections to pre-validated IPs,
+ * eliminating the DNS rebinding TOCTOU window between validation and fetch.
+ */
+function createPinnedDispatcher(hostname: string, validatedIps: string[]): UndiciAgent {
+  let index = 0;
+  return new UndiciAgent({
+    connect: {
+      // Preserve TLS certificate validation via SNI
+      servername: hostname,
+      lookup: (_origin, _opts, cb) => {
+        const ip = validatedIps[index % validatedIps.length];
+        index++;
+        cb(null, [{ address: ip, family: ip.includes(":") ? 6 : 4 }]);
+      },
+    },
+  });
 }
 
 async function deliverWithRetry(
@@ -157,9 +181,16 @@ async function deliverWithRetry(
   payload: string,
   signature: string,
 ): Promise<boolean> {
+  const hostname = new URL(url).hostname;
+
   for (let attempt = 0; attempt < WEBHOOK_MAX_RETRIES; attempt++) {
+    let dispatcher: UndiciAgent | undefined;
     try {
-      await assertPublicHostname(url);
+      // Re-resolve DNS on each attempt (IP may legitimately change),
+      // but pin the validated IPs for the actual connection.
+      const validatedIps = await resolveAndValidateIps(url);
+      dispatcher = createPinnedDispatcher(hostname, validatedIps);
+
       const res = await fetch(url, {
         method: "POST",
         headers: {
@@ -170,10 +201,14 @@ async function deliverWithRetry(
         body: payload,
         signal: AbortSignal.timeout(10_000),
         redirect: "error",
+        // @ts-expect-error -- Node.js fetch supports undici dispatcher
+        dispatcher,
       });
       if (res.ok) return true;
     } catch {
-      // Network or timeout error
+      // Network, timeout, or SSRF-blocked error
+    } finally {
+      dispatcher?.destroy();
     }
 
     if (attempt < WEBHOOK_MAX_RETRIES - 1) {

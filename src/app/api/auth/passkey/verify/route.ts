@@ -1,13 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID, randomBytes } from "node:crypto";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
-import { createCustomAdapter } from "@/lib/auth-adapter";
-import { sessionMetaStorage } from "@/lib/session-meta";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { extractClientIp } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -83,10 +80,10 @@ async function handlePOST(req: NextRequest) {
   const existingUser = await withBypassRls(prisma, async () =>
     prisma.user.findUnique({
       where: { email: user.email },
-      select: { tenant: { select: { isBootstrap: true } } },
+      select: { tenantId: true, tenant: { select: { isBootstrap: true } } },
     }),
   );
-  if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
+  if (!existingUser?.tenantId || !existingUser.tenant || !existingUser.tenant.isBootstrap) {
     return NextResponse.json(
       { error: "AUTHENTICATION_FAILED" },
       { status: 401 },
@@ -97,20 +94,41 @@ async function handlePOST(req: NextRequest) {
   const sessionToken = `${randomUUID()}${randomBytes(16).toString("hex")}`;
   const expires = new Date(Date.now() + PASSKEY_SESSION_MAX_AGE_SECONDS * 1000);
 
-  const adapter = createCustomAdapter();
-
-  // Run createSession inside sessionMetaStorage so IP/UA are captured
   const meta = extractRequestMeta(req);
 
-  await sessionMetaStorage.run(meta, async () => {
-    await adapter.createSession!({
-      sessionToken,
-      userId: user.id,
-      expires,
+  // Defense-in-depth: atomically delete all existing sessions and create
+  // new one. Passkey sign-in requires physical device possession, so this
+  // aggressive rotation is acceptable for a password manager.
+  const evictedCount = await withBypassRls(prisma, async () => {
+    const result = await prisma.$transaction(async (tx) => {
+      const deleted = await tx.session.deleteMany({
+        where: { userId: user.id },
+      });
+      await tx.session.create({
+        data: {
+          sessionToken,
+          userId: user.id,
+          tenantId: existingUser.tenantId,
+          expires,
+          ipAddress: meta.ip ?? null,
+          userAgent: meta.userAgent?.slice(0, 512) ?? null,
+        },
+      });
+      return deleted.count;
     });
+    return result;
   });
 
   // Audit log
+  if (evictedCount > 0) {
+    logAudit({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.SESSION_REVOKE_ALL,
+      userId: user.id,
+      metadata: { trigger: "passkey_signin", evictedCount },
+      ...meta,
+    });
+  }
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.AUTH_LOGIN,

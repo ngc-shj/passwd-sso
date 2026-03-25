@@ -11,11 +11,16 @@ import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { rateLimited } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
+
+const listLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+const createLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
 async function handleGET(req: NextRequest) {
@@ -27,6 +32,9 @@ async function handleGET(req: NextRequest) {
     return unauthorized();
   }
   const userId = authResult.userId;
+
+  const rl = await listLimiter.check(`rl:passwords_list:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   // Access restriction for token-based auth
   if (authResult.type !== "session") {
@@ -140,6 +148,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
   const userId = authResult.userId;
+
+  const rl = await createLimiter.check(`rl:passwords_create:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   // Access restriction for token-based auth
   if (authResult.type !== "session") {
