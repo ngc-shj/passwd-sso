@@ -97,6 +97,9 @@ async function clearRateLimits(): Promise<void> {
       ...userIds.map((id) => `rl:ea_create:${id}`),
       ...userIds.map((id) => `rl:vault_rotate:${id}`),
       ...userIds.map((id) => `rl:vault_change_pass:${id}`),
+      ...userIds.map((id) => `rl:vault_unlock:${id}`),
+      ...userIds.map((id) => `rl:vault_unlock_data:${id}`),
+      ...userIds.map((id) => `rl:vault_setup:${id}`),
     ];
     if (keys.length > 0) {
       await redis.del(...keys);
