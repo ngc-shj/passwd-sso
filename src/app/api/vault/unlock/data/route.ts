@@ -10,7 +10,10 @@ import { rateLimited } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
-const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 20 });
+// Higher limit than vault/unlock — this endpoint only returns encrypted data
+// and cannot be used for brute-force (passphrase verification is separate).
+// 120 req/5min accounts for ~40 E2E unlock calls + CI retries (×2) + headroom.
+const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 120 });
 
 /**
  * GET /api/vault/unlock/data
