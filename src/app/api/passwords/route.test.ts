@@ -13,6 +13,7 @@ const {
   mockAuditCreate,
   mockWithUserTenantRls,
   mockWithBypassRls,
+  mockRateLimiterCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -28,6 +29,7 @@ const {
   mockAuditCreate: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockRateLimiterCheck: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -48,6 +50,9 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
@@ -90,6 +95,7 @@ const mockEntry = {
 describe("GET /api/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
@@ -103,6 +109,12 @@ describe("GET /api/passwords", () => {
     mockExtTokenFindUnique.mockResolvedValue(null);
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
     expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    expect(res.status).toBe(429);
   });
 
   it("accepts extension token with passwords:read scope", async () => {
@@ -309,6 +321,7 @@ describe("GET /api/passwords", () => {
 describe("POST /api/passwords", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockAuth.mockResolvedValue({ user: { id: "test-user-id" } });
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
     mockPrismaTag.count.mockResolvedValue(1);
@@ -329,6 +342,14 @@ describe("POST /api/passwords", () => {
       body: validBody,
     }));
     expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
+    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
+      body: validBody,
+    }));
+    expect(res.status).toBe(429);
   });
 
   it("returns 400 on invalid body", async () => {

@@ -41,7 +41,9 @@ async function handlePOST(req: NextRequest) {
 
   const { name, text, expiresIn, maxViews, requirePassword } = result.data;
 
-  // Encrypt text content with master key
+  // Server-side encryption with master key (NOT E2E).
+  // The server can decrypt this data. For E2E-encrypted sharing,
+  // use share links with client-side encryption (masterKeyVersion=0).
   const encrypted = encryptShareData(JSON.stringify({ name, text }));
 
   // Generate access password if requested

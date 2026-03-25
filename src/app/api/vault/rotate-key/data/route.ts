@@ -18,7 +18,7 @@ const rotateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
  * Returns all PasswordEntry rows (active + trash) and all PasswordEntryHistory
  * rows for the authenticated user, plus ECDH private key fields.
  */
-async function handleGET(request: NextRequest) {
+async function handleGET(_request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
