@@ -90,17 +90,18 @@ async function clearRateLimits(): Promise<void> {
   const redis = new Redis(redisUrl, { lazyConnect: true, enableOfflineQueue: false });
   try {
     await redis.connect();
+    // Scan for all rate-limit keys belonging to test users.
+    // Uses pattern matching so new rate-limit keys are cleared automatically.
     const userIds = Object.values(TEST_USERS).map((u) => u.id);
-    const keys = [
-      ...userIds.map((id) => `rl:watchtower:start:${id}`),
-      ...userIds.map((id) => `rl:watchtower:hibp:${id}`),
-      ...userIds.map((id) => `rl:ea_create:${id}`),
-      ...userIds.map((id) => `rl:vault_rotate:${id}`),
-      ...userIds.map((id) => `rl:vault_change_pass:${id}`),
-      ...userIds.map((id) => `rl:vault_unlock:${id}`),
-      ...userIds.map((id) => `rl:vault_unlock_data:${id}`),
-      ...userIds.map((id) => `rl:vault_setup:${id}`),
-    ];
+    const keys: string[] = [];
+    for (const id of userIds) {
+      let cursor = "0";
+      do {
+        const [next, found] = await redis.scan(cursor, "MATCH", `rl:*:${id}`, "COUNT", 100);
+        cursor = next;
+        keys.push(...found);
+      } while (cursor !== "0");
+    }
     if (keys.length > 0) {
       await redis.del(...keys);
     }
