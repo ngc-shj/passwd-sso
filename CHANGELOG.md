@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.6](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.5...passwd-sso-v0.3.6) (2026-03-25)
+
+
+### Bug Fixes
+
+* security hardening — webhook IP pinning, password rate limits, session rotation ([#243](https://github.com/ngc-shj/passwd-sso/issues/243)) ([532a1a3](https://github.com/ngc-shj/passwd-sso/commit/532a1a35f99dc2333bd4aa60e0d7e96179fd22db))
+
 ## [0.3.5](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.4...passwd-sso-v0.3.5) (2026-03-25)
 
 
