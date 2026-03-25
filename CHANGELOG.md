@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.5](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.4...passwd-sso-v0.3.5) (2026-03-25)
+
+
+### Bug Fixes
+
+* clear vault unlock rate-limit keys in E2E global setup ([#241](https://github.com/ngc-shj/passwd-sso/issues/241)) ([6eac77f](https://github.com/ngc-shj/passwd-sso/commit/6eac77f46283ef617c57d3839fd8605976885481))
+
 ## [0.3.4](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.3...passwd-sso-v0.3.4) (2026-03-25)
 
 
