@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.3](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.2...passwd-sso-v0.3.3) (2026-03-25)
+
+
+### Bug Fixes
+
+* support Tailscale Serve proxy for access restriction ([d6f25d5](https://github.com/ngc-shj/passwd-sso/commit/d6f25d58208db3c15e7ec59404154d37b9181929))
+
 ## [0.3.2](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.1...passwd-sso-v0.3.2) (2026-03-24)
 
 
