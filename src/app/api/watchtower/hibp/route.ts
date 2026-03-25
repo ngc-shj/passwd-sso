@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { HIBP_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
@@ -26,8 +26,9 @@ async function handleGET(request: Request) {
     return unauthorized();
   }
 
-  if (!(await hibpLimiter.check(`rl:hibp:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await hibpLimiter.check(`rl:hibp:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { searchParams } = new URL(request.url);

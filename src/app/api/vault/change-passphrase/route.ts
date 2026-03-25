@@ -10,7 +10,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
@@ -48,8 +48,9 @@ async function handlePOST(request: Request) {
   }
 
   const rateKey = `rl:vault_change_pass:${session.user.id}`;
-  if (!(await changeLimiter.check(rateKey)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await changeLimiter.check(rateKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   let body: unknown;

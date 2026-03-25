@@ -15,7 +15,7 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
@@ -58,11 +58,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   const rateKey = `rl:audit_download:team:${teamId}:${session.user.id}`;
-  if (!(await downloadLimiter.check(rateKey)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+  const rl = await downloadLimiter.check(rateKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { searchParams } = new URL(req.url);

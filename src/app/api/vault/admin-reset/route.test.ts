@@ -5,12 +5,14 @@ import { createRequest } from "@/__tests__/helpers/request-builder";
 const {
   mockAuth, mockLogAudit, mockExecuteVaultReset,
   mockAdminVaultResetFindUnique, mockAdminVaultResetUpdateMany,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockLogAudit: vi.fn(),
   mockExecuteVaultReset: vi.fn(),
   mockAdminVaultResetFindUnique: vi.fn(),
   mockAdminVaultResetUpdateMany: vi.fn(),
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -34,6 +36,12 @@ vi.mock("@/lib/vault-reset", () => ({
 }));
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn(() => ({
+    check: mockRateLimitCheck,
+    clear: vi.fn(),
+  })),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -67,6 +75,7 @@ describe("POST /api/vault/admin-reset", () => {
     mockAdminVaultResetFindUnique.mockResolvedValue(RESET_RECORD);
     mockExecuteVaultReset.mockResolvedValue({ deletedEntries: 3, deletedAttachments: 1 });
     mockAdminVaultResetUpdateMany.mockResolvedValue({ count: 1 });
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   afterEach(() => {
@@ -270,5 +279,14 @@ describe("POST /api/vault/admin-reset", () => {
       body: { token: "g".repeat(64), confirmation: "DELETE MY VAULT" },
     }));
     expect(res.status).toBe(400);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(createRequest("POST", URL, {
+      body: { token: TOKEN, confirmation: "DELETE MY VAULT" },
+    }));
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 });

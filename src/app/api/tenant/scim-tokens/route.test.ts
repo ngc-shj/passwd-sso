@@ -10,6 +10,7 @@ const {
   mockLogAudit,
   mockHashToken,
   mockGenerateScimToken,
+  mockRateLimitCheck,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -32,6 +33,7 @@ const {
     mockLogAudit: vi.fn(),
     mockHashToken: vi.fn((t: string) => `hashed:${t}`),
     mockGenerateScimToken: vi.fn(() => "scim_test_plaintext_token"),
+    mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -57,6 +59,12 @@ vi.mock("@/lib/crypto-server", () => ({
 vi.mock("@/lib/scim/token-utils", () => ({
   generateScimToken: mockGenerateScimToken,
 }));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn(() => ({
+    check: mockRateLimitCheck,
+    clear: vi.fn(),
+  })),
+}));
 
 import { GET, POST } from "./route";
 
@@ -68,6 +76,7 @@ describe("GET /api/tenant/scim-tokens", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -113,6 +122,7 @@ describe("POST /api/tenant/scim-tokens", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockPrismaScimToken.count.mockResolvedValue(0);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -229,6 +239,17 @@ describe("POST /api/tenant/scim-tokens", () => {
     expect(mockPrismaScimToken.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ expiresAt: null }) }),
     );
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
+        body: { description: "test" },
+      }),
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("rethrows unexpected errors from POST", async () => {

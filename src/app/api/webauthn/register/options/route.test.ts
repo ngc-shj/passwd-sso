@@ -101,13 +101,15 @@ describe("POST /api/webauthn/register/options", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiterCheck.mockResolvedValue({ allowed: false });
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
 
     const req = createRequest("POST", ROUTE_URL);
-    const { status, json } = await parseResponse(await POST(req));
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
 
     expect(status).toBe(429);
     expect(json.error).toBe("RATE_LIMIT_EXCEEDED");
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("returns 503 when Redis is unavailable", async () => {
@@ -208,6 +210,6 @@ describe("POST /api/webauthn/register/options", () => {
     const req = createRequest("POST", ROUTE_URL);
     await POST(req);
 
-    expect(mockRateLimiterCheck).toHaveBeenCalledWith("webauthn:reg-opts:user-1");
+    expect(mockRateLimiterCheck).toHaveBeenCalledWith("rl:webauthn_reg_opts:user-1");
   });
 });

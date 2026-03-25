@@ -12,10 +12,11 @@ export function errorResponse(
   code: ApiErrorCode,
   status: number,
   details?: Record<string, unknown>,
+  headers?: HeadersInit,
 ): NextResponse {
   return NextResponse.json(
     details ? { error: code, ...details } : { error: code },
-    { status },
+    { status, headers },
   );
 }
 
@@ -34,6 +35,14 @@ export const validationError = (details: unknown) =>
   errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
     details,
   });
+
+export const rateLimited = (retryAfterMs?: number) => {
+  const headers: Record<string, string> = {};
+  if (retryAfterMs != null && retryAfterMs > 0) {
+    headers["Retry-After"] = String(Math.ceil(retryAfterMs / 1000));
+  }
+  return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429, undefined, headers);
+};
 
 /**
  * Convert a Prisma error to a standardized NextResponse.

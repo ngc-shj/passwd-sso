@@ -7,13 +7,18 @@ const {
   mockPrismaUser,
   mockPrismaVaultKey,
   mockWithUserTenantRls,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockPrismaVaultKey: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: mockPrismaUser,
@@ -48,6 +53,7 @@ describe("GET /api/vault/unlock/data", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockCheckAuth.mockResolvedValue(authOk());
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -207,5 +213,12 @@ describe("GET /api/vault/unlock/data", () => {
     const json = await res.json();
     expect(json.verificationArtifact).toBeNull();
     expect(json.userId).toBe("test-user-id");
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await GET(req());
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 });

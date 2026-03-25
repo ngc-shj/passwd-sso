@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaUser, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
-  mockRateLimiter: { check: vi.fn() },
+  mockVerifyCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockResetCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  mockResetClear: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
@@ -14,7 +16,9 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
 vi.mock("@/lib/rate-limit", () => ({
-  createRateLimiter: () => mockRateLimiter,
+  createRateLimiter: vi.fn()
+    .mockReturnValueOnce({ check: mockVerifyCheck, clear: vi.fn() })
+    .mockReturnValueOnce({ check: mockResetCheck, clear: mockResetClear }),
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
@@ -69,7 +73,9 @@ describe("POST /api/vault/recovery-key/recover", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
-    mockRateLimiter.check.mockResolvedValue({ allowed: true });
+    mockVerifyCheck.mockResolvedValue({ allowed: true });
+    mockResetCheck.mockResolvedValue({ allowed: true });
+    mockResetClear.mockResolvedValue(undefined);
     mockPrismaUser.findUnique.mockResolvedValue(userWithRecovery);
     mockPrismaUser.update.mockResolvedValue({});
   });
@@ -83,11 +89,12 @@ describe("POST /api/vault/recovery-key/recover", () => {
   });
 
   it("returns 429 when rate limited", async () => {
-    mockRateLimiter.check.mockResolvedValue({ allowed: false });
+    mockVerifyCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
     const res = await POST(createRequest("POST", URL, {
       body: { step: "verify", verifierHash: "a".repeat(64) },
     }));
     expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   // ─── Step: verify ─────────────────────────────────────────
@@ -129,6 +136,28 @@ describe("POST /api/vault/recovery-key/recover", () => {
   });
 
   // ─── Step: reset ──────────────────────────────────────────
+
+  it("blocks reset step when resetLimiter denies", async () => {
+    mockResetCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(createRequest("POST", URL, { body: resetBody }));
+    expect(res.status).toBe(429);
+  });
+
+  it("does not block verify when resetLimiter would deny", async () => {
+    // resetLimiter is not consulted for the "verify" step, so only verifyLimiter matters
+    mockVerifyCheck.mockResolvedValue({ allowed: true });
+    mockResetCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(createRequest("POST", URL, {
+      body: { step: "verify", verifierHash: "a".repeat(64) },
+    }));
+    expect(res.status).not.toBe(429);
+  });
+
+  it("calls resetLimiter.clear() on successful reset", async () => {
+    const res = await POST(createRequest("POST", URL, { body: resetBody }));
+    expect(res.status).toBe(200);
+    expect(mockResetClear).toHaveBeenCalledWith(`rl:recovery_reset:user-1`);
+  });
 
   describe("step=reset", () => {
     it("updates passphrase and recovery data on success", async () => {

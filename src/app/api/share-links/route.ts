@@ -14,7 +14,7 @@ import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationEr
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
@@ -43,8 +43,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await shareLinkLimiter.check(`rl:share_create:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await shareLinkLimiter.check(`rl:share_create:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const result = await parseBody(req, createShareLinkSchema);

@@ -12,6 +12,7 @@ const {
   mockLogAudit,
   mockDispatchTenantWebhook,
   mockRunDirectorySync,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockTenantMemberFindFirst: vi.fn(),
@@ -20,6 +21,7 @@ const {
   mockLogAudit: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
   mockRunDirectorySync: vi.fn(),
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -44,6 +46,12 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 }));
 vi.mock("@/lib/directory-sync/engine", () => ({
   runDirectorySync: mockRunDirectorySync,
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn(() => ({
+    check: mockRateLimitCheck,
+    clear: vi.fn(),
+  })),
 }));
 
 import { POST } from "./route";
@@ -81,6 +89,7 @@ describe("POST /api/directory-sync/[id]/run", () => {
     mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(BASE_CONFIG);
     mockRunDirectorySync.mockResolvedValue(SUCCESS_RESULT);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -240,5 +249,13 @@ describe("POST /api/directory-sync/[id]/run", () => {
     await POST(req, CTX);
 
     expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const req = createRequest("POST", ROUTE_URL);
+    const res = await POST(req, CTX);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 });

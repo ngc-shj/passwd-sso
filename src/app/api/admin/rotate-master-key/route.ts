@@ -26,6 +26,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
@@ -43,11 +44,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Rate limit (global fixed key, applied after auth)
-  if (!(await rateLimiter.check("rl:admin:rotate")).allowed) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded. Try again later." },
-      { status: 429 }
-    );
+  const rl = await rateLimiter.check("rl:admin:rotate");
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Parse body

@@ -8,6 +8,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "../helpers";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { rateLimited } from "@/lib/api-response";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -23,13 +24,9 @@ async function handleDELETE(
     );
   }
 
-  if (
-    !(await revokeLimiter.check(`rl:session_revoke:${session.user.id}`)).allowed
-  ) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+  const rl = await revokeLimiter.check(`rl:session_revoke:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { id } = await params;

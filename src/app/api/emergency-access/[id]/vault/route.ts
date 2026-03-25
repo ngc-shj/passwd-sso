@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
 
 const vaultLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
@@ -21,8 +21,9 @@ async function handleGET(
     return unauthorized();
   }
 
-  if (!(await vaultLimiter.check(`rl:ea_vault:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await vaultLimiter.check(`rl:ea_vault:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { id } = await params;

@@ -14,12 +14,15 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,
   SCIM_TOKEN_EXPIRY_MAX_DAYS,
   SCIM_TOKEN_EXPIRY_DEFAULT_DAYS,
 } from "@/lib/validations/common";
+
+const scimTokenCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 5 });
 
 export const runtime = "nodejs";
 
@@ -89,6 +92,9 @@ async function handlePOST(req: NextRequest) {
     }
     throw err;
   }
+
+  const rl = await scimTokenCreateLimiter.check(`rl:scim_token_create:${actor.tenantId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const result = await parseBody(req, createTokenSchema);
   if (!result.ok) return result.response;

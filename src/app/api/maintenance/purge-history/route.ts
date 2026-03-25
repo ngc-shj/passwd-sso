@@ -18,6 +18,7 @@ import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
@@ -34,11 +35,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Rate limit (global fixed key, applied after auth)
-  if (!(await rateLimiter.check("rl:admin:purge-history")).allowed) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded. Try again later." },
-      { status: 429 },
-    );
+  const rl = await rateLimiter.check("rl:admin:purge-history");
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Parse body

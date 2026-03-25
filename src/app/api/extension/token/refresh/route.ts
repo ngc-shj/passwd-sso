@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { validateExtensionToken } from "@/lib/extension-token";
 import { EXTENSION_TOKEN_TTL_MS } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -33,8 +33,9 @@ async function handlePOST(req: NextRequest) {
 
   const { tokenId, userId, scopes } = result.data;
 
-  if (!(await refreshLimiter.check(`rl:ext_refresh:${userId}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await refreshLimiter.check(`rl:ext_refresh:${userId}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Verify user's Auth.js session is still active

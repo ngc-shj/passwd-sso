@@ -7,6 +7,7 @@ import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { getLogger } from "@/lib/logger";
 
 // Rate limiters for magic link email (per-email address)
 const magicLinkEmailLimiter = createRateLimiter({
@@ -100,9 +101,12 @@ export default {
             async sendVerificationRequest({ identifier: email, url }) {
               // Rate limit per email address (3 emails per 10 minutes)
               const rl = await magicLinkEmailLimiter.check(
-                `magic-link:email:${email.toLowerCase()}`,
+                `rl:magic_link:${email.toLowerCase()}`,
               );
-              if (!rl.allowed) return; // silently drop — no user enumeration
+              if (!rl.allowed) {
+                getLogger().warn("magic-link.rate-limited");
+                return; // silently drop — no user enumeration
+              }
 
               // Extract locale from callbackUrl inside the magic link
               // URL format: .../api/auth/callback/nodemailer?callbackUrl=.../ja/...&token=...

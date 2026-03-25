@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, forbidden, notFound, unauthorized } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -75,8 +75,9 @@ async function handlePATCH(
     return unauthorized();
   }
 
-  if (!(await reencryptLimiter.check(`rl:history_reencrypt:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await reencryptLimiter.check(`rl:history_reencrypt:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { id, historyId } = await params;

@@ -6,6 +6,7 @@ import {
   notFound,
   forbidden,
   validationError,
+  rateLimited,
 } from "./api-response";
 
 describe("errorResponse", () => {
@@ -30,6 +31,30 @@ describe("errorResponse", () => {
     const body = await res.json();
     expect(body).toEqual({ error: "FORBIDDEN" });
     expect("details" in body).toBe(false);
+  });
+});
+
+describe("rateLimited", () => {
+  it("returns 429 with RATE_LIMIT_EXCEEDED error", async () => {
+    const res = rateLimited();
+    expect(res.status).toBe(429);
+    expect(await res.json()).toEqual({ error: "RATE_LIMIT_EXCEEDED" });
+  });
+
+  it("sets Retry-After header when retryAfterMs is provided (rounds up to seconds)", async () => {
+    const res = rateLimited(1500);
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("2");
+  });
+
+  it("omits Retry-After header when retryAfterMs is undefined", async () => {
+    const res = rateLimited();
+    expect(res.headers.get("Retry-After")).toBeNull();
+  });
+
+  it("omits Retry-After header when retryAfterMs is 0", async () => {
+    const res = rateLimited(0);
+    expect(res.headers.get("Retry-After")).toBeNull();
   });
 });
 

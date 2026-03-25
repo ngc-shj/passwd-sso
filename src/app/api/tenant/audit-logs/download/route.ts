@@ -7,8 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { VALID_ACTIONS } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
@@ -44,8 +43,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const rateKey = `rl:tenant_audit_download:${session.user.id}`;
-  if (!(await downloadLimiter.check(rateKey)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await downloadLimiter.check(rateKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { searchParams } = new URL(req.url);

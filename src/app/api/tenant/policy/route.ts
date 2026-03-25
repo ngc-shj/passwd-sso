@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -75,8 +75,9 @@ async function handlePATCH(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await policyLimiter.check(`rl:tenant_policy:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await policyLimiter.check(`rl:tenant_policy:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   let membership;

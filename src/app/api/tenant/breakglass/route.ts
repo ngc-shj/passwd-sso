@@ -14,7 +14,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, forbidden } from "@/lib/api-response";
+import { errorResponse, unauthorized, forbidden, rateLimited } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
@@ -80,9 +80,7 @@ async function handlePOST(req: NextRequest) {
     `rl:breakglass:${userId}`,
   );
   if (!rlResult.allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429, {
-      retryAfterMs: rlResult.retryAfterMs,
-    });
+    return rateLimited(rlResult.retryAfterMs);
   }
 
   // Verify target, check duplicate, and create grant in a single transaction

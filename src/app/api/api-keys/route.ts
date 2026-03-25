@@ -6,8 +6,9 @@ import { hashToken } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
@@ -16,6 +17,8 @@ import {
 } from "@/lib/constants/api-key";
 import { API_KEY_TOKEN_LENGTH, API_KEY_PREFIX_LENGTH } from "@/lib/validations/common";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+
+const apiKeyCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 5 });
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
@@ -71,6 +74,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
   const userId = authed.auth.userId;
+
+  const rl = await apiKeyCreateLimiter.check(`rl:api_key_create:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const result = await parseBody(req, apiKeyCreateSchema);
   if (!result.ok) return result.response;
