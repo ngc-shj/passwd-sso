@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -21,6 +21,10 @@ const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUse
   mockAuditCreate: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockRateLimiterCheck: vi.fn(),
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -71,6 +75,7 @@ const ownedEntry = {
 describe("GET /api/passwords/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockAuditCreate.mockResolvedValue({});
@@ -83,6 +88,15 @@ describe("GET /api/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(429);
   });
 
   it("returns 403 when scope insufficient", async () => {
@@ -237,6 +251,7 @@ describe("PUT /api/passwords/[id]", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
     mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaFolder.findFirst.mockResolvedValue({ id: "folder-1" });
@@ -258,6 +273,15 @@ describe("PUT /api/passwords/[id]", () => {
       createParams({ id: PW_ID }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/passwords/${PW_ID}`, { body: updateBody }),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(429);
   });
 
   it("returns 404 when entry not found", async () => {

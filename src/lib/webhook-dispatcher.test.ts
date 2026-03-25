@@ -388,6 +388,61 @@ describe("dispatchWebhook", () => {
   });
 });
 
+describe("SSRF defense (resolveAndValidateIps)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    // Restore default public IP for subsequent test suites
+    mockResolve4.mockImplementation(async () => ["93.184.216.34"]);
+    mockResolve6.mockImplementation(async () => []);
+  });
+
+  it("skips delivery when DNS resolves to private IP", async () => {
+    mockResolve4.mockResolvedValue(["192.168.1.1"]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips delivery when DNS resolves to cloud metadata IP", async () => {
+    mockResolve4.mockResolvedValue(["169.254.169.254"]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips delivery when DNS resolution fails (empty results)", async () => {
+    mockResolve4.mockResolvedValue([]);
+    mockResolve6.mockResolvedValue([]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips delivery for loopback IP", async () => {
+    mockResolve4.mockResolvedValue(["127.0.0.1"]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});
+
 describe("dispatchTenantWebhook", () => {
   beforeEach(() => {
     vi.clearAllMocks();

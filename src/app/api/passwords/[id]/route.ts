@@ -5,9 +5,14 @@ import { updateE2EPasswordSchema } from "@/lib/validations";
 import { notFound, forbidden, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/check-auth";
 import { parseBody } from "@/lib/parse-body";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { rateLimited } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+
+const getLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
+const updateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 // GET /api/passwords/[id] - Get password detail (returns encrypted blob)
 async function handleGET(
@@ -17,6 +22,9 @@ async function handleGET(
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
   if (!authResult.ok) return authResult.response;
   const userId = authResult.auth.userId;
+
+  const rl = await getLimiter.check(`rl:passwords_get:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const { id } = await params;
 
@@ -69,6 +77,9 @@ async function handlePUT(
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
   if (!authResult.ok) return authResult.response;
   const userId = authResult.auth.userId;
+
+  const rl = await updateLimiter.check(`rl:passwords_update:${userId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const { id } = await params;
 
