@@ -23,7 +23,7 @@ import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, forbidden, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
@@ -105,10 +105,8 @@ async function handlePOST(
   ]);
 
   if (!adminResult.allowed || !targetResult.allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    const retryAfterMs = !adminResult.allowed ? adminResult.retryAfterMs : targetResult.retryAfterMs;
+    return rateLimited(retryAfterMs);
   }
 
   // Check pending resets limit
@@ -124,10 +122,7 @@ async function handlePOST(
   );
 
   if (pendingCount >= MAX_PENDING_RESETS) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return rateLimited();
   }
 
   // Generate token

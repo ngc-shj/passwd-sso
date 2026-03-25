@@ -2,10 +2,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -25,8 +24,9 @@ async function handleGET(request: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await rotateLimiter.check(`rl:vault_rotate:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const [entries, historyEntries, user] = await withUserTenantRls(

@@ -3,8 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_ACTION,
   AUDIT_SCOPE,
@@ -31,8 +30,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const rateKey = `rl:audit_download:${session.user.id}`;
-  if (!(await downloadLimiter.check(rateKey)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await downloadLimiter.check(rateKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const { searchParams } = new URL(req.url);

@@ -8,7 +8,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, notFound } from "@/lib/api-response";
+import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -28,11 +28,13 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(token);
 
   // Rate limit by IP+tokenHash and by tokenHash globally
-  if (!(await ipLimiter.check(`rl:share_verify_ip:${ip}:${tokenHash}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const ipRl = await ipLimiter.check(`rl:share_verify_ip:${ip}:${tokenHash}`);
+  if (!ipRl.allowed) {
+    return rateLimited(ipRl.retryAfterMs);
   }
-  if (!(await tokenLimiter.check(`rl:share_verify_token:${tokenHash}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const tokenRl = await tokenLimiter.check(`rl:share_verify_token:${tokenHash}`);
+  if (!tokenRl.allowed) {
+    return rateLimited(tokenRl.retryAfterMs);
   }
 
   const share = await withBypassRls(prisma, () =>

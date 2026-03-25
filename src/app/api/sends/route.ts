@@ -11,8 +11,7 @@ import {
 } from "@/lib/crypto-server";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   AUDIT_TARGET_TYPE,
@@ -32,8 +31,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await sendTextLimiter.check(`rl:send_text:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await sendTextLimiter.check(`rl:send_text:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const result = await parseBody(req, createSendTextSchema);

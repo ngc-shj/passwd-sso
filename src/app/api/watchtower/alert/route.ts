@@ -18,7 +18,7 @@ import { notificationTitle, notificationBody } from "@/lib/notification-messages
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { BREACH_COUNT_MAX } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
@@ -53,12 +53,9 @@ async function handlePOST(req: NextRequest) {
   const rateLimitKey = teamId
     ? `rl:watchtower:alert:team:${teamId}:${session.user.id}`
     : `rl:watchtower:alert:${session.user.id}`;
-  const { allowed } = await alertLimiter.check(rateLimitKey);
-  if (!allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+  const rl = await alertLimiter.check(rateLimitKey);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   // Verify team membership when teamId is provided

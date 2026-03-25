@@ -11,6 +11,7 @@ const {
   mockPutObject,
   mockDeleteObject,
   mockWithUserTenantRls,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockEntryFindUnique: vi.fn(),
@@ -20,9 +21,11 @@ const {
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRateLimitCheck: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: { findUnique: mockEntryFindUnique },
@@ -90,7 +93,10 @@ function validFormFields(): Record<string, string | Blob> {
 }
 
 describe("GET /api/passwords/[id]/attachments", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
@@ -130,7 +136,10 @@ describe("GET /api/passwords/[id]/attachments", () => {
 });
 
 describe("POST /api/passwords/[id]/attachments", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);

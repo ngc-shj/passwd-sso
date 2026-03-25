@@ -6,6 +6,11 @@ export async function register() {
 
   // Initialize key provider and validate keys (Node.js runtime only)
   if (process.env.NEXT_RUNTIME === "nodejs") {
+    // Validate Redis config early — throws in production if REDIS_URL is missing.
+    // This replaces the lazy validation that was previously in rate-limit.ts check().
+    const { validateRedisConfig } = await import("@/lib/redis");
+    validateRedisConfig();
+
     const { getKeyProvider } = await import("@/lib/key-provider");
     const provider = await getKeyProvider();
     await provider.validateKeys();

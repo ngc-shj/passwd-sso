@@ -7,7 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
-import { unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
@@ -31,10 +31,7 @@ async function handleGET(req: NextRequest) {
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
   if (!rl.allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429, headers: { "Retry-After": String(Math.ceil(rl.retryAfterMs! / 1000)) } },
-    );
+    return rateLimited(rl.retryAfterMs);
   }
 
   const user = await withTenantRls(prisma, tenantId, async () =>

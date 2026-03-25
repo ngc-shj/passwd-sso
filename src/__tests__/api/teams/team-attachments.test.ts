@@ -12,6 +12,7 @@ const {
   mockPutObject,
   mockDeleteObject,
   mockWithTeamTenantRls,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
@@ -22,9 +23,11 @@ const {
   mockPutObject: vi.fn(),
   mockDeleteObject: vi.fn(),
   mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+  mockRateLimitCheck: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
 vi.mock("@/lib/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
@@ -103,7 +106,10 @@ function validFormFields(): Record<string, string | Blob> {
 const TEAM_ENTRY = { teamId: "o1", itemKeyVersion: 1, teamKeyVersion: 1, tenantId: "t1" };
 
 describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
@@ -154,7 +160,10 @@ describe("GET /api/teams/[teamId]/passwords/[id]/attachments", () => {
 });
 
 describe("POST /api/teams/[teamId]/passwords/[id]/attachments", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);

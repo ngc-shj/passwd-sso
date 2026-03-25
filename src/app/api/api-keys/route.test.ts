@@ -7,6 +7,7 @@ const {
   mockPrismaApiKey,
   mockPrismaUser,
   mockWithUserTenantRls,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaApiKey: {
@@ -16,10 +17,14 @@ const {
   },
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/lib/check-auth", () => ({
   checkAuth: mockCheckAuth,
+}));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -64,6 +69,7 @@ describe("GET /api/api-keys", () => {
   beforeEach(() => {
     mockCheckAuth.mockReset();
     mockPrismaApiKey.findMany.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -151,6 +157,7 @@ describe("POST /api/api-keys", () => {
     mockPrismaApiKey.count.mockReset();
     mockPrismaApiKey.create.mockReset();
     mockPrismaUser.findUnique.mockReset();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -250,6 +257,21 @@ describe("POST /api/api-keys", () => {
       }),
     );
     expect(res.status).toBe(401);
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "session", userId: "u1" },
+    });
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(
+      createRequest("POST", "http://localhost:3000/api/api-keys", {
+        body: { name: "test", scope: ["passwords:read"] },
+      }),
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("creates API key for session auth", async () => {

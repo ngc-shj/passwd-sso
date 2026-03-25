@@ -16,9 +16,12 @@ import {
   isValidSendFilename,
 } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, notFound, unauthorized, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
+
+const teamAttachmentUploadLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 function getExtension(filename: string): string {
   return filename.split(".").pop()?.toLowerCase() ?? "";
@@ -94,6 +97,9 @@ async function handlePOST(
     }
     throw e;
   }
+
+  const rl = await teamAttachmentUploadLimiter.check(`rl:team_attachment_upload:${session.user.id}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const entry = await withTeamTenantRls(teamId, async () =>
     prisma.teamPasswordEntry.findUnique({

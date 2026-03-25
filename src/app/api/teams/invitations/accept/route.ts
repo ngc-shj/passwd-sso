@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -20,8 +20,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await acceptLimiter.check(`rl:invite_accept:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await acceptLimiter.check(`rl:invite_accept:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const result = await parseBody(req, invitationAcceptSchema);

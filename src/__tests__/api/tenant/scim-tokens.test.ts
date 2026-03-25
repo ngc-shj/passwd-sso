@@ -13,6 +13,7 @@ const {
   mockScimTokenFindUnique,
   mockScimTokenUpdate,
   mockDispatchTenantWebhook,
+  mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -24,9 +25,11 @@ const {
   mockScimTokenFindUnique: vi.fn(),
   mockScimTokenUpdate: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
+  mockRateLimitCheck: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
 vi.mock("@/lib/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
@@ -100,7 +103,10 @@ const makeToken = (overrides: Record<string, unknown> = {}) => ({
 });
 
 describe("GET /api/tenant/scim-tokens", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 without session", async () => {
     mockAuth.mockResolvedValue(null);
@@ -135,7 +141,10 @@ describe("GET /api/tenant/scim-tokens", () => {
 });
 
 describe("POST /api/tenant/scim-tokens", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 without session", async () => {
     mockAuth.mockResolvedValue(null);
@@ -218,7 +227,10 @@ describe("POST /api/tenant/scim-tokens", () => {
 });
 
 describe("DELETE /api/tenant/scim-tokens/[tokenId]", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
+  });
 
   it("returns 401 without session", async () => {
     mockAuth.mockResolvedValue(null);

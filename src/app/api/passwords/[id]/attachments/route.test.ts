@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls } = vi.hoisted(() => ({
+const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -12,9 +12,13 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTen
     create: vi.fn(),
   },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -56,6 +60,7 @@ describe("GET /api/passwords/[id]/attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -115,6 +120,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockPrismaPasswordEntry.findUnique.mockResolvedValue({ userId: "user-1" });
     mockPrismaAttachment.count.mockResolvedValue(0);
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -339,6 +345,23 @@ describe("POST /api/passwords/[id]/attachments", () => {
         }),
       }),
     );
+  });
+
+  it("returns 429 when rate limited", async () => {
+    mockRateLimitCheck.mockResolvedValueOnce({ allowed: false, retryAfterMs: 30_000 });
+    const res = await POST(
+      createFormDataRequest("http://localhost:3000/api/passwords/pw-1/attachments", {
+        file: new Blob(["data"]),
+        iv: "a".repeat(24),
+        authTag: "b".repeat(32),
+        filename: "test.pdf",
+        contentType: "application/pdf",
+        sizeBytes: "100",
+      }),
+      createParams("pw-1")
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe("30");
   });
 
   it("falls back to server-generated UUID when clientId is not a valid UUID", async () => {

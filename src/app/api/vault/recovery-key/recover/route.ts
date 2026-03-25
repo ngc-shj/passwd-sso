@@ -7,6 +7,7 @@ import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/cryp
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -36,9 +37,13 @@ const resetSchema = z.object({
   recoveryVerifierHash: hexHash,
 });
 
-const recoverLimiter = createRateLimiter({
+const verifyLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 5,
+});
+const resetLimiter = createRateLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: 3,
 });
 
 /**
@@ -57,13 +62,7 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  const rateKey = `rl:recovery_key_recover:${session.user.id}`;
-  if (!(await recoverLimiter.check(rateKey)).allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
-  }
+  const userId = session.user.id;
 
   let body: unknown;
   try {
@@ -84,10 +83,20 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
+  // Per-step rate limiting
   if (stepCheck.data.step === "verify") {
-    return handleVerify(body, session.user.id);
+    const rl = await verifyLimiter.check(`rl:recovery_verify:${userId}`);
+    if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+    return handleVerify(body, userId);
   } else {
-    return handleReset(body, session.user.id, request);
+    const rl = await resetLimiter.check(`rl:recovery_reset:${userId}`);
+    if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+    const response = await handleReset(body, userId, request);
+    // Clear reset limiter on success
+    if (response.status === 200) {
+      await resetLimiter.clear(`rl:recovery_reset:${userId}`);
+    }
+    return response;
   }
 }
 

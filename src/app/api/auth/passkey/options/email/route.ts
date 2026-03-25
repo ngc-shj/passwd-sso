@@ -6,6 +6,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
+import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { extractClientIp } from "@/lib/ip-access";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/webauthn-server";
@@ -57,12 +58,9 @@ async function handlePOST(req: NextRequest) {
   if (originError) return originError;
 
   const ip = extractClientIp(req) ?? "unknown";
-  const rl = await rateLimiter.check(`webauthn:email-signin-opts:${ip}`);
+  const rl = await rateLimiter.check(`rl:webauthn_email_signin_opts:${ip}`);
   if (!rl.allowed) {
-    return NextResponse.json(
-      { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-      { status: 429 },
-    );
+    return rateLimited(rl.retryAfterMs);
   }
 
   const redis = getRedis();

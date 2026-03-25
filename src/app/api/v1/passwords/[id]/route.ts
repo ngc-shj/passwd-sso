@@ -14,12 +14,8 @@ import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
-function retryAfterHeaders(ms: number): HeadersInit {
-  return { "Retry-After": String(Math.ceil(ms / 1000)) };
-}
-
 import type { ValidatedApiKey } from "@/lib/api-key";
-import { notFound, validationError } from "@/lib/api-response";
+import { notFound, rateLimited, validationError } from "@/lib/api-response";
 
 type AuthCheckResult =
   | { ok: false; error: NextResponse }
@@ -38,13 +34,7 @@ async function checkAuth(
 
   const rl = await apiKeyLimiter.check(`rl:api_key:${authResult.data.apiKeyId}`);
   if (!rl.allowed) {
-    return {
-      ok: false,
-      error: NextResponse.json(
-        { error: API_ERROR.RATE_LIMIT_EXCEEDED },
-        { status: 429, headers: retryAfterHeaders(rl.retryAfterMs!) },
-      ),
-    };
+    return { ok: false, error: rateLimited(rl.retryAfterMs) };
   }
 
   return { ok: true, data: authResult.data };

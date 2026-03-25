@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockWarn } = vi.hoisted(() => ({
+const { mockWarn, mockRateLimitCheck } = vi.hoisted(() => ({
   mockWarn: vi.fn(),
+  mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/lib/logger", () => {
@@ -12,6 +13,13 @@ vi.mock("@/lib/logger", () => {
     getLogger: () => childLogger,
   };
 });
+
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: vi.fn(() => ({
+    check: mockRateLimitCheck,
+    clear: vi.fn(),
+  })),
+}));
 
 import { POST } from "./route";
 
@@ -37,6 +45,7 @@ function createCspRequest(
 describe("POST /api/csp-report", () => {
   beforeEach(() => {
     mockWarn.mockClear();
+    mockRateLimitCheck.mockResolvedValue({ allowed: true });
   });
 
   it("returns 204 and logs sanitized csp-report", async () => {
@@ -147,12 +156,12 @@ describe("POST /api/csp-report", () => {
     expect(mockWarn).not.toHaveBeenCalled();
   });
 
-  it("rate limits after exceeding max requests", async () => {
-    const ip = "10.0.0.99";
-    let lastRes: Response | undefined;
-    for (let i = 0; i < 61; i++) {
-      lastRes = await POST(createCspRequest({ i }, { ip }));
-    }
-    expect(lastRes!.status).toBe(204);
+  it("returns 204 silently when rate limited (no 429)", async () => {
+    mockRateLimitCheck.mockResolvedValue({ allowed: false, retryAfterMs: 5000 });
+    const res = await POST(
+      createCspRequest({ "csp-report": { "violated-directive": "default-src" } }, { ip: "10.0.0.99" }),
+    );
+    expect(res.status).toBe(204);
+    expect(mockWarn).not.toHaveBeenCalled();
   });
 });

@@ -15,8 +15,12 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
+import { createRateLimiter } from "@/lib/rate-limit";
+import { rateLimited } from "@/lib/api-response";
 
 type RouteContext = { params: Promise<{ id: string }> };
+
+const dirSyncRunLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
 const runSchema = z.object({
   dryRun: z.boolean().optional().default(false),
@@ -47,6 +51,9 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     );
   }
   const tenantId = member.tenantId;
+
+  const rl = await dirSyncRunLimiter.check(`rl:dirsync_run:${id}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   // Verify config belongs to tenant
   const config = await withUserTenantRls(session.user.id, () =>

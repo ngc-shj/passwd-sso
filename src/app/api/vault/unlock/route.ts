@@ -12,7 +12,7 @@ import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
@@ -52,9 +52,10 @@ async function handlePOST(request: NextRequest) {
   }
 
   const rateKey = `rl:vault_unlock:${session.user.id}`;
-  if (!(await unlockLimiter.check(rateKey)).allowed) {
+  const rl = await unlockLimiter.check(rateKey);
+  if (!rl.allowed) {
     getLogger().warn({ userId: session.user.id }, "vault.unlock.rateLimited");
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+    return rateLimited(rl.retryAfterMs);
   }
 
   let body: unknown;

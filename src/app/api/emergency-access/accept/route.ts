@@ -8,7 +8,7 @@ import { sendEmail } from "@/lib/email";
 import { emergencyGrantAcceptedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -24,8 +24,9 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  if (!(await acceptLimiter.check(`rl:ea_accept:${session.user.id}`)).allowed) {
-    return errorResponse(API_ERROR.RATE_LIMIT_EXCEEDED, 429);
+  const rl = await acceptLimiter.check(`rl:ea_accept:${session.user.id}`);
+  if (!rl.allowed) {
+    return rateLimited(rl.retryAfterMs);
   }
 
   const result = await parseBody(req, acceptEmergencyGrantSchema);
