@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.7](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.6...passwd-sso-v0.3.7) (2026-03-26)
+
+
+### Bug Fixes
+
+* unify entry list layout between personal and team vaults ([#248](https://github.com/ngc-shj/passwd-sso/issues/248)) ([0e53f1e](https://github.com/ngc-shj/passwd-sso/commit/0e53f1e6532b3d9f3c25c5ce75ab2af95da36bf1))
+
 ## [0.3.6](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.5...passwd-sso-v0.3.6) (2026-03-25)
 
 
