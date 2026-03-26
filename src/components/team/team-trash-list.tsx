@@ -258,29 +258,27 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   if (sortedFiltered.length === 0) {
     return (
-      <div className="mt-6">
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <div className="flex flex-col items-center justify-center text-center">
-            {entries.length === 0 ? (
-              <>
-                <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
-                <p className="text-muted-foreground">{tl("noTrash")}</p>
-              </>
-            ) : (
-              <p className="text-muted-foreground">{tl("noMatch")}</p>
-            )}
-          </div>
-        </Card>
-      </div>
+      <Card className="rounded-xl border bg-card/80 p-10">
+        <div className="flex flex-col items-center justify-center text-center">
+          {entries.length === 0 ? (
+            <>
+              <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
+              <p className="text-muted-foreground">{tl("noTrash")}</p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">{tl("noMatch")}</p>
+          )}
+        </div>
+      </Card>
     );
   }
 
   const canEmptyTrash = role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN;
 
   return (
-    <div className="mt-6">
+    <div className="space-y-4">
       {canEmptyTrash && (
-        <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">{t("description")}</p>
           <Dialog>
             <DialogTrigger asChild>
@@ -396,7 +394,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
         ))}
       </div>
 
-      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0} position="fixed">
+      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0}>
         <Button size="sm" onClick={() => requestAction("restore")}>
           <RotateCcw className="h-3.5 w-3.5 mr-1" />
           {t("restoreSelected")}

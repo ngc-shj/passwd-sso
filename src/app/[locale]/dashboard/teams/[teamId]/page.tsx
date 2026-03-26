@@ -569,7 +569,7 @@ export default function TeamDashboardPage({
 
   if (loadError) {
     return (
-      <div className="flex-1 overflow-auto p-4 md:p-6">
+      <div className="flex-1 p-4 md:p-6">
         <div className="mx-auto max-w-4xl">
           <Card className="rounded-xl border bg-card/80 p-6">
             <div className="flex flex-col items-start gap-3">
@@ -590,8 +590,8 @@ export default function TeamDashboardPage({
   }
 
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-6">
+    <div className="flex-1 p-4 md:p-6">
+      <div className="mx-auto max-w-4xl space-y-4">
         <EntryListHeader
           icon={headerIcon}
           title={isPrimaryScopeLabel ? subtitle : (team?.name ?? "...")}
@@ -792,7 +792,7 @@ export default function TeamDashboardPage({
             </div>
           </Card>
         ) : (
-          <div className="space-y-2">
+          <div className={selectionMode ? "space-y-2" : "space-y-1"}>
             {sortedFiltered.map((entry) => (
               selectionMode ? (
                 <div key={entry.id} className="flex items-start gap-2">
@@ -863,7 +863,7 @@ export default function TeamDashboardPage({
               )
             ))}
 
-            <FloatingActionBar visible={selectionMode && selectedIds.size > 0} position="fixed">
+            <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
               <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
                 <Archive className="h-4 w-4 mr-2" />
                 {tl("moveSelectedToArchive")}

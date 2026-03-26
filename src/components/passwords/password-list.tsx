@@ -386,7 +386,7 @@ export function PasswordList({
         )
       ))}
 
-      <FloatingActionBar visible={selectionMode && selectedIds.size > 0} position="sticky">
+      <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
         {archivedOnly ? (
           <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
             {t("moveSelectedToUnarchive")}

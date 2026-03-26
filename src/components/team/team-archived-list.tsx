@@ -394,26 +394,23 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
 
   if (sortedFiltered.length === 0) {
     return (
-      <div className="mt-6">
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <div className="flex flex-col items-center justify-center text-center">
-            {entries.length === 0 ? (
-              <>
-                <Archive className="mb-4 h-12 w-12 text-muted-foreground/50" />
-                <p className="text-muted-foreground">{tl("noArchive")}</p>
-              </>
-            ) : (
-              <p className="text-muted-foreground">{tl("noMatch")}</p>
-            )}
-          </div>
-        </Card>
-      </div>
+      <Card className="rounded-xl border bg-card/80 p-10">
+        <div className="flex flex-col items-center justify-center text-center">
+          {entries.length === 0 ? (
+            <>
+              <Archive className="mb-4 h-12 w-12 text-muted-foreground/50" />
+              <p className="text-muted-foreground">{tl("noArchive")}</p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">{tl("noMatch")}</p>
+          )}
+        </div>
+      </Card>
     );
   }
 
   return (
-    <div className="mt-6">
-      <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
+    <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
         {sortedFiltered.map((entry) =>
           effectiveSelectionMode ? (
             <div key={entry.id} className="flex items-start gap-2">
@@ -475,9 +472,8 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
             />
           )
         )}
-      </div>
 
-      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0} position="fixed">
+      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0}>
         <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
           <RotateCcw className="mr-1 h-4 w-4" />
           {tl("moveSelectedToUnarchive")}

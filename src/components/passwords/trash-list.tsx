@@ -337,7 +337,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
         ))}
       </div>
 
-      <FloatingActionBar visible={selectionMode && selectedIds.size > 0} position="sticky">
+      <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
         <Button size="sm" onClick={() => requestAction("restore")}>
           <RotateCcw className="h-3.5 w-3.5 mr-1" />
           {t("restoreSelected")}
