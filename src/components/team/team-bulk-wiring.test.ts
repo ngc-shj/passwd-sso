@@ -2,17 +2,23 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-describe("team archived list bulk wiring", () => {
+describe("team-archived-list bulk wiring", () => {
   const src = readFileSync(
     join(process.cwd(), "src/components/team/team-archived-list.tsx"),
     "utf8"
   );
 
-  it("uses shared bulk hooks and components", () => {
-    expect(src).toContain("useBulkSelection");
-    expect(src).toContain("useBulkAction");
+  it("imports shared bulk hooks", () => {
+    expect(src).toContain('import { useBulkSelection');
+    expect(src).toContain('import { useBulkAction');
+  });
+
+  it("imports EntryListShell", () => {
+    expect(src).toContain('import { EntryListShell }');
+  });
+
+  it("uses team scope", () => {
     expect(src).toContain('scope: { type: "team"');
-    expect(src).toContain("EntryListShell");
   });
 
   it("fetches from team-specific endpoint with archived param", () => {
@@ -22,17 +28,26 @@ describe("team archived list bulk wiring", () => {
   });
 });
 
-describe("team trash list bulk wiring", () => {
+describe("team-trash-list bulk wiring", () => {
   const src = readFileSync(
     join(process.cwd(), "src/components/team/team-trash-list.tsx"),
     "utf8"
   );
 
-  it("uses shared bulk hooks and components", () => {
-    expect(src).toContain("useBulkSelection");
-    expect(src).toContain("useBulkAction");
+  it("imports shared bulk hooks", () => {
+    expect(src).toContain('import { useBulkSelection');
+    expect(src).toContain('import { useBulkAction');
+  });
+
+  it("imports EntryListShell", () => {
+    expect(src).toContain('import { EntryListShell');
+  });
+
+  it("uses team scope", () => {
     expect(src).toContain('scope: { type: "team"');
-    expect(src).toContain("EntryListShell");
+  });
+
+  it("wires up restore action", () => {
     expect(src).toContain('requestAction("restore")');
   });
 
@@ -43,19 +58,25 @@ describe("team trash list bulk wiring", () => {
   });
 });
 
-describe("team dashboard bulk wiring", () => {
-  it("uses shared bulk hooks and components", () => {
-    const src = readFileSync(
-      join(
-        process.cwd(),
-        "src/app/[locale]/dashboard/teams/[teamId]/page.tsx"
-      ),
-      "utf8"
-    );
+describe("team-dashboard bulk wiring", () => {
+  const src = readFileSync(
+    join(
+      process.cwd(),
+      "src/app/[locale]/dashboard/teams/[teamId]/page.tsx"
+    ),
+    "utf8"
+  );
 
-    expect(src).toContain("useBulkSelection");
-    expect(src).toContain("useBulkAction");
+  it("imports shared bulk hooks", () => {
+    expect(src).toContain('import { useBulkSelection');
+    expect(src).toContain('import { useBulkAction');
+  });
+
+  it("imports EntryListShell", () => {
+    expect(src).toContain('import { EntryListShell }');
+  });
+
+  it("uses team scope", () => {
     expect(src).toContain('scope: { type: "team"');
-    expect(src).toContain("EntryListShell");
   });
 });

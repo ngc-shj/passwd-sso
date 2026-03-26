@@ -122,6 +122,7 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
         );
       })
     : entries;
+  // Uses filtered (post-search) so hidden entries are auto-deselected
   const entryIds = filtered.map((e) => e.id);
   const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,

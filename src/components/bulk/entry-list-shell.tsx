@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
@@ -85,9 +85,9 @@ export function EntryListShell<T extends { id: string; title: string }>(
 
         if (isCustom) {
           return (
-            <div key={entry.id}>
+            <Fragment key={entry.id}>
               {(renderEntry as CustomCheckboxProps<T>["renderEntry"])(entry, selectionState)}
-            </div>
+            </Fragment>
           );
         }
 
@@ -106,9 +106,9 @@ export function EntryListShell<T extends { id: string; title: string }>(
             </div>
           </div>
         ) : (
-          <div key={entry.id}>
+          <Fragment key={entry.id}>
             {(renderEntry as ExternalCheckboxProps<T>["renderEntry"])(entry)}
-          </div>
+          </Fragment>
         );
       })}
 
