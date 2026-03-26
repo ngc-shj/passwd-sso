@@ -18,8 +18,7 @@ import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide
 import { toast } from "sonner";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
-import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
-import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { EntryListShell, type EntrySelectionState } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { BulkSelectionHandle } from "@/hooks/use-bulk-selection";
@@ -258,29 +257,27 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
 
   if (sortedFiltered.length === 0) {
     return (
-      <div className="mt-6">
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <div className="flex flex-col items-center justify-center text-center">
-            {entries.length === 0 ? (
-              <>
-                <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
-                <p className="text-muted-foreground">{tl("noTrash")}</p>
-              </>
-            ) : (
-              <p className="text-muted-foreground">{tl("noMatch")}</p>
-            )}
-          </div>
-        </Card>
-      </div>
+      <Card className="rounded-xl border bg-card/80 p-10">
+        <div className="flex flex-col items-center justify-center text-center">
+          {entries.length === 0 ? (
+            <>
+              <Trash2 className="mb-4 h-12 w-12 text-muted-foreground/50" />
+              <p className="text-muted-foreground">{tl("noTrash")}</p>
+            </>
+          ) : (
+            <p className="text-muted-foreground">{tl("noMatch")}</p>
+          )}
+        </div>
+      </Card>
     );
   }
 
   const canEmptyTrash = role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN;
 
   return (
-    <div className="mt-6">
+    <div className="space-y-4">
       {canEmptyTrash && (
-        <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center justify-between">
           <p className="text-sm text-muted-foreground">{t("description")}</p>
           <Dialog>
             <DialogTrigger asChild>
@@ -303,16 +300,39 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
           </Dialog>
         </div>
       )}
-      <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
-        {sortedFiltered.map((entry) => (
-          <Card key={entry.id} className="py-0 gap-0 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
+      <EntryListShell
+        checkboxPlacement="custom"
+        entries={sortedFiltered}
+        selectionMode={effectiveSelectionMode}
+        selectedIds={selectedIds}
+        atLimit={atLimit}
+        onToggleSelectOne={toggleSelectOne}
+        selectEntryLabel={(title) => tl("selectEntry", { title })}
+        floatingActions={
+          <Button size="sm" onClick={() => requestAction("restore")}>
+            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+            {t("restoreSelected")}
+          </Button>
+        }
+        confirmDialog={{
+          open: bulkDialogOpen,
+          onOpenChange: setBulkDialogOpen,
+          title: pendingAction === "restore" ? t("restoreSelected") : "",
+          description: pendingAction === "restore" ? t("bulkRestoreConfirm", { count: selectedIds.size }) : "",
+          cancelLabel: tl("cancel"),
+          confirmLabel: tl("confirm"),
+          processing: bulkProcessing,
+          onConfirm: executeAction,
+        }}
+        renderEntry={(entry, selection: EntrySelectionState | null) => (
+          <Card className="py-0 gap-0 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
             <CardContent className="flex items-center gap-3 px-4 py-3">
-              {effectiveSelectionMode && (
+              {selection && (
                 <Checkbox
-                  checked={selectedIds.has(entry.id)}
-                  disabled={atLimit && !selectedIds.has(entry.id)}
-                  onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
-                  aria-label={tl("selectEntry", { title: entry.title })}
+                  checked={selection.checked}
+                  disabled={selection.disabled}
+                  onCheckedChange={(v) => selection.onCheckedChange(Boolean(v))}
+                  aria-label={selection.ariaLabel}
                 />
               )}
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
@@ -393,25 +413,7 @@ export const TeamTrashList = forwardRef<TeamTrashListHandle, TeamTrashListProps>
               )}
             </CardContent>
           </Card>
-        ))}
-      </div>
-
-      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0} position="fixed">
-        <Button size="sm" onClick={() => requestAction("restore")}>
-          <RotateCcw className="h-3.5 w-3.5 mr-1" />
-          {t("restoreSelected")}
-        </Button>
-      </FloatingActionBar>
-
-      <BulkActionConfirmDialog
-        open={bulkDialogOpen}
-        onOpenChange={setBulkDialogOpen}
-        title={pendingAction === "restore" ? t("restoreSelected") : ""}
-        description={pendingAction === "restore" ? t("bulkRestoreConfirm", { count: selectedIds.size }) : ""}
-        cancelLabel={tl("cancel")}
-        confirmLabel={tl("confirm")}
-        processing={bulkProcessing}
-        onConfirm={executeAction}
+        )}
       />
     </div>
   );
