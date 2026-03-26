@@ -6,46 +6,30 @@ import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
 describe("FloatingActionBar", () => {
   it("renders null when visible is false", () => {
     const { container } = render(
-      <FloatingActionBar visible={false} position="sticky">
+      <FloatingActionBar visible={false}>
         <button>action</button>
       </FloatingActionBar>,
     );
     expect(container.innerHTML).toBe("");
   });
 
-  it("renders children when visible is true (sticky)", () => {
-    const { getByText } = render(
-      <FloatingActionBar visible={true} position="sticky">
-        <button>action</button>
-      </FloatingActionBar>,
-    );
-    expect(getByText("action")).toBeDefined();
-  });
-
-  it("renders children when visible is true (fixed)", () => {
-    const { getByText } = render(
-      <FloatingActionBar visible={true} position="fixed">
-        <button>action</button>
-      </FloatingActionBar>,
-    );
-    expect(getByText("action")).toBeDefined();
-  });
-
-  it("uses sticky class for sticky position", () => {
+  it("renders children when visible is true", () => {
     const { container } = render(
-      <FloatingActionBar visible={true} position="sticky">
+      <FloatingActionBar visible={true}>
         <button>action</button>
       </FloatingActionBar>,
     );
-    expect(container.querySelector(".sticky")).not.toBeNull();
+    expect(container.querySelector("button")).not.toBeNull();
   });
 
-  it("uses fixed class for fixed position", () => {
+  it("uses sticky positioning with bottom-4", () => {
     const { container } = render(
-      <FloatingActionBar visible={true} position="fixed">
+      <FloatingActionBar visible={true}>
         <button>action</button>
       </FloatingActionBar>,
     );
-    expect(container.querySelector(".fixed")).not.toBeNull();
+    const bar = container.firstChild as HTMLElement;
+    expect(bar.className).toContain("sticky");
+    expect(bar.className).toContain("bottom-4");
   });
 });
