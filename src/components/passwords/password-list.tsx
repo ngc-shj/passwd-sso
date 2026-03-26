@@ -11,12 +11,10 @@ import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTagNameColor } from "@/lib/entry-form-types";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
-import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
-import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
 import { filterTravelSafe } from "@/lib/travel-mode";
 import { useTravelMode } from "@/hooks/use-travel-mode";
@@ -349,80 +347,60 @@ export function PasswordList({
   }
 
   return (
-    <div className={selectionMode ? "space-y-2" : "space-y-1"}>
-      {entries.map((entry) => (
-        selectionMode ? (
-          <div key={entry.id} className="flex items-start gap-2">
-            <Checkbox
-              className="mt-4"
-              checked={selectedIds.has(entry.id)}
-              disabled={atLimit && !selectedIds.has(entry.id)}
-              onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
-              aria-label={t("selectEntry", { title: entry.title })}
-            />
-            <div className="flex-1 min-w-0">
-              <PasswordCard
-                entry={entry}
-                expanded={expandedId === entry.id}
-                onToggleFavorite={handleToggleFavorite}
-                onToggleArchive={handleToggleArchive}
-                onDelete={handleDelete}
-                onToggleExpand={handleToggleExpand}
-                onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
-              />
-            </div>
-          </div>
-        ) : (
-          <PasswordCard
-            key={entry.id}
-            entry={entry}
-            expanded={expandedId === entry.id}
-            onToggleFavorite={handleToggleFavorite}
-            onToggleArchive={handleToggleArchive}
-            onDelete={handleDelete}
-            onToggleExpand={handleToggleExpand}
-            onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
-          />
-        )
-      ))}
-
-      <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
-        {archivedOnly ? (
-          <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
-            {t("moveSelectedToUnarchive")}
+    <EntryListShell
+      entries={entries}
+      selectionMode={selectionMode}
+      selectedIds={selectedIds}
+      atLimit={atLimit}
+      onToggleSelectOne={toggleSelectOne}
+      selectEntryLabel={(title) => t("selectEntry", { title })}
+      renderEntry={(entry) => (
+        <PasswordCard
+          entry={entry}
+          expanded={expandedId === entry.id}
+          onToggleFavorite={handleToggleFavorite}
+          onToggleArchive={handleToggleArchive}
+          onDelete={handleDelete}
+          onToggleExpand={handleToggleExpand}
+          onRefresh={() => { fetchPasswords(); onDataChange?.(); }}
+        />
+      )}
+      floatingActions={
+        <>
+          {archivedOnly ? (
+            <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
+              {t("moveSelectedToUnarchive")}
+            </Button>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
+              {t("moveSelectedToArchive")}
+            </Button>
+          )}
+          <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
+            {t("moveSelectedToTrash")}
           </Button>
-        ) : (
-          <Button variant="secondary" size="sm" onClick={() => requestAction("archive")}>
-            {t("moveSelectedToArchive")}
-          </Button>
-        )}
-        <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
-          {t("moveSelectedToTrash")}
-        </Button>
-      </FloatingActionBar>
-
-      <BulkActionConfirmDialog
-        open={bulkDialogOpen}
-        onOpenChange={setBulkDialogOpen}
-        title={
+        </>
+      }
+      confirmDialog={{
+        open: bulkDialogOpen,
+        onOpenChange: setBulkDialogOpen,
+        title:
           pendingAction === "archive"
             ? t("moveSelectedToArchive")
             : pendingAction === "unarchive"
               ? t("moveSelectedToUnarchive")
-              : t("moveSelectedToTrash")
-        }
-        description={
+              : t("moveSelectedToTrash"),
+        description:
           pendingAction === "archive"
             ? t("bulkArchiveConfirm", { count: selectedIds.size })
             : pendingAction === "unarchive"
               ? t("bulkUnarchiveConfirm", { count: selectedIds.size })
-              : t("bulkMoveConfirm", { count: selectedIds.size })
-        }
-        cancelLabel={t("cancel")}
-        confirmLabel={t("confirm")}
-        processing={bulkProcessing}
-        onConfirm={() => void executeAction()}
-      />
-    </div>
+              : t("bulkMoveConfirm", { count: selectedIds.size }),
+        cancelLabel: t("cancel"),
+        confirmLabel: t("confirm"),
+        processing: bulkProcessing,
+        onConfirm: () => void executeAction(),
+      }}
+    />
   );
 }

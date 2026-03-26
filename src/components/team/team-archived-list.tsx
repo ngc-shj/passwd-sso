@@ -7,12 +7,10 @@ import type { InlineDetailData } from "@/components/passwords/password-detail-in
 import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
-import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
-import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
@@ -410,99 +408,66 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
   }
 
   return (
-    <div className={effectiveSelectionMode ? "space-y-2" : "space-y-1"}>
-        {sortedFiltered.map((entry) =>
-          effectiveSelectionMode ? (
-            <div key={entry.id} className="flex items-start gap-2">
-              <Checkbox
-                className="mt-4"
-                checked={selectedIds.has(entry.id)}
-                disabled={atLimit && !selectedIds.has(entry.id)}
-                onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
-                aria-label={tl("selectEntry", { title: entry.title })}
-              />
-              <div className="flex-1 min-w-0">
-                <PasswordCard
-                  entry={entry}
-                  expanded={expandedId === entry.id}
-                  onToggleFavorite={handleToggleFavorite}
-                  onToggleArchive={handleToggleArchive}
-                  onDelete={handleDelete}
-                  onToggleExpand={(id) =>
-                    setExpandedId((prev) => (prev === id ? null : id))
-                  }
-                  onRefresh={() => {
-                    fetchArchived();
-                    setExpandedId(null);
-                  }}
-                  getPassword={createPasswordFetcher(entry)}
-                  getDetail={createDetailFetcher(entry)}
-                  getUrl={createUrlFetcher(entry)}
-                  onEditClick={() => handleEdit(entry.id)}
-                  canEdit={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER}
-                  canDelete={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN}
-                  createdBy={teamName}
-                  teamId={teamId}
-                />
-              </div>
-            </div>
-          ) : (
-            <PasswordCard
-              key={entry.id}
-              entry={entry}
-              expanded={expandedId === entry.id}
-              onToggleFavorite={handleToggleFavorite}
-              onToggleArchive={handleToggleArchive}
-              onDelete={handleDelete}
-              onToggleExpand={(id) =>
-                setExpandedId((prev) => (prev === id ? null : id))
-              }
-              onRefresh={() => {
-                fetchArchived();
-                setExpandedId(null);
-              }}
-              getPassword={createPasswordFetcher(entry)}
-              getDetail={createDetailFetcher(entry)}
-              getUrl={createUrlFetcher(entry)}
-              onEditClick={() => handleEdit(entry.id)}
-              canEdit={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER}
-              canDelete={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN}
-              createdBy={teamName}
-              teamId={teamId}
-            />
-          )
-        )}
-
-      <FloatingActionBar visible={effectiveSelectionMode && selectedIds.size > 0}>
-        <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
-          <RotateCcw className="mr-1 h-4 w-4" />
-          {tl("moveSelectedToUnarchive")}
-        </Button>
-        <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
-          <Trash2 className="mr-1 h-4 w-4" />
-          {tl("moveSelectedToTrash")}
-        </Button>
-      </FloatingActionBar>
-
-      <BulkActionConfirmDialog
-        open={bulkDialogOpen}
-        onOpenChange={setBulkDialogOpen}
-        title={
+    <EntryListShell
+      entries={sortedFiltered}
+      selectionMode={effectiveSelectionMode}
+      selectedIds={selectedIds}
+      atLimit={atLimit}
+      onToggleSelectOne={toggleSelectOne}
+      selectEntryLabel={(title) => tl("selectEntry", { title })}
+      renderEntry={(entry) => (
+        <PasswordCard
+          entry={entry}
+          expanded={expandedId === entry.id}
+          onToggleFavorite={handleToggleFavorite}
+          onToggleArchive={handleToggleArchive}
+          onDelete={handleDelete}
+          onToggleExpand={(id) =>
+            setExpandedId((prev) => (prev === id ? null : id))
+          }
+          onRefresh={() => {
+            fetchArchived();
+            setExpandedId(null);
+          }}
+          getPassword={createPasswordFetcher(entry)}
+          getDetail={createDetailFetcher(entry)}
+          getUrl={createUrlFetcher(entry)}
+          onEditClick={() => handleEdit(entry.id)}
+          canEdit={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN || role === TEAM_ROLE.MEMBER}
+          canDelete={role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN}
+          createdBy={teamName}
+          teamId={teamId}
+        />
+      )}
+      floatingActions={
+        <>
+          <Button variant="secondary" size="sm" onClick={() => requestAction("unarchive")}>
+            <RotateCcw className="mr-1 h-4 w-4" />
+            {tl("moveSelectedToUnarchive")}
+          </Button>
+          <Button variant="destructive" size="sm" onClick={() => requestAction("trash")}>
+            <Trash2 className="mr-1 h-4 w-4" />
+            {tl("moveSelectedToTrash")}
+          </Button>
+        </>
+      }
+      confirmDialog={{
+        open: bulkDialogOpen,
+        onOpenChange: setBulkDialogOpen,
+        title:
           pendingAction === "unarchive"
             ? tl("moveSelectedToUnarchive")
-            : tl("moveSelectedToTrash")
-        }
-        description={
+            : tl("moveSelectedToTrash"),
+        description:
           pendingAction === "unarchive"
             ? tl("bulkUnarchiveConfirm", { count: selectedIds.size })
-            : tl("bulkMoveConfirm", { count: selectedIds.size })
-        }
-        cancelLabel={tl("cancel")}
-        confirmLabel={tl("confirm")}
-        processing={bulkProcessing}
-        onConfirm={() => void executeAction()}
-      />
-
+            : tl("bulkMoveConfirm", { count: selectedIds.size }),
+        cancelLabel: tl("cancel"),
+        confirmLabel: tl("confirm"),
+        processing: bulkProcessing,
+        onConfirm: () => void executeAction(),
+      }}
+    >
       {editTeamId && editEntryId && (
         <TeamEditDialogLoader
           teamId={editTeamId}
@@ -516,6 +481,6 @@ export const TeamArchivedList = forwardRef<TeamArchivedListHandle, TeamArchivedL
           }}
         />
       )}
-    </div>
+    </EntryListShell>
   );
 });

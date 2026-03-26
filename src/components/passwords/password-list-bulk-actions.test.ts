@@ -15,8 +15,7 @@ describe("password list bulk actions", () => {
     expect(src).toContain('scope: { type: "personal" }');
 
     // Uses shared components
-    expect(src).toContain("FloatingActionBar");
-    expect(src).toContain("BulkActionConfirmDialog");
+    expect(src).toContain("EntryListShell");
 
     // Wires up bulk actions
     expect(src).toContain('requestAction("archive")');

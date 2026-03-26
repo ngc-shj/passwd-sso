@@ -23,8 +23,7 @@ import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";
-import { BulkActionConfirmDialog } from "@/components/bulk/bulk-action-confirm-dialog";
-import { FloatingActionBar } from "@/components/bulk/floating-action-bar";
+import { EntryListShell, type EntrySelectionState } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyVaultDataChanged } from "@/lib/events";
 
@@ -244,23 +243,31 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
         </Dialog>
       </div>
 
-      <div className={selectionMode ? "space-y-2" : "space-y-1"}>
-        {filtered.length === 0 && (
-          <Card className="rounded-xl border bg-card/80 p-10">
-            <div className="flex flex-col items-center justify-center text-center">
-              <p className="text-muted-foreground">{tl("noMatch")}</p>
-            </div>
-          </Card>
-        )}
-        {filtered.map((entry) => (
-          <Card key={entry.id} className="py-0 gap-0 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
+      {filtered.length === 0 && (
+        <Card className="rounded-xl border bg-card/80 p-10">
+          <div className="flex flex-col items-center justify-center text-center">
+            <p className="text-muted-foreground">{tl("noMatch")}</p>
+          </div>
+        </Card>
+      )}
+
+      <EntryListShell
+        checkboxPlacement="custom"
+        entries={filtered}
+        selectionMode={selectionMode}
+        selectedIds={selectedIds}
+        atLimit={atLimit}
+        onToggleSelectOne={toggleSelectOne}
+        selectEntryLabel={(title) => tl("selectEntry", { title })}
+        renderEntry={(entry: TrashEntry, selection: EntrySelectionState | null) => (
+          <Card className="py-0 gap-0 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
             <CardContent className="flex items-center gap-3 px-4 py-3">
-              {selectionMode && (
+              {selection && (
                 <Checkbox
-                  checked={selectedIds.has(entry.id)}
-                  disabled={atLimit && !selectedIds.has(entry.id)}
-                  onCheckedChange={(v) => toggleSelectOne(entry.id, Boolean(v))}
-                  aria-label={tl("selectEntry", { title: entry.title })}
+                  checked={selection.checked}
+                  disabled={selection.disabled}
+                  onCheckedChange={(v) => selection.onCheckedChange(Boolean(v))}
+                  aria-label={selection.ariaLabel}
                 />
               )}
               {entry.entryType === ENTRY_TYPE.IDENTITY ? (
@@ -334,25 +341,23 @@ export function TrashList({ refreshKey, searchQuery = "", selectionMode = false,
               </div>
             </CardContent>
           </Card>
-        ))}
-      </div>
-
-      <FloatingActionBar visible={selectionMode && selectedIds.size > 0}>
-        <Button size="sm" onClick={() => requestAction("restore")}>
-          <RotateCcw className="h-3.5 w-3.5 mr-1" />
-          {t("restoreSelected")}
-        </Button>
-      </FloatingActionBar>
-
-      <BulkActionConfirmDialog
-        open={bulkDialogOpen}
-        onOpenChange={setBulkDialogOpen}
-        title={t("restoreSelected")}
-        description={t("bulkRestoreConfirm", { count: selectedIds.size })}
-        cancelLabel={tl("cancel")}
-        confirmLabel={tl("confirm")}
-        processing={bulkProcessing}
-        onConfirm={() => void executeAction()}
+        )}
+        floatingActions={
+          <Button size="sm" onClick={() => requestAction("restore")}>
+            <RotateCcw className="h-3.5 w-3.5 mr-1" />
+            {t("restoreSelected")}
+          </Button>
+        }
+        confirmDialog={{
+          open: bulkDialogOpen,
+          onOpenChange: setBulkDialogOpen,
+          title: t("restoreSelected"),
+          description: t("bulkRestoreConfirm", { count: selectedIds.size }),
+          cancelLabel: tl("cancel"),
+          confirmLabel: tl("confirm"),
+          processing: bulkProcessing,
+          onConfirm: () => void executeAction(),
+        }}
       />
     </div>
   );

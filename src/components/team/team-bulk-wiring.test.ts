@@ -12,8 +12,7 @@ describe("team archived list bulk wiring", () => {
     expect(src).toContain("useBulkSelection");
     expect(src).toContain("useBulkAction");
     expect(src).toContain('scope: { type: "team"');
-    expect(src).toContain("FloatingActionBar");
-    expect(src).toContain("BulkActionConfirmDialog");
+    expect(src).toContain("EntryListShell");
   });
 
   it("fetches from team-specific endpoint with archived param", () => {
@@ -33,8 +32,7 @@ describe("team trash list bulk wiring", () => {
     expect(src).toContain("useBulkSelection");
     expect(src).toContain("useBulkAction");
     expect(src).toContain('scope: { type: "team"');
-    expect(src).toContain("FloatingActionBar");
-    expect(src).toContain("BulkActionConfirmDialog");
+    expect(src).toContain("EntryListShell");
     expect(src).toContain('requestAction("restore")');
   });
 
@@ -58,7 +56,6 @@ describe("team dashboard bulk wiring", () => {
     expect(src).toContain("useBulkSelection");
     expect(src).toContain("useBulkAction");
     expect(src).toContain('scope: { type: "team"');
-    expect(src).toContain("FloatingActionBar");
-    expect(src).toContain("BulkActionConfirmDialog");
+    expect(src).toContain("EntryListShell");
   });
 });

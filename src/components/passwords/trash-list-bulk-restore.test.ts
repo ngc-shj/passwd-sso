@@ -15,8 +15,7 @@ describe("trash list bulk restore wiring", () => {
     expect(src).toContain('scope: { type: "personal" }');
 
     // Uses shared components
-    expect(src).toContain("FloatingActionBar");
-    expect(src).toContain("BulkActionConfirmDialog");
+    expect(src).toContain("EntryListShell");
 
     // Wires up restore action
     expect(src).toContain('requestAction("restore")');
