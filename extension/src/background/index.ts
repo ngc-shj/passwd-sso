@@ -660,7 +660,10 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
       const entries = await getCachedEntries();
       const match = entries.find(
-        (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && isHostMatch(e.urlHost, tabHost),
+        (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+          (e.urlHost && isHostMatch(e.urlHost, tabHost)) ||
+          (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost))
+        ),
       );
       if (!match) {
         return;
