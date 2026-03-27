@@ -276,4 +276,55 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
 
     expect(status).toBe(403);
   });
+
+  it("returns 409 when service account is inactive", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(
+      makeAccessRequest({ serviceAccount: { isActive: false } }),
+    );
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(409);
+  });
+
+  it("returns 400 when no valid scopes remain after re-validation", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAccessRequestFindUnique.mockResolvedValue(
+      makeAccessRequest({ requestedScope: "nonexistent:scope" }),
+    );
+    mockTenantFindUnique.mockResolvedValue(null);
+
+    // updateMany succeeds (count 1) but parseSaTokenScopes("nonexistent:scope") returns []
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        serviceAccountToken: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn(),
+        },
+        accessRequest: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          update: vi.fn(),
+        },
+      };
+      return fn(tx);
+    });
+
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/access-requests/${REQUEST_ID}/approve`,
+    );
+    const res = await POST(req, createParams({ id: REQUEST_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("INVALID_SCOPE");
+  });
 });
