@@ -18,6 +18,7 @@ export const AUDIT_TARGET_TYPE = {
   TENANT_MEMBER: "TenantMember",
   SERVICE_ACCOUNT: "ServiceAccount",
   SERVICE_ACCOUNT_TOKEN: "ServiceAccountToken",
+  ACCESS_REQUEST: "AccessRequest",
 } as const;
 
 export type AuditTargetType =

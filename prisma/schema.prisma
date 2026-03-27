@@ -163,6 +163,7 @@ model User {
   breakGlassRequested PersonalLogAccessGrant[] @relation("BreakGlassRequester")
   breakGlassTargeted  PersonalLogAccessGrant[] @relation("BreakGlassTarget")
   createdServiceAccounts ServiceAccount[]      @relation("serviceAccountCreator")
+  approvedAccessRequests AccessRequest[]
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -436,6 +437,12 @@ model Tenant {
   personalLogAccessGrants    PersonalLogAccessGrant[]
   serviceAccounts            ServiceAccount[]
   serviceAccountTokens       ServiceAccountToken[]
+  accessRequests             AccessRequest[]
+
+  // JIT access policy
+  jitTokenDefaultTtlSec      Int?     @map("jit_token_default_ttl_sec")
+  jitTokenMaxTtlSec          Int?     @map("jit_token_max_ttl_sec")
+  saTokenMaxExpiryDays       Int?     @map("sa_token_max_expiry_days")
 
   @@map("tenants")
 }
@@ -811,6 +818,9 @@ enum AuditAction {
   SERVICE_ACCOUNT_DELETE
   SERVICE_ACCOUNT_TOKEN_CREATE
   SERVICE_ACCOUNT_TOKEN_REVOKE
+  ACCESS_REQUEST_CREATE
+  ACCESS_REQUEST_APPROVE
+  ACCESS_REQUEST_DENY
 }
 
 enum AuditScope {
@@ -819,29 +829,72 @@ enum AuditScope {
   TENANT
 }
 
-model AuditLog {
-  id         String      @id @default(uuid(4)) @db.Uuid
-  tenantId   String      @map("tenant_id") @db.Uuid
-  scope      AuditScope
-  action     AuditAction
-  userId     String      @map("user_id") @db.Uuid
-  teamId     String?     @map("team_id") @db.Uuid
-  targetType String?     @map("target_type")
-  targetId   String?     @map("target_id")
-  metadata   Json?
-  ip         String?     @db.VarChar(45)
-  userAgent  String?     @map("user_agent") @db.VarChar(512)
-  createdAt  DateTime    @default(now()) @map("created_at")
+enum ActorType {
+  HUMAN
+  SERVICE_ACCOUNT
+  MCP_AGENT
+  SYSTEM
+}
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  team   Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+model AuditLog {
+  id               String      @id @default(uuid(4)) @db.Uuid
+  tenantId         String      @map("tenant_id") @db.Uuid
+  scope            AuditScope
+  action           AuditAction
+  userId           String      @map("user_id") @db.Uuid
+  actorType        ActorType   @default(HUMAN) @map("actor_type")
+  serviceAccountId String?     @map("service_account_id") @db.Uuid
+  teamId           String?     @map("team_id") @db.Uuid
+  targetType       String?     @map("target_type")
+  targetId         String?     @map("target_id")
+  metadata         Json?
+  ip               String?     @db.VarChar(45)
+  userAgent        String?     @map("user_agent") @db.VarChar(512)
+  createdAt        DateTime    @default(now()) @map("created_at")
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  serviceAccount ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
+  team           Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([userId, scope, createdAt(sort: Desc)])
   @@index([teamId, scope, createdAt(sort: Desc)])
   @@index([tenantId, scope, createdAt(sort: Desc)])
+  @@index([tenantId, actorType, createdAt(sort: Desc)])
   @@index([action])
   @@map("audit_logs")
+}
+
+// ─── Access Request Models (JIT) ────────────────────────────
+
+enum AccessRequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  EXPIRED
+}
+
+model AccessRequest {
+  id                 String              @id @default(uuid(4)) @db.Uuid
+  tenantId           String              @map("tenant_id") @db.Uuid
+  serviceAccountId   String              @map("service_account_id") @db.Uuid
+  requestedScope     String              @map("requested_scope") @db.Text
+  justification      String?             @db.Text
+  status             AccessRequestStatus @default(PENDING)
+  approvedById       String?             @map("approved_by_id") @db.Uuid
+  approvedAt         DateTime?           @map("approved_at")
+  grantedTokenId     String?             @map("granted_token_id") @db.Uuid
+  grantedTokenTtlSec Int?                @map("granted_token_ttl_sec")
+  expiresAt          DateTime            @map("expires_at")
+  createdAt          DateTime            @default(now()) @map("created_at")
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
+  approvedBy     User?          @relation(fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([serviceAccountId, status])
+  @@map("access_requests")
 }
 
 // ─── Attachment Models ──────────────────────────────────────────
@@ -1204,6 +1257,8 @@ model ServiceAccount {
   team      Team?               @relation(fields: [teamId], references: [id], onDelete: SetNull)
   createdBy User                @relation("serviceAccountCreator", fields: [createdById], references: [id], onDelete: Restrict)
   tokens    ServiceAccountToken[]
+  accessRequests AccessRequest[]
+  auditLogs AuditLog[]
 
   @@unique([tenantId, name])
   @@index([tenantId, isActive])
