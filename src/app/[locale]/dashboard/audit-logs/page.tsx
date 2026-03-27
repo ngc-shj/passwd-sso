@@ -206,14 +206,16 @@ export default function AuditLogsPage() {
   );
 
   useEffect(() => {
+    let stale = false;
     setLoading(true);
     fetchLogs().then(async (data) => {
+      if (stale) return;
       if (data) {
         setLogs(data.items);
         setNextCursor(data.nextCursor);
         if (data.entryOverviews) {
           const names = await resolveEntryNames(data.entryOverviews);
-          setEntryNames(names);
+          if (!stale) setEntryNames(names);
         }
         if (data.relatedUsers) {
           setRelatedUsers(data.relatedUsers);
@@ -221,6 +223,7 @@ export default function AuditLogsPage() {
       }
       setLoading(false);
     });
+    return () => { stale = true; };
   }, [fetchLogs, resolveEntryNames]);
 
   const handleLoadMore = async () => {
