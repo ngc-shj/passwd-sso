@@ -1791,6 +1791,16 @@ describe("tab event badge updates", () => {
   beforeEach(async () => {
     vi.resetModules();
     vi.clearAllMocks();
+    // Restore crypto mocks cleared by vi.clearAllMocks()
+    cryptoMocks.deriveWrappingKey.mockResolvedValue("wrap-key");
+    cryptoMocks.unwrapSecretKey.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    cryptoMocks.deriveEncryptionKey.mockResolvedValue("enc-key");
+    cryptoMocks.verifyKey.mockResolvedValue(true);
+    cryptoMocks.decryptData.mockResolvedValue(
+      JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" }),
+    );
+    cryptoMocks.buildPersonalEntryAAD.mockReturnValue(new Uint8Array([1, 2]));
+    cryptoMocks.hexDecode.mockReturnValue(new Uint8Array([0, 1]));
     chromeMock = installChromeMock();
 
     vi.stubGlobal(
@@ -1847,6 +1857,9 @@ describe("tab event badge updates", () => {
 
     // Populate cache by fetching entries
     await sendMessage({ type: "FETCH_PASSWORDS" });
+    // Wait for fire-and-forget badge update triggered by FETCH_PASSWORDS to settle,
+    // then clear mock call history so tests start with a clean slate.
+    await new Promise((r) => setTimeout(r, 50));
     chromeMock?.action.setBadgeText.mockClear();
     chromeMock?.action.setBadgeBackgroundColor.mockClear();
   });
@@ -1863,21 +1876,32 @@ describe("tab event badge updates", () => {
     });
   });
 
-  it("clears badge on tab navigation loading", () => {
+  it("clears badge on tab navigation loading", async () => {
     const handler = tabUpdatedHandlers[0];
     handler(55, { status: "loading" }, { id: 55, url: "https://new-site.com" });
 
-    expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
+    });
   });
 
-  it("updates badge on tab navigation complete", async () => {
+  it("shows match count and blue badge for matching tab", async () => {
+    // Cached entries have urlHost "example.com" — navigate to matching site
     const handler = tabUpdatedHandlers[0];
-    handler(55, { status: "complete" }, { id: 55, url: "https://example.com" });
+    handler(55, { status: "complete" }, { id: 55, url: "https://example.com/login" });
 
     await vi.waitFor(() => {
-      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith(
-        expect.objectContaining({ tabId: 55 }),
-      );
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "1", tabId: 55 });
+      expect(chromeMock?.action.setBadgeBackgroundColor).toHaveBeenCalledWith({ color: "#3B82F6", tabId: 55 });
+    });
+  });
+
+  it("shows empty badge for non-matching tab", async () => {
+    const handler = tabUpdatedHandlers[0];
+    handler(55, { status: "complete" }, { id: 55, url: "https://no-match-site.com" });
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
     });
   });
 });
