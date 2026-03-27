@@ -1012,7 +1012,7 @@ describe("session hydration", () => {
     chromeMock = installChromeMock();
 
     const expiresAt = Date.now() + 600_000;
-    let resolveSessionGet: ((value: unknown) => void) | null = null;
+    let resolveSessionGet!: (value: unknown) => void;
     const delayedSession = new Promise((resolve) => {
       resolveSessionGet = resolve;
     });
@@ -1026,7 +1026,7 @@ describe("session hydration", () => {
     await loadBackground();
 
     const statusPromise = sendMessage({ type: "GET_STATUS" });
-    resolveSessionGet?.({
+    resolveSessionGet({
       authState: {
         token: "hydrated-tok",
         expiresAt,
@@ -1610,6 +1610,125 @@ describe("CHECK_PENDING_SAVE host validation", () => {
       expect.objectContaining({
         type: "CHECK_PENDING_SAVE",
         action: "none",
+      }),
+    );
+  });
+});
+
+describe("LOGIN_DETECTED suppresses on own app", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: "pw-1",
+                encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+                entryType: EXT_ENTRY_TYPE.LOGIN,
+                aadVersion: 1,
+              },
+            ],
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    await loadBackground();
+
+    // Unlock vault
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+  });
+
+  it("returns action 'none' when login is detected on own app pages", async () => {
+    const res = await sendMessageWithSender(
+      { type: "LOGIN_DETECTED", url: "https://localhost:3000/ja/auth/signin", username: "user", password: "pass" },
+      { tab: { id: 99, url: "https://localhost:3000/ja/auth/signin" } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "LOGIN_DETECTED",
+        action: "none",
+      }),
+    );
+  });
+
+  it("does not suppress login on non-app URLs", async () => {
+    const res = await sendMessageWithSender(
+      { type: "LOGIN_DETECTED", url: "https://external-site.com/login", username: "user", password: "pass" },
+      { tab: { id: 100, url: "https://external-site.com/login" } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "LOGIN_DETECTED",
+        action: "save",
+      }),
+    );
+  });
+
+  it("rejects SAVE_LOGIN from own app pages", async () => {
+    const res = await sendMessageWithSender(
+      { type: "SAVE_LOGIN", username: "user", password: "pass" },
+      { tab: { id: 101, url: "https://localhost:3000/ja/auth/signin" } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "SAVE_LOGIN",
+        ok: false,
+        error: "OWN_APP",
+      }),
+    );
+  });
+
+  it("rejects UPDATE_LOGIN from own app pages", async () => {
+    const res = await sendMessageWithSender(
+      { type: "UPDATE_LOGIN", entryId: "pw-1", password: "new-pass" },
+      { tab: { id: 102, url: "https://localhost:3000/ja/dashboard" } },
+    );
+
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "UPDATE_LOGIN",
+        ok: false,
+        error: "OWN_APP",
       }),
     );
   });
