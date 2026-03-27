@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.11](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.10...passwd-sso-v0.3.11) (2026-03-27)
+
+
+### Bug Fixes
+
+* add bulk import API to fix rate limit blocking large imports ([#260](https://github.com/ngc-shj/passwd-sso/issues/260)) ([88f1010](https://github.com/ngc-shj/passwd-sso/commit/88f1010a332eba1e343d13e6d15bf39f4514afbf))
+
 ## [0.3.10](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.9...passwd-sso-v0.3.10) (2026-03-27)
 
 
