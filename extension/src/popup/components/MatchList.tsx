@@ -141,7 +141,10 @@ export function MatchList({ tabUrl }: Props) {
 
   const sorted = sortByUrlMatch(entries, tabHost);
   const matched = tabHost
-    ? sorted.filter((e) => e.urlHost && isHostMatch(e.urlHost, tabHost))
+    ? sorted.filter((e) => {
+        if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
+        return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
+      })
     : [];
   const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
   // When viewing a specific site, only show non-LOGIN entries (cards, identity)
