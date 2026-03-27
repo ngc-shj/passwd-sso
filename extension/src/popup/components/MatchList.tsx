@@ -143,7 +143,12 @@ export function MatchList({ tabUrl }: Props) {
   const matched = tabHost
     ? sorted.filter((e) => e.urlHost && isHostMatch(e.urlHost, tabHost))
     : [];
-  const unmatched = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
+  const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
+  // When viewing a specific site, only show non-LOGIN entries (cards, identity)
+  // in the "other" section — unrelated login entries are noise.
+  const unmatched = tabHost
+    ? unmatchedAll.filter((e) => e.entryType !== EXT_ENTRY_TYPE.LOGIN)
+    : unmatchedAll;
 
   const filterEntries = (list: DecryptedEntry[], q: string) => {
     if (!q) return list;

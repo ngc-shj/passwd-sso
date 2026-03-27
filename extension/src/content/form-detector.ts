@@ -4,6 +4,9 @@
 
 import { initFormDetector } from "./form-detector-lib";
 import { initLoginDetector } from "./login-detector-lib";
+// Register AUTOFILL_FILL listener so autofill works without chrome.scripting.executeScript
+// (which requires host permissions or activeTab that may not be available).
+import "./autofill-lib";
 
 // Guard against double-injection per frame: manifest content_scripts may already be
 // attached, but programmatic executeScript (from popup after permission grant)
