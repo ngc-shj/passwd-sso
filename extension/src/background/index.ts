@@ -217,8 +217,14 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       await chrome.action.setBadgeText({ text: "", tabId });
       return;
     }
-    const entries = await getCachedEntries();
-    const count = entries.filter(
+    // Read from cache only — never trigger network fetches from badge updates.
+    // Cache is populated by FETCH_PASSWORDS (popup open) and GET_MATCHES_FOR_URL
+    // (form detection). Fetching here would race with autofill operations.
+    if (!cachedEntries) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    const count = cachedEntries.filter(
       (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && e.urlHost && isHostMatch(e.urlHost, host),
     ).length;
     const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
@@ -1966,6 +1972,10 @@ async function handleMessage(
           vaultLocked: false,
           suppressInline: false,
         });
+        // Cache was just populated — update badge for sender tab
+        if (_sender.tab?.id) {
+          void updateBadgeForTab(_sender.tab.id, effectiveUrl);
+        }
       } catch {
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
