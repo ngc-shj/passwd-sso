@@ -13,7 +13,6 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
-import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -77,12 +76,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         });
 
         createdIds.push(entry.id);
-      } catch (e) {
-        if (e instanceof TeamPasswordServiceError) {
-          failedCount++;
-        } else {
-          failedCount++;
-        }
+      } catch {
+        failedCount++;
       }
     }
   });

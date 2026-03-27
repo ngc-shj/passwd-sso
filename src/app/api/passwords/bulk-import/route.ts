@@ -40,6 +40,7 @@ async function handlePOST(req: NextRequest) {
 
   const createdIds: string[] = [];
   let failedCount = 0;
+  let actorMissing = false;
 
   await withUserTenantRls(userId, async () => {
     const actor = await prisma.user.findUnique({
@@ -47,6 +48,7 @@ async function handlePOST(req: NextRequest) {
       select: { tenantId: true },
     });
     if (!actor) {
+      actorMissing = true;
       return;
     }
 
@@ -115,6 +117,8 @@ async function handlePOST(req: NextRequest) {
       }
     }
   });
+
+  if (actorMissing) return unauthorized();
 
   const requestMeta = extractRequestMeta(req);
 

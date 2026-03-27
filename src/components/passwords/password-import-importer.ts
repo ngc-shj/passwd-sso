@@ -97,47 +97,52 @@ export async function runImportEntries({
       const tagIds = resolveEntryTagIds(entry, tagNameToId);
 
       if (isTeamImport) {
-        const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
-        const entryId = crypto.randomUUID();
-        const tkv = teamKeyVersion ?? 1;
-
-        // Generate per-entry ItemKey
-        const rawItemKey = generateItemKey();
-        let itemEncKey: CryptoKey;
-        let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
         try {
-          const ikAad = buildItemKeyWrapAAD(teamId!, entryId, tkv);
-          const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey!, ikAad);
-          itemEncKey = await deriveItemEncryptionKey(rawItemKey);
-          encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
-        } finally {
-          rawItemKey.fill(0);
+          const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
+          const entryId = crypto.randomUUID();
+          const tkv = teamKeyVersion ?? 1;
+
+          // Generate per-entry ItemKey
+          const rawItemKey = generateItemKey();
+          let itemEncKey: CryptoKey;
+          let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
+          try {
+            const ikAad = buildItemKeyWrapAAD(teamId!, entryId, tkv);
+            const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey!, ikAad);
+            itemEncKey = await deriveItemEncryptionKey(rawItemKey);
+            encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
+          } finally {
+            rawItemKey.fill(0);
+          }
+
+          const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob", 1);
+          const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview", 1);
+          const encryptedBlob = await encryptData(fullBlob, itemEncKey!, blobAad);
+          const encryptedOverview = await encryptData(overviewBlob, itemEncKey!, overviewAad);
+
+          if (entry.isFavorite) {
+            chunkFavoriteEntryIds.push(entryId);
+          }
+
+          const folderId = resolveEntryFolderId(entry, folderPathToId);
+          encryptedEntries.push({
+            id: entryId,
+            encryptedBlob,
+            encryptedOverview,
+            entryType: entry.entryType,
+            aadVersion: AAD_VERSION,
+            teamKeyVersion: tkv,
+            itemKeyVersion: 1,
+            encryptedItemKey,
+            tagIds,
+            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+            ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+            ...(folderId ? { teamFolderId: folderId } : {}),
+          });
+        } catch {
+          // Encryption failed for this entry — skip it
+          continue;
         }
-
-        const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob", 1);
-        const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview", 1);
-        const encryptedBlob = await encryptData(fullBlob, itemEncKey!, blobAad);
-        const encryptedOverview = await encryptData(overviewBlob, itemEncKey!, overviewAad);
-
-        if (entry.isFavorite) {
-          chunkFavoriteEntryIds.push(entryId);
-        }
-
-        const folderId = resolveEntryFolderId(entry, folderPathToId);
-        encryptedEntries.push({
-          id: entryId,
-          encryptedBlob,
-          encryptedOverview,
-          entryType: entry.entryType,
-          aadVersion: AAD_VERSION,
-          teamKeyVersion: tkv,
-          itemKeyVersion: 1,
-          encryptedItemKey,
-          tagIds,
-          ...(entry.requireReprompt ? { requireReprompt: true } : {}),
-          ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
-          ...(folderId ? { teamFolderId: folderId } : {}),
-        });
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();
@@ -181,8 +186,9 @@ export async function runImportEntries({
             break;
           }
           const retryAfter = res.headers.get("Retry-After");
-          const delaySec = retryAfter ? parseInt(retryAfter, 10) : 1;
-          await new Promise((resolve) => setTimeout(resolve, delaySec * 1000));
+          const rawSec = retryAfter ? parseInt(retryAfter, 10) : 1;
+          const delayMs = Math.min(Math.max(Number.isNaN(rawSec) ? 1 : rawSec, 1) * 1000, 60_000);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
           continue;
         }
 

@@ -531,27 +531,16 @@ describe("runImportEntries", () => {
   });
 
   it("accumulates success/failed counts from multiple chunks correctly", async () => {
-    // 2 chunks: first succeeds 3/5, second succeeds 2/5
-    const entries = Array.from({ length: 10 }, (_, i) => makeEntry({ title: `E${i}` }));
-    mockEncryptDataForEntries(10);
+    // With BULK_IMPORT_CHUNK_SIZE=50, 3 entries fit in 1 chunk.
+    // Server reports 2 success, 1 failed — verify counts are taken from response.
+    const entries = Array.from({ length: 3 }, (_, i) => makeEntry({ title: `E${i}` }));
+    mockEncryptDataForEntries(3);
 
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(response(true)) // GET tags
-      .mockResolvedValueOnce(bulkResponse(true, 3, 2)) // chunk 1 (5 entries, mock returns 3 success)
-      .mockResolvedValueOnce(bulkResponse(true, 2, 3)); // chunk 2 (5 entries, mock returns 2 success)
+      .mockResolvedValueOnce(bulkResponse(true, 2, 1)); // single chunk: server reports 2 success, 1 failed
     vi.stubGlobal("fetch", fetchMock);
-
-    // Override chunk size via 10 entries that fit in 2 chunks of 5 each is not possible with chunk=50
-    // With BULK_IMPORT_CHUNK_SIZE=50, 10 entries go in 1 chunk — adjust test to use 1 chunk
-    // Re-mock for single chunk scenario
-    vi.resetAllMocks();
-    mockEncryptDataForEntries(10);
-    const fetchMock2 = vi
-      .fn()
-      .mockResolvedValueOnce(response(true)) // GET tags
-      .mockResolvedValueOnce(bulkResponse(true, 7, 3)); // single chunk: 7 success, 3 failed
-    vi.stubGlobal("fetch", fetchMock2);
 
     const result = await runImportEntries({
       entries,
@@ -563,7 +552,7 @@ describe("runImportEntries", () => {
       encryptionKey: {} as CryptoKey,
     });
 
-    expect(result.successCount).toBe(7);
-    expect(result.failedCount).toBe(3);
+    expect(result.successCount).toBe(2);
+    expect(result.failedCount).toBe(1);
   });
 });

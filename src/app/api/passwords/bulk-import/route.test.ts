@@ -93,6 +93,14 @@ describe("POST /api/passwords/bulk-import", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 when actor user record is not found", async () => {
+    mockPrismaUser.findUnique.mockResolvedValue(null);
+    const res = await POST(createRequest("POST", URL, {
+      body: { entries: [makeEntry("550e8400-e29b-41d4-a716-000000000001")] },
+    }));
+    expect(res.status).toBe(401);
+  });
+
   it("returns 429 when rate limited", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await POST(createRequest("POST", URL, {

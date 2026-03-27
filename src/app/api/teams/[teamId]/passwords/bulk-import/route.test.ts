@@ -183,6 +183,27 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     expect(json.failed).toBe(0);
   });
 
+  it("handles partial failure when service throws a generic error", async () => {
+    mockCreateTeamPassword
+      .mockResolvedValueOnce({ id: "660e8400-e29b-41d4-a716-000000000001", entryType: "LOGIN", tags: [], createdAt: new Date() })
+      .mockRejectedValueOnce(new Error("DB timeout"));
+
+    const entries = [
+      makeEntry("660e8400-e29b-41d4-a716-000000000001"),
+      makeEntry("660e8400-e29b-41d4-a716-000000000002"),
+    ];
+
+    const res = await POST(
+      createRequest("POST", URL, { body: { entries } }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    const json = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(json.success).toBe(1);
+    expect(json.failed).toBe(1);
+  });
+
   it("handles partial failure when service throws TeamPasswordServiceError", async () => {
     mockCreateTeamPassword
       .mockResolvedValueOnce({ id: "660e8400-e29b-41d4-a716-000000000001", entryType: "LOGIN", tags: [], createdAt: new Date() })
