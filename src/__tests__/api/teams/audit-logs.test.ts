@@ -92,7 +92,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         id: "log-1",
         action: AUDIT_ACTION.ENTRY_CREATE,
         targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-        targetId: "entry-1",
+        targetId: "00000000-0000-4000-a000-000000000e01",
         metadata: null,
         ip: "10.0.0.1",
         userAgent: "Test",
@@ -376,7 +376,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         id: "log-1",
         action: AUDIT_ACTION.ENTRY_CREATE,
         targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-        targetId: "entry-1",
+        targetId: "00000000-0000-4000-a000-000000000e01",
         metadata: null,
         ip: null,
         userAgent: null,
@@ -388,7 +388,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     mockTeamEntryFindMany.mockResolvedValue([
       {
-        id: "entry-1",
+        id: "00000000-0000-4000-a000-000000000e01",
         encryptedOverview: "enc-ov",
         overviewIv: "a".repeat(24),
         overviewAuthTag: "b".repeat(32),
@@ -410,7 +410,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
 
     expect(status).toBe(200);
     expect(json.entryOverviews).toEqual({
-      "entry-1": {
+      "00000000-0000-4000-a000-000000000e01": {
         encryptedOverview: "enc-ov",
         overviewIv: "a".repeat(24),
         overviewAuthTag: "b".repeat(32),

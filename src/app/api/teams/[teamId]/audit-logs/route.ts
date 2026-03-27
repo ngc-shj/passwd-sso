@@ -85,10 +85,12 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { items, nextCursor } = paginateResult(logs, limit);
 
   // Collect encrypted overviews for entry targets (client decrypts to get titles)
+  // Filter out non-UUID targetIds (e.g. "bulk" from bulk operations)
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const entryIds = [
     ...new Set(
       items
-        .filter((l) => l.targetType === AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY && l.targetId)
+        .filter((l) => l.targetType === AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY && l.targetId && UUID_RE.test(l.targetId))
         .map((l) => l.targetId as string)
     ),
   ];

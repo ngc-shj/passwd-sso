@@ -159,12 +159,12 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       ...MOCK_LOG,
       id: "log-entry",
       targetType: "TeamPasswordEntry",
-      targetId: "entry-1",
+      targetId: "00000000-0000-4000-a000-000000000001",
     };
     mockPrismaAuditLog.findMany.mockResolvedValue([logWithTarget]);
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
-        id: "entry-1",
+        id: "00000000-0000-4000-a000-000000000001",
         encryptedOverview: "enc",
         overviewIv: "iv",
         overviewAuthTag: "tag",
@@ -182,7 +182,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
       createParams({ teamId: TEAM_ID }),
     );
     const json = await res.json();
-    expect(json.entryOverviews).toHaveProperty("entry-1");
-    expect(json.entryOverviews["entry-1"].encryptedOverview).toBe("enc");
+    expect(json.entryOverviews).toHaveProperty("00000000-0000-4000-a000-000000000001");
+    expect(json.entryOverviews["00000000-0000-4000-a000-000000000001"].encryptedOverview).toBe("enc");
   });
 });
