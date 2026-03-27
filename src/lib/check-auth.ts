@@ -83,16 +83,10 @@ export async function checkAuth(
     }
 
     // Enforce access restriction for non-session auth
-    if (authResult.type !== "session" && !skipAccessRestriction) {
-      if (authResult.type === "service_account") {
-        // SA tokens carry tenantId directly — skip userId-based tenant resolution
-        const denied = await enforceAccessRestriction(
-          req,
-          authResult.serviceAccountId,
-          authResult.tenantId,
-        );
-        if (denied) return { ok: false, response: denied };
-      } else {
+    // SA tokens skip enforceAccessRestriction — it expects userId (FK to users table),
+    // passing serviceAccountId would cause FK violation in the audit log write path.
+    if (authResult.type !== "session" && authResult.type !== "service_account" && !skipAccessRestriction) {
+      {
         const denied = await enforceAccessRestriction(
           req,
           authResult.userId,

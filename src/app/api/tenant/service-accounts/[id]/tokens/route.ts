@@ -111,6 +111,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  if (!sa.isActive) {
+    return NextResponse.json(
+      { error: API_ERROR.SA_NOT_FOUND, message: "Service account is inactive" },
+      { status: 409 },
+    );
+  }
+
   const result = await parseBody(req, saTokenCreateSchema);
   if (!result.ok) return result.response;
 

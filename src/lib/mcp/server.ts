@@ -16,6 +16,15 @@ import {
 } from "@/lib/constants/mcp";
 import { MCP_TOOLS, toolListCredentials, toolGetCredential, toolSearchCredentials } from "@/lib/mcp/tools";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
+import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
+
+// ─── Tool → required scope mapping ───────────────────────────
+
+const TOOL_SCOPE_MAP: Record<string, McpScope> = {
+  list_credentials: MCP_SCOPE.CREDENTIALS_LIST,
+  get_credential: MCP_SCOPE.CREDENTIALS_READ,
+  search_credentials: MCP_SCOPE.CREDENTIALS_LIST,
+};
 
 // ─── Rate limiting ────────────────────────────────────────────
 
@@ -78,6 +87,12 @@ async function handleToolsCall(
 ): Promise<JsonRpcResponse> {
   const p = params as { name?: string; arguments?: unknown };
   if (!p?.name) return err(id, -32602, "Missing tool name");
+
+  // Scope enforcement
+  const requiredScope = TOOL_SCOPE_MAP[p.name];
+  if (requiredScope && !token.scopes.includes(requiredScope)) {
+    return err(id, -32003, `Insufficient scope: requires ${requiredScope}`);
+  }
 
   let toolResult: { result?: unknown; error?: { code: number; message: string; data?: unknown } };
 

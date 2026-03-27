@@ -1,6 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { hashToken } from "@/lib/crypto-server";
 import { exchangeCodeForToken } from "@/lib/mcp/oauth-server";
+import { createRateLimiter } from "@/lib/rate-limit";
+
+const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 export async function POST(req: NextRequest) {
   let body: Record<string, string>;
@@ -24,6 +27,11 @@ export async function POST(req: NextRequest) {
   }
   if (!code || !redirect_uri || !client_id || !client_secret || !code_verifier) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  const rl = await tokenRateLimiter.check(`mcp:token:${client_id}`);
+  if (!rl.allowed) {
+    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
   }
 
   const clientSecretHash = hashToken(client_secret);

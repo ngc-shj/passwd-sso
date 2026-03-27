@@ -94,8 +94,12 @@ describe("createAuthorizationCode", () => {
 // ─── exchangeCodeForToken tests ───────────────────────────────
 
 describe("exchangeCodeForToken", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    const { prisma } = await import("@/lib/prisma");
+    // Provide $transaction that passes prisma itself as the tx argument
+    (prisma as Record<string, unknown>).$transaction = async (fn: (tx: unknown) => unknown) =>
+      fn(prisma);
   });
 
   it("returns invalid_grant when code not found", async () => {
@@ -244,6 +248,102 @@ describe("exchangeCodeForToken", () => {
     if (!result.ok) expect(result.error).toBe("invalid_grant");
   });
 
+  it("returns invalid_client when clientSecretHash does not match", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "code-id",
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60000),
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:correct-secret", isActive: true, tenantId: "tenant-uuid" },
+        clientId: "client-uuid",
+        tenantId: "tenant-uuid",
+        userId: "user-uuid",
+        serviceAccountId: null,
+        redirectUri: "https://example.com/callback",
+        codeChallenge: "any-challenge",
+        codeChallengeMethod: "S256",
+        scope: "credentials:read",
+      }),
+    };
+
+    const result = await exchangeCodeForToken({
+      code: "valid-code",
+      clientId: "mcpc_test",
+      clientSecretHash: "hashed:wrong-secret",
+      redirectUri: "https://example.com/callback",
+      codeVerifier: "verifier",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_client");
+  });
+
+  it("returns invalid_client when client isActive is false", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "code-id",
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60000),
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: false, tenantId: "tenant-uuid" },
+        clientId: "client-uuid",
+        tenantId: "tenant-uuid",
+        userId: "user-uuid",
+        serviceAccountId: null,
+        redirectUri: "https://example.com/callback",
+        codeChallenge: "any-challenge",
+        codeChallengeMethod: "S256",
+        scope: "credentials:read",
+      }),
+    };
+
+    const result = await exchangeCodeForToken({
+      code: "valid-code",
+      clientId: "mcpc_test",
+      clientSecretHash: "hashed:secret",
+      redirectUri: "https://example.com/callback",
+      codeVerifier: "verifier",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_client");
+  });
+
+  it("returns invalid_grant when redirectUri does not match", async () => {
+    const verifier = "correct-verifier-for-redirect-test";
+    const challenge = computeS256Challenge(verifier);
+
+    const { prisma } = await import("@/lib/prisma");
+    (prisma as Record<string, unknown>).mcpAuthorizationCode = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "code-id",
+        usedAt: null,
+        expiresAt: new Date(Date.now() + 60000),
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
+        clientId: "client-uuid",
+        tenantId: "tenant-uuid",
+        userId: "user-uuid",
+        serviceAccountId: null,
+        redirectUri: "https://example.com/callback",
+        codeChallenge: challenge,
+        codeChallengeMethod: "S256",
+        scope: "credentials:read",
+      }),
+    };
+
+    const result = await exchangeCodeForToken({
+      code: "valid-code",
+      clientId: "mcpc_test",
+      clientSecretHash: "hashed:secret",
+      redirectUri: "https://example.com/different-callback",
+      codeVerifier: verifier,
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toBe("invalid_grant");
+  });
+
   it("returns access token on successful exchange", async () => {
     const verifier = "correct-verifier-string-for-test";
     const challenge = computeS256Challenge(verifier);
@@ -256,7 +356,7 @@ describe("exchangeCodeForToken", () => {
         id: "code-id",
         usedAt: null,
         expiresAt: new Date(Date.now() + 60000),
-        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true },
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
         clientId: "client-uuid",
         tenantId: "tenant-uuid",
         userId: "user-uuid",

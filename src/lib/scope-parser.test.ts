@@ -120,6 +120,22 @@ describe("scopeSatisfies", () => {
     const required = parseScope("tags:read")!;
     expect(scopeSatisfies(granted, required)).toBe(false);
   });
+
+  it("team-scoped unqualified grant covers team-scoped qualified requirement", () => {
+    const teamId = "550e8400-e29b-41d4-a716-446655440000";
+    const folderId = "660e8400-e29b-41d4-a716-446655440001";
+    const granted = parseScopes(`team:${teamId}:passwords:read`);
+    const required = parseScope(`team:${teamId}:passwords:read:folder/${folderId}`)!;
+    expect(scopeSatisfies(granted, required)).toBe(true);
+  });
+
+  it("different team UUIDs do not satisfy each other", () => {
+    const teamA = "550e8400-e29b-41d4-a716-446655440000";
+    const teamB = "660e8400-e29b-41d4-a716-446655440001";
+    const granted = parseScopes(`team:${teamA}:passwords:read`);
+    const required = parseScope(`team:${teamB}:passwords:read`)!;
+    expect(scopeSatisfies(granted, required)).toBe(false);
+  });
 });
 
 describe("scopeStringSatisfies", () => {

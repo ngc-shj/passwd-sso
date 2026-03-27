@@ -13,14 +13,17 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { z } from "zod";
+import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 
 const accessRequestCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 20 });
 
 export const runtime = "nodejs";
 
+const VALID_ACCESS_REQUEST_STATUSES = ["PENDING", "APPROVED", "DENIED", "EXPIRED"] as const;
+
 const accessRequestCreateSchema = z.object({
   serviceAccountId: z.string().uuid(),
-  requestedScope: z.string().min(1).max(2048),
+  requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
   justification: z.string().max(1000).optional(),
   expiresInMinutes: z.number().int().min(5).max(1440).default(60),
 });
@@ -46,14 +49,17 @@ async function handleGET(req: NextRequest) {
   }
 
   const { searchParams } = new URL(req.url);
-  const status = searchParams.get("status") ?? undefined;
+  const rawStatus = searchParams.get("status");
+  const validatedStatus = rawStatus && (VALID_ACCESS_REQUEST_STATUSES as readonly string[]).includes(rawStatus)
+    ? (rawStatus as (typeof VALID_ACCESS_REQUEST_STATUSES)[number])
+    : undefined;
   const serviceAccountId = searchParams.get("serviceAccountId") ?? undefined;
 
   const accessRequests = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.accessRequest.findMany({
       where: {
         tenantId: actor.tenantId,
-        ...(status !== undefined && { status: status as never }),
+        ...(validatedStatus !== undefined && { status: validatedStatus }),
         ...(serviceAccountId !== undefined && { serviceAccountId }),
       },
       select: {
@@ -126,7 +132,7 @@ async function handlePOST(req: NextRequest) {
       data: {
         tenantId: actor.tenantId,
         serviceAccountId: result.data.serviceAccountId,
-        requestedScope: result.data.requestedScope,
+        requestedScope: result.data.requestedScope.join(","),
         justification: result.data.justification ?? null,
         expiresAt,
       },
@@ -151,7 +157,7 @@ async function handlePOST(req: NextRequest) {
     targetId: accessRequest.id,
     metadata: {
       serviceAccountId: result.data.serviceAccountId,
-      requestedScope: result.data.requestedScope,
+      requestedScope: result.data.requestedScope.join(","),
       expiresInMinutes: result.data.expiresInMinutes,
     },
     ...extractRequestMeta(req),

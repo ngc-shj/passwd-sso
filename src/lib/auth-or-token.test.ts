@@ -261,6 +261,34 @@ describe("authOrToken", () => {
       "passwords:write" as Parameters<typeof authOrToken>[1],
     );
     expect(result).toEqual({ type: "scope_insufficient" });
+    expect(mockHasSaTokenScope).toHaveBeenCalledWith(["passwords:read"], "passwords:write");
+  });
+
+  it("returns service_account result when SA token scope is satisfied", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateServiceAccountToken.mockResolvedValue({
+      ok: true,
+      data: {
+        serviceAccountId: "sa-3",
+        tenantId: "t3",
+        tokenId: "tok-3",
+        scopes: ["passwords:read"],
+      },
+    });
+    mockHasSaTokenScope.mockReturnValue(true);
+
+    const result = await authOrToken(
+      makeRequest("sa_test789"),
+      "passwords:read" as Parameters<typeof authOrToken>[1],
+    );
+    expect(result).toEqual({
+      type: "service_account",
+      serviceAccountId: "sa-3",
+      tenantId: "t3",
+      tokenId: "tok-3",
+      scopes: ["passwords:read"],
+    });
+    expect(mockHasSaTokenScope).toHaveBeenCalledWith(["passwords:read"], "passwords:read");
   });
 
   // ── Prefix table safety tests ──────────────────────────────

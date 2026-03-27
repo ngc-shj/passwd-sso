@@ -63,6 +63,10 @@ export async function GET(req: NextRequest) {
   const requestedScopes = scope.split(" ").filter(Boolean);
   const grantedScopes = requestedScopes.filter((s) => allowedScopeSet.has(s) && (MCP_SCOPES as string[]).includes(s));
 
+  // TODO: Add user consent screen (OAuth 2.1 requires explicit consent for authorization).
+  // Currently auto-approves for same-tenant MCP clients. A consent UI page should be
+  // implemented when the frontend dashboard for MCP is built.
+
   // Issue authorization code
   const { code } = await createAuthorizationCode({
     clientId: client.id,

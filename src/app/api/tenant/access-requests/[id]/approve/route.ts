@@ -12,7 +12,8 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
-import { SA_TOKEN_PREFIX } from "@/lib/constants/service-account";
+import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
+import { parseSaTokenScopes } from "@/lib/service-account-token";
 import { randomBytes } from "node:crypto";
 
 type Params = { params: Promise<{ id: string }> };
@@ -77,6 +78,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
   try {
     result = await prisma.$transaction(async (tx) => {
+      // Enforce token limit per SA
+      const activeTokenCount = await tx.serviceAccountToken.count({
+        where: { serviceAccountId: request.serviceAccountId, revokedAt: null },
+      });
+      if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
+        throw new Error("Token limit exceeded");
+      }
+
       // Optimistic lock: only update if still PENDING and belongs to this tenant
       const updated = await tx.accessRequest.updateMany({
         where: { id: requestId, status: "PENDING", tenantId: actor.tenantId },
@@ -91,7 +100,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         throw new Error("Already processed or wrong tenant");
       }
 
-      // Issue a short-lived SA token scoped to the requested scope
+      // Re-validate scope against SA allowlist at approval time
+      const validatedScopes = parseSaTokenScopes(request.requestedScope);
+      const validatedScope = validatedScopes.join(",");
+
+      // Issue a short-lived SA token scoped to validated scopes only
       const plaintext = SA_TOKEN_PREFIX + randomBytes(32).toString("hex");
       const tokenHash = hashToken(plaintext);
       const expiresAt = new Date(Date.now() + ttlSec * 1000);
@@ -103,7 +116,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           tokenHash,
           prefix: plaintext.slice(0, 7),
           name: `JIT-${requestId.slice(0, 8)}`,
-          scope: request.requestedScope,
+          scope: validatedScope,
           expiresAt,
         },
       });
@@ -119,6 +132,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (err instanceof Error && err.message === "Already processed or wrong tenant") {
       return NextResponse.json(
         { error: API_ERROR.CONFLICT },
+        { status: 409 },
+      );
+    }
+    if (err instanceof Error && err.message === "Token limit exceeded") {
+      return NextResponse.json(
+        { error: API_ERROR.SA_TOKEN_LIMIT_EXCEEDED },
         { status: 409 },
       );
     }

@@ -129,68 +129,73 @@ export async function exchangeCodeForToken(
 ): Promise<TokenExchangeOutcome> {
   const codeHash = hashToken(params.code);
 
-  const result = await withBypassRls(prisma, async () => {
-    // Atomic: find code, verify, mark used, create token
-    const authCode = await prisma.mcpAuthorizationCode.findUnique({
-      where: { codeHash },
-      include: { mcpClient: true },
-    });
+  const result = await withBypassRls(prisma, async () =>
+    prisma.$transaction(async (tx) => {
+      const authCode = await tx.mcpAuthorizationCode.findUnique({
+        where: { codeHash },
+        include: { mcpClient: true },
+      });
 
-    if (!authCode) return { error: "invalid_grant" as const };
-    if (authCode.usedAt) return { error: "invalid_grant" as const }; // replay
-    if (authCode.expiresAt < new Date()) return { error: "invalid_grant" as const };
+      if (!authCode) return { error: "invalid_grant" as const };
+      if (authCode.usedAt) return { error: "invalid_grant" as const };
+      if (authCode.expiresAt < new Date()) return { error: "invalid_grant" as const };
 
-    // Verify client identity
-    if (authCode.mcpClient.clientId !== params.clientId)
-      return { error: "invalid_client" as const };
-    if (authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
-      return { error: "invalid_client" as const };
-    if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
+      // Verify client identity
+      if (authCode.mcpClient.clientId !== params.clientId)
+        return { error: "invalid_client" as const };
+      if (authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
+        return { error: "invalid_client" as const };
+      if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
 
-    // Verify redirect_uri matches
-    if (authCode.redirectUri !== params.redirectUri)
-      return { error: "invalid_grant" as const };
+      // Tenant boundary guard
+      if (authCode.tenantId !== authCode.mcpClient.tenantId)
+        return { error: "invalid_grant" as const };
 
-    // PKCE S256 verification
-    if (authCode.codeChallengeMethod !== "S256")
-      return { error: "invalid_request" as const };
-    if (!verifyPkceS256(authCode.codeChallenge, params.codeVerifier))
-      return { error: "invalid_grant" as const };
+      // Verify redirect_uri matches
+      if (authCode.redirectUri !== params.redirectUri)
+        return { error: "invalid_grant" as const };
 
-    // Mark code as used
-    await prisma.mcpAuthorizationCode.update({
-      where: { id: authCode.id },
-      data: { usedAt: new Date() },
-    });
+      // PKCE S256 verification
+      if (authCode.codeChallengeMethod !== "S256")
+        return { error: "invalid_request" as const };
+      if (!verifyPkceS256(authCode.codeChallenge, params.codeVerifier))
+        return { error: "invalid_grant" as const };
 
-    // Issue access token
-    const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
-    const tokenHash = hashToken(plainToken);
-    const expirySeconds = Math.min(
-      params.tokenExpirySeconds ?? MCP_TOKEN_EXPIRY_SEC,
-      MCP_TOKEN_EXPIRY_SEC,
-    );
-    const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+      // Mark code as used (atomic within transaction)
+      await tx.mcpAuthorizationCode.update({
+        where: { id: authCode.id },
+        data: { usedAt: new Date() },
+      });
 
-    await prisma.mcpAccessToken.create({
-      data: {
-        tokenHash,
-        clientId: authCode.clientId,
-        tenantId: authCode.tenantId,
-        userId: authCode.userId,
-        serviceAccountId: authCode.serviceAccountId,
+      // Issue access token
+      const plainToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      const tokenHash = hashToken(plainToken);
+      const expirySeconds = Math.min(
+        params.tokenExpirySeconds ?? MCP_TOKEN_EXPIRY_SEC,
+        MCP_TOKEN_EXPIRY_SEC,
+      );
+      const expiresAt = new Date(Date.now() + expirySeconds * 1000);
+
+      await tx.mcpAccessToken.create({
+        data: {
+          tokenHash,
+          clientId: authCode.clientId,
+          tenantId: authCode.tenantId,
+          userId: authCode.userId,
+          serviceAccountId: authCode.serviceAccountId,
+          scope: authCode.scope,
+          expiresAt,
+        },
+      });
+
+      return {
+        ok: true as const,
+        accessToken: plainToken,
+        expiresIn: expirySeconds,
         scope: authCode.scope,
-        expiresAt,
-      },
-    });
-
-    return {
-      ok: true as const,
-      accessToken: plainToken,
-      expiresIn: expirySeconds,
-      scope: authCode.scope,
-    };
-  });
+      };
+    }),
+  );
 
   if ("error" in result) {
     return { ok: false, error: result.error as TokenExchangeError };
