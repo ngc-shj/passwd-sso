@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.8](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.7...passwd-sso-v0.3.8) (2026-03-27)
+
+
+### Bug Fixes
+
+* suppress auto-save banner on own app pages in browser extension ([#251](https://github.com/ngc-shj/passwd-sso/issues/251)) ([aa721a7](https://github.com/ngc-shj/passwd-sso/commit/aa721a783228a23ff163e57c670ec992195f2a11))
+
 ## [0.3.7](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.6...passwd-sso-v0.3.7) (2026-03-26)
 
 
