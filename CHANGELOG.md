@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.10](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.9...passwd-sso-v0.3.10) (2026-03-27)
+
+
+### Bug Fixes
+
+* generic custom field autofill and multi-URL matching ([#257](https://github.com/ngc-shj/passwd-sso/issues/257)) ([2a63029](https://github.com/ngc-shj/passwd-sso/commit/2a63029cc48d53148ff2010967a579db9315e2d7))
+
 ## [0.3.9](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.8...passwd-sso-v0.3.9) (2026-03-27)
 
 
