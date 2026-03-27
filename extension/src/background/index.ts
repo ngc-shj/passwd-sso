@@ -193,10 +193,12 @@ function clearVault(): void {
 async function clearAllTabBadges(): Promise<void> {
   try {
     const tabs = await chrome.tabs.query({});
+    // Use null to remove per-tab override so the global badge (×/!) becomes visible.
+    // An empty string "" would set a per-tab override that hides the global badge.
     await Promise.all(
       tabs
         .filter((tab) => tab.id)
-        .map((tab) => chrome.action.setBadgeText({ text: "", tabId: tab.id! }).catch(() => {})),
+        .map((tab) => chrome.action.setBadgeText({ text: null as unknown as string, tabId: tab.id! }).catch(() => {})),
     );
   } catch {
     // ignore — best effort cleanup

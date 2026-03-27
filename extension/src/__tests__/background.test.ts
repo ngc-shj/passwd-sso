@@ -386,8 +386,8 @@ describe("background message flow", () => {
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
-      // Per-tab badges cleared before setting global badge
-      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 1 });
+      // Per-tab overrides removed (null) so global badge becomes visible
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: null, tabId: 1 });
     });
   });
 
@@ -405,8 +405,8 @@ describe("background message flow", () => {
     await vi.waitFor(() => {
       // Global badge should show "!"
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "!" });
-      // Per-tab badges should be cleared (tab id 1 from mock)
-      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 1 });
+      // Per-tab overrides removed so global "!" becomes visible
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: null, tabId: 1 });
     });
   });
 
@@ -422,7 +422,7 @@ describe("background message flow", () => {
 
     await vi.waitFor(() => {
       expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "×" });
-      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 1 });
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: null, tabId: 1 });
     });
   });
 
