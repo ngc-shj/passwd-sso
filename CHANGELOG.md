@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.3.10](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.9...passwd-sso-v0.3.10) (2026-03-27)
+
+
+### Bug Fixes
+
+* generic custom field autofill and multi-URL matching ([#257](https://github.com/ngc-shj/passwd-sso/issues/257)) ([2a63029](https://github.com/ngc-shj/passwd-sso/commit/2a63029cc48d53148ff2010967a579db9315e2d7))
+
+## [0.3.9](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.8...passwd-sso-v0.3.9) (2026-03-27)
+
+
+### Bug Fixes
+
+* refine extension popup UX ([#254](https://github.com/ngc-shj/passwd-sso/issues/254)) ([ed0267c](https://github.com/ngc-shj/passwd-sso/commit/ed0267c5486c17b92e9e457c54164a40d3d06d6a))
+
+## [0.3.8](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.7...passwd-sso-v0.3.8) (2026-03-27)
+
+
+### Bug Fixes
+
+* suppress auto-save banner on own app pages in browser extension ([#251](https://github.com/ngc-shj/passwd-sso/issues/251)) ([aa721a7](https://github.com/ngc-shj/passwd-sso/commit/aa721a783228a23ff163e57c670ec992195f2a11))
+
 ## [0.3.7](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.6...passwd-sso-v0.3.7) (2026-03-26)
 
 

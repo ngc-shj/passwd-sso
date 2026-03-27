@@ -105,7 +105,10 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
   try {
     const entries = await deps.getCachedEntries();
     const loginMatches = entries.filter(
-      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && deps!.isHostMatch(e.urlHost, host),
+      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+        (e.urlHost && deps!.isHostMatch(e.urlHost, host)) ||
+        (e.additionalUrlHosts ?? []).some((h) => deps!.isHostMatch(h, host))
+      ),
     );
     const ccEntries = entries.filter(
       (e) => e.entryType === EXT_ENTRY_TYPE.CREDIT_CARD,

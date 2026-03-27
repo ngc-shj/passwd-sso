@@ -21,7 +21,7 @@ export function isHostMatch(entryHost: string, tabHost: string): boolean {
   return t.endsWith(`.${e}`);
 }
 
-export function sortByUrlMatch<T extends { urlHost: string }>(
+export function sortByUrlMatch<T extends { urlHost: string; additionalUrlHosts?: string[] }>(
   entries: T[],
   tabHost: string | null,
 ): T[] {
@@ -29,7 +29,9 @@ export function sortByUrlMatch<T extends { urlHost: string }>(
   const matched: T[] = [];
   const other: T[] = [];
   for (const entry of entries) {
-    if (entry.urlHost && isHostMatch(entry.urlHost, tabHost)) {
+    const primaryMatch = entry.urlHost && isHostMatch(entry.urlHost, tabHost);
+    const additionalMatch = (entry.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
+    if (primaryMatch || additionalMatch) {
       matched.push(entry);
     } else {
       other.push(entry);

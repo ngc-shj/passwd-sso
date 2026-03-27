@@ -239,8 +239,30 @@ export function performAutofill(payload: AutofillPayload) {
       ? hintedInput
       : null;
 
+  // Build label→input map for custom fields and identify reserved inputs
+  const customFieldMap = new Map<string, HTMLInputElement>();
+  if (payload.customFields) {
+    for (const { label } of payload.customFields) {
+      const lower = label.toLowerCase();
+      const target = inputs.find(
+        (i) =>
+          isUsableInput(i) &&
+          i.type !== "password" &&
+          (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
+      );
+      if (target) customFieldMap.set(lower, target);
+    }
+  }
+  const customFieldTargets = new Set(customFieldMap.values());
+
   const focusedUsername = findFocusedTextInput();
-  const scopeForm = (focusedUsername ?? hintedUsernameInput)?.form ?? null;
+  // If focused input is reserved for a custom field, don't use it as username target
+  const effectiveFocusedUsername =
+    focusedUsername && !customFieldTargets.has(focusedUsername) ? focusedUsername : null;
+  const effectiveHintedUsername =
+    hintedUsernameInput && !customFieldTargets.has(hintedUsernameInput) ? hintedUsernameInput : null;
+
+  const scopeForm = (effectiveFocusedUsername ?? effectiveHintedUsername ?? focusedUsername ?? hintedUsernameInput)?.form ?? null;
   const passwordInput =
     (scopeForm
       ? findPasswordInput(
@@ -248,50 +270,14 @@ export function performAutofill(payload: AutofillPayload) {
         )
       : null) ?? findPasswordInput(inputs);
   const usernameInput =
-    focusedUsername ??
-    hintedUsernameInput ??
-    findUsernameInput(inputs, passwordInput);
-
-  const host = window.location.hostname.toLowerCase();
-  const isAwsSignInPage =
-    host === "signin.aws.amazon.com" ||
-    host.endsWith(".signin.aws.amazon.com") ||
-    host === "sign-in.aws.amazon.com" ||
-    host.endsWith(".sign-in.aws.amazon.com");
-
-  const findAwsAccountInput = (): HTMLInputElement | null => {
-    return (
-      inputs.find((i) => {
-        if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-        return /(account|alias|アカウント|エイリアス)/.test(getHints(i));
-      }) ?? null
+    effectiveFocusedUsername ??
+    effectiveHintedUsername ??
+    findUsernameInput(
+      inputs.filter((i) => !customFieldTargets.has(i)),
+      passwordInput,
     );
-  };
 
-  const findAwsIamInput = (): HTMLInputElement | null => {
-    return (
-      inputs.find((i) => {
-        if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-        return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(getHints(i));
-      }) ?? null
-    );
-  };
-
-  if (isAwsSignInPage) {
-    const awsAccountInput = findAwsAccountInput();
-    const awsIamInput = findAwsIamInput();
-    if (awsAccountInput && payload.awsAccountIdOrAlias) {
-      setInputValue(awsAccountInput, payload.awsAccountIdOrAlias);
-    }
-    if (awsIamInput && (payload.awsIamUsername || payload.username)) {
-      setInputValue(awsIamInput, payload.awsIamUsername || payload.username);
-    }
-  }
-
-  const hasAwsSpecificValues =
-    isAwsSignInPage && Boolean(payload.awsAccountIdOrAlias || payload.awsIamUsername);
-
-  if (!hasAwsSpecificValues && usernameInput && payload.username) {
+  if (usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
   if (passwordInput && payload.password) {
@@ -323,6 +309,16 @@ export function performAutofill(payload: AutofillPayload) {
       }
     }
   }
+
+  // Generic custom field autofill using pre-built label→input map
+  if (payload.customFields) {
+    for (const { label, value } of payload.customFields) {
+      const target = customFieldMap.get(label.toLowerCase());
+      if (target) {
+        setInputValue(target, value);
+      }
+    }
+  }
 }
 
 // Guard against double-registration when autofill.js is also injected.
@@ -333,8 +329,9 @@ if (
   !(window as unknown as Record<string, boolean>)[AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: AutofillPayload) => {
-    if (message?.type === "AUTOFILL_FILL") {
+  chrome.runtime.onMessage.addListener((message: AutofillPayload, sender: chrome.runtime.MessageSender) => {
+    // Only accept messages from our own extension — reject external senders
+    if (message?.type === "AUTOFILL_FILL" && sender.id === chrome.runtime.id) {
       performAutofill(message);
     }
   });
