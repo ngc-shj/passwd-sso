@@ -19,12 +19,13 @@ import {
   HEX_COLOR_REGEX,
   ENCRYPTED_TEAM_KEY_MAX,
   EPHEMERAL_PUBLIC_KEY_MAX,
+  FILENAME_MAX_LENGTH,
   encryptedFieldSchema,
   hexIv,
   hexAuthTag,
   hexSalt,
 } from "./common";
-import { entryTypeSchema } from "./entry";
+import { entryTypeSchema, BULK_IMPORT_MAX_ENTRIES } from "./entry";
 
 // ─── Team Schemas ──────────────────────────────────────────
 
@@ -175,6 +176,13 @@ export const invitationAcceptSchema = z.object({
   token: z.string().min(1),
 });
 
+// ─── Bulk Team Import Schema ────────────────────────────────
+
+export const bulkTeamImportSchema = z.object({
+  entries: z.array(createTeamE2EPasswordSchema).min(1).max(BULK_IMPORT_MAX_ENTRIES),
+  sourceFilename: z.string().max(FILENAME_MAX_LENGTH).optional(),
+});
+
 // ─── Type Exports ──────────────────────────────────────────
 
 export type CreateTeamInput = z.infer<typeof createTeamSchema>;
@@ -189,3 +197,4 @@ export type UpdateMemberRoleInput = z.infer<typeof updateMemberRoleSchema>;
 export type UpdateTenantMemberRoleInput = z.infer<typeof updateTenantMemberRoleSchema>;
 export type CreateTeamTagInput = z.infer<typeof createTeamTagSchema>;
 export type UpdateTeamTagInput = z.infer<typeof updateTeamTagSchema>;
+export type BulkTeamImportInput = z.infer<typeof bulkTeamImportSchema>;

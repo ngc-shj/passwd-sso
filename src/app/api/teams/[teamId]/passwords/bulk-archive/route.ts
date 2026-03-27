@@ -72,7 +72,7 @@ async function handlePOST(
     userId: session.user.id,
     teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-    targetId: "bulk",
+    // targetId omitted for bulk operations
     metadata: {
       bulk: true,
       operation,

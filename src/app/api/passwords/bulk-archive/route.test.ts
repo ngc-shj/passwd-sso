@@ -226,7 +226,7 @@ describe("POST /api/passwords/bulk-archive", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_ARCHIVE",
-          targetId: "bulk",
+          targetId: null,
           metadata: expect.objectContaining({
             bulk: true,
             operation: "archive",

@@ -200,7 +200,7 @@ describe("POST /api/passwords/bulk-trash", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_TRASH",
-          targetId: "bulk",
+          targetId: null,
           metadata: expect.objectContaining({
             bulk: true,
             requestedCount: 2,

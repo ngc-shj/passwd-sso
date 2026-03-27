@@ -23,12 +23,14 @@ import {
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 
+const BULK_IMPORT_CHUNK_SIZE = 50;
+const MAX_RETRIES_PER_CHUNK = 3;
+
 interface RunImportParams {
   entries: ParsedEntry[];
   isTeamImport: boolean;
   tagsPath: string;
   foldersPath: string;
-  passwordsPath: string;
   sourceFilename: string;
   userId?: string;
   encryptionKey?: CryptoKey;
@@ -56,7 +58,6 @@ export async function runImportEntries({
   isTeamImport,
   tagsPath,
   foldersPath,
-  passwordsPath,
   sourceFilename,
   userId,
   encryptionKey,
@@ -78,42 +79,53 @@ export async function runImportEntries({
     resolveFolderPathsForImport(entries, foldersPath),
   ]);
   const headers = importRequestHeaders(sourceFilename);
+  const bulkPath = isTeamImport
+    ? apiPath.teamPasswordsBulkImport(teamId!)
+    : apiPath.passwordsBulkImport();
 
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    onProgress?.(i + 1, entries.length);
+  // Track favorited team entries for post-bulk favorite toggle
+  const teamFavoriteEntryIds: string[] = [];
 
-    try {
+  for (let chunkStart = 0; chunkStart < entries.length; chunkStart += BULK_IMPORT_CHUNK_SIZE) {
+    const chunk = entries.slice(chunkStart, chunkStart + BULK_IMPORT_CHUNK_SIZE);
+
+    // Encrypt all entries in the chunk
+    const encryptedEntries: object[] = [];
+    // Collect favorites for this chunk; only committed to teamFavoriteEntryIds on success
+    const chunkFavoriteEntryIds: string[] = [];
+    for (const entry of chunk) {
       const tagIds = resolveEntryTagIds(entry, tagNameToId);
-      let res: Response;
 
       if (isTeamImport) {
-        const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
-        const entryId = crypto.randomUUID();
-        const tkv = teamKeyVersion ?? 1;
-
-        // Generate per-entry ItemKey
-        const rawItemKey = generateItemKey();
-        let itemEncKey: CryptoKey;
-        let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
         try {
-          const ikAad = buildItemKeyWrapAAD(teamId!, entryId, tkv);
-          const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey!, ikAad);
-          itemEncKey = await deriveItemEncryptionKey(rawItemKey);
-          encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
-        } finally {
-          rawItemKey.fill(0);
-        }
+          const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
+          const entryId = crypto.randomUUID();
+          const tkv = teamKeyVersion ?? 1;
 
-        const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob", 1);
-        const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview", 1);
-        const encryptedBlob = await encryptData(fullBlob, itemEncKey, blobAad);
-        const encryptedOverview = await encryptData(overviewBlob, itemEncKey, overviewAad);
+          // Generate per-entry ItemKey
+          const rawItemKey = generateItemKey();
+          let itemEncKey: CryptoKey;
+          let encryptedItemKey: { ciphertext: string; iv: string; authTag: string };
+          try {
+            const ikAad = buildItemKeyWrapAAD(teamId!, entryId, tkv);
+            const wrapped = await wrapItemKey(rawItemKey, teamEncryptionKey!, ikAad);
+            itemEncKey = await deriveItemEncryptionKey(rawItemKey);
+            encryptedItemKey = { ciphertext: wrapped.ciphertext, iv: wrapped.iv, authTag: wrapped.authTag };
+          } finally {
+            rawItemKey.fill(0);
+          }
 
-        res = await fetchApi(passwordsPath, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
+          const blobAad = buildTeamEntryAAD(teamId!, entryId, "blob", 1);
+          const overviewAad = buildTeamEntryAAD(teamId!, entryId, "overview", 1);
+          const encryptedBlob = await encryptData(fullBlob, itemEncKey!, blobAad);
+          const encryptedOverview = await encryptData(overviewBlob, itemEncKey!, overviewAad);
+
+          if (entry.isFavorite) {
+            chunkFavoriteEntryIds.push(entryId);
+          }
+
+          const folderId = resolveEntryFolderId(entry, folderPathToId);
+          encryptedEntries.push({
             id: entryId,
             encryptedBlob,
             encryptedOverview,
@@ -125,23 +137,11 @@ export async function runImportEntries({
             tagIds,
             ...(entry.requireReprompt ? { requireReprompt: true } : {}),
             ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
-            ...(() => {
-              const fid = resolveEntryFolderId(entry, folderPathToId);
-              return fid ? { teamFolderId: fid } : {};
-            })(),
-          }),
-        });
-
-        // Set per-user favorite via toggle API (team favorites are a join table).
-        // Failure is best-effort: the entry itself is already created and
-        // the user can manually toggle the favorite later.
-        if (res.ok && entry.isFavorite) {
-          await fetchApi(apiPath.teamPasswordFavorite(teamId!, entryId), {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-          }).catch(() => {
-            // Silently ignore — entry is already created
+            ...(folderId ? { teamFolderId: folderId } : {}),
           });
+        } catch {
+          // Encryption failed for this entry — skip it
+          continue;
         }
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
@@ -150,32 +150,78 @@ export async function runImportEntries({
         const encryptedBlob = await encryptData(fullBlob, encryptionKey!, aad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, aad);
 
-        res = await fetchApi(passwordsPath, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            id: entryId,
-            encryptedBlob,
-            encryptedOverview,
-            entryType: entry.entryType,
-            keyVersion: 1,
-            aadVersion: aad ? AAD_VERSION : 0,
-            tagIds,
-            ...(entry.requireReprompt ? { requireReprompt: true } : {}),
-            ...(entry.isFavorite ? { isFavorite: true } : {}),
-            ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
-            ...(() => {
-              const fid = resolveEntryFolderId(entry, folderPathToId);
-              return fid ? { folderId: fid } : {};
-            })(),
-          }),
+        const folderId = resolveEntryFolderId(entry, folderPathToId);
+        encryptedEntries.push({
+          id: entryId,
+          encryptedBlob,
+          encryptedOverview,
+          entryType: entry.entryType,
+          keyVersion: 1,
+          aadVersion: aad ? AAD_VERSION : 0,
+          tagIds,
+          ...(entry.requireReprompt ? { requireReprompt: true } : {}),
+          ...(entry.isFavorite ? { isFavorite: true } : {}),
+          ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+          ...(folderId ? { folderId } : {}),
         });
       }
-
-      if (res.ok) successCount++;
-    } catch {
-      // Skip failed entries and continue import loop.
     }
+
+    // Send chunk with retry on 429
+    let chunkSuccess = 0;
+    let retries = 0;
+    let sent = false;
+    while (!sent && retries < MAX_RETRIES_PER_CHUNK) {
+      try {
+        const res = await fetchApi(bulkPath, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ entries: encryptedEntries, sourceFilename }),
+        });
+
+        if (res.status === 429) {
+          retries++;
+          if (retries >= MAX_RETRIES_PER_CHUNK) {
+            // Retries exhausted — treat entire chunk as failed
+            break;
+          }
+          const retryAfter = res.headers.get("Retry-After");
+          const rawSec = retryAfter ? parseInt(retryAfter, 10) : 1;
+          const delayMs = Math.min(Math.max(Number.isNaN(rawSec) ? 1 : rawSec, 1) * 1000, 60_000);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        if (res.ok) {
+          const data = await res.json();
+          chunkSuccess = typeof data.success === "number" ? data.success : 0;
+        }
+        sent = true;
+      } catch {
+        // Network error — treat chunk as failed
+        sent = true;
+      }
+    }
+
+    successCount += chunkSuccess;
+    // Only schedule favorite toggles if the chunk was accepted by the server
+    if (chunkSuccess > 0) {
+      for (const id of chunkFavoriteEntryIds) {
+        teamFavoriteEntryIds.push(id);
+      }
+    }
+    onProgress?.(Math.min(chunkStart + chunk.length, entries.length), entries.length);
+  }
+
+  // Set per-user favorite via toggle API for team entries (best-effort).
+  // Done after bulk import so entry IDs are known.
+  for (const entryId of teamFavoriteEntryIds) {
+    await fetchApi(apiPath.teamPasswordFavorite(teamId!, entryId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+    }).catch(() => {
+      // Silently ignore — entry is already created
+    });
   }
 
   return {
