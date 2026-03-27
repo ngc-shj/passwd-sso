@@ -240,8 +240,9 @@ if (
   !window[CC_AUTOFILL_GUARD]
 ) {
   window[CC_AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener(function (message) {
-    if (message && message.type === "AUTOFILL_CC_FILL") {
+  chrome.runtime.onMessage.addListener(function (message, sender) {
+    // Only accept messages from our own extension — reject external senders
+    if (message && message.type === "AUTOFILL_CC_FILL" && sender.id === chrome.runtime.id) {
       performCreditCardAutofill(message);
     }
   });

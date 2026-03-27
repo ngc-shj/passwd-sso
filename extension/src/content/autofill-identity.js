@@ -184,8 +184,9 @@ if (
   !window[IDENTITY_AUTOFILL_GUARD]
 ) {
   window[IDENTITY_AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener(function (message) {
-    if (message && message.type === "AUTOFILL_IDENTITY_FILL") {
+  chrome.runtime.onMessage.addListener(function (message, sender) {
+    // Only accept messages from our own extension — reject external senders
+    if (message && message.type === "AUTOFILL_IDENTITY_FILL" && sender.id === chrome.runtime.id) {
       performIdentityAutofill(message);
     }
   });
