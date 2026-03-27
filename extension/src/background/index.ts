@@ -190,20 +190,69 @@ function clearVault(): void {
   void updateBadge();
 }
 
+async function clearAllTabBadges(): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({});
+    // Use null to remove per-tab override so the global badge (×/!) becomes visible.
+    // An empty string "" would set a per-tab override that hides the global badge.
+    await Promise.all(
+      tabs
+        .filter((tab) => tab.id)
+        .map((tab) => chrome.action.setBadgeText({ text: null as unknown as string, tabId: tab.id! }).catch(() => {})),
+    );
+  } catch {
+    // ignore — best effort cleanup
+  }
+}
+
+async function updateBadgeForTab(tabId: number, url: string | undefined): Promise<void> {
+  if (!currentToken || !encryptionKey) return;
+  try {
+    if (!url) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    const host = extractHost(url);
+    if (!host || await isOwnAppPage(url)) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    // Read from cache only — never trigger network fetches from badge updates.
+    // Cache is populated by FETCH_PASSWORDS (popup open) and GET_MATCHES_FOR_URL
+    // (form detection). Fetching here would race with autofill operations.
+    if (!cachedEntries) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    const count = cachedEntries.filter(
+      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && e.urlHost && isHostMatch(e.urlHost, host),
+    ).length;
+    const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
+    await chrome.action.setBadgeText({ text, tabId });
+    if (count > 0) {
+      await chrome.action.setBadgeBackgroundColor({ color: "#3B82F6", tabId });
+    }
+  } catch {
+    await chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
+  }
+}
+
 async function updateBadge(): Promise<void> {
   if (!currentToken) {
-    // Disconnected — gray badge with "×"
+    await clearAllTabBadges();
     await chrome.action.setBadgeText({ text: "×" });
     await chrome.action.setBadgeBackgroundColor({ color: "#9CA3AF" });
     return;
   }
   if (!encryptionKey) {
-    // Connected but vault locked — amber badge with "!"
+    await clearAllTabBadges();
     await chrome.action.setBadgeText({ text: "!" });
     await chrome.action.setBadgeBackgroundColor({ color: "#F59E0B" });
     return;
   }
-  // Connected and vault unlocked — no badge
+  // Connected and vault unlocked — clear stale per-tab badges.
+  // Per-tab match counts will be set by tabs.onActivated / tabs.onUpdated events.
+  await clearAllTabBadges();
   await chrome.action.setBadgeText({ text: "" });
 }
 
@@ -433,12 +482,18 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.tabs.onActivated.addListener((activeInfo) => {
   chrome.tabs.get(activeInfo.tabId).then((tab) => {
     updateContextMenuForTab(tab.id!, tab.url);
+    void updateBadgeForTab(tab.id!, tab.url);
   }).catch(() => {});
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "loading") {
+    // Clear stale badge count during navigation
+    chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
+  }
   if (changeInfo.status === "complete") {
     updateContextMenuForTab(tabId, tab.url);
+    void updateBadgeForTab(tabId, tab.url);
 
     // Push pending save prompt to the new page after navigation.
     // Use a short delay to give content scripts (document_idle) time to load.
@@ -1209,11 +1264,19 @@ async function performAutofillForEntry(
   }
 
   let messageFillSucceeded = false;
+  // Try injecting autofill.js first (needs host permissions or activeTab).
+  // If injection fails (no permissions), fall through to sendMessage which
+  // reaches the listener already bundled in form-detector.ts.
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ["src/content/autofill.js"],
     });
+  } catch {
+    // executeScript failed (no host permission / no activeTab) — that's OK,
+    // form-detector.ts bundles autofill-lib.ts so the listener is already present.
+  }
+  try {
     await chrome.tabs.sendMessage(tabId, {
       type: "AUTOFILL_FILL",
       username,
@@ -1611,6 +1674,10 @@ async function handleMessage(
         cachedEntries = entries;
         cacheTimestamp = Date.now();
         sendResponse({ type: "FETCH_PASSWORDS", entries });
+        // Update badge count now that cache is populated
+        void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          if (tab?.id) void updateBadgeForTab(tab.id, tab.url);
+        }).catch(() => {});
       } catch (err) {
         sendResponse({
           type: "FETCH_PASSWORDS",
@@ -1913,6 +1980,10 @@ async function handleMessage(
           vaultLocked: false,
           suppressInline: false,
         });
+        // Cache was just populated — update badge for sender tab
+        if (_sender.tab?.id) {
+          void updateBadgeForTab(_sender.tab.id, effectiveUrl);
+        }
       } catch {
         sendResponse({
           type: "GET_MATCHES_FOR_URL",

@@ -27,8 +27,6 @@
     "autofillSent": "自動入力を送信しました",
     "passwordCopied": "パスワードをコピーしました",
     "totpCopied": "TOTP コードをコピーしました (30秒)",
-    "enableAutofill": "このサイトで自動入力を有効にする",
-    "autofillEnabled": "このサイトで自動入力が有効です",
     "httpWarning": "このページは HTTP です。安全でないページへの入力にはリスクがあります。",
     "unlockSite": "現在のサイト: {host}",
     "badgeCard": "カード",

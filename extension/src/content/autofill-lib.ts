@@ -333,8 +333,9 @@ if (
   !(window as unknown as Record<string, boolean>)[AUTOFILL_GUARD]
 ) {
   (window as unknown as Record<string, boolean>)[AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener((message: AutofillPayload) => {
-    if (message?.type === "AUTOFILL_FILL") {
+  chrome.runtime.onMessage.addListener((message: AutofillPayload, sender: chrome.runtime.MessageSender) => {
+    // Only accept messages from our own extension — reject external senders
+    if (message?.type === "AUTOFILL_FILL" && sender.id === chrome.runtime.id) {
       performAutofill(message);
     }
   });
