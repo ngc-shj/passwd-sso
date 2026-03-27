@@ -190,21 +190,74 @@ function clearVault(): void {
   void updateBadge();
 }
 
+async function clearAllTabBadges(): Promise<void> {
+  try {
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(
+      tabs
+        .filter((tab) => tab.id)
+        .map((tab) => chrome.action.setBadgeText({ text: "", tabId: tab.id! }).catch(() => {})),
+    );
+  } catch {
+    // ignore — best effort cleanup
+  }
+}
+
+async function updateBadgeForTab(tabId: number, url: string | undefined): Promise<void> {
+  if (!currentToken || !encryptionKey) return;
+  try {
+    if (!url) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    const host = extractHost(url);
+    if (!host || await isOwnAppPage(url)) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    // Use cached entries only — avoid triggering network fetches from badge updates.
+    // Badge will refresh on next tab activation after cache is populated.
+    if (!cachedEntries) {
+      await chrome.action.setBadgeText({ text: "", tabId });
+      return;
+    }
+    const count = cachedEntries.filter(
+      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && e.urlHost && isHostMatch(e.urlHost, host),
+    ).length;
+    const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
+    await chrome.action.setBadgeText({ text, tabId });
+    if (count > 0) {
+      await chrome.action.setBadgeBackgroundColor({ color: "#3B82F6", tabId });
+    }
+  } catch {
+    await chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
+  }
+}
+
 async function updateBadge(): Promise<void> {
   if (!currentToken) {
-    // Disconnected — gray badge with "×"
+    await clearAllTabBadges();
     await chrome.action.setBadgeText({ text: "×" });
     await chrome.action.setBadgeBackgroundColor({ color: "#9CA3AF" });
     return;
   }
   if (!encryptionKey) {
-    // Connected but vault locked — amber badge with "!"
+    await clearAllTabBadges();
     await chrome.action.setBadgeText({ text: "!" });
     await chrome.action.setBadgeBackgroundColor({ color: "#F59E0B" });
     return;
   }
-  // Connected and vault unlocked — no badge
+  // Connected and vault unlocked — clear stale per-tab badges, then show match count
+  await clearAllTabBadges();
   await chrome.action.setBadgeText({ text: "" });
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab?.id) {
+      void updateBadgeForTab(tab.id, tab.url);
+    }
+  } catch {
+    // ignore
+  }
 }
 
 // ── Session persistence & token refresh ──────────────────────
@@ -433,12 +486,18 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.tabs.onActivated.addListener((activeInfo) => {
   chrome.tabs.get(activeInfo.tabId).then((tab) => {
     updateContextMenuForTab(tab.id!, tab.url);
+    void updateBadgeForTab(tab.id!, tab.url);
   }).catch(() => {});
 });
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "loading") {
+    // Clear stale badge count during navigation
+    chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
+  }
   if (changeInfo.status === "complete") {
     updateContextMenuForTab(tabId, tab.url);
+    void updateBadgeForTab(tabId, tab.url);
 
     // Push pending save prompt to the new page after navigation.
     // Use a short delay to give content scripts (document_idle) time to load.
