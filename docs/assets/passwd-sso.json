@@ -9,7 +9,7 @@
       "type": "login",
       "name": "AWS Console (IAM)",
       "login": {
-        "username": "alice@example.com",
+        "username": "alice",
         "password": "ChangeMe-Example-123!",
         "uris": [
           {
@@ -30,13 +30,14 @@
         "isFavorite": true,
         "expiresAt": "2027-03-01T00:00:00.000Z",
         "customFields": [
-          { "label": "accountIdOrAlias", "value": "123456789012", "type": "text" },
-          { "label": "iamUsername", "value": "alice", "type": "text" }
+          { "label": "account", "value": "123456789012", "type": "text" },
+          { "label": "Console URL", "value": "https://console.aws.amazon.com", "type": "url" },
+          { "label": "IAM Dashboard", "value": "https://us-east-1.console.aws.amazon.com/iam", "type": "url" }
         ],
         "totp": {
           "secret": "JBSWY3DPEHPK3PXP",
           "issuer": "AWS",
-          "label": "alice@example.com",
+          "label": "alice",
           "period": 30,
           "digits": 6,
           "algorithm": "SHA1"
@@ -229,6 +230,31 @@
         "requireReprompt": false,
         "isFavorite": false,
         "expiresAt": "2027-01-15T00:00:00.000Z"
+      }
+    },
+    {
+      "folder": "Work / Infra",
+      "type": "sshkey",
+      "name": "Deploy Key (staging)",
+      "sshKey": {
+        "privateKey": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBSampleTestKeyDoNotUseInProductionAAAAAAAAAAAAAAAA\n-----END OPENSSH PRIVATE KEY-----",
+        "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFJhbXBsZVRlc3RLZXlEb05vdFVzZUluUHJvZHVjdGlv alice@example.com",
+        "keyType": "ed25519",
+        "keySize": 256,
+        "fingerprint": "SHA256:SampleFingerprintForTestingOnly0000000000",
+        "passphrase": null,
+        "comment": "alice@example.com"
+      },
+      "notes": "Staging deploy key (sample — not a real key)",
+      "reprompt": 1,
+      "passwdSso": {
+        "entryType": "SSH_KEY",
+        "tags": [
+          { "name": "ssh", "color": "#64748b" },
+          { "name": "infra", "color": "#16a34a" }
+        ],
+        "requireReprompt": true,
+        "isFavorite": false
       }
     }
   ]
