@@ -11,7 +11,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 <details>
 <summary>More screenshots</summary>
 
-### Entry Detail (AWS 3-field example)
+### Entry Detail (custom field autofill example)
 
 ![passwd-sso entry detail](docs/assets/passwd-sso-entry-detail.png)
 
@@ -19,7 +19,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 ![passwd-sso password generator](docs/assets/passwd-sso-password-generator.png)
 
-### Browser Extension (AWS IAM 3-field fill)
+### Browser Extension (custom field autofill)
 
 ![passwd-sso extension aws fill 1](docs/assets/passwd-sso-extension-aws-fill-1.png)
 ![passwd-sso extension aws fill 2](docs/assets/passwd-sso-extension-aws-fill-2.png)
@@ -87,7 +87,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **CLI** — `passwd-sso` with 13 commands; OS keychain integration, XDG-compliant config
 - **SSH Agent** — `passwd-sso agent` proxies vault SSH keys via SSH agent protocol
 - **CI/CD Secrets** — `env` and `run` commands inject vault secrets into environment/subprocess
-- **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, AWS 3-field, CC/address fill, new-login detect & save
+- **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, custom field autofill, multi-URL matching, CC/address fill, new-login detect & save
 - **REST API v1** — `/api/v1/*` with OpenAPI 3.1 spec
 - **API Keys** — Scoped keys with SHA-256 hashed tokens and configurable expiration
 
