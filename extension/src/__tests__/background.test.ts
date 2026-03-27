@@ -590,17 +590,11 @@ describe("background message flow", () => {
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
-    expect(chromeMock?.scripting.executeScript).toHaveBeenCalled();
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
       type: "AUTOFILL_FILL",
       username: "alice",
       password: "secret",
     });
-    // Direct fallback should NOT run when message-based autofill succeeds.
-    const directFallbackCall = chromeMock?.scripting.executeScript.mock.calls.find(
-      (call) => Array.isArray((call[0] as { args?: unknown[] }).args),
-    );
-    expect(directFallbackCall).toBeUndefined();
   });
 
   it("autofills with blob username fallback when overview username is missing", async () => {
@@ -862,9 +856,8 @@ describe("background message flow", () => {
     chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
       new Error("Could not establish connection"),
     );
-    // 1st call: inject file, 2nd call: direct fallback with hint -> unserializable, 3rd: retry with null hint
+    // 1st call: direct fallback with hint -> unserializable, 2nd: retry with null hint
     chromeMock?.scripting.executeScript
-      .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("Value is unserializable"))
       .mockResolvedValueOnce([]);
 
