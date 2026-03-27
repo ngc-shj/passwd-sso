@@ -252,46 +252,7 @@ export function performAutofill(payload: AutofillPayload) {
     hintedUsernameInput ??
     findUsernameInput(inputs, passwordInput);
 
-  const host = window.location.hostname.toLowerCase();
-  const isAwsSignInPage =
-    host === "signin.aws.amazon.com" ||
-    host.endsWith(".signin.aws.amazon.com") ||
-    host === "sign-in.aws.amazon.com" ||
-    host.endsWith(".sign-in.aws.amazon.com");
-
-  const findAwsAccountInput = (): HTMLInputElement | null => {
-    return (
-      inputs.find((i) => {
-        if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-        return /(account|alias|アカウント|エイリアス)/.test(getHints(i));
-      }) ?? null
-    );
-  };
-
-  const findAwsIamInput = (): HTMLInputElement | null => {
-    return (
-      inputs.find((i) => {
-        if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-        return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(getHints(i));
-      }) ?? null
-    );
-  };
-
-  if (isAwsSignInPage) {
-    const awsAccountInput = findAwsAccountInput();
-    const awsIamInput = findAwsIamInput();
-    if (awsAccountInput && payload.awsAccountIdOrAlias) {
-      setInputValue(awsAccountInput, payload.awsAccountIdOrAlias);
-    }
-    if (awsIamInput && (payload.awsIamUsername || payload.username)) {
-      setInputValue(awsIamInput, payload.awsIamUsername || payload.username);
-    }
-  }
-
-  const hasAwsSpecificValues =
-    isAwsSignInPage && Boolean(payload.awsAccountIdOrAlias || payload.awsIamUsername);
-
-  if (!hasAwsSpecificValues && usernameInput && payload.username) {
+  if (usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
   if (passwordInput && payload.password) {

@@ -1226,23 +1226,6 @@ async function performAutofillForEntry(
     "";
 
   const customFields = Array.isArray(blob.customFields) ? blob.customFields : [];
-  const findCustomFieldValue = (pattern: RegExp): string | null => {
-    for (const field of customFields) {
-      const label = (field?.label ?? "").toString();
-      const value = (field?.value ?? "").toString();
-      if (!label || !value) continue;
-      if (pattern.test(label)) return value;
-    }
-    return null;
-  };
-  const awsAccountIdOrAlias =
-    findCustomFieldValue(
-      /(aws.*account|account.*(id|alias)|account id|account alias|アカウント|アカウントID|エイリアス)/i,
-    ) ?? "";
-  const awsIamUsername =
-    findCustomFieldValue(
-      /(iam.*(user|username)|user ?name|iamユーザー|iamユーザ|ユーザー名)/i,
-    ) ?? "";
 
   // Generic text custom fields for autofill by input id/name matching
   const textCustomFields = customFields
@@ -1300,8 +1283,6 @@ async function performAutofillForEntry(
       ...(password ? { password } : {}),
       ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
-      ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
-      ...(awsIamUsername ? { awsIamUsername } : {}),
       ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
     });
     messageFillSucceeded = true;
@@ -1320,8 +1301,6 @@ async function performAutofillForEntry(
         username,
         password ?? "",
         hintArg,
-        awsAccountIdOrAlias,
-        awsIamUsername,
       ],
       func: (
         usernameArg: string,
@@ -1332,8 +1311,6 @@ async function performAutofillForEntry(
           type?: string;
           autocomplete?: string;
         } | null,
-        awsAccountIdOrAliasArg?: string,
-        awsIamUsernameArg?: string,
       ) => {
       const isUsableInput = (input: HTMLInputElement) =>
         !input.disabled && !input.readOnly;
@@ -1358,12 +1335,6 @@ async function performAutofillForEntry(
       const inputs = Array.from(
         document.querySelectorAll("input"),
       ) as HTMLInputElement[];
-      const host = window.location.hostname.toLowerCase();
-      const isAwsSignInPage =
-        host === "signin.aws.amazon.com" ||
-        host.endsWith(".signin.aws.amazon.com") ||
-        host === "sign-in.aws.amazon.com" ||
-        host.endsWith(".sign-in.aws.amazon.com");
 
       const findInputByHint = () => {
         if (!targetHintArg) return null;
@@ -1431,28 +1402,6 @@ async function performAutofillForEntry(
       }
 
       if (fallbackUsername && usernameArg) setInputValue(fallbackUsername, usernameArg);
-      if (isAwsSignInPage) {
-        const readHints = (input: HTMLInputElement) => {
-          const labelText =
-            (input.id
-              ? document.querySelector(`label[for="${input.id.replace(/["\\]/g, "\\$&")}"]`)
-                  ?.textContent ?? ""
-              : "") + (input.getAttribute("aria-label") ?? "") + (input.placeholder ?? "");
-          return `${input.name} ${input.id} ${labelText}`.toLowerCase();
-        };
-        const accountInput = inputs.find((i) => {
-          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-          const hints = readHints(i);
-          return /(account|alias|アカウント|エイリアス)/.test(hints);
-        });
-        const iamInput = inputs.find((i) => {
-          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-          const hints = readHints(i);
-          return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(hints);
-        });
-        if (accountInput && awsAccountIdOrAliasArg) setInputValue(accountInput, awsAccountIdOrAliasArg);
-        if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
-      }
       if (passwordInput && passwordArg) setInputValue(passwordInput, passwordArg);
       },
     });

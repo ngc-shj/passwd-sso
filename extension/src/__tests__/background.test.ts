@@ -626,14 +626,15 @@ describe("background message flow", () => {
     });
   });
 
-  it("includes AWS fields from custom fields when available", async () => {
+  it("includes text custom fields in autofill payload", async () => {
     cryptoMocks.decryptData
       .mockResolvedValueOnce(
         JSON.stringify({
           password: "secret",
           customFields: [
-            { label: "AWS Account ID / Alias", value: "123456789012" },
-            { label: "IAM username", value: "alice-iam" },
+            { label: "brchNum", value: "001", type: "text" },
+            { label: "apiKey", value: "sk-123", type: "hidden" },
+            { label: "https://example.com", value: "https://example.com", type: "url" },
           ],
         }),
       )
@@ -653,8 +654,7 @@ describe("background message flow", () => {
         type: "AUTOFILL_FILL",
         username: "alice",
         password: "secret",
-        awsAccountIdOrAlias: "123456789012",
-        awsIamUsername: "alice-iam",
+        customFields: [{ label: "brchNum", value: "001" }],
       }),
     );
   });

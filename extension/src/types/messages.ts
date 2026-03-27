@@ -78,8 +78,6 @@ export interface AutofillPayload {
   password: string;
   targetHint?: AutofillTargetHint;
   totpCode?: string;
-  awsAccountIdOrAlias?: string;
-  awsIamUsername?: string;
   customFields?: Array<{ label: string; value: string }>;
 }
 
