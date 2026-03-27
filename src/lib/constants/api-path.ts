@@ -71,6 +71,7 @@ export const API_PATH = {
   AUTH_PASSKEY_VERIFY: "/api/auth/passkey/verify",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
+  TENANT_SERVICE_ACCOUNTS: "/api/tenant/service-accounts",
 } as const;
 
 export const apiPath = {
@@ -176,4 +177,11 @@ export const apiPath = {
   tenantWebhooks: () => API_PATH.TENANT_WEBHOOKS,
   tenantWebhookById: (webhookId: string) =>
     `${API_PATH.TENANT_WEBHOOKS}/${webhookId}`,
+  tenantServiceAccounts: () => API_PATH.TENANT_SERVICE_ACCOUNTS,
+  tenantServiceAccountById: (saId: string) =>
+    `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}`,
+  tenantServiceAccountTokens: (saId: string) =>
+    `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}/tokens`,
+  tenantServiceAccountTokenById: (saId: string, tokenId: string) =>
+    `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}/tokens/${tokenId}`,
 } as const;

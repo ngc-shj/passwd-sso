@@ -84,12 +84,22 @@ export async function checkAuth(
 
     // Enforce access restriction for non-session auth
     if (authResult.type !== "session" && !skipAccessRestriction) {
-      const denied = await enforceAccessRestriction(
-        req,
-        authResult.userId,
-        authResult.type === "api_key" ? authResult.tenantId : undefined,
-      );
-      if (denied) return { ok: false, response: denied };
+      if (authResult.type === "service_account") {
+        // SA tokens carry tenantId directly — skip userId-based tenant resolution
+        const denied = await enforceAccessRestriction(
+          req,
+          authResult.serviceAccountId,
+          authResult.tenantId,
+        );
+        if (denied) return { ok: false, response: denied };
+      } else {
+        const denied = await enforceAccessRestriction(
+          req,
+          authResult.userId,
+          authResult.type === "api_key" ? authResult.tenantId : undefined,
+        );
+        if (denied) return { ok: false, response: denied };
+      }
     }
 
     return { ok: true, auth: authResult };

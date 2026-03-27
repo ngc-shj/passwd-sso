@@ -28,7 +28,7 @@ async function handleGET(req: NextRequest) {
   if (authResult?.type === "scope_insufficient") {
     return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
   }
-  if (!authResult) {
+  if (!authResult || authResult.type === "service_account") {
     return unauthorized();
   }
   const userId = authResult.userId;
@@ -144,7 +144,7 @@ async function handlePOST(req: NextRequest) {
   if (authResult?.type === "scope_insufficient") {
     return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
   }
-  if (!authResult) {
+  if (!authResult || authResult.type === "service_account") {
     return unauthorized();
   }
   const userId = authResult.userId;

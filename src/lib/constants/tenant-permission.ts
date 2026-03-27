@@ -6,6 +6,7 @@ export const TENANT_PERMISSION = {
   AUDIT_LOG_VIEW: "tenant:auditLog:view",
   BREAKGLASS_REQUEST: "tenant:breakglass:request",
   WEBHOOK_MANAGE: "tenant:webhook:manage",
+  SERVICE_ACCOUNT_MANAGE: "tenant:serviceAccount:manage",
 } as const;
 
 export type TenantPermissionValue =
