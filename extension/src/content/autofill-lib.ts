@@ -323,6 +323,21 @@ export function performAutofill(payload: AutofillPayload) {
       }
     }
   }
+
+  // Generic custom field autofill: match label to input id or name
+  if (payload.customFields) {
+    for (const { label, value } of payload.customFields) {
+      const lower = label.toLowerCase();
+      const target = inputs.find(
+        (i) =>
+          isUsableInput(i) &&
+          (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
+      );
+      if (target) {
+        setInputValue(target, value);
+      }
+    }
+  }
 }
 
 // Guard against double-registration when autofill.js is also injected.

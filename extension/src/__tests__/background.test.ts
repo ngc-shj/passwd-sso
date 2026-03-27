@@ -648,13 +648,15 @@ describe("background message flow", () => {
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
-    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
-      type: "AUTOFILL_FILL",
-      username: "alice",
-      password: "secret",
-      awsAccountIdOrAlias: "123456789012",
-      awsIamUsername: "alice-iam",
-    });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1,
+      expect.objectContaining({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        awsAccountIdOrAlias: "123456789012",
+        awsIamUsername: "alice-iam",
+      }),
+    );
   });
 
   it("suppresses inline matches on passwd-sso origin", async () => {

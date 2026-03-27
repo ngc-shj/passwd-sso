@@ -224,9 +224,11 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       await chrome.action.setBadgeText({ text: "", tabId });
       return;
     }
-    const count = cachedEntries.filter(
-      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && e.urlHost && isHostMatch(e.urlHost, host),
-    ).length;
+    const count = cachedEntries.filter((e) => {
+      if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
+      if (e.urlHost && isHostMatch(e.urlHost, host)) return true;
+      return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, host));
+    }).length;
     const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
     await chrome.action.setBadgeText({ text, tabId });
     if (count > 0) {
@@ -774,9 +776,13 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         title?: string;
         username?: string;
         urlHost?: string;
+        additionalUrlHosts?: string[];
         cardholderName?: string;
         fullName?: string;
       };
+      const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
+        ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
+        : [];
       entries.push({
         id: item.id,
         title: overview.title ?? "",
@@ -786,6 +792,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
           overview.fullName ??
           "",
         urlHost: overview.urlHost ?? "",
+        ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
         entryType: item.entryType,
       });
     } catch {
@@ -942,14 +949,19 @@ async function decryptTeamOverviews(
       title?: string;
       username?: string;
       urlHost?: string;
+      additionalUrlHosts?: string[];
       cardholderName?: string;
       fullName?: string;
     };
+    const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
+      ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
+      : [];
     return {
       id: item.id,
       title: overview.title ?? "",
       username: overview.username ?? overview.cardholderName ?? overview.fullName ?? "",
       urlHost: overview.urlHost ?? "",
+      ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
       entryType: item.entryType,
       teamId,
       teamName,
@@ -1232,6 +1244,11 @@ async function performAutofillForEntry(
       /(iam.*(user|username)|user ?name|iamユーザー|iamユーザ|ユーザー名)/i,
     ) ?? "";
 
+  // Generic text custom fields for autofill by input id/name matching
+  const textCustomFields = customFields
+    .filter((f) => (!f.type || f.type.toLowerCase() === "text") && f.label && f.value)
+    .map(({ label, value }) => ({ label: label!, value: value! }));
+
   const serializableTargetHint = targetHint
     ? {
         ...(typeof targetHint.id === "string" && targetHint.id
@@ -1285,6 +1302,7 @@ async function performAutofillForEntry(
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
       ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
       ...(awsIamUsername ? { awsIamUsername } : {}),
+      ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
     });
     messageFillSucceeded = true;
   } catch {
@@ -1968,12 +1986,11 @@ async function handleMessage(
           return;
         }
         const entries = await getCachedEntries();
-        const matches = entries.filter(
-          (e) =>
-            e.entryType === EXT_ENTRY_TYPE.LOGIN &&
-            e.urlHost &&
-            isHostMatch(e.urlHost, tabHost),
-        );
+        const matches = entries.filter((e) => {
+          if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
+          if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
+          return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
+        });
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
           entries: matches,
