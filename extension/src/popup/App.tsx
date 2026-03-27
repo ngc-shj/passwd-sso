@@ -8,26 +8,6 @@ import { MatchList } from "./components/MatchList";
 
 type AppState = "loading" | "not_logged_in" | "logged_in" | "vault_unlocked";
 
-async function checkHostPermission(url: string): Promise<boolean> {
-  try {
-    const origin = new URL(url).origin;
-    return await chrome.permissions.contains({ origins: [`${origin}/*`] });
-  } catch {
-    return true; // non-http URLs — don't show button
-  }
-}
-
-async function injectFormDetector(tabId: number): Promise<void> {
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId, allFrames: true },
-      files: ["src/content/form-detector.js"],
-    });
-  } catch {
-    // ignore injection errors on restricted pages
-  }
-}
-
 async function notifyVaultStateChanged(): Promise<void> {
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -42,7 +22,6 @@ async function notifyVaultStateChanged(): Promise<void> {
 export function App() {
   const [state, setState] = useState<AppState>("loading");
   const [tabUrl, setTabUrl] = useState<string | null>(null);
-  const [hasHostPermission, setHasHostPermission] = useState(true);
   const containerMinHeight =
     state === "vault_unlocked" ? "min-h-[480px]" : "min-h-[260px]";
 
@@ -62,21 +41,7 @@ export function App() {
     chrome.tabs
       .query({ active: true, currentWindow: true })
       .then((tabs) => {
-        const tabId = tabs[0]?.id;
-        const url = tabs[0]?.url ?? null;
-        setTabUrl(url);
-        if (url) {
-          checkHostPermission(url)
-            .then(async (has) => {
-              setHasHostPermission(has);
-              // static content_scripts are not guaranteed to attach to already-open tabs
-              // right after permission grant; inject once for immediate UX.
-              if (has && tabId) {
-                await injectFormDetector(tabId);
-              }
-            })
-            .catch(() => {});
-        }
+        setTabUrl(tabs[0]?.url ?? null);
       })
       .catch(() => {
         setTabUrl(null);
@@ -161,38 +126,7 @@ export function App() {
           />
         )}
         {state === "vault_unlocked" && (
-          <>
-            {!hasHostPermission && tabUrl && (
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const tabs = await chrome.tabs.query({
-                      active: true,
-                      currentWindow: true,
-                    });
-                    const tabId = tabs[0]?.id;
-                    const origin = new URL(tabUrl).origin;
-                    const granted = await chrome.permissions.request({
-                      origins: [`${origin}/*`],
-                    });
-                    if (granted) {
-                      setHasHostPermission(true);
-                      if (tabId) {
-                        await injectFormDetector(tabId);
-                      }
-                    }
-                  } catch {
-                    // ignore
-                  }
-                }}
-                className="mb-3 w-full px-3 py-2 text-sm text-blue-700 bg-blue-50 border border-blue-200 rounded-md hover:bg-blue-100 transition-colors"
-              >
-                {t("popup.enableAutofill")}
-              </button>
-            )}
-            <MatchList tabUrl={tabUrl} />
-          </>
+          <MatchList tabUrl={tabUrl} />
         )}
       </main>
     </div>

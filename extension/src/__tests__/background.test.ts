@@ -37,12 +37,16 @@ let storageChangeHandlers: Array<
   (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, areaName: string) => void
 > = [];
 let commandHandlers: Array<(command: string) => void | Promise<void>> = [];
+let tabActivatedHandlers: Array<(activeInfo: { tabId: number; windowId: number }) => void> = [];
+let tabUpdatedHandlers: Array<(tabId: number, changeInfo: { status?: string }, tab: { id?: number; url?: string }) => void> = [];
 
 function installChromeMock() {
   messageHandlers = [];
   alarmHandlers = [];
   storageChangeHandlers = [];
   commandHandlers = [];
+  tabActivatedHandlers = [];
+  tabUpdatedHandlers = [];
 
   const chromeMock = {
     runtime: {
@@ -76,9 +80,18 @@ function installChromeMock() {
     },
     tabs: {
       sendMessage: vi.fn().mockResolvedValue({}),
+      get: vi.fn().mockResolvedValue({ id: 1, url: "https://github.com" }),
       query: vi.fn().mockResolvedValue([{ id: 1, url: "https://github.com" }]),
-      onActivated: { addListener: vi.fn() },
-      onUpdated: { addListener: vi.fn() },
+      onActivated: {
+        addListener: (fn: (activeInfo: { tabId: number; windowId: number }) => void) => {
+          tabActivatedHandlers.push(fn);
+        },
+      },
+      onUpdated: {
+        addListener: (fn: (tabId: number, changeInfo: { status?: string }, tab: { id?: number; url?: string }) => void) => {
+          tabUpdatedHandlers.push(fn);
+        },
+      },
       onRemoved: { addListener: vi.fn() },
     },
     action: {
@@ -371,7 +384,46 @@ describe("background message flow", () => {
       expiresAt: Date.now() + 60_000,
     });
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
-    expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "" });
+      // Per-tab overrides removed (null) so global badge becomes visible
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: null, tabId: 1 });
+    });
+  });
+
+  it("clears all tab badges on vault lock", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    chromeMock?.action.setBadgeText.mockClear();
+
+    await sendMessage({ type: "LOCK_VAULT" });
+
+    await vi.waitFor(() => {
+      // Global badge should show "!"
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "!" });
+      // Per-tab overrides removed so global "!" becomes visible
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: null, tabId: 1 });
+    });
+  });
+
+  it("clears all tab badges on disconnect", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    chromeMock?.action.setBadgeText.mockClear();
+
+    await sendMessage({ type: "CLEAR_TOKEN" });
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "×" });
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: null, tabId: 1 });
+    });
   });
 
   it("handles trigger-autofill command by requesting inline suggestions", async () => {
@@ -780,7 +832,7 @@ describe("background message flow", () => {
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "NOT_FOUND" });
   });
 
-  it("returns error when AUTOFILL script injection fails", async () => {
+  it("succeeds via sendMessage even when executeScript injection fails", async () => {
     chromeMock?.scripting.executeScript.mockRejectedValue(new Error("CSP"));
     cryptoMocks.decryptData.mockReset();
     cryptoMocks.decryptData
@@ -795,7 +847,8 @@ describe("background message flow", () => {
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
-    expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "CSP" });
+    // executeScript fails but sendMessage reaches the listener bundled in form-detector.ts
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
   });
 
   it("retries direct inject without hint when args are unserializable", async () => {
@@ -1731,5 +1784,124 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
         error: "OWN_APP",
       }),
     );
+  });
+});
+
+describe("tab event badge updates", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    // Restore crypto mocks cleared by vi.clearAllMocks()
+    cryptoMocks.deriveWrappingKey.mockResolvedValue("wrap-key");
+    cryptoMocks.unwrapSecretKey.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    cryptoMocks.deriveEncryptionKey.mockResolvedValue("enc-key");
+    cryptoMocks.verifyKey.mockResolvedValue(true);
+    cryptoMocks.decryptData.mockResolvedValue(
+      JSON.stringify({ title: "Example", username: "alice", urlHost: "example.com" }),
+    );
+    cryptoMocks.buildPersonalEntryAAD.mockReturnValue(new Uint8Array([1, 2]));
+    cryptoMocks.hexDecode.mockReturnValue(new Uint8Array([0, 1]));
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: "pw-1",
+                encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+                entryType: EXT_ENTRY_TYPE.LOGIN,
+                aadVersion: 1,
+              },
+            ],
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+
+    // Populate cache by fetching entries
+    await sendMessage({ type: "FETCH_PASSWORDS" });
+    // Wait for fire-and-forget badge update triggered by FETCH_PASSWORDS to settle,
+    // then clear mock call history so tests start with a clean slate.
+    await new Promise((r) => setTimeout(r, 50));
+    chromeMock?.action.setBadgeText.mockClear();
+    chromeMock?.action.setBadgeBackgroundColor.mockClear();
+  });
+
+  it("updates badge on tab activation", async () => {
+    // tabs.get returns the tab info for the activated tab
+    chromeMock!.tabs.get.mockResolvedValueOnce({ id: 42, url: "https://github.com" });
+
+    const handler = tabActivatedHandlers[0];
+    handler({ tabId: 42, windowId: 1 });
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 42 });
+    });
+  });
+
+  it("clears badge on tab navigation loading", async () => {
+    const handler = tabUpdatedHandlers[0];
+    handler(55, { status: "loading" }, { id: 55, url: "https://new-site.com" });
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
+    });
+  });
+
+  it("shows match count and blue badge for matching tab", async () => {
+    // Cached entries have urlHost "example.com" — navigate to matching site
+    const handler = tabUpdatedHandlers[0];
+    handler(55, { status: "complete" }, { id: 55, url: "https://example.com/login" });
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "1", tabId: 55 });
+      expect(chromeMock?.action.setBadgeBackgroundColor).toHaveBeenCalledWith({ color: "#3B82F6", tabId: 55 });
+    });
+  });
+
+  it("shows empty badge for non-matching tab", async () => {
+    const handler = tabUpdatedHandlers[0];
+    handler(55, { status: "complete" }, { id: 55, url: "https://no-match-site.com" });
+
+    await vi.waitFor(() => {
+      expect(chromeMock?.action.setBadgeText).toHaveBeenCalledWith({ text: "", tabId: 55 });
+    });
   });
 });

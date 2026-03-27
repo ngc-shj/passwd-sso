@@ -640,4 +640,66 @@ describe("MatchList", () => {
     expect(await screen.findByText("Personal")).toBeInTheDocument();
     expect(screen.getByText("Team Copy")).toBeInTheDocument();
   });
+
+  it("hides non-matching LOGIN entries when tabUrl is set", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "login-match",
+          title: "Matched Login",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "login-other",
+          title: "Other Login",
+          username: "bob",
+          urlHost: "other.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "card-1",
+          title: "My Card",
+          username: "",
+          urlHost: "",
+          entryType: EXT_ENTRY_TYPE.CREDIT_CARD,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl="https://example.com" />);
+
+    expect(await screen.findByText("Matched Login")).toBeInTheDocument();
+    expect(screen.getByText("My Card")).toBeInTheDocument();
+    expect(screen.queryByText("Other Login")).toBeNull();
+  });
+
+  it("shows all entries including LOGIN when tabUrl is null", async () => {
+    mockSendMessage.mockResolvedValueOnce({
+      type: "FETCH_PASSWORDS",
+      entries: [
+        {
+          id: "login-1",
+          title: "Login Entry",
+          username: "alice",
+          urlHost: "example.com",
+          entryType: EXT_ENTRY_TYPE.LOGIN,
+        },
+        {
+          id: "card-1",
+          title: "Card Entry",
+          username: "",
+          urlHost: "",
+          entryType: EXT_ENTRY_TYPE.CREDIT_CARD,
+        },
+      ],
+    });
+
+    render(<MatchList tabUrl={null} />);
+
+    expect(await screen.findByText("Login Entry")).toBeInTheDocument();
+    expect(screen.getByText("Card Entry")).toBeInTheDocument();
+  });
 });

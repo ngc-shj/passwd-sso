@@ -138,4 +138,24 @@ describe("App tab URL handling", () => {
       expect(mockSendMessage).toHaveBeenCalledWith({ type: "CLEAR_TOKEN" });
     });
   });
+
+  it("does not render 'Enable autofill' button in vault_unlocked state", async () => {
+    const chromeMock = (globalThis as unknown as { chrome: { tabs: { query: ReturnType<typeof vi.fn> } } }).chrome;
+    chromeMock.tabs.query.mockResolvedValueOnce([{ url: "https://example.com" }]);
+    mockSendMessage.mockResolvedValueOnce({
+      type: "GET_STATUS",
+      hasToken: true,
+      vaultUnlocked: true,
+      expiresAt: Date.now() + 1000,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(mockMatchList).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText(/enable autofill/i)).toBeNull();
+    expect(screen.queryByText(/自動入力を有効にする/i)).toBeNull();
+  });
 });
