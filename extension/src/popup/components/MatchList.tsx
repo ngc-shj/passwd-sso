@@ -141,7 +141,10 @@ export function MatchList({ tabUrl }: Props) {
 
   const sorted = sortByUrlMatch(entries, tabHost);
   const matched = tabHost
-    ? sorted.filter((e) => e.urlHost && isHostMatch(e.urlHost, tabHost))
+    ? sorted.filter((e) => {
+        if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
+        return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
+      })
     : [];
   const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
   // When viewing a specific site, only show non-LOGIN entries (cards, identity)
@@ -150,6 +153,15 @@ export function MatchList({ tabUrl }: Props) {
     ? unmatchedAll.filter((e) => e.entryType !== EXT_ENTRY_TYPE.LOGIN)
     : unmatchedAll;
 
+  const displayHost = (e: DecryptedEntry): string => {
+    if (e.urlHost && tabHost && isHostMatch(e.urlHost, tabHost)) return e.urlHost;
+    if (tabHost) {
+      const matched = (e.additionalUrlHosts ?? []).find((h) => isHostMatch(h, tabHost));
+      if (matched) return matched;
+    }
+    return e.urlHost || e.additionalUrlHosts?.[0] || "";
+  };
+
   const filterEntries = (list: DecryptedEntry[], q: string) => {
     if (!q) return list;
     const lower = q.toLowerCase();
@@ -157,7 +169,8 @@ export function MatchList({ tabUrl }: Props) {
       (e) =>
         e.title.toLowerCase().includes(lower) ||
         e.username.toLowerCase().includes(lower) ||
-        e.urlHost.toLowerCase().includes(lower),
+        e.urlHost.toLowerCase().includes(lower) ||
+        (e.additionalUrlHosts ?? []).some((h) => h.toLowerCase().includes(lower)),
     );
   };
   const filteredMatched = filterEntries(matched, query);
@@ -258,8 +271,8 @@ export function MatchList({ tabUrl }: Props) {
                   {e.username && (
                     <div className="text-xs text-gray-600">{e.username}</div>
                   )}
-                  {e.urlHost && (
-                    <div className="text-xs text-gray-500">{e.urlHost}</div>
+                  {displayHost(e) && (
+                    <div className="text-xs text-gray-500">{displayHost(e)}</div>
                   )}
                 </li>
               ))}
@@ -319,8 +332,8 @@ export function MatchList({ tabUrl }: Props) {
                   {e.username && (
                     <div className="text-xs text-gray-600">{e.username}</div>
                   )}
-                  {e.urlHost && (
-                    <div className="text-xs text-gray-500">{e.urlHost}</div>
+                  {displayHost(e) && (
+                    <div className="text-xs text-gray-500">{displayHost(e)}</div>
                   )}
                 </li>
               ))}

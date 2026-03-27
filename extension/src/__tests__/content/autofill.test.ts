@@ -130,51 +130,43 @@ describe("performAutofill", () => {
     expect(pw.value).toBe("secret");
   });
 
-  it("fills AWS account alias + IAM username + password", () => {
-    mockHost("signin.aws.amazon.com");
+  it("fills custom fields by matching label to input id", () => {
     setupForm(`
-      <label for="acct">Account ID or alias</label>
-      <input id="acct" type="text" />
-      <label for="iam-user">IAM user name</label>
-      <input id="iam-user" type="text" />
+      <input id="brchNum" type="text" />
+      <input id="user" type="text" name="username" />
       <input id="pw" type="password" />
     `);
 
     performAutofill({
       type: "AUTOFILL_FILL",
-      username: "fallback",
+      username: "alice",
       password: "secret",
-      awsAccountIdOrAlias: "123456789012",
-      awsIamUsername: "alice-iam",
+      customFields: [{ label: "brchNum", value: "001" }],
     });
 
-    expect((document.getElementById("acct") as HTMLInputElement).value).toBe("123456789012");
-    expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("alice-iam");
+    expect((document.getElementById("brchNum") as HTMLInputElement).value).toBe("001");
+    expect((document.getElementById("user") as HTMLInputElement).value).toBe("alice");
     expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
 
-  it("falls back to normal username fill on AWS when aws-specific values are empty", () => {
-    mockHost("signin.aws.amazon.com");
+  it("fills custom fields by matching label to input name (case-insensitive)", () => {
     setupForm(`
-      <label for="iam-user">IAM user name</label>
-      <input id="iam-user" type="text" />
+      <input type="text" name="AccountId" />
+      <input id="user" type="text" name="username" />
       <input id="pw" type="password" />
     `);
 
     performAutofill({
       type: "AUTOFILL_FILL",
-      username: "fallback-user",
+      username: "alice",
       password: "secret",
-      awsAccountIdOrAlias: "",
-      awsIamUsername: "",
+      customFields: [{ label: "accountid", value: "123456789012" }],
     });
 
-    expect((document.getElementById("iam-user") as HTMLInputElement).value).toBe("fallback-user");
-    expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
+    expect((document.querySelector("[name=AccountId]") as HTMLInputElement).value).toBe("123456789012");
   });
 
-  it("ignores aws-specific payload on non-AWS pages", () => {
-    mockHost("example.com");
+  it("skips custom fields with no matching input", () => {
     setupForm(`
       <input id="user" type="text" name="username" />
       <input id="pw" type="password" />
@@ -182,13 +174,12 @@ describe("performAutofill", () => {
 
     performAutofill({
       type: "AUTOFILL_FILL",
-      username: "normal-user",
+      username: "alice",
       password: "secret",
-      awsAccountIdOrAlias: "123456789012",
-      awsIamUsername: "alice-iam",
+      customFields: [{ label: "nonexistent", value: "ignored" }],
     });
 
-    expect((document.getElementById("user") as HTMLInputElement).value).toBe("normal-user");
+    expect((document.getElementById("user") as HTMLInputElement).value).toBe("alice");
     expect((document.getElementById("pw") as HTMLInputElement).value).toBe("secret");
   });
 

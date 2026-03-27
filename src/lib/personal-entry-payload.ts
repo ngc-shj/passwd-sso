@@ -46,6 +46,14 @@ export function buildPersonalEntryPayload(
   const tags = toTagNameColor(input.selectedTags);
   const validCustomFields = filterNonEmptyCustomFields(input.customFields);
   const urlHost = parseUrlHost(input.url);
+  const additionalUrlHosts = [
+    ...new Set(
+      validCustomFields
+        .filter((f) => f.type === "url" && f.value)
+        .map((f) => parseUrlHost(f.value))
+        .filter((h): h is string => h !== null && h !== urlHost),
+    ),
+  ];
 
   const fullBlob = JSON.stringify({
     title: input.title,
@@ -65,6 +73,7 @@ export function buildPersonalEntryPayload(
     title: input.title,
     username: input.username || null,
     urlHost,
+    ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
     tags,
     requireReprompt: input.requireReprompt,
     ...(input.travelSafe !== undefined && { travelSafe: input.travelSafe }),
