@@ -361,7 +361,7 @@ async function revokeCurrentTokenOnServer(): Promise<void> {
   }
 }
 
-async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
+async function isOwnAppPage(url: string): Promise<boolean> {
   let pageUrl: URL;
   try {
     pageUrl = new URL(url);
@@ -388,7 +388,7 @@ async function shouldSuppressInlineMatches(url: string): Promise<boolean> {
     return false;
   }
 
-  // Suppress inline suggestions on the passwd-sso app pages.
+  // This is our own app — suppress inline suggestions, auto-save banner, etc.
   return true;
 }
 
@@ -1860,7 +1860,7 @@ async function handleMessage(
 
     case "GET_MATCHES_FOR_URL": {
       const effectiveUrl = message.topUrl ?? message.url;
-      if (await shouldSuppressInlineMatches(effectiveUrl)) {
+      if (await isOwnAppPage(effectiveUrl)) {
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
           entries: [],
@@ -1973,6 +1973,11 @@ async function handleMessage(
           sendResponse({ type: "LOGIN_DETECTED", action: "none" });
           return;
         }
+        // Never offer to save credentials entered on our own app
+        if (await isOwnAppPage(senderUrl)) {
+          sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+          return;
+        }
         const result = await handleLoginDetected(
           senderUrl,
           message.username,
@@ -2029,6 +2034,11 @@ async function handleMessage(
           sendResponse({ type: "SAVE_LOGIN", ok: false, error: "NO_TAB" });
           return;
         }
+        // Defense-in-depth: refuse to save credentials from our own app
+        if (await isOwnAppPage(senderUrl)) {
+          sendResponse({ type: "SAVE_LOGIN", ok: false, error: "OWN_APP" });
+          return;
+        }
         // Derive title from trusted sender URL instead of message.title
         // to prevent content-script spoofing.
         const title = (() => {
@@ -2050,6 +2060,16 @@ async function handleMessage(
     case "UPDATE_LOGIN": {
       if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       try {
+        const senderUrl = _sender.tab?.url;
+        if (!senderUrl) {
+          sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "NO_TAB" });
+          return;
+        }
+        // Defense-in-depth: refuse to update credentials from our own app
+        if (await isOwnAppPage(senderUrl)) {
+          sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "OWN_APP" });
+          return;
+        }
         const result = await handleUpdateLogin(
           message.entryId,
           message.password,
