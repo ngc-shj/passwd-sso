@@ -832,7 +832,7 @@ describe("background message flow", () => {
     expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "NOT_FOUND" });
   });
 
-  it("returns error when AUTOFILL script injection fails", async () => {
+  it("succeeds via sendMessage even when executeScript injection fails", async () => {
     chromeMock?.scripting.executeScript.mockRejectedValue(new Error("CSP"));
     cryptoMocks.decryptData.mockReset();
     cryptoMocks.decryptData
@@ -847,7 +847,8 @@ describe("background message flow", () => {
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
-    expect(res).toEqual({ type: "AUTOFILL", ok: false, error: "CSP" });
+    // executeScript fails but sendMessage reaches the listener bundled in form-detector.ts
+    expect(res).toEqual({ type: "AUTOFILL", ok: true });
   });
 
   it("retries direct inject without hint when args are unserializable", async () => {

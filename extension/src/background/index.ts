@@ -1264,11 +1264,19 @@ async function performAutofillForEntry(
   }
 
   let messageFillSucceeded = false;
+  // Try injecting autofill.js first (needs host permissions or activeTab).
+  // If injection fails (no permissions), fall through to sendMessage which
+  // reaches the listener already bundled in form-detector.ts.
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ["src/content/autofill.js"],
     });
+  } catch {
+    // executeScript failed (no host permission / no activeTab) — that's OK,
+    // form-detector.ts bundles autofill-lib.ts so the listener is already present.
+  }
+  try {
     await chrome.tabs.sendMessage(tabId, {
       type: "AUTOFILL_FILL",
       username,
