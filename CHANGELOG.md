@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.12](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.11...passwd-sso-v0.3.12) (2026-03-27)
+
+
+### Bug Fixes
+
+* update sample data, remove unused code, and harden extension message listeners ([#262](https://github.com/ngc-shj/passwd-sso/issues/262)) ([cb894be](https://github.com/ngc-shj/passwd-sso/commit/cb894be5cafd82a0f72b9fc22b0fcf60e84bf939))
+
 ## [0.3.11](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.10...passwd-sso-v0.3.11) (2026-03-27)
 
 
