@@ -217,13 +217,8 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       await chrome.action.setBadgeText({ text: "", tabId });
       return;
     }
-    // Use cached entries only — avoid triggering network fetches from badge updates.
-    // Badge will refresh on next tab activation after cache is populated.
-    if (!cachedEntries) {
-      await chrome.action.setBadgeText({ text: "", tabId });
-      return;
-    }
-    const count = cachedEntries.filter(
+    const entries = await getCachedEntries();
+    const count = entries.filter(
       (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && e.urlHost && isHostMatch(e.urlHost, host),
     ).length;
     const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
@@ -249,17 +244,10 @@ async function updateBadge(): Promise<void> {
     await chrome.action.setBadgeBackgroundColor({ color: "#F59E0B" });
     return;
   }
-  // Connected and vault unlocked — clear stale per-tab badges, then show match count
+  // Connected and vault unlocked — clear stale per-tab badges.
+  // Per-tab match counts will be set by tabs.onActivated / tabs.onUpdated events.
   await clearAllTabBadges();
   await chrome.action.setBadgeText({ text: "" });
-  try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (tab?.id) {
-      void updateBadgeForTab(tab.id, tab.url);
-    }
-  } catch {
-    // ignore
-  }
 }
 
 // ── Session persistence & token refresh ──────────────────────
@@ -1672,6 +1660,10 @@ async function handleMessage(
         cachedEntries = entries;
         cacheTimestamp = Date.now();
         sendResponse({ type: "FETCH_PASSWORDS", entries });
+        // Update badge count now that cache is populated
+        void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
+          if (tab?.id) void updateBadgeForTab(tab.id, tab.url);
+        }).catch(() => {});
       } catch (err) {
         sendResponse({
           type: "FETCH_PASSWORDS",
