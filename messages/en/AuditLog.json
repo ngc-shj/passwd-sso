@@ -19,6 +19,7 @@
   "AUTH_LOGOUT": "Logged out",
   "ENTRY_CREATE": "Created entry",
   "ENTRY_IMPORT": "Import run",
+  "ENTRY_BULK_IMPORT": "Bulk imported entries",
   "ENTRY_UPDATE": "Updated entry",
   "ENTRY_DELETE": "Deleted entry",
   "ENTRY_TRASH": "Moved entry to trash",

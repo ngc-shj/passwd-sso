@@ -19,6 +19,7 @@
   "AUTH_LOGOUT": "ログアウト",
   "ENTRY_CREATE": "エントリー作成",
   "ENTRY_IMPORT": "インポート実行",
+  "ENTRY_BULK_IMPORT": "エントリー一括インポート",
   "ENTRY_UPDATE": "エントリー更新",
   "ENTRY_DELETE": "エントリー削除",
   "ENTRY_TRASH": "エントリーをごみ箱へ移動",
