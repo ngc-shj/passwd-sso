@@ -179,7 +179,7 @@ describe("POST /api/passwords/bulk-restore", () => {
       expect.objectContaining({
         data: expect.objectContaining({
           action: "ENTRY_BULK_RESTORE",
-          targetId: "bulk",
+          targetId: null,
           metadata: expect.objectContaining({
             bulk: true,
             operation: "restore",

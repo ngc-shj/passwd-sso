@@ -53,7 +53,7 @@ async function handlePOST(req: NextRequest) {
     action: AUDIT_ACTION.ENTRY_BULK_TRASH,
     userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-    targetId: "bulk",
+    targetId: null,
     metadata: {
       bulk: true,
       requestedCount: ids.length,

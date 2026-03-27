@@ -171,7 +171,7 @@ describe("POST /api/passwords/bulk-import", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
-        targetId: "bulk",
+        targetId: null,
         metadata: expect.objectContaining({
           bulk: true,
           requestedCount: 2,

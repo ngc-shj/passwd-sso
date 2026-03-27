@@ -127,7 +127,7 @@ async function handlePOST(req: NextRequest) {
     action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
     userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-    targetId: "bulk",
+    targetId: null,
     metadata: {
       bulk: true,
       requestedCount: entries.length,
