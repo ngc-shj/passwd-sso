@@ -164,6 +164,7 @@ model User {
   breakGlassTargeted  PersonalLogAccessGrant[] @relation("BreakGlassTarget")
   createdServiceAccounts ServiceAccount[]      @relation("serviceAccountCreator")
   approvedAccessRequests AccessRequest[]
+  createdMcpClients      McpClient[]           @relation("mcpClientCreator")
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -438,6 +439,8 @@ model Tenant {
   serviceAccounts            ServiceAccount[]
   serviceAccountTokens       ServiceAccountToken[]
   accessRequests             AccessRequest[]
+  mcpClients                 McpClient[]
+  mcpAccessTokens            McpAccessToken[]
 
   // JIT access policy
   jitTokenDefaultTtlSec      Int?     @map("jit_token_default_ttl_sec")
@@ -821,6 +824,9 @@ enum AuditAction {
   ACCESS_REQUEST_CREATE
   ACCESS_REQUEST_APPROVE
   ACCESS_REQUEST_DENY
+  MCP_CLIENT_CREATE
+  MCP_CLIENT_UPDATE
+  MCP_CLIENT_DELETE
 }
 
 enum AuditScope {
@@ -1427,4 +1433,70 @@ model PersonalLogAccessGrant {
   @@index([expiresAt])
   @@index([requesterId, targetUserId, tenantId])
   @@map("personal_log_access_grants")
+}
+
+// ─── MCP Gateway Models ────────────────────────────────────
+
+model McpClient {
+  id               String   @id @default(uuid(4)) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  clientId         String   @unique @map("client_id") @db.VarChar(64)
+  clientSecretHash String   @map("client_secret_hash") @db.VarChar(64)
+  name             String   @db.VarChar(100)
+  redirectUris     String[] @map("redirect_uris")
+  allowedScopes    String   @map("allowed_scopes") @db.VarChar(1024)
+  isActive         Boolean  @default(true) @map("is_active")
+  createdById      String   @map("created_by_id") @db.Uuid
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy          User                 @relation("mcpClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  authorizationCodes McpAuthorizationCode[]
+  accessTokens       McpAccessToken[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("mcp_clients")
+}
+
+model McpAuthorizationCode {
+  id                  String    @id @default(uuid(4)) @db.Uuid
+  codeHash            String    @unique @map("code_hash") @db.VarChar(64)
+  clientId            String    @map("client_id") @db.Uuid
+  tenantId            String    @map("tenant_id") @db.Uuid
+  userId              String?   @map("user_id") @db.Uuid
+  serviceAccountId    String?   @map("service_account_id") @db.Uuid
+  redirectUri         String    @map("redirect_uri") @db.Text
+  scope               String    @db.VarChar(1024)
+  codeChallenge       String    @map("code_challenge") @db.VarChar(128)
+  codeChallengeMethod String    @default("S256") @map("code_challenge_method") @db.VarChar(10)
+  expiresAt           DateTime  @map("expires_at")
+  usedAt              DateTime? @map("used_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+
+  mcpClient McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@map("mcp_authorization_codes")
+}
+
+model McpAccessToken {
+  id               String    @id @default(uuid(4)) @db.Uuid
+  tokenHash        String    @unique @map("token_hash") @db.VarChar(64)
+  clientId         String    @map("client_id") @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  userId           String?   @map("user_id") @db.Uuid
+  serviceAccountId String?   @map("service_account_id") @db.Uuid
+  scope            String    @db.VarChar(1024)
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  mcpClient McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([expiresAt])
+  @@map("mcp_access_tokens")
 }
