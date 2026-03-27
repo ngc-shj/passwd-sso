@@ -13,6 +13,7 @@ describe("API_PATH", () => {
     expect(API_PATH.PASSWORDS_BULK_TRASH).toBe("/api/passwords/bulk-trash");
     expect(API_PATH.PASSWORDS_BULK_ARCHIVE).toBe("/api/passwords/bulk-archive");
     expect(API_PATH.PASSWORDS_BULK_RESTORE).toBe("/api/passwords/bulk-restore");
+    expect(API_PATH.PASSWORDS_BULK_IMPORT).toBe("/api/passwords/bulk-import");
     expect(API_PATH.PASSWORDS_EMPTY_TRASH).toBe("/api/passwords/empty-trash");
     expect(API_PATH.PASSWORDS_GENERATE).toBe("/api/passwords/generate");
     expect(API_PATH.TAGS).toBe("/api/tags");
@@ -73,6 +74,10 @@ describe("API_PATH", () => {
     expect(apiPath.passwordsBulkTrash()).toBe("/api/passwords/bulk-trash");
     expect(apiPath.passwordsBulkArchive()).toBe("/api/passwords/bulk-archive");
     expect(apiPath.passwordsBulkRestore()).toBe("/api/passwords/bulk-restore");
+    expect(apiPath.passwordsBulkImport()).toBe("/api/passwords/bulk-import");
+    expect(apiPath.teamPasswordsBulkImport("team-1")).toBe(
+      "/api/teams/team-1/passwords/bulk-import"
+    );
     expect(apiPath.passwordsEmptyTrash()).toBe("/api/passwords/empty-trash");
     expect(apiPath.passwordRestore("pw-1")).toBe("/api/passwords/pw-1/restore");
     expect(apiPath.passwordAttachments("pw-1")).toBe(

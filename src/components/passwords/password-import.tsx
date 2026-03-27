@@ -44,7 +44,6 @@ function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelCon
   const isTeamImport = Boolean(scopedTeamId);
   const tagsPath = scopedTeamId ? apiPath.teamTags(scopedTeamId) : API_PATH.TAGS;
   const foldersPath = scopedTeamId ? apiPath.teamFolders(scopedTeamId) : API_PATH.FOLDERS;
-  const passwordsPath = scopedTeamId ? apiPath.teamPasswords(scopedTeamId) : API_PATH.PASSWORDS;
 
   // Resolve team encryption key for team imports
   const [teamEncryptionKey, setTeamEncryptionKey] = useState<CryptoKey | undefined>();
@@ -90,7 +89,6 @@ function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelCon
     isTeamImport,
     tagsPath,
     foldersPath,
-    passwordsPath,
     sourceFilename,
     encryptedInput,
     userId: userId ?? undefined,

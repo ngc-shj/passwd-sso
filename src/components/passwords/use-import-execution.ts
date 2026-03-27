@@ -13,7 +13,6 @@ interface UseImportExecutionParams {
   isTeamImport: boolean;
   tagsPath: string;
   foldersPath: string;
-  passwordsPath: string;
   sourceFilename: string;
   encryptedInput: boolean;
   userId?: string;
@@ -43,7 +42,6 @@ export function useImportExecution({
   isTeamImport,
   tagsPath,
   foldersPath,
-  passwordsPath,
   sourceFilename,
   encryptedInput,
   userId,
@@ -77,7 +75,6 @@ export function useImportExecution({
         isTeamImport,
         tagsPath,
         foldersPath,
-        passwordsPath,
         sourceFilename,
         userId,
         encryptionKey: encryptionKey ?? undefined,

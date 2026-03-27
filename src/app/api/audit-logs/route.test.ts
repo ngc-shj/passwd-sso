@@ -295,11 +295,11 @@ describe("GET /api/audit-logs", () => {
   // --- Entry overviews resolved for PasswordEntry targets ---
 
   it("resolves encryptedOverview for PasswordEntry target logs", async () => {
-    const log = makeLog({ targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY, targetId: "entry-abc" });
+    const log = makeLog({ targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY, targetId: "00000000-0000-4000-a000-000000000abc" });
     mockAuditLogFindMany.mockResolvedValue([log]);
     mockPasswordEntryFindMany.mockResolvedValue([
       {
-        id: "entry-abc",
+        id: "00000000-0000-4000-a000-000000000abc",
         encryptedOverview: "cipher",
         overviewIv: "iv-hex",
         overviewAuthTag: "tag-hex",
@@ -311,7 +311,7 @@ describe("GET /api/audit-logs", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.entryOverviews["entry-abc"]).toEqual({
+    expect(json.entryOverviews["00000000-0000-4000-a000-000000000abc"]).toEqual({
       ciphertext: "cipher",
       iv: "iv-hex",
       authTag: "tag-hex",

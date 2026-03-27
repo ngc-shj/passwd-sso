@@ -11,6 +11,7 @@ import {
   PASSPHRASE_SEPARATOR_MAX,
   CHARS_FIELD_MAX,
   HISTORY_BLOB_MAX,
+  FILENAME_MAX_LENGTH,
   asciiPrintable,
   encryptedFieldSchema,
   hexString,
@@ -101,9 +102,19 @@ export const teamHistoryReencryptSchema = z.object({
   oldBlobHash: hexString(32),
 });
 
+// ─── Bulk Import Schemas ────────────────────────────────────
+
+export const BULK_IMPORT_MAX_ENTRIES = 50;
+
+export const bulkImportSchema = z.object({
+  entries: z.array(createE2EPasswordSchema).min(1).max(BULK_IMPORT_MAX_ENTRIES),
+  sourceFilename: z.string().max(FILENAME_MAX_LENGTH).optional(),
+});
+
 // ─── Type Exports ──────────────────────────────────────────
 
 export type GeneratePasswordInput = z.infer<typeof generatePasswordSchema>;
 export type GeneratePassphraseInput = z.infer<typeof generatePassphraseSchema>;
 export type CreateE2EPasswordInput = z.infer<typeof createE2EPasswordSchema>;
 export type UpdateE2EPasswordInput = z.infer<typeof updateE2EPasswordSchema>;
+export type BulkImportInput = z.infer<typeof bulkImportSchema>;

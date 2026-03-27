@@ -215,18 +215,21 @@ export default function TeamAuditLogsPage({
   );
 
   useEffect(() => {
+    let stale = false;
     setLoading(true);
     fetchLogs().then(async (data) => {
+      if (stale) return;
       if (data) {
         setLogs(data.items);
         setNextCursor(data.nextCursor);
         if (data.entryOverviews) {
           const names = await resolveTeamEntryNames(data.entryOverviews);
-          setEntryNames(names);
+          if (!stale) setEntryNames(names);
         }
       }
       setLoading(false);
     });
+    return () => { stale = true; };
   }, [fetchLogs, resolveTeamEntryNames]);
 
   useEffect(() => {
