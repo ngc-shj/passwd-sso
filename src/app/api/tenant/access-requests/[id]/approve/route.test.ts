@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
 import { DEFAULT_SESSION } from "../../../../../../__tests__/helpers/mock-auth";
 import {
   createRequest,
@@ -86,6 +87,7 @@ const makeAccessRequest = (overrides: Record<string, unknown> = {}) => ({
   serviceAccountId: SA_ID,
   requestedScope: "passwords:read",
   status: "PENDING",
+  serviceAccount: { isActive: true },
   ...overrides,
 });
 
@@ -194,7 +196,7 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
       const tx = {
         serviceAccountToken: {
-          count: vi.fn().mockResolvedValue(5), // MAX_SA_TOKENS_PER_ACCOUNT = 5
+          count: vi.fn().mockResolvedValue(MAX_SA_TOKENS_PER_ACCOUNT),
           create: vi.fn(),
         },
         accessRequest: {

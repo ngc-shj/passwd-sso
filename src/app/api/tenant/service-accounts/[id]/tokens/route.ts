@@ -121,36 +121,41 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const result = await parseBody(req, saTokenCreateSchema);
   if (!result.ok) return result.response;
 
-  const activeTokenCount = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccountToken.count({
-      where: { serviceAccountId: id, revokedAt: null },
-    }),
-  );
-  if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
-    return NextResponse.json(
-      { error: API_ERROR.SA_TOKEN_LIMIT_EXCEEDED },
-      { status: 409 },
-    );
-  }
-
   const plaintext = SA_TOKEN_PREFIX + randomBytes(32).toString("hex");
   const prefix = plaintext.slice(0, 7);
   const tokenHash = hashToken(plaintext);
   const scope = result.data.scope.join(",");
 
-  const token = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccountToken.create({
-      data: {
-        serviceAccountId: id,
-        tenantId: actor.tenantId,
-        tokenHash,
-        prefix,
-        name: result.data.name,
-        scope,
-        expiresAt: result.data.expiresAt,
-      },
-    }),
-  );
+  let token;
+  try {
+    token = await prisma.$transaction(async (tx) => {
+      const activeTokenCount = await tx.serviceAccountToken.count({
+        where: { serviceAccountId: id, revokedAt: null },
+      });
+      if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
+        throw new Error("Token limit exceeded");
+      }
+      return tx.serviceAccountToken.create({
+        data: {
+          serviceAccountId: id,
+          tenantId: actor.tenantId,
+          tokenHash,
+          prefix,
+          name: result.data.name,
+          scope,
+          expiresAt: result.data.expiresAt,
+        },
+      });
+    });
+  } catch (err) {
+    if (err instanceof Error && err.message === "Token limit exceeded") {
+      return NextResponse.json(
+        { error: API_ERROR.SA_TOKEN_LIMIT_EXCEEDED },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
 
   logAudit({
     scope: AUDIT_SCOPE.TENANT,

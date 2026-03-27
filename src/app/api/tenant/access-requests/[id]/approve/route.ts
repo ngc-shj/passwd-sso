@@ -55,12 +55,20 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         serviceAccountId: true,
         requestedScope: true,
         status: true,
+        serviceAccount: { select: { isActive: true } },
       },
     }),
   );
 
   if (!request || request.tenantId !== actor.tenantId) {
     return notFound();
+  }
+
+  if (!request.serviceAccount.isActive) {
+    return NextResponse.json(
+      { error: API_ERROR.SA_NOT_FOUND, message: "Service account is inactive" },
+      { status: 409 },
+    );
   }
 
   // Read tenant policy for JIT TTL bounds
@@ -102,6 +110,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
       // Re-validate scope against SA allowlist at approval time
       const validatedScopes = parseSaTokenScopes(request.requestedScope);
+      if (validatedScopes.length === 0) {
+        throw new Error("No valid scopes after re-validation");
+      }
       const validatedScope = validatedScopes.join(",");
 
       // Issue a short-lived SA token scoped to validated scopes only
@@ -139,6 +150,12 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       return NextResponse.json(
         { error: API_ERROR.SA_TOKEN_LIMIT_EXCEEDED },
         { status: 409 },
+      );
+    }
+    if (err instanceof Error && err.message === "No valid scopes after re-validation") {
+      return NextResponse.json(
+        { error: "INVALID_SCOPE", message: "No valid scopes remain after re-validation" },
+        { status: 400 },
       );
     }
     throw err;

@@ -31,7 +31,11 @@ export async function POST(req: NextRequest) {
 
   const rl = await tokenRateLimiter.check(`mcp:token:${client_id}`);
   if (!rl.allowed) {
-    return NextResponse.json({ error: "rate_limited" }, { status: 429 });
+    const retryAfter = Math.ceil((rl.retryAfterMs ?? 60_000) / 1000);
+    return NextResponse.json(
+      { error: "slow_down" },
+      { status: 429, headers: { "Retry-After": String(retryAfter) } },
+    );
   }
 
   const clientSecretHash = hashToken(client_secret);

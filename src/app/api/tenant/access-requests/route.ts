@@ -118,7 +118,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
 
-  if (!sa || sa.tenantId !== actor.tenantId) {
+  if (!sa || sa.tenantId !== actor.tenantId || !sa.isActive) {
     return NextResponse.json(
       { error: API_ERROR.SA_NOT_FOUND },
       { status: 404 },
