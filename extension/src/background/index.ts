@@ -1294,6 +1294,7 @@ async function performAutofillForEntry(
         username,
         password ?? "",
         hintArg,
+        textCustomFields,
       ],
       func: (
         usernameArg: string,
@@ -1304,6 +1305,7 @@ async function performAutofillForEntry(
           type?: string;
           autocomplete?: string;
         } | null,
+        customFieldsArg?: Array<{ label: string; value: string }>,
       ) => {
       const isUsableInput = (input: HTMLInputElement) =>
         !input.disabled && !input.readOnly;
@@ -1394,7 +1396,25 @@ async function performAutofillForEntry(
         }
       }
 
-      if (fallbackUsername && usernameArg) setInputValue(fallbackUsername, usernameArg);
+      // Fill custom fields by matching label to input id/name
+      const cfTargets = new Set<HTMLInputElement>();
+      if (customFieldsArg) {
+        for (const { label, value } of customFieldsArg) {
+          const lower = label.toLowerCase();
+          const target = inputs.find(
+            (i) => isUsableInput(i) && (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
+          );
+          if (target) {
+            cfTargets.add(target);
+            setInputValue(target, value);
+          }
+        }
+      }
+
+      // Skip username fill if target is reserved for a custom field
+      if (fallbackUsername && usernameArg && !cfTargets.has(fallbackUsername)) {
+        setInputValue(fallbackUsername, usernameArg);
+      }
       if (passwordInput && passwordArg) setInputValue(passwordInput, passwordArg);
       },
     });

@@ -169,7 +169,8 @@ export function MatchList({ tabUrl }: Props) {
       (e) =>
         e.title.toLowerCase().includes(lower) ||
         e.username.toLowerCase().includes(lower) ||
-        e.urlHost.toLowerCase().includes(lower),
+        e.urlHost.toLowerCase().includes(lower) ||
+        (e.additionalUrlHosts ?? []).some((h) => h.toLowerCase().includes(lower)),
     );
   };
   const filteredMatched = filterEntries(matched, query);
