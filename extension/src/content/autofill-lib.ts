@@ -239,7 +239,27 @@ export function performAutofill(payload: AutofillPayload) {
       ? hintedInput
       : null;
 
+  // Identify inputs reserved for custom fields — exclude from username candidates
+  const customFieldTargets = new Set<HTMLInputElement>();
+  if (payload.customFields) {
+    for (const { label } of payload.customFields) {
+      const lower = label.toLowerCase();
+      const target = inputs.find(
+        (i) =>
+          isUsableInput(i) &&
+          (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
+      );
+      if (target) customFieldTargets.add(target);
+    }
+  }
+
   const focusedUsername = findFocusedTextInput();
+  // If focused input is reserved for a custom field, don't use it as username target
+  const effectiveFocusedUsername =
+    focusedUsername && !customFieldTargets.has(focusedUsername) ? focusedUsername : null;
+  const effectiveHintedUsername =
+    hintedUsernameInput && !customFieldTargets.has(hintedUsernameInput) ? hintedUsernameInput : null;
+
   const scopeForm = (focusedUsername ?? hintedUsernameInput)?.form ?? null;
   const passwordInput =
     (scopeForm
@@ -248,9 +268,12 @@ export function performAutofill(payload: AutofillPayload) {
         )
       : null) ?? findPasswordInput(inputs);
   const usernameInput =
-    focusedUsername ??
-    hintedUsernameInput ??
-    findUsernameInput(inputs, passwordInput);
+    effectiveFocusedUsername ??
+    effectiveHintedUsername ??
+    findUsernameInput(
+      inputs.filter((i) => !customFieldTargets.has(i)),
+      passwordInput,
+    );
 
   if (usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
