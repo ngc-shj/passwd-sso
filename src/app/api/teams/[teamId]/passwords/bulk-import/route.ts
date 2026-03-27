@@ -90,7 +90,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     userId,
     teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-    targetId: null,
+    // targetId omitted for bulk operations
     metadata: {
       bulk: true,
       requestedCount: entries.length,

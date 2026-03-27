@@ -242,7 +242,6 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
         teamId: TEAM_ID,
-        targetId: null,
         metadata: expect.objectContaining({
           bulk: true,
           requestedCount: 2,
