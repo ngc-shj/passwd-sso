@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.8...passwd-sso-v0.4.0) (2026-03-27)
+
+
+### Features
+
+* refine extension popup UX ([#254](https://github.com/ngc-shj/passwd-sso/issues/254)) ([61e5586](https://github.com/ngc-shj/passwd-sso/commit/61e55866b096394269004240ff46583e1b51f078))
+
 ## [0.3.8](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.7...passwd-sso-v0.3.8) (2026-03-27)
 
 
