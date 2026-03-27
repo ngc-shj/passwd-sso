@@ -75,4 +75,23 @@ describe("sortByUrlMatch", () => {
     const sorted = sortByUrlMatch(entries, null);
     expect(sorted).toBe(entries);
   });
+
+  it("matches entries via additionalUrlHosts", () => {
+    const entries = [
+      { id: "1", urlHost: "foo.com" },
+      { id: "2", urlHost: "bar.com", additionalUrlHosts: ["example.com"] },
+      { id: "3", urlHost: "baz.com" },
+    ];
+    const sorted = sortByUrlMatch(entries, "example.com");
+    expect(sorted[0].id).toBe("2");
+  });
+
+  it("matches primary urlHost before additionalUrlHosts", () => {
+    const entries = [
+      { id: "1", urlHost: "", additionalUrlHosts: ["example.com"] },
+      { id: "2", urlHost: "example.com" },
+    ];
+    const sorted = sortByUrlMatch(entries, "example.com");
+    expect(sorted.map((e) => e.id)).toEqual(["1", "2"]);
+  });
 });

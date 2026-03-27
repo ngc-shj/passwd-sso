@@ -61,7 +61,10 @@ export async function handleLoginDetected(
     const entries = await deps.getCachedEntries();
     // Find entries matching host + username
     const hostMatches = entries.filter(
-      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && deps!.isHostMatch(e.urlHost, host),
+      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+        (e.urlHost && deps!.isHostMatch(e.urlHost, host)) ||
+        (e.additionalUrlHosts ?? []).some((h) => deps!.isHostMatch(h, host))
+      ),
     );
 
     // Find entry with matching username (first match)

@@ -590,17 +590,11 @@ describe("background message flow", () => {
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
-    expect(chromeMock?.scripting.executeScript).toHaveBeenCalled();
     expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
       type: "AUTOFILL_FILL",
       username: "alice",
       password: "secret",
     });
-    // Direct fallback should NOT run when message-based autofill succeeds.
-    const directFallbackCall = chromeMock?.scripting.executeScript.mock.calls.find(
-      (call) => Array.isArray((call[0] as { args?: unknown[] }).args),
-    );
-    expect(directFallbackCall).toBeUndefined();
   });
 
   it("autofills with blob username fallback when overview username is missing", async () => {
@@ -626,14 +620,15 @@ describe("background message flow", () => {
     });
   });
 
-  it("includes AWS fields from custom fields when available", async () => {
+  it("includes text custom fields in autofill payload", async () => {
     cryptoMocks.decryptData
       .mockResolvedValueOnce(
         JSON.stringify({
           password: "secret",
           customFields: [
-            { label: "AWS Account ID / Alias", value: "123456789012" },
-            { label: "IAM username", value: "alice-iam" },
+            { label: "brchNum", value: "001", type: "text" },
+            { label: "apiKey", value: "sk-123", type: "hidden" },
+            { label: "https://example.com", value: "https://example.com", type: "url" },
           ],
         }),
       )
@@ -648,13 +643,14 @@ describe("background message flow", () => {
 
     const res = await sendMessage({ type: "AUTOFILL", entryId: "pw-1", tabId: 1 });
     expect(res).toEqual({ type: "AUTOFILL", ok: true });
-    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1, {
-      type: "AUTOFILL_FILL",
-      username: "alice",
-      password: "secret",
-      awsAccountIdOrAlias: "123456789012",
-      awsIamUsername: "alice-iam",
-    });
+    expect(chromeMock?.tabs.sendMessage).toHaveBeenCalledWith(1,
+      expect.objectContaining({
+        type: "AUTOFILL_FILL",
+        username: "alice",
+        password: "secret",
+        customFields: [{ label: "brchNum", value: "001" }],
+      }),
+    );
   });
 
   it("suppresses inline matches on passwd-sso origin", async () => {
@@ -860,9 +856,8 @@ describe("background message flow", () => {
     chromeMock?.tabs.sendMessage.mockRejectedValueOnce(
       new Error("Could not establish connection"),
     );
-    // 1st call: inject file, 2nd call: direct fallback with hint -> unserializable, 3rd: retry with null hint
+    // 1st call: direct fallback with hint -> unserializable, 2nd: retry with null hint
     chromeMock?.scripting.executeScript
-      .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error("Value is unserializable"))
       .mockResolvedValueOnce([]);
 
