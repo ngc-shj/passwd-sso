@@ -224,9 +224,11 @@ async function updateBadgeForTab(tabId: number, url: string | undefined): Promis
       await chrome.action.setBadgeText({ text: "", tabId });
       return;
     }
-    const count = cachedEntries.filter(
-      (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && e.urlHost && isHostMatch(e.urlHost, host),
-    ).length;
+    const count = cachedEntries.filter((e) => {
+      if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
+      if (e.urlHost && isHostMatch(e.urlHost, host)) return true;
+      return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, host));
+    }).length;
     const text = count === 0 ? "" : count > 99 ? "99+" : count.toString();
     await chrome.action.setBadgeText({ text, tabId });
     if (count > 0) {
@@ -658,7 +660,10 @@ chrome.commands.onCommand.addListener(async (command) => {
     try {
       const entries = await getCachedEntries();
       const match = entries.find(
-        (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && isHostMatch(e.urlHost, tabHost),
+        (e) => e.entryType === EXT_ENTRY_TYPE.LOGIN && (
+          (e.urlHost && isHostMatch(e.urlHost, tabHost)) ||
+          (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost))
+        ),
       );
       if (!match) {
         return;
@@ -774,9 +779,13 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         title?: string;
         username?: string;
         urlHost?: string;
+        additionalUrlHosts?: string[];
         cardholderName?: string;
         fullName?: string;
       };
+      const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
+        ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
+        : [];
       entries.push({
         id: item.id,
         title: overview.title ?? "",
@@ -786,6 +795,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
           overview.fullName ??
           "",
         urlHost: overview.urlHost ?? "",
+        ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
         entryType: item.entryType,
       });
     } catch {
@@ -942,14 +952,19 @@ async function decryptTeamOverviews(
       title?: string;
       username?: string;
       urlHost?: string;
+      additionalUrlHosts?: string[];
       cardholderName?: string;
       fullName?: string;
     };
+    const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
+      ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
+      : [];
     return {
       id: item.id,
       title: overview.title ?? "",
       username: overview.username ?? overview.cardholderName ?? overview.fullName ?? "",
       urlHost: overview.urlHost ?? "",
+      ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
       entryType: item.entryType,
       teamId,
       teamName,
@@ -1214,23 +1229,11 @@ async function performAutofillForEntry(
     "";
 
   const customFields = Array.isArray(blob.customFields) ? blob.customFields : [];
-  const findCustomFieldValue = (pattern: RegExp): string | null => {
-    for (const field of customFields) {
-      const label = (field?.label ?? "").toString();
-      const value = (field?.value ?? "").toString();
-      if (!label || !value) continue;
-      if (pattern.test(label)) return value;
-    }
-    return null;
-  };
-  const awsAccountIdOrAlias =
-    findCustomFieldValue(
-      /(aws.*account|account.*(id|alias)|account id|account alias|アカウント|アカウントID|エイリアス)/i,
-    ) ?? "";
-  const awsIamUsername =
-    findCustomFieldValue(
-      /(iam.*(user|username)|user ?name|iamユーザー|iamユーザ|ユーザー名)/i,
-    ) ?? "";
+
+  // Generic text custom fields for autofill by input id/name matching
+  const textCustomFields = customFields
+    .filter((f) => (!f.type || f.type.toLowerCase() === "text") && f.label && f.value)
+    .map(({ label, value }) => ({ label: label!, value: value! }));
 
   const serializableTargetHint = targetHint
     ? {
@@ -1264,18 +1267,8 @@ async function performAutofillForEntry(
   }
 
   let messageFillSucceeded = false;
-  // Try injecting autofill.js first (needs host permissions or activeTab).
-  // If injection fails (no permissions), fall through to sendMessage which
-  // reaches the listener already bundled in form-detector.ts.
-  try {
-    await chrome.scripting.executeScript({
-      target: { tabId },
-      files: ["src/content/autofill.js"],
-    });
-  } catch {
-    // executeScript failed (no host permission / no activeTab) — that's OK,
-    // form-detector.ts bundles autofill-lib.ts so the listener is already present.
-  }
+  // autofill-lib.ts is bundled in form-detector.ts (manifest content_scripts),
+  // so the AUTOFILL_FILL listener is already present — no executeScript needed.
   try {
     await chrome.tabs.sendMessage(tabId, {
       type: "AUTOFILL_FILL",
@@ -1283,8 +1276,7 @@ async function performAutofillForEntry(
       ...(password ? { password } : {}),
       ...(totpCode ? { totpCode } : {}),
       ...(serializableTargetHint ? { targetHint: serializableTargetHint } : {}),
-      ...(awsAccountIdOrAlias ? { awsAccountIdOrAlias } : {}),
-      ...(awsIamUsername ? { awsIamUsername } : {}),
+      ...(textCustomFields.length ? { customFields: textCustomFields } : {}),
     });
     messageFillSucceeded = true;
   } catch {
@@ -1302,8 +1294,7 @@ async function performAutofillForEntry(
         username,
         password ?? "",
         hintArg,
-        awsAccountIdOrAlias,
-        awsIamUsername,
+        textCustomFields,
       ],
       func: (
         usernameArg: string,
@@ -1314,8 +1305,7 @@ async function performAutofillForEntry(
           type?: string;
           autocomplete?: string;
         } | null,
-        awsAccountIdOrAliasArg?: string,
-        awsIamUsernameArg?: string,
+        customFieldsArg?: Array<{ label: string; value: string }>,
       ) => {
       const isUsableInput = (input: HTMLInputElement) =>
         !input.disabled && !input.readOnly;
@@ -1340,12 +1330,6 @@ async function performAutofillForEntry(
       const inputs = Array.from(
         document.querySelectorAll("input"),
       ) as HTMLInputElement[];
-      const host = window.location.hostname.toLowerCase();
-      const isAwsSignInPage =
-        host === "signin.aws.amazon.com" ||
-        host.endsWith(".signin.aws.amazon.com") ||
-        host === "sign-in.aws.amazon.com" ||
-        host.endsWith(".sign-in.aws.amazon.com");
 
       const findInputByHint = () => {
         if (!targetHintArg) return null;
@@ -1412,28 +1396,24 @@ async function performAutofillForEntry(
         }
       }
 
-      if (fallbackUsername && usernameArg) setInputValue(fallbackUsername, usernameArg);
-      if (isAwsSignInPage) {
-        const readHints = (input: HTMLInputElement) => {
-          const labelText =
-            (input.id
-              ? document.querySelector(`label[for="${input.id.replace(/["\\]/g, "\\$&")}"]`)
-                  ?.textContent ?? ""
-              : "") + (input.getAttribute("aria-label") ?? "") + (input.placeholder ?? "");
-          return `${input.name} ${input.id} ${labelText}`.toLowerCase();
-        };
-        const accountInput = inputs.find((i) => {
-          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-          const hints = readHints(i);
-          return /(account|alias|アカウント|エイリアス)/.test(hints);
-        });
-        const iamInput = inputs.find((i) => {
-          if (!isUsableInput(i) || !["text", "email", "tel"].includes(i.type)) return false;
-          const hints = readHints(i);
-          return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(hints);
-        });
-        if (accountInput && awsAccountIdOrAliasArg) setInputValue(accountInput, awsAccountIdOrAliasArg);
-        if (iamInput && awsIamUsernameArg) setInputValue(iamInput, awsIamUsernameArg);
+      // Fill custom fields by matching label to input id/name
+      const cfTargets = new Set<HTMLInputElement>();
+      if (customFieldsArg) {
+        for (const { label, value } of customFieldsArg) {
+          const lower = label.toLowerCase();
+          const target = inputs.find(
+            (i) => isUsableInput(i) && (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower),
+          );
+          if (target) {
+            cfTargets.add(target);
+            setInputValue(target, value);
+          }
+        }
+      }
+
+      // Skip username fill if target is reserved for a custom field
+      if (fallbackUsername && usernameArg && !cfTargets.has(fallbackUsername)) {
+        setInputValue(fallbackUsername, usernameArg);
       }
       if (passwordInput && passwordArg) setInputValue(passwordInput, passwordArg);
       },
@@ -1968,12 +1948,11 @@ async function handleMessage(
           return;
         }
         const entries = await getCachedEntries();
-        const matches = entries.filter(
-          (e) =>
-            e.entryType === EXT_ENTRY_TYPE.LOGIN &&
-            e.urlHost &&
-            isHostMatch(e.urlHost, tabHost),
-        );
+        const matches = entries.filter((e) => {
+          if (e.entryType !== EXT_ENTRY_TYPE.LOGIN) return false;
+          if (e.urlHost && isHostMatch(e.urlHost, tabHost)) return true;
+          return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
+        });
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
           entries: matches,

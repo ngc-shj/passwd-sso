@@ -31,6 +31,7 @@ export interface DecryptedEntry {
   title: string;
   username: string;
   urlHost: string;
+  additionalUrlHosts?: string[];
   entryType: string;
   teamId?: string;
   teamName?: string;
@@ -77,8 +78,7 @@ export interface AutofillPayload {
   password: string;
   targetHint?: AutofillTargetHint;
   totpCode?: string;
-  awsAccountIdOrAlias?: string;
-  awsIamUsername?: string;
+  customFields?: Array<{ label: string; value: string }>;
 }
 
 export interface AutofillTargetHint {
