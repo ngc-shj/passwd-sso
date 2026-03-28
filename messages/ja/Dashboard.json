@@ -83,8 +83,8 @@
   "tenantTabProvisioningDesc": "SCIMプロビジョニングとディレクトリ同期を設定して、ユーザー管理を自動化します。",
   "tenantTabAuditLogDesc": "組織のアクティビティとセキュリティイベントを確認します。",
   "tenantTabWebhooksDesc": "Webhookエンドポイントを設定して、リアルタイムのイベント通知を受信します。",
-  "tenantTabUnifiedAccess": "統合アクセス",
-  "tenantTabUnifiedAccessDesc": "AIエージェント連携のためのサービスアカウント、MCPクライアント、アクセスリクエストを管理します。",
+  "tenantTabMachineIdentity": "マシン ID",
+  "tenantTabMachineIdentityDesc": "マシン ID のためのサービスアカウント、MCPクライアント、アクセスリクエストを管理します。",
   "tenantTabServiceAccounts": "サービスアカウント",
   "tenantTabMcpClients": "MCPクライアント",
   "tenantTabAccessRequests": "アクセスリクエスト"

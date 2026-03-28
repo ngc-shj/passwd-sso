@@ -1,10 +1,10 @@
-# Unified Access: AI Agent Identity & MCP Gateway
+# Machine Identity: AI Agent Identity & MCP Gateway
 
 ## Overview
 
-passwd-sso's Unified Access feature enables AI agents and automated systems to interact with the password vault alongside human users, while preserving the zero-knowledge encryption model.
+passwd-sso's Machine Identity feature enables AI agents and automated systems to interact with the password vault alongside human users, while preserving the zero-knowledge encryption model.
 
-Inspired by [1Password's Unified Access](https://1password.com/product/unified-access), this feature introduces non-human identities as first-class entities with scoped access, approval workflows, and unified audit tracking.
+Inspired by [1Password's Machine Identity](https://1password.com/product/unified-access), this feature introduces non-human identities as first-class entities with scoped access, approval workflows, and unified audit tracking.
 
 ## Architecture
 
@@ -89,7 +89,7 @@ SA (sa_ token)                    Admin (browser session)
      │──────────────────────────────────►  │
      │                                    │
      │                           Reviews request in UI
-     │                           Unified Access → Access Requests
+     │                           Machine Identity → Access Requests
      │                                    │
      │                     POST /approve  │
      │  ◄─────────────────────────────────│
@@ -223,7 +223,7 @@ Tenant audit log UI includes an actor type filter dropdown. The API accepts an o
 
 ### Step 1: Register MCP Client
 
-Tenant Settings → Unified Access → MCP Clients → **Register MCP Client**
+Tenant Settings → Machine Identity → MCP Clients → **Register MCP Client**
 
 - **Name:** `claude-desktop`
 - **Redirect URIs:** `http://localhost:3000/callback`

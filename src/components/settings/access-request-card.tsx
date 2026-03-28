@@ -71,7 +71,7 @@ const STATUS_VARIANTS: Record<
 };
 
 export function AccessRequestCard() {
-  const t = useTranslations("UnifiedAccess");
+  const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
   const locale = useLocale();
 

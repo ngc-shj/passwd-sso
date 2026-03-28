@@ -60,7 +60,7 @@ interface SaToken {
 }
 
 export function ServiceAccountCard() {
-  const t = useTranslations("UnifiedAccess");
+  const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
   const locale = useLocale();
 

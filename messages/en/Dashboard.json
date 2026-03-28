@@ -83,8 +83,8 @@
   "tenantTabProvisioningDesc": "Set up SCIM provisioning and directory sync for automated user management.",
   "tenantTabAuditLogDesc": "Review organization activity and security events.",
   "tenantTabWebhooksDesc": "Configure webhook endpoints to receive real-time event notifications.",
-  "tenantTabUnifiedAccess": "Unified Access",
-  "tenantTabUnifiedAccessDesc": "Manage service accounts, MCP clients, and access requests for AI agent integration.",
+  "tenantTabMachineIdentity": "Machine Identity",
+  "tenantTabMachineIdentityDesc": "Manage service accounts, MCP clients, and access requests for machine identity.",
   "tenantTabServiceAccounts": "Service Accounts",
   "tenantTabMcpClients": "MCP Clients",
   "tenantTabAccessRequests": "Access Requests"

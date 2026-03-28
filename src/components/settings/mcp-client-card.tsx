@@ -62,7 +62,7 @@ function validateRedirectUris(uris: string[]): boolean {
 }
 
 export function McpClientCard() {
-  const t = useTranslations("UnifiedAccess");
+  const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
 
   const [clients, setClients] = useState<McpClient[]>([]);

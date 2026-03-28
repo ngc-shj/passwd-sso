@@ -91,7 +91,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **REST API v1** — `/api/v1/*` with OpenAPI 3.1 spec
 - **API Keys** — Scoped keys with SHA-256 hashed tokens and configurable expiration
 
-### AI & Automation (Unified Access)
+### AI & Automation (Machine Identity)
 
 - **Service Accounts** — Non-human identity management with scoped `sa_` tokens, tenant admin CRUD
 - **MCP Gateway** — [Model Context Protocol](https://modelcontextprotocol.io/) server for AI agent credential access (Claude Desktop, Cursor)

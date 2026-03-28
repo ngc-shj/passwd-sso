@@ -64,7 +64,7 @@ export default function TenantSettingsPage() {
             <TabsTrigger value="members"><Users className="h-4 w-4 mr-2" />{t("tenantTabMembers")}</TabsTrigger>
             <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />{t("tenantTabSecurity")}</TabsTrigger>
             <TabsTrigger value="provisioning"><Link2 className="h-4 w-4 mr-2" />{t("tenantTabProvisioning")}</TabsTrigger>
-            <TabsTrigger value="unified-access"><Bot className="h-4 w-4 mr-2" />{t("tenantTabUnifiedAccess")}</TabsTrigger>
+            <TabsTrigger value="machine-identity"><Bot className="h-4 w-4 mr-2" />{t("tenantTabMachineIdentity")}</TabsTrigger>
             <TabsTrigger value="audit-log"><ScrollText className="h-4 w-4 mr-2" />{t("tenantTabAuditLog")}</TabsTrigger>
             <TabsTrigger value="webhooks"><Webhook className="h-4 w-4 mr-2" />{t("tenantTabWebhooks")}</TabsTrigger>
           </TabsList>
@@ -98,8 +98,8 @@ export default function TenantSettingsPage() {
               </TabsContent>
             </Tabs>
           </TabsContent>
-          <TabsContent value="unified-access" className="mt-0 space-y-4">
-            <TabDescription>{t("tenantTabUnifiedAccessDesc")}</TabDescription>
+          <TabsContent value="machine-identity" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabMachineIdentityDesc")}</TabDescription>
             <Tabs defaultValue="service-accounts" className="space-y-4">
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="service-accounts">

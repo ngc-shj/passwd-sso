@@ -60,7 +60,7 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - MCP tokens: `mcp_` prefix, validated by dedicated `validateMcpToken()` in MCP route handlers
 - JIT Access: SA self-service via `access-request:create` scope → admin approval → short-lived token
 
-### Unified Access (AI Agent Identity)
+### Machine Identity (AI Agent Identity)
 
 - Service accounts as first-class non-human identities with `sa_` prefix tokens
 - MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
@@ -312,7 +312,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/v1/vault/status` | GET | REST API v1 vault status |
 | `/api/v1/openapi.json` | GET | OpenAPI 3.1 spec |
 
-#### Service Accounts & Unified Access
+#### Service Accounts & Machine Identity
 
 | Endpoint | Methods | Purpose |
 |----------|---------|---------|
