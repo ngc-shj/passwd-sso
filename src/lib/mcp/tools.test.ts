@@ -55,24 +55,30 @@ describe("toolGetDecryptedCredential", () => {
     const token = makeToken();
     const result = await toolGetDecryptedCredential(token, { id: "550e8400-e29b-41d4-a716-446655440000" });
     expect(result.error?.message).toContain("No active delegation session");
+    expect(mockFindActiveDelegationSession).toHaveBeenCalledWith("user-1", "tok-1");
   });
 
   it("returns error when entry is not delegated (Redis miss)", async () => {
     mockFindActiveDelegationSession.mockResolvedValueOnce({ id: "session-1", expiresAt: new Date(Date.now() + 60000) });
     mockFetchDelegationEntry.mockResolvedValueOnce(null);
     const token = makeToken();
-    const result = await toolGetDecryptedCredential(token, { id: "550e8400-e29b-41d4-a716-446655440000" });
+    const entryId = "550e8400-e29b-41d4-a716-446655440000";
+    const result = await toolGetDecryptedCredential(token, { id: entryId });
     expect(result.error?.message).toContain("not delegated");
+    expect(mockFetchDelegationEntry).toHaveBeenCalledWith("user-1", "session-1", entryId);
   });
 
   it("returns plaintext entry when delegation is active", async () => {
-    const mockEntry = { id: "550e8400-e29b-41d4-a716-446655440000", title: "GitHub", username: "alice", password: "secret", url: "https://github.com", notes: null };
+    const entryId = "550e8400-e29b-41d4-a716-446655440000";
+    const mockEntry = { id: entryId, title: "GitHub", username: "alice", password: "secret", url: "https://github.com", notes: null };
     mockFindActiveDelegationSession.mockResolvedValueOnce({ id: "session-1", expiresAt: new Date(Date.now() + 60000) });
     mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
     const token = makeToken();
-    const result = await toolGetDecryptedCredential(token, { id: "550e8400-e29b-41d4-a716-446655440000" });
+    const result = await toolGetDecryptedCredential(token, { id: entryId });
     expect(result.result).toBeDefined();
     expect(result.result?.entry).toEqual(mockEntry);
+    expect(mockFindActiveDelegationSession).toHaveBeenCalledWith("user-1", "tok-1");
+    expect(mockFetchDelegationEntry).toHaveBeenCalledWith("user-1", "session-1", entryId);
   });
 
   it("returns error for invalid UUID input", async () => {

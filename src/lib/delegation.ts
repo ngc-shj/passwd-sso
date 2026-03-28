@@ -106,7 +106,11 @@ export async function storeDelegationEntries(
     pipeline.pexpire(indexKey, ttlMs);
   }
 
-  await pipeline.exec();
+  const results = await pipeline.exec();
+  if (results) {
+    const failed = results.find(([err]) => err !== null);
+    if (failed) throw new Error(`Redis pipeline command failed: ${failed[0]}`);
+  }
 }
 
 export async function fetchDelegationEntry(
