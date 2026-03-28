@@ -172,7 +172,7 @@ export function ServiceAccountCard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: createName.trim(),
-          description: createDescription.trim() || null,
+          ...(createDescription.trim() && { description: createDescription.trim() }),
         }),
       });
       if (res.status === 409) {
