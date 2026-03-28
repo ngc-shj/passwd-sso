@@ -14,7 +14,12 @@ const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
   redirectUris: z.array(
     z.string().url().refine(
-      (u) => u.startsWith("https://") || u.startsWith("http://localhost"),
+      (u) => {
+        try {
+          const url = new URL(u);
+          return url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost");
+        } catch { return false; }
+      },
       { message: "redirect_uri must use https:// or http://localhost" },
     ),
   ).min(1).max(10).optional(),

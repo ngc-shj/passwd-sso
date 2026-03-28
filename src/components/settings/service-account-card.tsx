@@ -175,17 +175,15 @@ export function ServiceAccountCard() {
           ...(createDescription.trim() && { description: createDescription.trim() }),
         }),
       });
-      if (res.status === 409) {
-        const data = await res.json().catch(() => null);
-        if (data?.code === "NAME_CONFLICT") {
-          setCreateNameError(t("saNameConflict"));
-        } else {
-          toast.error(t("saLimitReached"));
-        }
-        return;
-      }
       if (!res.ok) {
-        toast.error(t("saCreateFailed"));
+        const data = await res.json().catch(() => null);
+        if (res.status === 409 && data?.error === "SA_NAME_CONFLICT") {
+          setCreateNameError(t("saNameConflict"));
+        } else if (res.status === 422 && data?.error === "SA_LIMIT_EXCEEDED") {
+          toast.error(t("saLimitReached"));
+        } else {
+          toast.error(t("saCreateFailed"));
+        }
         return;
       }
       toast.success(t("saCreated"));
@@ -296,7 +294,7 @@ export function ServiceAccountCard() {
         return;
       }
       // Set expiry to end-of-day to avoid timezone issues with date-only input
-      const expiryDate = new Date(tokenExpiresAt + "T23:59:59");
+      const expiryDate = new Date(tokenExpiresAt + "T23:59:59Z");
       const body = {
         name: tokenName.trim(),
         scope: Array.from(tokenSelectedScopes),

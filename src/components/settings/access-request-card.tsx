@@ -351,7 +351,15 @@ export function AccessRequestCard() {
       )}
 
       {/* Create access request dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog open={createOpen} onOpenChange={(open) => {
+        setCreateOpen(open);
+        if (!open) {
+          setSelectedSaId("");
+          setSelectedScopes(new Set());
+          setJustification("");
+          setExpiresInMinutes("60");
+        }
+      }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t("arCreateTitle")}</DialogTitle>

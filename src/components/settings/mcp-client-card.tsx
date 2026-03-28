@@ -146,17 +146,15 @@ export function McpClientCard() {
           allowedScopes: Array.from(createScopes),
         }),
       });
-      if (res.status === 409) {
-        const data = await res.json().catch(() => null);
-        if (data?.code === "NAME_CONFLICT") {
-          setCreateNameError(t("mcpNameConflict"));
-        } else {
-          toast.error(t("mcpLimitReached"));
-        }
-        return;
-      }
       if (!res.ok) {
-        toast.error(t("mcpCreateFailed"));
+        const data = await res.json().catch(() => null);
+        if (res.status === 409 && data?.error === "MCP_CLIENT_NAME_CONFLICT") {
+          setCreateNameError(t("mcpNameConflict"));
+        } else if (res.status === 422 && data?.error === "MCP_CLIENT_LIMIT_EXCEEDED") {
+          toast.error(t("mcpLimitReached"));
+        } else {
+          toast.error(t("mcpCreateFailed"));
+        }
         return;
       }
       const data = await res.json();
