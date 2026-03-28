@@ -49,7 +49,7 @@ Even with a separate app role, `FORCE ROW LEVEL SECURITY` remains important:
 
 ### Known Limitation: `app.bypass_rls` GUC
 
-PostgreSQL user-defined GUCs (`app.*` prefix) can be set by any role, including `passwd_app`. This means the app can execute `SET LOCAL app.bypass_rls = 'on'` to bypass RLS. This is by design — `withBypassRls()` is used in 25 allowlisted code paths for cross-tenant operations (e.g., SCIM sync, admin operations).
+PostgreSQL user-defined GUCs (`app.*` prefix) can be set by any role, including `passwd_app`. This means the app can execute `SET LOCAL app.bypass_rls = 'on'` to bypass RLS. This is by design — `withBypassRls()` is used in 47 allowlisted code paths for cross-tenant operations (e.g., SCIM sync, admin operations).
 
 Mitigations:
 - **CI guard**: The existing RLS bypass allowlist is enforced by CI (any new `withBypassRls` callsite requires explicit approval)
