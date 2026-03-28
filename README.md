@@ -91,6 +91,15 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **REST API v1** — `/api/v1/*` with OpenAPI 3.1 spec
 - **API Keys** — Scoped keys with SHA-256 hashed tokens and configurable expiration
 
+### AI & Automation (Unified Access)
+
+- **Service Accounts** — Non-human identity management with scoped `sa_` tokens, tenant admin CRUD
+- **MCP Gateway** — [Model Context Protocol](https://modelcontextprotocol.io/) server for AI agent credential access (Claude Desktop, Cursor)
+- **OAuth 2.1 + PKCE** — Authorization Code flow for MCP client authentication
+- **Just-in-Time Access** — SA self-service scope requests with admin approval workflow
+- **Unified Audit** — All actions tracked with `actorType` (Human/Service Account/MCP Agent) across personal, team, and tenant logs
+- **Zero-Knowledge Preserved** — MCP Gateway returns encrypted data only; server never sees plaintext (Delegated Decryption planned)
+
 ### UI & Localization
 
 - **i18n** — English and Japanese (next-intl)
@@ -121,6 +130,8 @@ Browser (Web Crypto API)
 Next.js App (SSR / API Routes)
   │  ← Auth.js sessions, route protection, RBAC
   │  ← Share links / sends: server-side AES-256-GCM encryption
+  │  ← MCP Gateway: /api/mcp (Streamable HTTP, OAuth 2.1 PKCE)
+  │  ← Service Account tokens: sa_ prefix, JIT access workflow
   ▼
 PostgreSQL ← Prisma 7          Redis ← rate limiting
   │

@@ -12,3 +12,4 @@ Language policy: English-only (Class B). See [../operations/language-policy.md](
 | [webauthn-registration-flow.md](webauthn-registration-flow.md) | WebAuthn registration sequence |
 | [tenant-team-scim-spec.md](tenant-team-scim-spec.md) | SCIM provisioning spec |
 | [entry-field-checklist.md](entry-field-checklist.md) | Entry field addition checklist |
+| [unified-access.md](unified-access.md) | AI agent identity & MCP Gateway architecture |

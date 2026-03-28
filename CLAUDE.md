@@ -56,6 +56,18 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Route-handler auth (not middleware): `/api/vault/*`, `/api/folders/*`, `/api/admin/*`, `/api/maintenance/*`, `/api/scim/*`
 - API key auth (no session): `/api/v1/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
+- Service Account tokens: `sa_` prefix Bearer tokens, validated in `authOrToken()` alongside existing `api_`/extension tokens
+- MCP tokens: `mcp_` prefix, validated by dedicated `validateMcpToken()` in MCP route handlers
+- JIT Access: SA self-service via `access-request:create` scope → admin approval → short-lived token
+
+### Unified Access (AI Agent Identity)
+
+- Service accounts as first-class non-human identities with `sa_` prefix tokens
+- MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
+- OAuth 2.1 Authorization Code + PKCE for MCP client authentication
+- Unified audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
+- E2E encryption preserved: MCP tools return encrypted data only (Phase 3)
+- Delegated Decryption planned for Phase 5 (browser-side decrypt → MCP relay)
 
 ### E2E Encryption Architecture
 
@@ -299,6 +311,25 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/v1/tags` | GET | REST API v1 tag list |
 | `/api/v1/vault/status` | GET | REST API v1 vault status |
 | `/api/v1/openapi.json` | GET | OpenAPI 3.1 spec |
+
+#### Service Accounts & Unified Access
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/tenant/service-accounts` | GET, POST | List/create service accounts |
+| `/api/tenant/service-accounts/[id]` | GET, PUT, DELETE | CRUD single SA (DELETE = hard delete) |
+| `/api/tenant/service-accounts/[id]/tokens` | GET, POST | List/create SA tokens |
+| `/api/tenant/service-accounts/[id]/tokens/[tokenId]` | DELETE | Revoke SA token |
+| `/api/tenant/access-requests` | GET, POST | List/create JIT access requests (SA self-service via `sa_` token or admin via session) |
+| `/api/tenant/access-requests/[id]` | GET | Access request detail |
+| `/api/tenant/access-requests/[id]/approve` | POST | Approve + issue JIT token |
+| `/api/tenant/access-requests/[id]/deny` | POST | Deny request |
+| `/api/tenant/mcp-clients` | GET, POST | List/create MCP clients |
+| `/api/tenant/mcp-clients/[id]` | GET, PUT, DELETE | CRUD single MCP client |
+| `/api/mcp` | POST, GET | MCP Streamable HTTP (JSON-RPC) + SSE |
+| `/api/mcp/authorize` | GET | OAuth 2.1 authorization (PKCE) |
+| `/api/mcp/token` | POST | OAuth 2.1 token exchange |
+| `/api/mcp/.well-known/oauth-authorization-server` | GET | OAuth discovery metadata |
 
 #### Health & Infrastructure
 
