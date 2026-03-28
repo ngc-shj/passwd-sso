@@ -11,6 +11,9 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
+import { findActiveDelegationSession, fetchDelegationEntry } from "@/lib/delegation";
+import { logAudit } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 
 // ─── Tool definitions ─────────────────────────────────────────
 
@@ -52,6 +55,21 @@ export const MCP_TOOLS = [
         limit: { type: "number", description: "Max entries to return (default 100, max 200)" },
         offset: { type: "number", description: "Offset for pagination (default 0)" },
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "get_decrypted_credential",
+    description:
+      "Retrieve plaintext credentials for a pre-approved entry. " +
+      "Only returns data if the user has explicitly delegated this entry via the vault UI. " +
+      "Requires credentials:decrypt scope and an active delegation session.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        id: { type: "string", description: "Credential entry UUID (must be pre-approved via delegation)" },
+      },
+      required: ["id"],
       additionalProperties: false,
     },
   },
@@ -210,4 +228,44 @@ export async function toolSearchCredentials(
   );
 
   return { result: { entries } };
+}
+
+export async function toolGetDecryptedCredential(
+  token: McpTokenData,
+  rawInput: unknown,
+) {
+  const parsed = getCredentialSchema.safeParse(rawInput);
+  if (!parsed.success) {
+    return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
+  }
+  const { id } = parsed.data;
+
+  if (!token.userId) {
+    return { error: { code: -32603, message: "Service account tokens cannot access delegated credentials" } };
+  }
+
+  // Find active delegation session for this MCP token
+  const session = await findActiveDelegationSession(token.userId, token.tokenId);
+  if (!session) {
+    return { error: { code: -32603, message: "No active delegation session for this token" } };
+  }
+
+  // Fetch decrypted entry from Redis
+  const entry = await fetchDelegationEntry(token.userId, session.id, id);
+  if (!entry) {
+    return { error: { code: -32603, message: "Entry not delegated or delegation expired" } };
+  }
+
+  // Audit log (fire-and-forget)
+  logAudit({
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.DELEGATION_READ,
+    userId: token.userId,
+    actorType: "MCP_AGENT",
+    tenantId: token.tenantId,
+    targetId: id,
+    metadata: { delegationSessionId: session.id },
+  });
+
+  return { result: { entry } };
 }

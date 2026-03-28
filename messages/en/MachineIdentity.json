@@ -133,5 +133,29 @@
   "actorTypeMcpAgent": "MCP Agent",
   "actorTypeSystem": "System",
   "actorType": "Actor type",
-  "actorName": "Actor"
+  "actorName": "Actor",
+  "delegation": {
+    "title": "Delegated Access",
+    "description": "Share decrypted vault entries with MCP sessions for AI agent access.",
+    "noSessions": "No active delegation sessions",
+    "newDelegation": "New Delegation",
+    "revokeAll": "Revoke All",
+    "revoke": "Revoke",
+    "expiresIn": "Expires in {minutes} min",
+    "expired": "Expired",
+    "entries": "{count} entries",
+    "selectMcpToken": "Select MCP Session",
+    "selectEntries": "Select Entries",
+    "setTtl": "Duration",
+    "ttlMinutes": "{minutes} minutes",
+    "confirm": "Confirm Delegation",
+    "confirmDescription": "The following entries will be accessible to the MCP agent for the specified duration.",
+    "warning": "The selected entries will be temporarily decrypted and accessible to the AI agent.",
+    "created": "Delegation created successfully",
+    "revoked": "Delegation revoked",
+    "revokedAll": "All delegations revoked",
+    "noDecryptScope": "This token does not have the credentials:decrypt scope. Re-authorize the MCP client to enable delegation.",
+    "bannerActive": "You have {count} active delegation(s) for AI agents.",
+    "bannerManage": "Manage"
+  }
 }

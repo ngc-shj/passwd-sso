@@ -153,4 +153,10 @@ describe("API_PATH", () => {
       "/api/tenant/scim-tokens/tok-1"
     );
   });
+
+  it("builds vault delegation paths", () => {
+    expect(API_PATH.VAULT_DELEGATION).toBe("/api/vault/delegation");
+    expect(apiPath.vaultDelegation()).toBe("/api/vault/delegation");
+    expect(apiPath.vaultDelegationById("sess-1")).toBe("/api/vault/delegation/sess-1");
+  });
 });

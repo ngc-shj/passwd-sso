@@ -213,17 +213,36 @@ Add to `MCP_TOOLS` array with description that explicitly states: "Requires cred
 
 **MCP token deletion**: If active (non-revoked, non-expired) `DelegationSession` rows exist for a token, the token deletion API must auto-revoke them (set `revokedAt`, evict Redis) before proceeding. The `onDelete: Restrict` FK prevents deletion of tokens with active delegations at the DB level.
 
-### 6. Vault Lock Integration (`src/lib/vault-context.tsx`)
+### 6. Harden `assertOrigin()` fallback (`src/lib/csrf.ts`)
+
+When `APP_URL` is not configured, derive the expected origin from the request's `Host` header instead of skipping the check entirely:
+
+```typescript
+if (!appUrl) {
+  const host = request.headers.get("host");
+  if (!host || !origin) return null;
+  const proto = request.headers.get("x-forwarded-proto") || "http";
+  const expectedOrigin = `${proto}://${host}`;
+  if (new URL(origin).origin !== new URL(expectedOrigin).origin) {
+    return NextResponse.json({ error: API_ERROR.INVALID_ORIGIN }, { status: 403 });
+  }
+  return null;
+}
+```
+
+This hardens all endpoints using `assertOrigin()` (vault, recovery key, delegation), not just Phase 5.
+
+### 7. Vault Lock Integration (`src/lib/vault-context.tsx`)
 
 Use `fetch('/api/vault/delegation', { method: 'DELETE', keepalive: true })` in the `lock()` callback and `pagehide` event handler. `keepalive: true` survives page unload, sends proper method/headers, and includes cookies — unlike `sendBeacon` which only supports POST.
 
 Note: `sendBeacon` is NOT suitable here (POST-only, `text/plain` content-type, no auth headers). Redis TTL is the ultimate fallback if `fetch` with `keepalive` fails.
 
-### 7. Key Rotation Integration (`src/app/api/vault/rotate-key/route.ts`)
+### 8. Key Rotation Integration (`src/app/api/vault/rotate-key/route.ts`)
 
 Call `revokeAllDelegationSessions(userId, tenantId, "KEY_ROTATION")` after successful rotation transaction.
 
-### 8. UI Components
+### 9. UI Components
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
@@ -233,11 +252,11 @@ Call `revokeAllDelegationSessions(userId, tenantId, "KEY_ROTATION")` after succe
 
 **Entry selector in dialog**: Uses `useVault()` to access `encryptionKey`, decrypts overviews in-browser (same pattern as `password-list.tsx`), renders checkboxes for selection.
 
-### 9. i18n
+### 10. i18n
 
 Add keys under `MachineIdentity.delegation.*` in `messages/en.json` and `messages/ja.json`.
 
-### 10. Tenant Admin Policy
+### 11. Tenant Admin Policy
 
 Add `delegationDefaultTtlSec` and `delegationMaxTtlSec` fields to the tenant policy UI (mirrors JIT token TTL pattern).
 
@@ -248,11 +267,49 @@ Add `delegationDefaultTtlSec` and `delegationMaxTtlSec` fields to the tenant pol
 | 1 | Schema + migration | `prisma/schema.prisma` | — |
 | 2 | Constants (scope, audit, API path) | `src/lib/constants/mcp.ts`, `audit.ts`, `api-path.ts` | 1 |
 | 3 | Core library | `src/lib/delegation.ts` + tests | 1, 2 |
-| 4 | Browser API endpoints + proxy | `src/app/api/vault/delegation/`, `src/proxy.ts` + tests | 3 |
+| 4 | Harden assertOrigin + browser API endpoints + proxy | `src/lib/csrf.ts`, `src/app/api/vault/delegation/`, `src/proxy.ts` + tests | 3 |
 | 5 | MCP tool | `src/lib/mcp/tools.ts`, `server.ts` + tests | 3 |
 | 6 | Vault lock + key rotation hooks | `vault-context.tsx`, `rotate-key/route.ts` | 4 |
 | 7 | UI components | Settings page, delegation manager, dialog, banner | 4, 5 |
 | 8 | i18n + tenant admin policy UI | `messages/`, tenant settings | 7 |
+
+## Implementation Checklist
+
+### Batch 1: Schema + Constants + Core Library
+- [ ] `prisma/schema.prisma` — AuditAction enum (after line 829), Tenant fields (after line 448), User relation (after line 167), McpAccessToken relation (after line 1497), DelegationSession model (after line 1502)
+- [ ] `src/lib/constants/mcp.ts` — CREDENTIALS_DECRYPT scope (after line 9)
+- [ ] `src/lib/constants/audit.ts` — AUDIT_ACTION entries (after line 115), VALUES (after line 230), GROUP (after line 255), GROUPS_PERSONAL (after line 347), GROUPS_TENANT (after line 471)
+- [ ] `src/lib/constants/api-path.ts` — VAULT_DELEGATION constant (after line 76), builder functions (after line 196)
+- [ ] `src/lib/audit-logger.ts` — add "entries" to METADATA_BLOCKLIST (after line 95)
+- [ ] `src/lib/delegation.ts` — NEW: core library with Redis ops, envelope encryption (uses encryptServerData/decryptServerData directly for AAD support, NOT encryptShareData)
+- [ ] `src/lib/csrf.ts` — harden assertOrigin fallback (line 29-32)
+- [ ] Run `prisma migrate dev`
+
+### Batch 2: API + MCP + Hooks
+- [ ] `src/app/api/vault/delegation/route.ts` — NEW: POST/GET/DELETE
+- [ ] `src/app/api/vault/delegation/[id]/route.ts` — NEW: DELETE by ID
+- [ ] `src/proxy.ts` — add VAULT_DELEGATION to session guard (line 176)
+- [ ] `src/lib/mcp/tools.ts` — get_decrypted_credential tool definition + handler
+- [ ] `src/lib/mcp/server.ts` — TOOL_SCOPE_MAP (line 26) + switch (line 108) + import
+- [ ] `src/lib/vault-context.tsx` — fetch keepalive DELETE in lock() (line 189) + pagehide (line 208)
+- [ ] `src/app/api/vault/rotate-key/route.ts` — revokeAllDelegationSessions (after line 294)
+
+### Batch 3: UI + i18n + Tests
+- [ ] `src/components/settings/delegation-manager.tsx` — NEW
+- [ ] `src/components/settings/create-delegation-dialog.tsx` — NEW
+- [ ] `src/components/vault/delegation-revoke-banner.tsx` — NEW
+- [ ] `src/app/[locale]/dashboard/settings/page.tsx` — add DelegationManager (after line 67)
+- [ ] `src/components/layout/dashboard-shell.tsx` — add banner (after line 21)
+- [ ] `messages/en.json`, `messages/ja.json` — delegation UI strings
+- [ ] `messages/en/AuditLog.json`, `messages/ja/AuditLog.json` — action + group labels
+- [ ] `src/lib/constants/api-path.test.ts` — new path assertions
+- [ ] `src/lib/constants/mcp.test.ts` — NEW: MCP_SCOPES exhaustiveness
+- [ ] `src/lib/delegation.test.ts` — NEW: unit tests
+- [ ] `src/lib/mcp/tools.test.ts` — get_decrypted_credential tests
+- [ ] `src/app/api/vault/delegation/route.test.ts` — NEW: integration tests
+
+### Deviation Note
+Plan specifies `encryptShareData`/`decryptShareData` but these do NOT accept AAD. Implementation uses `encryptServerData`/`decryptServerData` directly with manual masterKeyVersion management via `getCurrentMasterKeyVersion()`/`getMasterKeyByVersion()`.
 
 ## Comprehensive File List
 
@@ -273,6 +330,7 @@ Add `delegationDefaultTtlSec` and `delegationMaxTtlSec` fields to the tenant pol
 - `src/lib/constants/audit.ts` — DELEGATION_* actions, group, AUDIT_ACTION_VALUES
 - `src/lib/constants/api-path.ts` — `VAULT_DELEGATION` path
 - `src/lib/constants/api-path.test.ts` — new path assertions
+- `src/lib/csrf.ts` — harden `assertOrigin()` fallback (derive from Host header)
 - `src/lib/audit-logger.ts` — add `entries` to METADATA_BLOCKLIST
 - `src/lib/mcp/tools.ts` — `get_decrypted_credential` tool + handler
 - `src/lib/mcp/server.ts` — TOOL_SCOPE_MAP + handleToolsCall switch

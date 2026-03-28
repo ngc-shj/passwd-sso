@@ -133,5 +133,29 @@
   "actorTypeMcpAgent": "MCP エージェント",
   "actorTypeSystem": "システム",
   "actorType": "アクタータイプ",
-  "actorName": "アクター"
+  "actorName": "アクター",
+  "delegation": {
+    "title": "委任アクセス",
+    "description": "復号したボールトエントリをMCPセッションと共有し、AIエージェントにアクセスを許可します。",
+    "noSessions": "アクティブな委任セッションはありません",
+    "newDelegation": "新規委任",
+    "revokeAll": "すべて失効",
+    "revoke": "失効",
+    "expiresIn": "残り {minutes} 分",
+    "expired": "期限切れ",
+    "entries": "{count} エントリ",
+    "selectMcpToken": "MCPセッションを選択",
+    "selectEntries": "エントリを選択",
+    "setTtl": "有効期間",
+    "ttlMinutes": "{minutes} 分",
+    "confirm": "委任を確認",
+    "confirmDescription": "以下のエントリが指定期間中、MCPエージェントからアクセス可能になります。",
+    "warning": "選択されたエントリは一時的に復号され、AIエージェントがアクセス可能になります。",
+    "created": "委任セッションを作成しました",
+    "revoked": "委任セッションを失効しました",
+    "revokedAll": "すべての委任セッションを失効しました",
+    "noDecryptScope": "このトークンにはcredentials:decryptスコープがありません。MCPクライアントを再認可して委任を有効にしてください。",
+    "bannerActive": "{count} 件のアクティブな委任があります。",
+    "bannerManage": "管理"
+  }
 }

@@ -187,6 +187,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, [vaultStatus]);
 
   const lock = useCallback(() => {
+    // Revoke all delegation sessions (best-effort, survives page unload)
+    fetch("/api/vault/delegation", { method: "DELETE", keepalive: true }).catch(() => {});
     if (secretKeyRef.current) {
       secretKeyRef.current.fill(0);
       secretKeyRef.current = null;
@@ -207,6 +209,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const zeroSensitiveKeys = () => {
+      fetch("/api/vault/delegation", { method: "DELETE", keepalive: true }).catch(() => {});
       if (secretKeyRef.current) {
         secretKeyRef.current.fill(0);
         secretKeyRef.current = null;

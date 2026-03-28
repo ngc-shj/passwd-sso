@@ -191,5 +191,10 @@
   "actorTypeAll": "All actors",
   "actorTypeHuman": "Human",
   "actorTypeSa": "Service Account",
-  "actorTypeMcp": "MCP Agent"
+  "actorTypeMcp": "MCP Agent",
+  "DELEGATION_CREATE": "Delegation session created",
+  "DELEGATION_REVOKE": "Delegation session revoked",
+  "DELEGATION_EXPIRE": "Delegation session expired",
+  "DELEGATION_READ": "Delegated credential accessed",
+  "groupDelegation": "Delegation"
 }

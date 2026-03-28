@@ -7,6 +7,7 @@ export const MCP_SCOPE = {
   CREDENTIALS_LIST: "credentials:list",
   TEAM_CREDENTIALS_READ: "team:credentials:read",
   VAULT_STATUS: "vault:status",
+  CREDENTIALS_DECRYPT: "credentials:decrypt",
 } as const;
 
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];

@@ -165,6 +165,7 @@ model User {
   createdServiceAccounts ServiceAccount[]      @relation("serviceAccountCreator")
   approvedAccessRequests AccessRequest[]
   createdMcpClients      McpClient[]           @relation("mcpClientCreator")
+  delegationSessions    DelegationSession[]
   tenant                Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId])
@@ -441,11 +442,16 @@ model Tenant {
   accessRequests             AccessRequest[]
   mcpClients                 McpClient[]
   mcpAccessTokens            McpAccessToken[]
+  delegationSessions         DelegationSession[]
 
   // JIT access policy
   jitTokenDefaultTtlSec      Int?     @map("jit_token_default_ttl_sec")
   jitTokenMaxTtlSec          Int?     @map("jit_token_max_ttl_sec")
   saTokenMaxExpiryDays       Int?     @map("sa_token_max_expiry_days")
+
+  // Delegation policy
+  delegationDefaultTtlSec    Int?     @map("delegation_default_ttl_sec")
+  delegationMaxTtlSec        Int?     @map("delegation_max_ttl_sec")
 
   @@map("tenants")
 }
@@ -827,6 +833,10 @@ enum AuditAction {
   MCP_CLIENT_CREATE
   MCP_CLIENT_UPDATE
   MCP_CLIENT_DELETE
+  DELEGATION_CREATE
+  DELEGATION_REVOKE
+  DELEGATION_EXPIRE
+  DELEGATION_READ
 }
 
 enum AuditScope {
@@ -1495,8 +1505,30 @@ model McpAccessToken {
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   mcpClient McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  delegationSessions DelegationSession[]
 
   @@index([tenantId])
   @@index([expiresAt])
   @@map("mcp_access_tokens")
+}
+
+model DelegationSession {
+  id         String    @id @default(uuid(4)) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  mcpTokenId String    @map("mcp_token_id") @db.Uuid
+  entryIds   String[]  @map("entry_ids")
+  note       String?   @db.VarChar(255)
+  expiresAt  DateTime  @map("expires_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  mcpAccessToken McpAccessToken @relation(fields: [mcpTokenId], references: [id], onDelete: Restrict)
+
+  @@index([userId, revokedAt, expiresAt])
+  @@index([mcpTokenId, revokedAt])
+  @@index([tenantId])
+  @@map("delegation_sessions")
 }

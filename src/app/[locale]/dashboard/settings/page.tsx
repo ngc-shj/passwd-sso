@@ -12,6 +12,7 @@ import { TravelModeCard } from "@/components/settings/travel-mode-card";
 import { PasskeyCredentialsCard } from "@/components/settings/passkey-credentials-card";
 import { RotateKeyCard } from "@/components/settings/rotate-key-card";
 import { TabDescription } from "@/components/settings/tab-description";
+import { DelegationManager } from "@/components/settings/delegation-manager";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
@@ -65,6 +66,8 @@ export default function SettingsPage() {
             <CliTokenCard />
             <Separator />
             <ApiKeyManager />
+            <Separator />
+            <DelegationManager />
           </TabsContent>
         </Tabs>
       </div>

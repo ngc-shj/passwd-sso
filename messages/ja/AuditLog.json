@@ -191,5 +191,10 @@
   "actorTypeAll": "すべてのアクター",
   "actorTypeHuman": "ユーザー",
   "actorTypeSa": "サービスアカウント",
-  "actorTypeMcp": "MCPエージェント"
+  "actorTypeMcp": "MCPエージェント",
+  "DELEGATION_CREATE": "委任セッションを作成",
+  "DELEGATION_REVOKE": "委任セッションを失効",
+  "DELEGATION_EXPIRE": "委任セッションが期限切れ",
+  "DELEGATION_READ": "委任された認証情報にアクセス",
+  "groupDelegation": "委任"
 }
