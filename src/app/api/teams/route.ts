@@ -18,7 +18,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 // GET /api/teams — List teams the user belongs to
 async function handleGET(req: NextRequest) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (!authResult || authResult.type === "scope_insufficient") {
+  if (!authResult || authResult.type === "scope_insufficient" || authResult.type === "service_account") {
     return unauthorized();
   }
   const userId = authResult.userId;

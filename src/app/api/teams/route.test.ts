@@ -70,6 +70,18 @@ describe("GET /api/teams", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for service_account auth type", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: "sa-1",
+      tenantId: "t-1",
+      tokenId: "tok-1",
+      scopes: [],
+    });
+    const res = await GET(makeReq());
+    expect(res.status).toBe(401);
+  });
+
   it("returns list of teams with role and tenant info", async () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {

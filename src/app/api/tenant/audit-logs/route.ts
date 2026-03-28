@@ -37,6 +37,8 @@ async function handleGET(req: NextRequest) {
   const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
   const scopeParam = searchParams.get("scope");
   const teamIdParam = searchParams.get("teamId");
+  const actorTypeParam = searchParams.get("actorType");
+  const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
 
   const where: Record<string, unknown> = {
     tenantId: actor.tenantId,
@@ -88,14 +90,31 @@ async function handleGET(req: NextRequest) {
   const dateFilter = buildAuditLogDateFilter(from, to);
   if (dateFilter) where.createdAt = dateFilter;
 
+  // actorType filter — allowlist only, silently ignore invalid values
+  if (actorTypeParam && (VALID_ACTOR_TYPES as readonly string[]).includes(actorTypeParam)) {
+    where.actorType = actorTypeParam;
+  }
+
   let logs;
   try {
     logs = await withTenantRls(prisma, actor.tenantId, async () =>
       prisma.auditLog.findMany({
         where,
-        include: {
+        select: {
+          id: true,
+          scope: true,
+          action: true,
+          actorType: true,
+          serviceAccountId: true,
+          targetType: true,
+          targetId: true,
+          metadata: true,
+          ip: true,
+          userAgent: true,
+          createdAt: true,
           user: { select: { id: true, name: true, email: true, image: true } },
           team: { select: { id: true, name: true } },
+          serviceAccount: { select: { id: true, name: true } },
         },
         orderBy: { createdAt: "desc" },
         take: limit + 1,
@@ -113,6 +132,8 @@ async function handleGET(req: NextRequest) {
       id: log.id,
       scope: log.scope,
       action: log.action,
+      actorType: log.actorType,
+      serviceAccountId: log.serviceAccountId,
       targetType: log.targetType,
       targetId: log.targetId,
       metadata: log.metadata,
@@ -128,6 +149,10 @@ async function handleGET(req: NextRequest) {
       team: log.team ? {
         id: log.team.id,
         name: log.team.name,
+      } : null,
+      serviceAccount: log.serviceAccount ? {
+        id: log.serviceAccount.id,
+        name: log.serviceAccount.name,
       } : null,
     })),
     nextCursor,

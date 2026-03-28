@@ -163,6 +163,14 @@ export const API_ERROR = {
   API_KEY_ALREADY_REVOKED: "API_KEY_ALREADY_REVOKED",
   API_KEY_INVALID: "API_KEY_INVALID",
   API_KEY_SCOPE_INSUFFICIENT: "API_KEY_SCOPE_INSUFFICIENT",
+
+  // ── Service Accounts ──────────────────────────────────────
+  SA_LIMIT_EXCEEDED: "SA_LIMIT_EXCEEDED",
+  SA_NOT_FOUND: "SA_NOT_FOUND",
+  SA_NAME_CONFLICT: "SA_NAME_CONFLICT",
+  SA_TOKEN_LIMIT_EXCEEDED: "SA_TOKEN_LIMIT_EXCEEDED",
+  SA_TOKEN_NOT_FOUND: "SA_TOKEN_NOT_FOUND",
+  SA_TOKEN_ALREADY_REVOKED: "SA_TOKEN_ALREADY_REVOKED",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -284,6 +292,12 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   API_KEY_ALREADY_REVOKED: "apiKeyAlreadyRevoked",
   API_KEY_INVALID: "apiKeyInvalid",
   API_KEY_SCOPE_INSUFFICIENT: "apiKeyScopeInsufficient",
+  SA_LIMIT_EXCEEDED: "saLimitExceeded",
+  SA_NOT_FOUND: "saNotFound",
+  SA_NAME_CONFLICT: "saNameConflict",
+  SA_TOKEN_LIMIT_EXCEEDED: "saTokenLimitExceeded",
+  SA_TOKEN_NOT_FOUND: "saTokenNotFound",
+  SA_TOKEN_ALREADY_REVOKED: "saTokenAlreadyRevoked",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

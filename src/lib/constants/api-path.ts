@@ -71,6 +71,9 @@ export const API_PATH = {
   AUTH_PASSKEY_VERIFY: "/api/auth/passkey/verify",
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
+  TENANT_SERVICE_ACCOUNTS: "/api/tenant/service-accounts",
+  TENANT_MCP_CLIENTS: "/api/tenant/mcp-clients",
+  TENANT_ACCESS_REQUESTS: "/api/tenant/access-requests",
 } as const;
 
 export const apiPath = {
@@ -176,4 +179,19 @@ export const apiPath = {
   tenantWebhooks: () => API_PATH.TENANT_WEBHOOKS,
   tenantWebhookById: (webhookId: string) =>
     `${API_PATH.TENANT_WEBHOOKS}/${webhookId}`,
+  tenantServiceAccounts: () => API_PATH.TENANT_SERVICE_ACCOUNTS,
+  tenantServiceAccountById: (saId: string) =>
+    `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}`,
+  tenantServiceAccountTokens: (saId: string) =>
+    `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}/tokens`,
+  tenantServiceAccountTokenById: (saId: string, tokenId: string) =>
+    `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}/tokens/${tokenId}`,
+  tenantMcpClients: () => API_PATH.TENANT_MCP_CLIENTS,
+  tenantMcpClientById: (clientId: string) =>
+    `${API_PATH.TENANT_MCP_CLIENTS}/${clientId}`,
+  tenantAccessRequests: () => API_PATH.TENANT_ACCESS_REQUESTS,
+  tenantAccessRequestApprove: (requestId: string) =>
+    `${API_PATH.TENANT_ACCESS_REQUESTS}/${requestId}/approve`,
+  tenantAccessRequestDeny: (requestId: string) =>
+    `${API_PATH.TENANT_ACCESS_REQUESTS}/${requestId}/deny`,
 } as const;

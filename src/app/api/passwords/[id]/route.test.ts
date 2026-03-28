@@ -90,6 +90,18 @@ describe("GET /api/passwords/[id]", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for service_account auth type", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "service_account", serviceAccountId: "sa-1", tenantId: "t-1", tokenId: "tok-1", scopes: [] },
+    });
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/passwords/${PW_ID}`),
+      createParams({ id: PW_ID }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("returns 429 when rate limited", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 1000 });
     const res = await GET(
