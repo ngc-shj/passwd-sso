@@ -227,13 +227,14 @@ export async function revokeAllDelegationSessions(
   );
 
   if (result.count > 0 && tenantId) {
-    logAudit({
-      scope: AUDIT_SCOPE.PERSONAL,
+    const auditBase = {
       action: AUDIT_ACTION.DELEGATION_REVOKE,
       userId,
       tenantId,
       metadata: { revokedCount: result.count, reason: reason ?? "manual" },
-    });
+    };
+    logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+    logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
   }
 
   return result.count;
@@ -260,14 +261,15 @@ export async function revokeDelegationSession(
   await evictDelegationRedisKeys(userId, sessionId).catch(() => {});
 
   if (result.count > 0) {
-    logAudit({
-      scope: AUDIT_SCOPE.PERSONAL,
+    const auditBase = {
       action: AUDIT_ACTION.DELEGATION_REVOKE,
       userId,
       tenantId,
       targetId: sessionId,
       metadata: { reason: "manual" },
-    });
+    };
+    logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+    logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
   }
 
   return result.count > 0;

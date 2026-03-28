@@ -85,14 +85,20 @@ describe("toolGetDecryptedCredential", () => {
     expect(result.result?.entry).toEqual(mockEntry);
     expect(mockFindActiveDelegationSession).toHaveBeenCalledWith("user-1", "tok-1");
     expect(mockFetchDelegationEntry).toHaveBeenCalledWith("user-1", "session-1", entryId);
-    // Verify audit log
+    // Verify audit log — both personal and tenant scope
+    expect(mockLogAudit).toHaveBeenCalledTimes(2);
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "PERSONAL",
       action: "DELEGATION_READ",
       actorType: "MCP_AGENT",
       userId: "user-1",
       tenantId: "t-1",
       targetId: entryId,
-      metadata: { delegationSessionId: "session-1" },
+      metadata: { delegationSessionId: "session-1", mcpClientId: "c-1" },
+    }));
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({
+      scope: "TENANT",
+      action: "DELEGATION_READ",
     }));
   });
 

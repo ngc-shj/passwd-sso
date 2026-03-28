@@ -211,9 +211,8 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  // Audit log (no plaintext in metadata!)
-  logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+  // Audit log — both personal and tenant scope (no plaintext in metadata!)
+  const auditBase = {
     action: AUDIT_ACTION.DELEGATION_CREATE,
     userId,
     tenantId,
@@ -221,7 +220,9 @@ async function handlePOST(request: NextRequest) {
     metadata: { entryCount: entryIds.length, mcpClientId: mcpToken.clientId },
     ip: request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip"),
     userAgent: request.headers.get("user-agent"),
-  });
+  };
+  logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+  logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
 
   return NextResponse.json({
     delegationSessionId: delegationSession.id,

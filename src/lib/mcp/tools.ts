@@ -263,16 +263,17 @@ export async function toolGetDecryptedCredential(
     return { error: { code: -32603, message: "Entry not delegated or delegation expired" } };
   }
 
-  // Audit log (fire-and-forget)
-  logAudit({
-    scope: AUDIT_SCOPE.PERSONAL,
+  // Audit log — both personal and tenant scope
+  const auditBase = {
     action: AUDIT_ACTION.DELEGATION_READ,
     userId: token.userId,
-    actorType: "MCP_AGENT",
+    actorType: "MCP_AGENT" as const,
     tenantId: token.tenantId,
     targetId: id,
-    metadata: { delegationSessionId: session.id },
-  });
+    metadata: { delegationSessionId: session.id, mcpClientId: token.clientId },
+  };
+  logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+  logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
 
   return { result: { entry } };
 }
