@@ -303,4 +303,102 @@ describe("POST /api/tenant/access-requests", () => {
 
     expect(status).toBe(403);
   });
+
+  it("creates access request via SA token with access-request:create scope", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-1",
+      scopes: ["access-request:create"],
+    });
+    mockServiceAccountFindUnique.mockResolvedValue({
+      isActive: true,
+      createdById: DEFAULT_SESSION.user.id,
+    });
+    const created = {
+      id: "req-sa-1",
+      serviceAccountId: SA_ID,
+      requestedScope: "passwords:read",
+      justification: "Automated request",
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      createdAt: new Date(),
+    };
+    mockAccessRequestCreate.mockResolvedValue(created);
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        serviceAccountId: SA_ID,
+        requestedScope: ["passwords:read"],
+        justification: "Automated request",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(json.id).toBe("req-sa-1");
+  });
+
+  it("returns 403 when SA token lacks access-request:create scope", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-2",
+      scopes: ["passwords:read"],
+    });
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        requestedScope: ["passwords:read"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(403);
+  });
+
+  it("SA self-service infers serviceAccountId from token (no serviceAccountId in body)", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-3",
+      scopes: ["access-request:create"],
+    });
+    mockServiceAccountFindUnique.mockResolvedValue({
+      isActive: true,
+      createdById: DEFAULT_SESSION.user.id,
+    });
+    const created = {
+      id: "req-sa-infer",
+      serviceAccountId: SA_ID,
+      requestedScope: "passwords:read",
+      justification: null,
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      createdAt: new Date(),
+    };
+    mockAccessRequestCreate.mockResolvedValue(created);
+
+    // Body does NOT include serviceAccountId — SA path infers it from token
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: {
+        requestedScope: ["passwords:read"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(json.serviceAccountId).toBe(SA_ID);
+    expect(mockAccessRequestCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ serviceAccountId: SA_ID }),
+      }),
+    );
+  });
 });
