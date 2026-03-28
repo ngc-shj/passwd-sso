@@ -66,7 +66,7 @@ TB6: Client <-> WebAuthn Authenticator
 | S4: Attacker spoofs WebAuthn assertion | TB6 | Origin and RP ID validation; challenge freshness; signature verification | None (WebAuthn protocol provides strong anti-spoofing) |
 | S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 39 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 25 allowlisted files (CI-guarded) |
 
-> **⚠️ SUPERUSER bypasses RLS**: PostgreSQL SUPERUSER and BYPASSRLS roles bypass all RLS policies, including FORCE ROW LEVEL SECURITY. The application database user **must not** have SUPERUSER or BYPASSRLS privileges in production. The Docker Compose dev setup grants SUPERUSER for convenience; production deployments must use a non-superuser role (see [deployment guide](../operations/deployment.md)).
+> **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 25 allowlisted code paths for cross-tenant operations (CI-guarded). See [deployment guide](../operations/deployment.md) for production role setup.
 
 ### 3.2 Tampering
 

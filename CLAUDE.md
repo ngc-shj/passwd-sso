@@ -380,9 +380,11 @@ All password data is encrypted **client-side** before reaching the server. The s
 
 ### Docker Services
 
-Five containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration)
+Five containers: `app` (Next.js, connects as `passwd_app` — NOSUPERUSER), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration, connects as `passwd_user` — SUPERUSER)
 
 Dev override adds: `mailpit` (local email testing on port 8025)
+
+**Database role separation**: The `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) so RLS is enforced in dev. The `migrate` service connects as `passwd_user` (SUPERUSER, table owner) for DDL. For local `npm run db:migrate`, set `MIGRATION_DATABASE_URL` in `.env.local` pointing to `passwd_user`.
 
 ## Versioning
 
