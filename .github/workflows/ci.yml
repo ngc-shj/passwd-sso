@@ -332,17 +332,20 @@ jobs:
 
       - name: Re-grant and seed test data
         run: |
-          psql postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+          psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
             -- Re-grant DML on tables created by migration
             GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
             GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
 
             -- Seed test rows as SUPERUSER (bypasses RLS) to make assertions meaningful.
             -- Without data, count(*) = 0 is vacuously true regardless of RLS.
+            -- Disable FK checks for seeding (SUPERUSER required).
+            SET session_replication_role = 'replica';
             INSERT INTO teams (id, tenant_id, name, slug, created_at, updated_at)
               VALUES (gen_random_uuid(), gen_random_uuid(), 'rls-smoke', 'rls-smoke', NOW(), NOW());
             INSERT INTO service_accounts (id, tenant_id, name, identity_type, is_active, created_by_id, created_at, updated_at)
               VALUES (gen_random_uuid(), gen_random_uuid(), 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, gen_random_uuid(), NOW(), NOW());
+            SET session_replication_role = 'origin';
           SQL
 
       - name: Verify RLS enforcement
