@@ -155,22 +155,22 @@ MCP Client                    passwd-sso                      User
 
 | Tool | Required Scope | Returns |
 |------|---------------|---------|
-| `list_credentials` | `credentials:list` | Encrypted overviews (metadata) |
-| `get_credential` | `credentials:read` | Encrypted blob (full entry) |
-| `search_credentials` | `credentials:list` | Encrypted overviews for client-side search |
+| `list_credentials` | `credentials:decrypt` | Plaintext overviews of delegated entries |
+| `get_credential` | `credentials:decrypt` | Plaintext fields (title, username, password, url, notes) |
+| `search_credentials` | `credentials:decrypt` | Plaintext overviews filtered by keyword |
 
-All tools return **encrypted data only** — the server never decrypts. This preserves the zero-knowledge model.
+All tools require an **active delegation session**. The human user unlocks their vault in the browser, selects entries to delegate, and the browser relays plaintext to an envelope-encrypted Redis cache with short TTLs. The server never stores or derives encryption keys.
 
 ### E2E Encryption Strategy
 
 | Phase | Approach | Status |
 |-------|----------|--------|
-| Phase 3 (current) | Encrypted data only — AI agents receive ciphertext | Implemented |
-| Phase 5 (future) | Delegated Decryption — human unlocks vault, browser relays plaintext to MCP session | Planned |
+| Phase 3 | Encrypted data only — AI agents receive ciphertext | Implemented |
+| Phase 5 | Delegated Decryption — human unlocks vault, browser relays plaintext to MCP session | Implemented |
 
 **Why not decrypt server-side?** The server has never had access to plaintext passwords — that's the core security guarantee. Breaking this would require storing the encryption key server-side, which defeats zero-knowledge.
 
-**Delegated Decryption** solves this by keeping decryption in the browser: the human user unlocks their vault, and the browser-side code selectively shares plaintext entries with the MCP session — with explicit per-entry consent.
+**Delegated Decryption** keeps decryption in the browser: the human user unlocks their vault, selects entries to delegate (max 20), and the browser relays plaintext to an envelope-encrypted Redis cache (AES-256-GCM + AAD) with configurable TTLs (5–60 min). MCP tools read from this cache only when an active delegation session exists.
 
 ## Unified Audit
 
@@ -327,8 +327,8 @@ Claude can query your vault metadata (entry count, folder distribution, timestam
 
 | Capability | Status |
 |-----------|--------|
-| List entries (encrypted overviews) | ✅ Working |
-| Get entry (encrypted blob) | ✅ Working |
-| Read plaintext passwords | ❌ Requires Delegated Decryption (Phase 5) |
+| List delegated entries (plaintext) | ✅ Working |
+| Get delegated entry (plaintext) | ✅ Working |
+| Read plaintext passwords | ✅ Via Delegated Decryption (requires active delegation session) |
 | Create/update entries | ❌ Not yet implemented |
 | Team vault access | ❌ Requires ECDH key distribution to SA |
