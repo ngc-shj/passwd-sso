@@ -65,7 +65,7 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Service accounts as first-class non-human identities with `sa_` prefix tokens
 - MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
 - OAuth 2.1 Authorization Code + PKCE for MCP client authentication
-- Unified audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
+- Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
 - E2E encryption preserved: MCP tools return encrypted data only (Phase 3)
 - Delegated Decryption planned for Phase 5 (browser-side decrypt → MCP relay)
 
