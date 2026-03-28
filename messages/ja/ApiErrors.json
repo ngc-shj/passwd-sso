@@ -93,5 +93,11 @@
   "itemKeyVersionDowngrade": "エントリの暗号化バージョンをダウングレードすることはできません。",
   "sharePasswordRequired": "このコンテンツにアクセスするにはパスワードが必要です。",
   "sharePasswordIncorrect": "パスワードが正しくありません。",
-  "policySharePasswordRequired": "チームポリシーにより共有リンクにはパスワードが必要です。"
+  "policySharePasswordRequired": "チームポリシーにより共有リンクにはパスワードが必要です。",
+  "saLimitExceeded": "サービスアカウントの上限に達しました。",
+  "saNotFound": "サービスアカウントが見つかりません。",
+  "saNameConflict": "同じ名前のサービスアカウントが既に存在します。",
+  "saTokenLimitExceeded": "サービスアカウントのトークン上限に達しました。",
+  "saTokenNotFound": "サービスアカウントトークンが見つかりません。",
+  "saTokenAlreadyRevoked": "サービスアカウントトークンは既に失効しています。"
 }

@@ -47,6 +47,9 @@ interface AuditLogItem {
   id: string;
   scope: string;
   action: string;
+  actorType?: string;
+  serviceAccountId?: string | null;
+  serviceAccount?: { id: string; name: string } | null;
   targetType: string | null;
   targetId: string | null;
   metadata: Record<string, unknown> | null;
@@ -122,6 +125,7 @@ export function TenantAuditLogCard() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [grantRefreshTrigger, setGrantRefreshTrigger] = useState(0);
   const [scopeFilter, setScopeFilter] = useState<"ALL" | "TENANT" | "TEAM">("ALL");
+  const [actorTypeFilter, setActorTypeFilter] = useState<string>("ALL");
   const [teamFilter, setTeamFilter] = useState<string>("");
   const [teams, setTeams] = useState<{ id: string; name: string }[]>([]);
 
@@ -153,9 +157,10 @@ export function TenantAuditLogCard() {
       params.set("to", endOfDay.toISOString());
     }
     if (scopeFilter !== "ALL") params.set("scope", scopeFilter);
+    if (actorTypeFilter !== "ALL") params.set("actorType", actorTypeFilter);
     if (teamFilter) params.set("teamId", teamFilter);
     return params;
-  }, [selectedActions, dateFrom, dateTo, scopeFilter, teamFilter]);
+  }, [selectedActions, dateFrom, dateTo, scopeFilter, actorTypeFilter, teamFilter]);
 
   const fetchLogs = useCallback(
     async (cursor?: string) => {
@@ -324,6 +329,23 @@ export function TenantAuditLogCard() {
                   </Select>
                 </div>
               )}
+              <div className="space-y-1">
+                <Label className="text-xs">{t("actorTypeLabel")}</Label>
+                <Select
+                  value={actorTypeFilter}
+                  onValueChange={setActorTypeFilter}
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                    <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                    <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
+                    <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1">
                 <Label className="text-xs">{t("dateFrom")}</Label>
                 <Input

@@ -45,6 +45,15 @@ describe("GET /api/vault/status", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for service_account auth type", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "service_account", serviceAccountId: "sa-1", tenantId: "t-1", tokenId: "tok-1", scopes: [] },
+    });
+    const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
+    expect(res.status).toBe(401);
+  });
+
   it("returns 403 when scope insufficient", async () => {
     mockCheckAuth.mockResolvedValue(
       authFail(403, "EXTENSION_TOKEN_SCOPE_INSUFFICIENT"),

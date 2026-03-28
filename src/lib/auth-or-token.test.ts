@@ -1,13 +1,19 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-const { mockAuth, mockValidateExtensionToken, mockHasScope, mockValidateApiKey, mockHasApiKeyScope } = vi.hoisted(
+const {
+  mockAuth, mockValidateExtensionToken, mockHasScope,
+  mockValidateApiKey, mockHasApiKeyScope,
+  mockValidateServiceAccountToken, mockHasSaTokenScope,
+} = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockValidateExtensionToken: vi.fn(),
     mockHasScope: vi.fn(),
     mockValidateApiKey: vi.fn(),
     mockHasApiKeyScope: vi.fn(),
+    mockValidateServiceAccountToken: vi.fn(),
+    mockHasSaTokenScope: vi.fn(),
   }),
 );
 
@@ -20,8 +26,15 @@ vi.mock("@/lib/api-key", () => ({
   validateApiKey: mockValidateApiKey,
   hasApiKeyScope: mockHasApiKeyScope,
 }));
+vi.mock("@/lib/service-account-token", () => ({
+  validateServiceAccountToken: mockValidateServiceAccountToken,
+  hasSaTokenScope: mockHasSaTokenScope,
+}));
 vi.mock("@/lib/constants/api-key", () => ({
   API_KEY_PREFIX: "api_",
+}));
+vi.mock("@/lib/constants/service-account", () => ({
+  SA_TOKEN_PREFIX: "sa_",
 }));
 
 import { authOrToken } from "./auth-or-token";
@@ -41,6 +54,8 @@ describe("authOrToken", () => {
     mockHasScope.mockReset();
     mockValidateApiKey.mockReset();
     mockHasApiKeyScope.mockReset();
+    mockValidateServiceAccountToken.mockReset();
+    mockHasSaTokenScope.mockReset();
   });
 
   it("returns session result when session is valid", async () => {
@@ -58,7 +73,7 @@ describe("authOrToken", () => {
       data: { userId: "user-2", scopes: ["passwords:read"] },
     });
 
-    const result = await authOrToken(makeRequest());
+    const result = await authOrToken(makeRequest("abcdef1234567890"));
     expect(result).toEqual({
       type: "token",
       userId: "user-2",
@@ -83,7 +98,7 @@ describe("authOrToken", () => {
     mockHasScope.mockReturnValue(false);
 
     const result = await authOrToken(
-      makeRequest(),
+      makeRequest("abcdef1234567890"),
       "passwords:write" as Parameters<typeof authOrToken>[1],
     );
     expect(result).toEqual({ type: "scope_insufficient" });
@@ -98,7 +113,7 @@ describe("authOrToken", () => {
     mockHasScope.mockReturnValue(true);
 
     const result = await authOrToken(
-      makeRequest(),
+      makeRequest("abcdef1234567890"),
       "passwords:write" as Parameters<typeof authOrToken>[1],
     );
     expect(result).toEqual({
@@ -173,7 +188,7 @@ describe("authOrToken", () => {
     expect(result).toEqual({ type: "scope_insufficient" });
   });
 
-  it("dispatches to extension token when Bearer lacks api_ prefix", async () => {
+  it("dispatches to extension token when Bearer lacks known prefix", async () => {
     mockAuth.mockResolvedValue(null);
     mockValidateExtensionToken.mockResolvedValue({
       ok: true,
@@ -187,5 +202,111 @@ describe("authOrToken", () => {
       scopes: ["passwords:read"],
     });
     expect(mockValidateApiKey).not.toHaveBeenCalled();
+    expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
+  });
+
+  // ── Service account token path tests ──────────────────────
+
+  it("returns service_account result for valid SA token", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateServiceAccountToken.mockResolvedValue({
+      ok: true,
+      data: {
+        serviceAccountId: "sa-1",
+        tenantId: "t1",
+        tokenId: "tok-1",
+        scopes: ["passwords:read"],
+      },
+    });
+
+    const result = await authOrToken(makeRequest("sa_test123"));
+    expect(result).toEqual({
+      type: "service_account",
+      serviceAccountId: "sa-1",
+      tenantId: "t1",
+      tokenId: "tok-1",
+      scopes: ["passwords:read"],
+    });
+    expect(mockValidateApiKey).not.toHaveBeenCalled();
+    expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  it("returns null when SA token validation fails", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateServiceAccountToken.mockResolvedValue({
+      ok: false,
+      error: "SA_TOKEN_INVALID",
+    });
+
+    const result = await authOrToken(makeRequest("sa_invalid"));
+    expect(result).toBeNull();
+    expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  it("returns scope_insufficient when SA token lacks required scope", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateServiceAccountToken.mockResolvedValue({
+      ok: true,
+      data: {
+        serviceAccountId: "sa-2",
+        tenantId: "t2",
+        tokenId: "tok-2",
+        scopes: ["passwords:read"],
+      },
+    });
+    mockHasSaTokenScope.mockReturnValue(false);
+
+    const result = await authOrToken(
+      makeRequest("sa_test456"),
+      "passwords:write" as Parameters<typeof authOrToken>[1],
+    );
+    expect(result).toEqual({ type: "scope_insufficient" });
+    expect(mockHasSaTokenScope).toHaveBeenCalledWith(["passwords:read"], "passwords:write");
+  });
+
+  it("returns service_account result when SA token scope is satisfied", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateServiceAccountToken.mockResolvedValue({
+      ok: true,
+      data: {
+        serviceAccountId: "sa-3",
+        tenantId: "t3",
+        tokenId: "tok-3",
+        scopes: ["passwords:read"],
+      },
+    });
+    mockHasSaTokenScope.mockReturnValue(true);
+
+    const result = await authOrToken(
+      makeRequest("sa_test789"),
+      "passwords:read" as Parameters<typeof authOrToken>[1],
+    );
+    expect(result).toEqual({
+      type: "service_account",
+      serviceAccountId: "sa-3",
+      tenantId: "t3",
+      tokenId: "tok-3",
+      scopes: ["passwords:read"],
+    });
+    expect(mockHasSaTokenScope).toHaveBeenCalledWith(["passwords:read"], "passwords:read");
+  });
+
+  // ── Prefix table safety tests ──────────────────────────────
+
+  it("returns null for scim_ prefixed tokens (handled by dedicated routes)", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    const result = await authOrToken(makeRequest("scim_test123"));
+    expect(result).toBeNull();
+    expect(mockValidateApiKey).not.toHaveBeenCalled();
+    expect(mockValidateServiceAccountToken).not.toHaveBeenCalled();
+    expect(mockValidateExtensionToken).not.toHaveBeenCalled();
+  });
+
+  it("returns null when no Bearer token and no session", async () => {
+    mockAuth.mockResolvedValue(null);
+
+    const result = await authOrToken(makeRequest());
+    expect(result).toBeNull();
   });
 });

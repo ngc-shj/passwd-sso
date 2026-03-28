@@ -24,7 +24,7 @@ type Params = { params: Promise<{ teamId: string; id: string }> };
 // GET /api/teams/[teamId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
 async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (!authResult || authResult.type === "scope_insufficient") {
+  if (!authResult || authResult.type === "scope_insufficient" || authResult.type === "service_account") {
     return unauthorized();
   }
   const userId = authResult.userId;

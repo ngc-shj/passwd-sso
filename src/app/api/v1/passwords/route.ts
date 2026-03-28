@@ -4,7 +4,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { validateApiKeyOnly } from "@/lib/api-key";
+import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -19,9 +19,9 @@ const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
-// GET /api/v1/passwords — List passwords (API key only)
+// GET /api/v1/passwords — List passwords (API key or SA token)
 async function handleGET(req: NextRequest) {
-  const authResult = await validateApiKeyOnly(req, API_KEY_SCOPE.PASSWORDS_READ);
+  const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_READ);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
       return NextResponse.json(
@@ -32,12 +32,19 @@ async function handleGET(req: NextRequest) {
     return unauthorized();
   }
 
-  const { userId, tenantId, apiKeyId } = authResult.data;
+  const { userId, tenantId, rateLimitKey } = authResult.data;
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
+      { status: 403 },
+    );
+  }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
+  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -104,9 +111,9 @@ async function handleGET(req: NextRequest) {
   return NextResponse.json(entries);
 }
 
-// POST /api/v1/passwords — Create password (API key only)
+// POST /api/v1/passwords — Create password (API key or SA token)
 async function handlePOST(req: NextRequest) {
-  const authResult = await validateApiKeyOnly(req, API_KEY_SCOPE.PASSWORDS_WRITE);
+  const authResult = await validateV1Auth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
       return NextResponse.json(
@@ -117,12 +124,19 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  const { userId, tenantId, apiKeyId } = authResult.data;
+  const { userId, tenantId, rateLimitKey } = authResult.data;
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
+      { status: 403 },
+    );
+  }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
+  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

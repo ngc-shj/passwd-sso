@@ -97,6 +97,16 @@ describe("GET /api/api-keys", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for service_account auth type", async () => {
+    mockCheckAuth.mockResolvedValue({
+      ok: true,
+      auth: { type: "service_account", serviceAccountId: "sa-1", tenantId: "t-1", tokenId: "tok-1", scopes: [] },
+    });
+
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));
+    expect(res.status).toBe(401);
+  });
+
   it("returns key list for session auth", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,

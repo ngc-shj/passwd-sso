@@ -10,14 +10,17 @@ import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
-import type { AuditAction, AuditScope } from "@prisma/client";
+import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
 import type { NextRequest } from "next/server";
+import type { AuthResult } from "@/lib/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
   userId: string;
+  actorType?: ActorType;
+  serviceAccountId?: string | null;
   tenantId?: string;
   teamId?: string;
   targetType?: string;
@@ -25,6 +28,20 @@ export interface AuditLogParams {
   metadata?: Record<string, unknown>;
   ip?: string | null;
   userAgent?: string | null;
+}
+
+/** Infer ActorType from an AuthResult. */
+export function resolveActorType(auth: AuthResult): ActorType {
+  switch (auth.type) {
+    case "session":
+    case "token":
+    case "api_key":
+      return "HUMAN";
+    case "service_account":
+      return "SERVICE_ACCOUNT";
+    default:
+      return "HUMAN";
+  }
 }
 
 /**
@@ -61,7 +78,7 @@ export function sanitizeMetadata(value: unknown): unknown {
  * 2. Structured JSON to stdout via pino (for Fluent Bit forwarding)
  */
 export function logAudit(params: AuditLogParams): void {
-  const { scope, action, userId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
+  const { scope, action, userId, actorType, serviceAccountId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
 
   // Truncate metadata if too large
   let safeMetadata: Record<string, unknown> | undefined;
@@ -101,6 +118,8 @@ export function logAudit(params: AuditLogParams): void {
           scope,
           action,
           userId,
+          actorType: actorType ?? "HUMAN",
+          serviceAccountId: serviceAccountId ?? null,
           tenantId: resolvedTenantId,
           teamId: teamId ?? null,
           targetType: targetType ?? null,
@@ -125,6 +144,8 @@ export function logAudit(params: AuditLogParams): void {
           scope,
           action,
           userId,
+          actorType: actorType ?? "HUMAN",
+          serviceAccountId: serviceAccountId ?? null,
           teamId: teamId ?? null,
           targetType: targetType ?? null,
           targetId: targetId ?? null,

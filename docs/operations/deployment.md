@@ -176,3 +176,17 @@ The deploy script uses these environment variables:
 | `APP_SERVICE` | `passwd-sso-prod-app` | ECS app service name |
 | `SUBNETS` | *(required)* | Comma-separated subnet IDs |
 | `SECURITY_GROUPS` | *(required)* | Comma-separated security group IDs |
+
+## Database User Permissions
+
+The application database user **must not** have `SUPERUSER` or `BYPASSRLS` privileges in production. PostgreSQL `SUPERUSER` bypasses all Row Level Security policies, even when `FORCE ROW LEVEL SECURITY` is enabled on tables.
+
+```sql
+-- Production: create a non-superuser application role
+CREATE ROLE passwd_app LOGIN PASSWORD '<strong-password>' NOSUPERUSER NOBYPASSRLS;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO passwd_app;
+GRANT USAGE ON SCHEMA public TO passwd_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+```
+
+The Docker Compose dev setup grants `SUPERUSER` for convenience (migration creation requires it). This means RLS is not enforced at the DB level in development — tenant isolation relies on the application layer (`withTenantRls`). In production, RLS provides defense-in-depth.

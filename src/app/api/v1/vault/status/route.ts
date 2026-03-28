@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { validateApiKeyOnly } from "@/lib/api-key";
+import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -11,9 +11,9 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
-// GET /api/v1/vault/status — Check vault initialization status (API key only)
+// GET /api/v1/vault/status — Check vault initialization status (API key or SA token)
 async function handleGET(req: NextRequest) {
-  const authResult = await validateApiKeyOnly(req, API_KEY_SCOPE.VAULT_STATUS);
+  const authResult = await validateV1Auth(req, API_KEY_SCOPE.VAULT_STATUS);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
       return NextResponse.json(
@@ -24,14 +24,21 @@ async function handleGET(req: NextRequest) {
     return unauthorized();
   }
 
-  const { userId, tenantId, apiKeyId } = authResult.data;
+  const { userId, tenantId, rateLimitKey } = authResult.data;
 
-  const denied = await enforceAccessRestriction(req, userId, tenantId);
-  if (denied) return denied;
+  // SA tokens have no userId — skip user-specific access restriction and vault query
+  if (userId) {
+    const denied = await enforceAccessRestriction(req, userId, tenantId);
+    if (denied) return denied;
+  }
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
+  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
+  }
+
+  if (!userId) {
+    return NextResponse.json({ initialized: false, keyVersion: null });
   }
 
   const user = await withTenantRls(prisma, tenantId, async () =>

@@ -248,7 +248,7 @@ Evidence:
 1. FORCE RLS applied to all 28 tenant-scoped tables
 Status: `PASS`
 Evidence:
-- Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 28 tables.
+- Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 39 tables.
 - `scripts/check-bypass-rls.mjs` CI guard enforces allowlist (25 files) for `withBypassRls` usage.
 - `scripts/check-team-auth-rls.mjs` CI guard prevents nested team-auth under RLS wrappers.
 

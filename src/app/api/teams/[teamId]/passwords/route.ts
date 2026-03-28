@@ -22,7 +22,7 @@ const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 // GET /api/teams/[teamId]/passwords — List team passwords (encrypted overviews, optionally blobs)
 async function handleGET(req: NextRequest, { params }: Params) {
   const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (!authResult || authResult.type === "scope_insufficient") {
+  if (!authResult || authResult.type === "scope_insufficient" || authResult.type === "service_account") {
     return unauthorized();
   }
   const userId = authResult.userId;
