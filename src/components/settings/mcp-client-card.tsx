@@ -154,9 +154,10 @@ export function McpClientCard() {
         return;
       }
       const data = await res.json();
+      const created = data.client ?? data;
       setNewCredentials({
-        clientId: data.clientId,
-        clientSecret: data.clientSecret,
+        clientId: created.clientId,
+        clientSecret: created.clientSecret,
       });
       toast.success(t("mcpCreated"));
       fetchClients();

@@ -102,7 +102,7 @@ export function ServiceAccountCard() {
       const res = await fetchApi(apiPath.tenantServiceAccounts());
       if (res.ok) {
         const data = await res.json();
-        setAccounts(data.serviceAccounts ?? []);
+        setAccounts(Array.isArray(data) ? data : data.serviceAccounts ?? []);
       }
     } catch {
       // silently fail
