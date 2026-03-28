@@ -19,6 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import {
   LogIn,
@@ -65,6 +66,7 @@ import { downloadBlob } from "@/lib/download-blob";
 interface AuditLogItem {
   id: string;
   action: string;
+  actorType?: string;
   targetType: string | null;
   targetId: string | null;
   metadata: Record<string, unknown> | null;
@@ -142,6 +144,11 @@ const ACTION_GROUPS = [
     value: AUDIT_ACTION_GROUP.EMERGENCY,
     actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.EMERGENCY],
   },
+  ...(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.DELEGATION] ? [{
+    label: "groupDelegation" as const,
+    value: AUDIT_ACTION_GROUP.DELEGATION,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.DELEGATION],
+  }] : []),
 ] as const;
 
 export default function AuditLogsPage() {
@@ -677,7 +684,16 @@ export default function AuditLogsPage() {
                     {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{getActionLabel(log)}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium">{getActionLabel(log)}</p>
+                      {log.actorType && log.actorType !== "HUMAN" && (
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+                          {log.actorType === "SERVICE_ACCOUNT" ? t("actorTypeSa")
+                            : log.actorType === "MCP_AGENT" ? t("actorTypeMcp")
+                            : log.actorType}
+                        </Badge>
+                      )}
+                    </div>
                     {targetLabel && (
                       <p className="text-xs text-muted-foreground truncate">
                         {targetLabel}
