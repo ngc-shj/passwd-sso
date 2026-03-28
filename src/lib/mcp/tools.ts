@@ -1,17 +1,21 @@
 /**
  * MCP tool implementations.
  *
- * All tools return encrypted data only — the server never sees plaintext.
- * E2E encryption is preserved: AI agents receive encrypted blobs.
+ * All tools require an active delegation session. Only delegated
+ * (pre-approved) entries are returned, always as plaintext.
+ * The server retrieves plaintext from Redis envelope-encrypted cache.
  *
  * Tool inputs are strictly typed with Zod (no URL args — SSRF prevention).
  */
 
 import { z } from "zod";
-import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
-import { findActiveDelegationSession, fetchDelegationEntry, getDelegatedEntryIds } from "@/lib/delegation";
+import {
+  findActiveDelegationSession,
+  fetchDelegationEntry,
+  getDelegatedEntryIds,
+  type DelegationEntryData,
+} from "@/lib/delegation";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 
@@ -21,13 +25,14 @@ export const MCP_TOOLS = [
   {
     name: "list_credentials",
     description:
-      "List encrypted credential entries. Returns encrypted overviews — decrypt client-side with vault key.",
+      "List delegated credential entries. Returns plaintext overviews for entries " +
+      "the user has pre-approved via the vault UI. Requires credentials:decrypt scope " +
+      "and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
         limit: { type: "number", description: "Max entries to return (default 50, max 200)" },
         offset: { type: "number", description: "Offset for pagination (default 0)" },
-        folderId: { type: "string", description: "Filter by folder UUID" },
       },
       additionalProperties: false,
     },
@@ -35,7 +40,8 @@ export const MCP_TOOLS = [
   {
     name: "get_credential",
     description:
-      "Get a single encrypted credential entry by ID. Returns encrypted blob — decrypt client-side.",
+      "Get a single delegated credential by ID. Returns plaintext fields (title, username, " +
+      "password, url, notes). Requires credentials:decrypt scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -48,28 +54,14 @@ export const MCP_TOOLS = [
   {
     name: "search_credentials",
     description:
-      "Return encrypted credential overviews for client-side search and filtering.",
+      "Search delegated credential entries by keyword. Searches title and username fields " +
+      "of delegated entries. Requires credentials:decrypt scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        limit: { type: "number", description: "Max entries to return (default 100, max 200)" },
-        offset: { type: "number", description: "Offset for pagination (default 0)" },
+        query: { type: "string", description: "Search keyword (matches title or username)" },
+        limit: { type: "number", description: "Max entries to return (default 50, max 200)" },
       },
-      additionalProperties: false,
-    },
-  },
-  {
-    name: "get_decrypted_credential",
-    description:
-      "Retrieve plaintext credentials for a pre-approved entry. " +
-      "Only returns data if the user has explicitly delegated this entry via the vault UI. " +
-      "Requires credentials:decrypt scope and an active delegation session.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        id: { type: "string", description: "Credential entry UUID (must be pre-approved via delegation)" },
-      },
-      required: ["id"],
       additionalProperties: false,
     },
   },
@@ -80,7 +72,6 @@ export const MCP_TOOLS = [
 const listCredentialsSchema = z.object({
   limit: z.number().int().min(1).max(200).default(50),
   offset: z.number().int().min(0).default(0),
-  folderId: z.string().uuid().optional(),
 });
 
 const getCredentialSchema = z.object({
@@ -88,156 +79,85 @@ const getCredentialSchema = z.object({
 });
 
 const searchCredentialsSchema = z.object({
-  limit: z.number().int().min(1).max(200).default(100),
-  offset: z.number().int().min(0).default(0),
+  query: z.string().min(1).max(200).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
 });
+
+// ─── Helpers ─────────────────────────────────────────────────
+
+function requireDelegation(token: McpTokenData) {
+  if (!token.userId) {
+    return { error: { code: -32603, message: "Service account tokens cannot access credentials" } };
+  }
+  return null;
+}
+
+async function getSession(token: McpTokenData) {
+  const session = await findActiveDelegationSession(token.userId!, token.tokenId);
+  if (!session) {
+    return { error: { code: -32603, message: "No active delegation session. Delegate entries via the vault UI first." } };
+  }
+  return { session };
+}
+
+function auditRead(token: McpTokenData, targetId: string, sessionId: string, ip?: string | null) {
+  const auditBase = {
+    action: AUDIT_ACTION.DELEGATION_READ,
+    userId: token.userId!,
+    actorType: "MCP_AGENT" as const,
+    tenantId: token.tenantId,
+    targetId,
+    metadata: { delegationSessionId: sessionId, mcpClientId: token.clientId },
+    ip: ip ?? undefined,
+  };
+  logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+  logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+}
 
 // ─── Tool handlers ────────────────────────────────────────────
 
 export async function toolListCredentials(
   token: McpTokenData,
   rawInput: unknown,
+  ip?: string | null,
 ) {
   const parsed = listCredentialsSchema.safeParse(rawInput ?? {});
   if (!parsed.success) {
     return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
   }
-  const { limit, offset, folderId } = parsed.data;
+  const { limit, offset } = parsed.data;
 
-  // Only userId-based tokens can access personal credentials
-  if (!token.userId) {
-    return { error: { code: -32603, message: "Service account tokens cannot list personal credentials" } };
+  const guard = requireDelegation(token);
+  if (guard) return guard;
+
+  const result = await getSession(token);
+  if ("error" in result) return result;
+  const { session } = result;
+
+  // Get all delegated entry IDs from Redis index
+  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId).catch(() => new Set<string>());
+  if (delegatedIds.size === 0) {
+    return { result: { entries: [] } };
   }
 
-  const entries = await withBypassRls(prisma, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: token.userId!,
-        tenantId: token.tenantId,
-        deletedAt: null,
-        isArchived: false,
-        ...(folderId ? { folderId } : {}),
-      },
-      select: {
-        id: true,
-        encryptedOverview: true,
-        overviewIv: true,
-        overviewAuthTag: true,
-        keyVersion: true,
-        aadVersion: true,
-        entryType: true,
-        isFavorite: true,
-        createdAt: true,
-        updatedAt: true,
-        folderId: true,
-      },
-      orderBy: { updatedAt: "desc" },
-      take: limit,
-      skip: offset,
-    }),
-  );
+  // Fetch plaintext for each delegated entry
+  const entries: DelegationEntryData[] = [];
+  for (const entryId of delegatedIds) {
+    const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
+    if (entry) entries.push(entry);
+  }
 
-  // Mark delegated entries
-  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId).catch(() => new Set<string>());
-  const enriched = entries.map((e) => ({
-    ...e,
-    delegated: delegatedIds.has(e.id),
-  }));
+  // Apply pagination
+  const paginated = entries.slice(offset, offset + limit);
 
-  return { result: { entries: enriched } };
+  for (const entry of paginated) {
+    auditRead(token, entry.id, session.id, ip);
+  }
+
+  return { result: { entries: paginated, total: entries.length } };
 }
 
 export async function toolGetCredential(
-  token: McpTokenData,
-  rawInput: unknown,
-) {
-  const parsed = getCredentialSchema.safeParse(rawInput);
-  if (!parsed.success) {
-    return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
-  }
-  const { id } = parsed.data;
-
-  if (!token.userId) {
-    return { error: { code: -32603, message: "Service account tokens cannot access personal credentials" } };
-  }
-
-  const entry = await withBypassRls(prisma, async () =>
-    prisma.passwordEntry.findFirst({
-      where: {
-        id,
-        userId: token.userId!,
-        tenantId: token.tenantId,
-        deletedAt: null,
-      },
-      select: {
-        id: true,
-        encryptedBlob: true,
-        blobIv: true,
-        blobAuthTag: true,
-        encryptedOverview: true,
-        overviewIv: true,
-        overviewAuthTag: true,
-        keyVersion: true,
-        aadVersion: true,
-        entryType: true,
-        isFavorite: true,
-        createdAt: true,
-        updatedAt: true,
-        folderId: true,
-      },
-    }),
-  );
-
-  if (!entry) {
-    return { error: { code: -32603, message: "Credential not found" } };
-  }
-
-  return { result: { entry } };
-}
-
-export async function toolSearchCredentials(
-  token: McpTokenData,
-  rawInput: unknown,
-) {
-  const parsed = searchCredentialsSchema.safeParse(rawInput ?? {});
-  if (!parsed.success) {
-    return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
-  }
-  const { limit, offset } = parsed.data;
-
-  if (!token.userId) {
-    return { error: { code: -32603, message: "Service account tokens cannot access personal credentials" } };
-  }
-
-  // Return all overviews for client-side search (encrypted, server can't filter by content)
-  const entries = await withBypassRls(prisma, async () =>
-    prisma.passwordEntry.findMany({
-      where: {
-        userId: token.userId!,
-        tenantId: token.tenantId,
-        deletedAt: null,
-        isArchived: false,
-      },
-      select: {
-        id: true,
-        encryptedOverview: true,
-        overviewIv: true,
-        overviewAuthTag: true,
-        keyVersion: true,
-        entryType: true,
-        updatedAt: true,
-        folderId: true,
-      },
-      orderBy: { updatedAt: "desc" },
-      take: limit,
-      skip: offset,
-    }),
-  );
-
-  return { result: { entries } };
-}
-
-export async function toolGetDecryptedCredential(
   token: McpTokenData,
   rawInput: unknown,
   ip?: string | null,
@@ -248,34 +168,65 @@ export async function toolGetDecryptedCredential(
   }
   const { id } = parsed.data;
 
-  if (!token.userId) {
-    return { error: { code: -32603, message: "Service account tokens cannot access delegated credentials" } };
-  }
+  const guard = requireDelegation(token);
+  if (guard) return guard;
 
-  // Find active delegation session for this MCP token
-  const session = await findActiveDelegationSession(token.userId, token.tokenId);
-  if (!session) {
-    return { error: { code: -32603, message: "No active delegation session for this token" } };
-  }
+  const result = await getSession(token);
+  if ("error" in result) return result;
+  const { session } = result;
 
-  // Fetch decrypted entry from Redis
-  const entry = await fetchDelegationEntry(token.userId, session.id, id);
+  const entry = await fetchDelegationEntry(token.userId!, session.id, id);
   if (!entry) {
     return { error: { code: -32603, message: "Entry not delegated or delegation expired" } };
   }
 
-  // Audit log — both personal and tenant scope
-  const auditBase = {
-    action: AUDIT_ACTION.DELEGATION_READ,
-    userId: token.userId,
-    actorType: "MCP_AGENT" as const,
-    tenantId: token.tenantId,
-    targetId: id,
-    metadata: { delegationSessionId: session.id, mcpClientId: token.clientId },
-    ip: ip ?? undefined,
-  };
-  logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  auditRead(token, id, session.id, ip);
 
   return { result: { entry } };
+}
+
+export async function toolSearchCredentials(
+  token: McpTokenData,
+  rawInput: unknown,
+  ip?: string | null,
+) {
+  const parsed = searchCredentialsSchema.safeParse(rawInput ?? {});
+  if (!parsed.success) {
+    return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
+  }
+  const { query, limit } = parsed.data;
+
+  const guard = requireDelegation(token);
+  if (guard) return guard;
+
+  const result = await getSession(token);
+  if ("error" in result) return result;
+  const { session } = result;
+
+  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId).catch(() => new Set<string>());
+  if (delegatedIds.size === 0) {
+    return { result: { entries: [] } };
+  }
+
+  const entries: DelegationEntryData[] = [];
+  for (const entryId of delegatedIds) {
+    const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
+    if (entry) entries.push(entry);
+  }
+
+  // Filter by query if provided
+  const filtered = query
+    ? entries.filter((e) => {
+        const q = query.toLowerCase();
+        return e.title.toLowerCase().includes(q) || (e.username?.toLowerCase().includes(q) ?? false);
+      })
+    : entries;
+
+  const results = filtered.slice(0, limit);
+
+  for (const entry of results) {
+    auditRead(token, entry.id, session.id, ip);
+  }
+
+  return { result: { entries: results } };
 }

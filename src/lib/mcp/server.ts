@@ -14,17 +14,16 @@ import {
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
 } from "@/lib/constants/mcp";
-import { MCP_TOOLS, toolListCredentials, toolGetCredential, toolSearchCredentials, toolGetDecryptedCredential } from "@/lib/mcp/tools";
+import { MCP_TOOLS, toolListCredentials, toolGetCredential, toolSearchCredentials } from "@/lib/mcp/tools";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
 
 // ─── Tool → required scope mapping ───────────────────────────
 
 const TOOL_SCOPE_MAP: Record<string, McpScope> = {
-  list_credentials: MCP_SCOPE.CREDENTIALS_LIST,
-  get_credential: MCP_SCOPE.CREDENTIALS_READ,
-  search_credentials: MCP_SCOPE.CREDENTIALS_LIST,
-  get_decrypted_credential: MCP_SCOPE.CREDENTIALS_DECRYPT,
+  list_credentials: MCP_SCOPE.CREDENTIALS_DECRYPT,
+  get_credential: MCP_SCOPE.CREDENTIALS_DECRYPT,
+  search_credentials: MCP_SCOPE.CREDENTIALS_DECRYPT,
 };
 
 // ─── Rate limiting ────────────────────────────────────────────
@@ -100,16 +99,13 @@ async function handleToolsCall(
 
   switch (p.name) {
     case "list_credentials":
-      toolResult = await toolListCredentials(token, p.arguments);
+      toolResult = await toolListCredentials(token, p.arguments, ip);
       break;
     case "get_credential":
-      toolResult = await toolGetCredential(token, p.arguments);
+      toolResult = await toolGetCredential(token, p.arguments, ip);
       break;
     case "search_credentials":
-      toolResult = await toolSearchCredentials(token, p.arguments);
-      break;
-    case "get_decrypted_credential":
-      toolResult = await toolGetDecryptedCredential(token, p.arguments, ip);
+      toolResult = await toolSearchCredentials(token, p.arguments, ip);
       break;
     default:
       return err(id, -32601, `Unknown tool: ${p.name}`);

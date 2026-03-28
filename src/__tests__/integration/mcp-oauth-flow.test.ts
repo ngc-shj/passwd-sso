@@ -149,7 +149,7 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   clientId: "mcpc_abc123def456",
   name: "test-mcp-client",
   redirectUris: ["https://example.com/callback"],
-  allowedScopes: "credentials:read,credentials:list",
+  allowedScopes: "credentials:decrypt",
   isActive: true,
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -169,7 +169,7 @@ const makeTokenData = (overrides: Partial<{
   clientId: "client-uuid-1",
   userId: "user-uuid-1",
   serviceAccountId: null,
-  scopes: ["credentials:read", "credentials:list"],
+  scopes: ["credentials:decrypt"],
   ...overrides,
 });
 
@@ -189,7 +189,7 @@ describe("Scenario 1: MCP Client Registration", () => {
       body: {
         name: "test-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:read", "credentials:list"],
+        allowedScopes: ["credentials:decrypt"],
       },
     });
     const res = await postClients(req);
@@ -559,9 +559,10 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
 describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("list_credentials with credentials:list scope → success", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
-    mockPasswordEntryFindMany.mockResolvedValue([]);
+  it("list_credentials with credentials:decrypt scope → -32603 when no active delegation session", async () => {
+    // delegationSession.findFirst is mocked to return null (no active session)
+    // so list_credentials errors with "No active delegation session"
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
 
     const response = await handleMcpRequest(
       {
@@ -573,16 +574,15 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
       token,
     );
 
-    expect("result" in response).toBe(true);
-    if ("result" in response) {
-      const result = response.result as { content: { type: string; text: string }[] };
-      expect(Array.isArray(result.content)).toBe(true);
-      expect(result.content[0].type).toBe("text");
+    expect("error" in response).toBe(true);
+    if ("error" in response) {
+      expect(response.error.code).toBe(-32603);
+      expect(response.error.message).toContain("delegation");
     }
   });
 
-  it("get_credential with only credentials:list scope → -32003 insufficient scope", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
+  it("get_credential without credentials:decrypt scope → -32003 insufficient scope", async () => {
+    const token = makeTokenData({ scopes: [MCP_SCOPE.VAULT_STATUS] });
 
     const response = await handleMcpRequest(
       {
@@ -601,30 +601,14 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     if ("error" in response) {
       expect(response.error.code).toBe(-32003);
       expect(response.error.message).toContain("Insufficient scope");
-      expect(response.error.message).toContain("credentials:read");
+      expect(response.error.message).toContain("credentials:decrypt");
     }
   });
 
-  it("get_credential with credentials:read scope → success (entry found)", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_READ] });
+  it("get_credential with credentials:decrypt scope → -32603 when no active delegation session", async () => {
+    // delegationSession.findFirst returns null (no active delegation)
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
     const entryId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"; // valid UUIDv4
-    const mockEntry = {
-      id: entryId,
-      encryptedBlob: "blob-data",
-      blobIv: "iv",
-      blobAuthTag: "tag",
-      encryptedOverview: "overview",
-      overviewIv: "oiv",
-      overviewAuthTag: "otag",
-      keyVersion: 1,
-      aadVersion: 1,
-      entryType: "LOGIN",
-      isFavorite: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      folderId: null,
-    };
-    mockPasswordEntryFindFirst.mockResolvedValue(mockEntry);
 
     const response = await handleMcpRequest(
       {
@@ -639,19 +623,16 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
       token,
     );
 
-    expect("result" in response).toBe(true);
-    if ("result" in response) {
-      const result = response.result as { content: { type: string; text: string }[] };
-      expect(result.content[0].type).toBe("text");
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.entry.id).toBe(entryId);
+    expect("error" in response).toBe(true);
+    if ("error" in response) {
+      expect(response.error.code).toBe(-32603);
+      expect(response.error.message).toContain("delegation");
     }
   });
 
-  it("get_credential with credentials:read scope → -32603 when entry not found", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_READ] });
+  it("get_credential with credentials:decrypt scope → -32603 when entry not delegated", async () => {
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
     const entryId = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"; // valid UUIDv4
-    mockPasswordEntryFindFirst.mockResolvedValue(null);
 
     const response = await handleMcpRequest(
       {
