@@ -64,7 +64,9 @@ TB6: Client <-> WebAuthn Authenticator
 | S2: Attacker forges SSO assertion | TB4 | SAML signature validation by Jackson; OIDC token validation by Auth.js | Compromised IdP could issue valid tokens |
 | S3: Attacker replays extension token | TB5 | Token hashed (SHA-256) before DB storage; expiry enforced; single-use refresh | Token window between issue and expiry |
 | S4: Attacker spoofs WebAuthn assertion | TB6 | Origin and RP ID validation; challenge freshness; signature verification | None (WebAuthn protocol provides strong anti-spoofing) |
-| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 25 allowlisted files (CI-guarded) |
+| S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 39 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 25 allowlisted files (CI-guarded) |
+
+> **⚠️ SUPERUSER bypasses RLS**: PostgreSQL SUPERUSER and BYPASSRLS roles bypass all RLS policies, including FORCE ROW LEVEL SECURITY. The application database user **must not** have SUPERUSER or BYPASSRLS privileges in production. The Docker Compose dev setup grants SUPERUSER for convenience; production deployments must use a non-superuser role (see [deployment guide](../operations/deployment.md)).
 
 ### 3.2 Tampering
 
