@@ -13,6 +13,7 @@ import {
 
 const {
   mockAuth,
+  mockAuthOrToken,
   mockRequireTenantPermission,
   mockWithTenantRls,
   mockWithBypassRls,
@@ -28,6 +29,7 @@ const {
   mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockAuthOrToken: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -77,8 +79,12 @@ vi.mock("@/lib/tenant-rls", () => ({
   withTenantRls: mockWithTenantRls,
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/auth-or-token", () => ({
+  authOrToken: mockAuthOrToken,
+}));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  resolveActorType: () => "HUMAN",
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
@@ -110,6 +116,7 @@ describe("Scenario 1: Full JIT workflow", () => {
   it("creates access request, approves it, and JIT token contains only validated scopes", async () => {
     // Step 1: Create access request
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue({
       id: SA_ID,
@@ -149,6 +156,7 @@ describe("Scenario 1: Full JIT workflow", () => {
 
     // Step 2: Approve the request to issue JIT token
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAccessRequestFindUnique.mockResolvedValue({
       id: REQUEST_ID,
@@ -246,6 +254,7 @@ describe("Scenario 2: Forbidden scope rejection via schema validation", () => {
 
   it("POST /api/tenant/access-requests returns 400 when requesting vault:unlock scope", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
@@ -266,6 +275,7 @@ describe("Scenario 3: Double approval prevention", () => {
 
   it("first approval succeeds, second approval gets 409 CONFLICT", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAccessRequestFindUnique.mockResolvedValue({
       id: REQUEST_ID,
@@ -343,6 +353,7 @@ describe("Scenario 4: Inactive SA JIT rejection", () => {
 
   it("creating request for inactive SA returns 404", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue({
       id: SA_ID,
@@ -365,6 +376,7 @@ describe("Scenario 4: Inactive SA JIT rejection", () => {
 
   it("approving request where SA became inactive returns 409", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     // SA is inactive at the time of approval
     mockAccessRequestFindUnique.mockResolvedValue({

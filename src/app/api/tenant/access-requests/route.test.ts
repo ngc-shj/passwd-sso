@@ -4,8 +4,10 @@ import { createRequest, parseResponse } from "../../../../__tests__/helpers/requ
 
 const {
   mockAuth,
+  mockAuthOrToken,
   mockRequireTenantPermission,
   mockWithTenantRls,
+  mockWithBypassRls,
   mockLogAudit,
   mockRateLimiterCheck,
   mockAccessRequestFindMany,
@@ -14,8 +16,10 @@ const {
   mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockAuthOrToken: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockAccessRequestFindMany: vi.fn(),
@@ -49,11 +53,16 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
+vi.mock("@/lib/auth-or-token", () => ({
+  authOrToken: mockAuthOrToken,
+}));
 vi.mock("@/lib/tenant-rls", () => ({
   withTenantRls: mockWithTenantRls,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
+  resolveActorType: () => "HUMAN",
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
@@ -94,6 +103,7 @@ describe("GET /api/tenant/access-requests", () => {
 
   it("lists access requests for tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAccessRequestFindMany.mockResolvedValue([makeAccessRequest()]);
 
@@ -109,6 +119,7 @@ describe("GET /api/tenant/access-requests", () => {
 
   it("filters by validated status enum", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAccessRequestFindMany.mockResolvedValue([makeAccessRequest({ status: "APPROVED" })]);
 
@@ -129,6 +140,7 @@ describe("GET /api/tenant/access-requests", () => {
 
   it("ignores invalid status (does not crash)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAccessRequestFindMany.mockResolvedValue([makeAccessRequest()]);
 
@@ -163,6 +175,7 @@ describe("POST /api/tenant/access-requests", () => {
 
   it("creates access request with validated scope array", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue({
       id: SA_ID,
@@ -202,6 +215,7 @@ describe("POST /api/tenant/access-requests", () => {
 
   it("rejects invalid scope values not in SA_TOKEN_SCOPES", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
@@ -218,6 +232,7 @@ describe("POST /api/tenant/access-requests", () => {
 
   it("returns 404 for non-existent service account", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue(null);
 
@@ -236,6 +251,7 @@ describe("POST /api/tenant/access-requests", () => {
 
   it("returns 404 for inactive service account", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue({
       id: SA_ID,
@@ -257,7 +273,7 @@ describe("POST /api/tenant/access-requests", () => {
   });
 
   it("returns 401 for unauthenticated users", async () => {
-    mockAuth.mockResolvedValue(null);
+    mockAuthOrToken.mockResolvedValue(null);
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
       body: {
@@ -273,6 +289,7 @@ describe("POST /api/tenant/access-requests", () => {
 
   it("returns 403 for insufficient permission", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockAuthOrToken.mockResolvedValue({ type: "session", userId: DEFAULT_SESSION.user.id });
     mockRequireTenantPermission.mockRejectedValue(new TenantAuthError("FORBIDDEN", 403));
 
     const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {

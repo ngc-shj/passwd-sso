@@ -1,14 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAudit, extractRequestMeta, resolveActorType } from "@/lib/audit";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { authOrToken } from "@/lib/auth-or-token";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
-import { withTenantRls } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -21,8 +22,16 @@ export const runtime = "nodejs";
 
 const VALID_ACCESS_REQUEST_STATUSES = ["PENDING", "APPROVED", "DENIED", "EXPIRED"] as const;
 
-const accessRequestCreateSchema = z.object({
+// Admin creates request on behalf of SA
+const adminCreateSchema = z.object({
   serviceAccountId: z.string().uuid(),
+  requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
+  justification: z.string().max(1000).optional(),
+  expiresInMinutes: z.number().int().min(5).max(1440).default(60),
+});
+
+// SA self-service request (serviceAccountId inferred from token)
+const saCreateSchema = z.object({
   requestedScope: z.array(z.enum(SA_TOKEN_SCOPES as [string, ...string[]])).min(1),
   justification: z.string().max(1000).optional(),
   expiresInMinutes: z.number().int().min(5).max(1440).default(60),
@@ -85,55 +94,94 @@ async function handleGET(req: NextRequest) {
 }
 
 // POST /api/tenant/access-requests — Create a new access request
+// Supports two auth modes:
+// 1. SA token (Bearer sa_...) — SA self-service, serviceAccountId inferred from token
+// 2. Session (admin) — admin creates on behalf of SA, serviceAccountId in body
 async function handlePOST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user?.id) {
+  const authResult = await authOrToken(req);
+  if (!authResult || authResult.type === "scope_insufficient") {
     return unauthorized();
   }
 
-  let actor;
-  try {
-    actor = await requireTenantPermission(
-      session.user.id,
-      TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
+  let tenantId: string;
+  let serviceAccountId: string;
+  let userId: string;
+  let requestedScope: string[];
+  let justification: string | undefined;
+  let expiresInMinutes: number;
+
+  if (authResult.type === "service_account") {
+    // SA self-service: serviceAccountId from token
+    tenantId = authResult.tenantId;
+    serviceAccountId = authResult.serviceAccountId;
+
+    const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:sa:${serviceAccountId}`);
+    if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+
+    const result = await parseBody(req, saCreateSchema);
+    if (!result.ok) return result.response;
+
+    requestedScope = result.data.requestedScope;
+    justification = result.data.justification;
+    expiresInMinutes = result.data.expiresInMinutes;
+
+    // Verify SA is active
+    const sa = await withBypassRls(prisma, async () =>
+      prisma.serviceAccount.findUnique({
+        where: { id: serviceAccountId },
+        select: { isActive: true, createdById: true },
+      }),
     );
-  } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
+    if (!sa || !sa.isActive) {
+      return NextResponse.json({ error: API_ERROR.SA_NOT_FOUND }, { status: 404 });
     }
-    throw err;
-  }
+    userId = sa.createdById;
+  } else {
+    // Admin path: session or API key auth
+    if (!("userId" in authResult)) return unauthorized();
+    userId = authResult.userId;
 
-  const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${actor.tenantId}`);
-  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
+    let actor;
+    try {
+      actor = await requireTenantPermission(userId, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
+    } catch (err) {
+      if (err instanceof TenantAuthError) return errorResponse(err.message, err.status);
+      throw err;
+    }
+    tenantId = actor.tenantId;
 
-  const result = await parseBody(req, accessRequestCreateSchema);
-  if (!result.ok) return result.response;
+    const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${tenantId}`);
+    if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  // Validate that the service account exists and belongs to this tenant
-  const sa = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.serviceAccount.findUnique({
-      where: { id: result.data.serviceAccountId },
-      select: { id: true, tenantId: true, isActive: true },
-    }),
-  );
+    const result = await parseBody(req, adminCreateSchema);
+    if (!result.ok) return result.response;
 
-  if (!sa || sa.tenantId !== actor.tenantId || !sa.isActive) {
-    return NextResponse.json(
-      { error: API_ERROR.SA_NOT_FOUND },
-      { status: 404 },
+    serviceAccountId = result.data.serviceAccountId;
+    requestedScope = result.data.requestedScope;
+    justification = result.data.justification;
+    expiresInMinutes = result.data.expiresInMinutes;
+
+    // Validate SA exists and belongs to this tenant
+    const sa = await withTenantRls(prisma, tenantId, async () =>
+      prisma.serviceAccount.findUnique({
+        where: { id: serviceAccountId },
+        select: { id: true, tenantId: true, isActive: true },
+      }),
     );
+    if (!sa || sa.tenantId !== tenantId || !sa.isActive) {
+      return NextResponse.json({ error: API_ERROR.SA_NOT_FOUND }, { status: 404 });
+    }
   }
 
-  const expiresAt = new Date(Date.now() + result.data.expiresInMinutes * 60 * 1000);
+  const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
 
-  const accessRequest = await withTenantRls(prisma, actor.tenantId, async () =>
+  const accessRequest = await withBypassRls(prisma, async () =>
     prisma.accessRequest.create({
       data: {
-        tenantId: actor.tenantId,
-        serviceAccountId: result.data.serviceAccountId,
-        requestedScope: result.data.requestedScope.join(","),
-        justification: result.data.justification ?? null,
+        tenantId,
+        serviceAccountId,
+        requestedScope: requestedScope.join(","),
+        justification: justification ?? null,
         expiresAt,
       },
       select: {
@@ -151,22 +199,24 @@ async function handlePOST(req: NextRequest) {
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.ACCESS_REQUEST_CREATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
+    userId,
+    actorType: resolveActorType(authResult),
+    serviceAccountId: authResult.type === "service_account" ? serviceAccountId : undefined,
+    tenantId,
     targetType: AUDIT_TARGET_TYPE.ACCESS_REQUEST,
     targetId: accessRequest.id,
     metadata: {
-      serviceAccountId: result.data.serviceAccountId,
-      requestedScope: result.data.requestedScope.join(","),
-      expiresInMinutes: result.data.expiresInMinutes,
+      serviceAccountId,
+      requestedScope: requestedScope.join(","),
+      expiresInMinutes,
     },
     ...extractRequestMeta(req),
   });
   void dispatchTenantWebhook({
     type: AUDIT_ACTION.ACCESS_REQUEST_CREATE,
-    tenantId: actor.tenantId,
+    tenantId,
     timestamp: new Date().toISOString(),
-    data: { accessRequestId: accessRequest.id, serviceAccountId: result.data.serviceAccountId },
+    data: { accessRequestId: accessRequest.id, serviceAccountId },
   });
 
   return NextResponse.json(accessRequest, { status: 201 });
