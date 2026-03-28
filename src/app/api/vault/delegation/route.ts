@@ -239,12 +239,15 @@ async function handleGET(_request: NextRequest) {
 
   const { id: userId } = session.user;
   const tenantId = await resolveUserTenantId(userId);
+  if (!tenantId) {
+    return NextResponse.json({ error: "No tenant" }, { status: 403 });
+  }
 
   const sessions = await withBypassRls(prisma, () =>
     prisma.delegationSession.findMany({
       where: {
         userId,
-        tenantId: tenantId ?? undefined,
+        tenantId,
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
@@ -272,7 +275,7 @@ async function handleGET(_request: NextRequest) {
     prisma.mcpAccessToken.findMany({
       where: {
         userId,
-        tenantId: tenantId ?? undefined,
+        tenantId,
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },

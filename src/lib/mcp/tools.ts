@@ -13,7 +13,7 @@ import type { McpTokenData } from "@/lib/mcp/oauth-server";
 import {
   findActiveDelegationSession,
   fetchDelegationEntry,
-  getDelegatedEntryIds,
+  getDelegatedEntryIdsForSession,
   type DelegationEntryData,
 } from "@/lib/delegation";
 import { logAudit } from "@/lib/audit";
@@ -60,8 +60,9 @@ export const MCP_TOOLS = [
     inputSchema: {
       type: "object" as const,
       properties: {
-        query: { type: "string", description: "Search keyword (matches title or username)" },
+        query: { type: "string", description: "Search keyword (matches title or username). Omit to list all delegated entries." },
         limit: { type: "number", description: "Max entries to return (default 50, max 200)" },
+        offset: { type: "number", description: "Offset for pagination (default 0)" },
       },
       additionalProperties: false,
     },
@@ -82,6 +83,7 @@ const getCredentialSchema = z.object({
 const searchCredentialsSchema = z.object({
   query: z.string().min(1).max(200).optional(),
   limit: z.number().int().min(1).max(200).default(50),
+  offset: z.number().int().min(0).default(0),
 });
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -148,11 +150,8 @@ export async function toolListCredentials(
   if ("error" in result) return result;
   const { session } = result;
 
-  // Get all delegated entry IDs from Redis index
-  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId).catch(() => new Set<string>());
-  if (delegatedIds.size === 0) {
-    return { result: { entries: [] } };
-  }
+  // Get all delegated entry IDs from Redis index (uses session.id directly — no double DB lookup)
+  const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
   // Fetch plaintext for each delegated entry
   const entries: DelegationEntryData[] = [];
@@ -206,7 +205,7 @@ export async function toolSearchCredentials(
   if (!parsed.success) {
     return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
   }
-  const { query, limit } = parsed.data;
+  const { query, limit, offset } = parsed.data;
 
   const guard = requireDelegation(token);
   if (guard) return guard;
@@ -215,10 +214,7 @@ export async function toolSearchCredentials(
   if ("error" in result) return result;
   const { session } = result;
 
-  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId).catch(() => new Set<string>());
-  if (delegatedIds.size === 0) {
-    return { result: { entries: [] } };
-  }
+  const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
   const entries: DelegationEntryData[] = [];
   for (const entryId of delegatedIds) {
@@ -234,9 +230,9 @@ export async function toolSearchCredentials(
       })
     : entries;
 
-  const results = filtered.slice(0, limit);
+  const paginated = filtered.slice(offset, offset + limit);
 
-  auditDelegationAccess(token, "search", session.id, ip, { entryCount: results.length, query });
+  auditDelegationAccess(token, "search", session.id, ip, { entryCount: paginated.length, query });
 
-  return { result: { entries: results } };
+  return { result: { entries: paginated, total: filtered.length } };
 }

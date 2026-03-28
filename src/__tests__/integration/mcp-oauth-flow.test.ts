@@ -138,7 +138,7 @@ import { POST as postToken } from "@/app/api/mcp/token/route";
 
 import { GET as getDiscovery } from "@/app/api/mcp/.well-known/oauth-authorization-server/route";
 import { handleMcpRequest } from "@/lib/mcp/server";
-import { MCP_SCOPE } from "@/lib/constants/mcp";
+import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
 
 // ─── Shared fixtures ──────────────────────────────────────────
 
@@ -162,14 +162,14 @@ const makeTokenData = (overrides: Partial<{
   clientId: string;
   userId: string | null;
   serviceAccountId: string | null;
-  scopes: string[];
+  scopes: McpScope[];
 }> = {}) => ({
   tokenId: "token-id",
   tenantId: "tenant-1",
   clientId: "client-uuid-1",
   userId: "user-uuid-1",
   serviceAccountId: null,
-  scopes: ["credentials:decrypt"],
+  scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] as McpScope[],
   ...overrides,
 });
 
@@ -279,7 +279,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn().mockResolvedValue({}),
         },
@@ -307,7 +307,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
     expect(json.access_token).toMatch(/^mcp_/);
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBeGreaterThan(0);
-    expect(json.scope).toBe("credentials:read");
+    expect(json.scope).toBe("credentials:decrypt");
   });
 });
 
@@ -349,7 +349,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -389,7 +389,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: "any-challenge",
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -429,7 +429,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: "any-challenge",
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -472,7 +472,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -519,7 +519,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback", // stored URI
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },

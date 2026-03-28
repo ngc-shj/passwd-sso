@@ -161,11 +161,17 @@ export async function getDelegatedEntryIds(
 ): Promise<Set<string>> {
   const session = await findActiveDelegationSession(userId, mcpTokenId);
   if (!session) return new Set();
+  return getDelegatedEntryIdsForSession(userId, session.id);
+}
 
+export async function getDelegatedEntryIdsForSession(
+  userId: string,
+  sessionId: string,
+): Promise<Set<string>> {
   const redis = getRedis();
   if (!redis) return new Set();
 
-  const indexKey = delegationIndexKey(userId, session.id);
+  const indexKey = delegationIndexKey(userId, sessionId);
   const ids = await redis.smembers(indexKey);
   return new Set(ids);
 }
