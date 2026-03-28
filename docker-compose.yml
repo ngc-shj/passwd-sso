@@ -4,13 +4,15 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        DATABASE_URL: postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+        # Dummy URL for prisma generate (no actual DB connection at build time).
+        # Do NOT use real credentials here — build args are visible in image metadata.
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
     ports:
       - "3000:3000"
     env_file:
       - .env.local
     environment:
-      - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+      - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
       - JACKSON_URL=http://jackson:5225
       - REDIS_URL=redis://redis:6379
     depends_on:
@@ -30,6 +32,7 @@ services:
       POSTGRES_USER: passwd_user
       POSTGRES_PASSWORD: passwd_pass
       POSTGRES_DB: passwd_sso
+      PASSWD_APP_PASSWORD: passwd_app_pass
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -78,7 +81,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        DATABASE_URL: postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
     environment:
       - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
     depends_on:

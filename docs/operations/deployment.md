@@ -179,14 +179,29 @@ The deploy script uses these environment variables:
 
 ## Database User Permissions
 
-The application database user **must not** have `SUPERUSER` or `BYPASSRLS` privileges in production. PostgreSQL `SUPERUSER` bypasses all Row Level Security policies, even when `FORCE ROW LEVEL SECURITY` is enabled on tables.
+The application uses two database roles with separated privileges:
+
+| Role | Privileges | Purpose |
+|------|-----------|---------|
+| `passwd_user` (or equivalent) | SUPERUSER or DDL-capable | Table owner, migrations (`prisma migrate deploy`) |
+| `passwd_app` (or equivalent) | NOSUPERUSER NOBYPASSRLS | App runtime (Next.js), RLS enforced |
 
 ```sql
 -- Production: create a non-superuser application role
 CREATE ROLE passwd_app LOGIN PASSWORD '<strong-password>' NOSUPERUSER NOBYPASSRLS;
-GRANT ALL ON ALL TABLES IN SCHEMA public TO passwd_app;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
 GRANT USAGE ON SCHEMA public TO passwd_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
 ```
 
-The Docker Compose dev setup grants `SUPERUSER` for convenience (migration creation requires it). This means RLS is not enforced at the DB level in development — tenant isolation relies on the application layer (`withTenantRls`). In production, RLS provides defense-in-depth.
+**Environment variables:**
+- `DATABASE_URL` — app runtime connection (non-SUPERUSER role, e.g. `passwd_app`)
+- `MIGRATION_DATABASE_URL` — Prisma CLI connection (SUPERUSER role, e.g. `passwd_user`)
+
+The Docker Compose dev setup enforces the same role separation: the `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) while the `migrate` service connects as `passwd_user` (SUPERUSER). RLS is enforced in all environments.
+
+> **⚠️ Breaking change for existing dev environments**: After upgrading, run `docker compose down -v && docker compose up` to recreate the database with the new `passwd_app` role. The initdb scripts only run on first initialization (empty volume).

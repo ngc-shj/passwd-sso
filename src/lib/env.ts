@@ -38,6 +38,24 @@ const envSchema = z
   .object({
     // --- Critical (always required) ---
     DATABASE_URL: nonEmpty,
+    // SUPERUSER URL for Prisma CLI (migrate, studio). Optional — falls back to DATABASE_URL.
+    MIGRATION_DATABASE_URL: z
+      .string()
+      .transform((s) => s.trim())
+      .pipe(
+        z.string().refine(
+          (s) => {
+            try {
+              new URL(s);
+              return true;
+            } catch {
+              return false;
+            }
+          },
+          { message: "MIGRATION_DATABASE_URL must be a valid URL" },
+        ),
+      )
+      .optional(),
     SHARE_MASTER_KEY: hex64.optional(),
 
     // --- Key rotation ---

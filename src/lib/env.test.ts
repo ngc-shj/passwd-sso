@@ -158,4 +158,36 @@ describe("env validation", () => {
     });
     await expect(import("./env")).rejects.toThrow("SMTP_HOST");
   });
+
+  // --- MIGRATION_DATABASE_URL ---
+
+  it("accepts valid MIGRATION_DATABASE_URL", async () => {
+    process.env = buildMinimalEnv({
+      MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso",
+    });
+    const { env } = await import("./env");
+    expect(env.MIGRATION_DATABASE_URL).toBe(
+      "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso",
+    );
+  });
+
+  it("MIGRATION_DATABASE_URL is optional (undefined when not set)", async () => {
+    process.env = buildMinimalEnv();
+    const { env } = await import("./env");
+    expect(env.MIGRATION_DATABASE_URL).toBeUndefined();
+  });
+
+  it("rejects invalid MIGRATION_DATABASE_URL", async () => {
+    process.env = buildMinimalEnv({
+      MIGRATION_DATABASE_URL: "not-a-url",
+    });
+    await expect(import("./env")).rejects.toThrow("MIGRATION_DATABASE_URL");
+  });
+
+  it("rejects empty MIGRATION_DATABASE_URL", async () => {
+    process.env = buildMinimalEnv({
+      MIGRATION_DATABASE_URL: "",
+    });
+    await expect(import("./env")).rejects.toThrow("Invalid environment variables");
+  });
 });

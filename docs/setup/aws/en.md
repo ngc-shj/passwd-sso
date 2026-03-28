@@ -67,6 +67,7 @@ This guide describes a production-oriented AWS deployment:
 
 Store these in Secrets Manager:
 - `DATABASE_URL`
+- `MIGRATION_DATABASE_URL` (SUPERUSER role — used for `prisma migrate deploy` only)
 - `AUTH_SECRET`
 - `AUTH_GOOGLE_ID`
 - `AUTH_GOOGLE_SECRET`
@@ -136,10 +137,12 @@ Env vars (example):
 
 ## Migrations
 
-Run Prisma migrations from a one-off task:
+Run Prisma migrations from a one-off task using the SUPERUSER role:
 ```
-npx prisma migrate deploy
+MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma migrate deploy
 ```
+
+The `MIGRATION_DATABASE_URL` must point to a role with DDL privileges (table owner). The app service `DATABASE_URL` should use a non-SUPERUSER role.
 
 ## Health Checks
 

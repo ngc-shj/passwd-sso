@@ -91,7 +91,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   let result: { plaintext: string; expiresAt: Date; tokenId: string };
   try {
-    result = await prisma.$transaction(async (tx) => {
+    result = await withTenantRls(prisma, actor.tenantId, async () =>
+    prisma.$transaction(async (tx) => {
       // Enforce token limit per SA
       const activeTokenCount = await tx.serviceAccountToken.count({
         where: { serviceAccountId: request.serviceAccountId, revokedAt: null },
@@ -144,7 +145,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       });
 
       return { plaintext, expiresAt, tokenId: token.id };
-    });
+    }),
+    );
   } catch (err) {
     if (err instanceof Error && err.message === "Already processed or wrong tenant") {
       return NextResponse.json(

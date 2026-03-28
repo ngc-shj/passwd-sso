@@ -25,7 +25,8 @@ Examples:
 
 Set these in Vercel Project Settings → Environment Variables:
 
-- `DATABASE_URL` (PostgreSQL connection string)
+- `DATABASE_URL` (PostgreSQL connection string — non-SUPERUSER app role)
+- `MIGRATION_DATABASE_URL` (PostgreSQL connection string — SUPERUSER role, for migrations only)
 - `AUTH_URL` (production URL, e.g. `https://your-app.vercel.app`)
 - `AUTH_SECRET` (generate with `openssl rand -base64 32`)
 - `SHARE_MASTER_KEY` (generate with `openssl rand -hex 32`)
@@ -50,7 +51,7 @@ Run migrations separately before/with deployment.
 Example (run from local machine against production DB):
 
 ```bash
-DATABASE_URL='postgresql://...' npx prisma migrate deploy
+MIGRATION_DATABASE_URL='postgresql://SUPERUSER:password@HOST:5432/DB' npx prisma migrate deploy
 ```
 
 Recommended: enforce migrations in CI (e.g., GitHub Actions) before production deploy.
