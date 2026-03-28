@@ -289,10 +289,12 @@ export function ServiceAccountCard() {
         setTokenCreating(false);
         return;
       }
+      // Set expiry to end-of-day to avoid timezone issues with date-only input
+      const expiryDate = new Date(tokenExpiresAt + "T23:59:59");
       const body = {
         name: tokenName.trim(),
         scope: Array.from(tokenSelectedScopes),
-        expiresAt: new Date(tokenExpiresAt).toISOString(),
+        expiresAt: expiryDate.toISOString(),
       };
       const res = await fetchApi(
         apiPath.tenantServiceAccountTokens(tokenForSaId),
@@ -738,6 +740,7 @@ export function ServiceAccountCard() {
                     type="date"
                     value={tokenExpiresAt}
                     onChange={(e) => setTokenExpiresAt(e.target.value)}
+                    min={new Date(Date.now() + 86400000).toISOString().split("T")[0]}
                   />
                 </div>
               </div>
@@ -745,7 +748,7 @@ export function ServiceAccountCard() {
                 <Button variant="outline" onClick={() => setTokenCreateOpen(false)}>
                   {tCommon("cancel")}
                 </Button>
-                <Button onClick={handleCreateToken} disabled={tokenCreating}>
+                <Button onClick={handleCreateToken} disabled={tokenCreating || !tokenName.trim() || tokenSelectedScopes.size === 0 || !tokenExpiresAt}>
                   {tokenCreating && (
                     <Loader2 className="h-4 w-4 animate-spin mr-1" />
                   )}
