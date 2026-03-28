@@ -39,6 +39,7 @@ interface McpClient {
   id: string;
   name: string;
   clientId: string;
+  redirectUris: string[];
   allowedScopes: string;
   isActive: boolean;
   createdAt: string;
@@ -171,7 +172,7 @@ export function McpClientCard() {
   const openEdit = (client: McpClient) => {
     setEditClient(client);
     setEditName(client.name);
-    setEditRedirectUris(""); // redirectUris not returned by list API
+    setEditRedirectUris(Array.isArray(client.redirectUris) ? client.redirectUris.join("\n") : "");
     setEditScopes(
       new Set(client.allowedScopes ? client.allowedScopes.split(",").map((s) => s.trim()).filter(Boolean) : [])
     );
@@ -204,14 +205,12 @@ export function McpClientCard() {
     try {
       const body: Record<string, unknown> = {
         name: editName.trim(),
+        redirectUris: uris,
         allowedScopes: Array.from(editScopes),
         isActive: editIsActive,
       };
-      if (uris.length > 0) {
-        body.redirectUris = uris;
-      }
       const res = await fetchApi(apiPath.tenantMcpClientById(editClient.id), {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });

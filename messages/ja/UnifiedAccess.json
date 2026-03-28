@@ -45,6 +45,7 @@
   "tokenRevokeWarning": "この操作は元に戻せません。このトークンを使用しているクライアントはアクセスできなくなります。",
   "tokenLimitReached": "このサービスアカウントのトークン上限に達しました",
   "tokenNameRequired": "トークン名は必須です",
+  "tokenExpiresAtRequired": "有効期限は必須です",
   "tokenScopeRequired": "スコープを1つ以上選択してください",
   "tokenSecret": "トークン値",
   "tokenSecretWarning": "この値は再表示できません。今すぐコピーしてください。",

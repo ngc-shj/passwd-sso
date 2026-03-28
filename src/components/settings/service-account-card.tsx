@@ -217,7 +217,7 @@ export function ServiceAccountCard() {
     setEditNameError("");
     try {
       const res = await fetchApi(apiPath.tenantServiceAccountById(editSa.id), {
-        method: "PATCH",
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: editName.trim(),
@@ -284,13 +284,16 @@ export function ServiceAccountCard() {
     setTokenNameError("");
     setTokenScopeError("");
     try {
-      const body: Record<string, unknown> = {
+      if (!tokenExpiresAt) {
+        setTokenNameError(t("tokenExpiresAtRequired"));
+        setTokenCreating(false);
+        return;
+      }
+      const body = {
         name: tokenName.trim(),
         scope: Array.from(tokenSelectedScopes),
+        expiresAt: new Date(tokenExpiresAt).toISOString(),
       };
-      if (tokenExpiresAt) {
-        body.expiresAt = new Date(tokenExpiresAt).toISOString();
-      }
       const res = await fetchApi(
         apiPath.tenantServiceAccountTokens(tokenForSaId),
         {
@@ -436,6 +439,7 @@ export function ServiceAccountCard() {
                         size="sm"
                         className="h-7 text-xs"
                         onClick={() => openTokenCreate(sa.id)}
+                        disabled={!sa.isActive}
                       >
                         <KeyRound className="h-3 w-3 mr-1" />
                         {t("createToken")}

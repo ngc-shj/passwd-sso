@@ -28,6 +28,7 @@ const {
   mockServiceAccountCreate,
   mockServiceAccountFindUnique,
   mockServiceAccountUpdate,
+  mockServiceAccountDelete,
   mockServiceAccountTokenFindUnique,
   mockServiceAccountTokenUpdate,
   mockServiceAccountTokenUpdateMany,
@@ -46,6 +47,7 @@ const {
   mockServiceAccountCreate: vi.fn(),
   mockServiceAccountFindUnique: vi.fn(),
   mockServiceAccountUpdate: vi.fn(),
+  mockServiceAccountDelete: vi.fn(),
   mockServiceAccountTokenFindUnique: vi.fn(),
   mockServiceAccountTokenUpdate: vi.fn(),
   mockServiceAccountTokenUpdateMany: vi.fn(),
@@ -78,6 +80,7 @@ vi.mock("@/lib/prisma", () => ({
       create: mockServiceAccountCreate,
       findUnique: mockServiceAccountFindUnique,
       update: mockServiceAccountUpdate,
+      delete: mockServiceAccountDelete,
     },
     serviceAccountToken: {
       findUnique: mockServiceAccountTokenFindUnique,
@@ -240,9 +243,9 @@ describe("Scenario 1: SA CRUD lifecycle", () => {
     );
   });
 
-  it("step 4: deletes SA via DELETE — soft-deletes (isActive=false) and revokes tokens", async () => {
+  it("step 4: deletes SA via DELETE — hard-deletes (cascade removes tokens)", async () => {
     mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "a0000000-0000-4000-8000-000000000001" });
-    mockPrismaTransaction.mockResolvedValue([{ count: 1 }, {}]);
+    mockServiceAccountDelete.mockResolvedValue({});
 
     const req = createRequest("DELETE", `http://localhost/api/tenant/service-accounts/${SA_ID}`);
     const res = await deleteSA(req, createParams({ id: SA_ID }));
@@ -255,9 +258,8 @@ describe("Scenario 1: SA CRUD lifecycle", () => {
     );
   });
 
-  it("step 4 follow-up: GET after delete returns 404 (tenantId mismatch simulates RLS exclusion)", async () => {
-    // After soft-delete, the record would be excluded by tenant RLS in production.
-    // We simulate this by returning null.
+  it("step 4 follow-up: GET after delete returns 404 (record no longer exists)", async () => {
+    // After hard-delete, the record is gone from the database.
     mockServiceAccountFindUnique.mockResolvedValue(null);
 
     const req = createRequest("GET", `http://localhost/api/tenant/service-accounts/${SA_ID}`);

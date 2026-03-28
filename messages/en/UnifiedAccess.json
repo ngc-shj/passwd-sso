@@ -45,6 +45,7 @@
   "tokenRevokeWarning": "This action cannot be undone. Any API clients using this token will lose access.",
   "tokenLimitReached": "Maximum tokens reached for this service account",
   "tokenNameRequired": "Token name is required",
+  "tokenExpiresAtRequired": "Expiration date is required",
   "tokenScopeRequired": "Select at least one scope",
   "tokenSecret": "Token value",
   "tokenSecretWarning": "This value cannot be shown again. Copy it now.",

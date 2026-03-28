@@ -13,6 +13,7 @@ const {
   mockLogAudit,
   mockServiceAccountFindUnique,
   mockServiceAccountUpdate,
+  mockServiceAccountDelete,
   mockServiceAccountTokenUpdateMany,
   mockPrismaArrayTransaction,
   mockDispatchTenantWebhook,
@@ -23,6 +24,7 @@ const {
   mockLogAudit: vi.fn(),
   mockServiceAccountFindUnique: vi.fn(),
   mockServiceAccountUpdate: vi.fn(),
+  mockServiceAccountDelete: vi.fn(),
   mockServiceAccountTokenUpdateMany: vi.fn(),
   mockPrismaArrayTransaction: vi.fn().mockResolvedValue([{ count: 1 }, {}]),
   mockDispatchTenantWebhook: vi.fn(),
@@ -47,6 +49,7 @@ vi.mock("@/lib/prisma", () => ({
     serviceAccount: {
       findUnique: mockServiceAccountFindUnique,
       update: mockServiceAccountUpdate,
+      delete: mockServiceAccountDelete,
     },
     serviceAccountToken: {
       updateMany: mockServiceAccountTokenUpdateMany,
@@ -254,11 +257,11 @@ describe("PUT /api/tenant/service-accounts/[id]", () => {
 describe("DELETE /api/tenant/service-accounts/[id]", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("soft-deletes a service account and revokes its tokens", async () => {
+  it("hard-deletes a service account (cascade removes tokens)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockServiceAccountFindUnique.mockResolvedValue({ id: SA_ID, tenantId: "tenant-1" });
-    mockPrismaArrayTransaction.mockResolvedValue([{ count: 2 }, {}]);
+    mockServiceAccountDelete.mockResolvedValue({});
 
     const req = createRequest(
       "DELETE",

@@ -197,17 +197,11 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // Hard-delete: cascade removes tokens and access requests automatically
   await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.$transaction([
-      prisma.serviceAccountToken.updateMany({
-        where: { serviceAccountId: id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      }),
-      prisma.serviceAccount.update({
-        where: { id },
-        data: { isActive: false },
-      }),
-    ]),
+    prisma.serviceAccount.delete({
+      where: { id },
+    }),
   );
 
   logAudit({
