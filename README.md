@@ -72,7 +72,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 - **Team Vault** — E2E encrypted sharing (ECDH-P256) with RBAC (Owner/Admin/Member/Viewer)
 - **Team Security Policies** — Sharing/export controls, reprompt requirements, password-policy guidance
-- **Multi-Tenant Isolation** — PostgreSQL FORCE RLS on 33 tables with IdP claim-based tenant resolution
+- **Multi-Tenant Isolation** — PostgreSQL FORCE RLS on 39 tables with IdP claim-based tenant resolution
 - **SCIM 2.0 Provisioning** — Tenant-scoped user/group sync (RFC 7644)
 - **Directory Sync** — Azure AD, Google Workspace, Okta member sync
 - **Tenant Admin** — Member management, SCIM tokens, admin vault reset, tenant settings

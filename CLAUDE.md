@@ -125,6 +125,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/passwords/bulk-archive` | POST | Bulk archive entries |
 | `/api/passwords/bulk-restore` | POST | Bulk restore entries |
 | `/api/passwords/bulk-trash` | POST | Bulk soft-delete entries |
+| `/api/passwords/bulk-import` | POST | Bulk import entries |
 | `/api/passwords/empty-trash` | POST | Permanently delete all trashed entries |
 
 #### Tags & Folders
@@ -194,6 +195,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/passwords/bulk-archive` | POST | Bulk archive team entries |
 | `/api/teams/[teamId]/passwords/bulk-restore` | POST | Bulk restore team entries |
 | `/api/teams/[teamId]/passwords/bulk-trash` | POST | Bulk soft-delete team entries |
+| `/api/teams/[teamId]/passwords/bulk-import` | POST | Bulk import team entries |
 | `/api/teams/[teamId]/passwords/empty-trash` | POST | Empty team trash |
 | `/api/teams/[teamId]/tags` | GET, POST | Team tags |
 | `/api/teams/[teamId]/tags/[id]` | PUT, DELETE | Update/delete team tag |
