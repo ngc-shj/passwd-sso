@@ -339,13 +339,15 @@ jobs:
 
             -- Seed test rows as SUPERUSER (bypasses RLS) to make assertions meaningful.
             -- Without data, count(*) = 0 is vacuously true regardless of RLS.
-            -- Disable FK checks for seeding (SUPERUSER required).
-            SET session_replication_role = 'replica';
+            -- Create parent records first to satisfy FK constraints.
+            INSERT INTO tenants (id, name, slug, created_at, updated_at)
+              VALUES ('00000000-0000-0000-0000-000000000001', 'rls-smoke-tenant', 'rls-smoke-tenant', NOW(), NOW());
+            INSERT INTO users (id, tenant_id, email, created_at, updated_at)
+              VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'rls-smoke@test.local', NOW(), NOW());
             INSERT INTO teams (id, tenant_id, name, slug, created_at, updated_at)
-              VALUES (gen_random_uuid(), gen_random_uuid(), 'rls-smoke', 'rls-smoke', NOW(), NOW());
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke', 'rls-smoke', NOW(), NOW());
             INSERT INTO service_accounts (id, tenant_id, name, identity_type, is_active, created_by_id, created_at, updated_at)
-              VALUES (gen_random_uuid(), gen_random_uuid(), 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, gen_random_uuid(), NOW(), NOW());
-            SET session_replication_role = 'origin';
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, '00000000-0000-0000-0000-000000000002', NOW(), NOW());
           SQL
 
       - name: Verify RLS enforcement
