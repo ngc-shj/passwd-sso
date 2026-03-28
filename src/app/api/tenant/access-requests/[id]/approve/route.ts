@@ -11,12 +11,15 @@ import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, unauthorized, notFound, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
 import { parseSaTokenScopes } from "@/lib/service-account-token";
 import { randomBytes } from "node:crypto";
 
 type Params = { params: Promise<{ id: string }> };
+
+const approveLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 export const runtime = "nodejs";
 
@@ -42,6 +45,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
     throw err;
   }
+
+  const rl = await approveLimiter.check(`rl:access_request_approve:${actor.tenantId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const { id: requestId } = await params;
 

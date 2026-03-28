@@ -9,11 +9,14 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, unauthorized, notFound, rateLimited } from "@/lib/api-response";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
 
 export const runtime = "nodejs";
+
+const denyLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 // POST /api/tenant/access-requests/[id]/deny — Deny an access request
 async function handlePOST(req: NextRequest, { params }: Params) {
@@ -34,6 +37,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
     throw err;
   }
+
+  const rl = await denyLimiter.check(`rl:access_request_deny:${actor.tenantId}`);
+  if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
   const { id: requestId } = await params;
 
