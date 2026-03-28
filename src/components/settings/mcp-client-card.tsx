@@ -51,9 +51,14 @@ interface NewClientCredentials {
 }
 
 function validateRedirectUris(uris: string[]): boolean {
-  return uris.every(
-    (u) => u.startsWith("https://") || u.startsWith("http://localhost")
-  );
+  return uris.every((u) => {
+    try {
+      const url = new URL(u);
+      return url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost");
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function McpClientCard() {
