@@ -1,16 +1,22 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockFindActiveDelegationSession, mockFetchDelegationEntry } = vi.hoisted(() => ({
+const { mockFindActiveDelegationSession, mockFetchDelegationEntry, mockGetDelegatedEntryIds } = vi.hoisted(() => ({
   mockFindActiveDelegationSession: vi.fn(),
   mockFetchDelegationEntry: vi.fn(),
+  mockGetDelegatedEntryIds: vi.fn(),
+}));
+
+const { mockLogAudit } = vi.hoisted(() => ({
+  mockLogAudit: vi.fn(),
 }));
 
 vi.mock("@/lib/delegation", () => ({
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
+  getDelegatedEntryIds: mockGetDelegatedEntryIds,
 }));
 
-vi.mock("@/lib/audit", () => ({ logAudit: vi.fn() }));
+vi.mock("@/lib/audit", () => ({ logAudit: mockLogAudit }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -68,7 +74,7 @@ describe("toolGetDecryptedCredential", () => {
     expect(mockFetchDelegationEntry).toHaveBeenCalledWith("user-1", "session-1", entryId);
   });
 
-  it("returns plaintext entry when delegation is active", async () => {
+  it("returns plaintext entry and logs audit when delegation is active", async () => {
     const entryId = "550e8400-e29b-41d4-a716-446655440000";
     const mockEntry = { id: entryId, title: "GitHub", username: "alice", password: "secret", url: "https://github.com", notes: null };
     mockFindActiveDelegationSession.mockResolvedValueOnce({ id: "session-1", expiresAt: new Date(Date.now() + 60000) });
@@ -79,6 +85,15 @@ describe("toolGetDecryptedCredential", () => {
     expect(result.result?.entry).toEqual(mockEntry);
     expect(mockFindActiveDelegationSession).toHaveBeenCalledWith("user-1", "tok-1");
     expect(mockFetchDelegationEntry).toHaveBeenCalledWith("user-1", "session-1", entryId);
+    // Verify audit log
+    expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({
+      action: "DELEGATION_READ",
+      actorType: "MCP_AGENT",
+      userId: "user-1",
+      tenantId: "t-1",
+      targetId: entryId,
+      metadata: { delegationSessionId: "session-1" },
+    }));
   });
 
   it("returns error for invalid UUID input", async () => {

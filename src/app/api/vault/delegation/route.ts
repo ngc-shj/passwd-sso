@@ -237,11 +237,13 @@ async function handleGET(_request: NextRequest) {
   }
 
   const { id: userId } = session.user;
+  const tenantId = await resolveUserTenantId(userId);
 
   const sessions = await withBypassRls(prisma, () =>
     prisma.delegationSession.findMany({
       where: {
         userId,
+        tenantId: tenantId ?? undefined,
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
@@ -269,6 +271,7 @@ async function handleGET(_request: NextRequest) {
     prisma.mcpAccessToken.findMany({
       where: {
         userId,
+        tenantId: tenantId ?? undefined,
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },

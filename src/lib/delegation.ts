@@ -213,13 +213,14 @@ export async function revokeAllDelegationSessions(
     await evictDelegationRedisKeys(userId, session.id).catch(() => {});
   }
 
-  // Bulk update DB
+  // Bulk update DB — constrained to findMany IDs to avoid TOCTOU
+  const sessionIds = sessions.map((s) => s.id);
   const result = await withBypassRls(prisma, () =>
     prisma.delegationSession.updateMany({
       where: {
+        id: { in: sessionIds },
         userId,
         revokedAt: null,
-        expiresAt: { gt: new Date() },
       },
       data: { revokedAt: new Date() },
     }),
@@ -243,9 +244,7 @@ export async function revokeDelegationSession(
   sessionId: string,
   tenantId: string,
 ): Promise<boolean> {
-  // Evict Redis keys
-  await evictDelegationRedisKeys(userId, sessionId).catch(() => {});
-
+  // DB first, then Redis — failed DB leaves Redis intact (safer failure mode)
   const result = await withBypassRls(prisma, () =>
     prisma.delegationSession.updateMany({
       where: {
@@ -256,6 +255,9 @@ export async function revokeDelegationSession(
       data: { revokedAt: new Date() },
     }),
   );
+
+  // Evict Redis keys (best-effort; TTL handles cleanup if this fails)
+  await evictDelegationRedisKeys(userId, sessionId).catch(() => {});
 
   if (result.count > 0) {
     logAudit({

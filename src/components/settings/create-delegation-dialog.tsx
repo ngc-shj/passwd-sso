@@ -168,29 +168,39 @@ export function CreateDelegationDialog({
         notes?: string | null;
       }> = [];
 
+      const failedIds: string[] = [];
       for (const entryId of selectedEntryIds) {
-        const res = await fetchApi(apiPath.passwordById(entryId));
-        if (!res.ok) continue;
-        const raw = await res.json();
-        const aad =
-          raw.aadVersion >= 1 && userId
-            ? buildPersonalEntryAAD(userId, raw.id)
-            : undefined;
-        const blob = JSON.parse(
-          await decryptData(
-            raw.encryptedBlob as EncryptedData,
-            encryptionKey,
-            aad,
-          ),
-        );
-        delegationEntries.push({
-          id: entryId,
-          title: blob.title ?? "",
-          username: blob.username ?? null,
-          password: blob.password ?? blob.content ?? null,
-          url: blob.url ?? null,
-          notes: blob.notes ?? null,
-        });
+        try {
+          const res = await fetchApi(apiPath.passwordById(entryId));
+          if (!res.ok) { failedIds.push(entryId); continue; }
+          const raw = await res.json();
+          const aad =
+            raw.aadVersion >= 1 && userId
+              ? buildPersonalEntryAAD(userId, raw.id)
+              : undefined;
+          const blob = JSON.parse(
+            await decryptData(
+              raw.encryptedBlob as EncryptedData,
+              encryptionKey,
+              aad,
+            ),
+          );
+          delegationEntries.push({
+            id: entryId,
+            title: blob.title ?? "",
+            username: blob.username ?? null,
+            password: blob.password ?? blob.content ?? null,
+            url: blob.url ?? null,
+            notes: blob.notes ?? null,
+          });
+        } catch {
+          failedIds.push(entryId);
+        }
+      }
+
+      if (failedIds.length > 0 && delegationEntries.length === 0) {
+        toast.error("Failed to decrypt selected entries");
+        return;
       }
 
       const res = await fetchApi(API_PATH.VAULT_DELEGATION, {

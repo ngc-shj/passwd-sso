@@ -138,7 +138,7 @@ export async function toolListCredentials(
   );
 
   // Mark delegated entries
-  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId);
+  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId).catch(() => new Set<string>());
   const enriched = entries.map((e) => ({
     ...e,
     delegated: delegatedIds.has(e.id),
