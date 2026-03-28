@@ -98,7 +98,7 @@ export function CreateDelegationDialog({
       for (const entry of data) {
         try {
           const aad =
-            entry.aadVersion >= 1 && userId
+            entry.aadVersion >= 1
               ? buildPersonalEntryAAD(userId, entry.id)
               : undefined;
           const overview: DecryptedOverview = JSON.parse(
@@ -178,7 +178,7 @@ export function CreateDelegationDialog({
           if (!res.ok) { failedIds.push(entryId); continue; }
           const raw = await res.json();
           const aad =
-            raw.aadVersion >= 1 && userId
+            raw.aadVersion >= 1
               ? buildPersonalEntryAAD(userId, raw.id)
               : undefined;
           const blob = JSON.parse(
