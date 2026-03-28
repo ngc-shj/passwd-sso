@@ -73,9 +73,11 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
 ]);
 
-// Regex to match prisma model access: prisma.modelName.method(...)
-// Captures the model name (e.g., "tenant" from "prisma.tenant.findUnique").
-const PRISMA_MODEL_RE = /prisma\.(\w+)\./g;
+// Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)
+// Captures the model name (e.g., "tenant" from "prisma.tenant.findUnique" or "tx.session.create").
+// tx is the transaction client inside prisma.$transaction(async (tx) => { ... }) — when nested
+// inside withBypassRls, tx inherits the bypass context via the Proxy.
+const PRISMA_MODEL_RE = /(?:prisma|tx)\.(\w+)\./g;
 
 // Regex to find withBypassRls call sites (not imports).
 const BYPASS_CALL_RE = /withBypassRls\s*\(/;
