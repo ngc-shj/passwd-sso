@@ -186,5 +186,10 @@
   "scopeAll": "All",
   "scopeTenant": "Tenant",
   "scopeTeam": "Team",
-  "scopeAllTeams": "All teams"
+  "scopeAllTeams": "All teams",
+  "actorTypeLabel": "Actor",
+  "actorTypeAll": "All actors",
+  "actorTypeHuman": "Human",
+  "actorTypeSa": "Service Account",
+  "actorTypeMcp": "MCP Agent"
 }
