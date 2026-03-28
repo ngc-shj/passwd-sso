@@ -11,7 +11,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
-import { findActiveDelegationSession, fetchDelegationEntry } from "@/lib/delegation";
+import { findActiveDelegationSession, fetchDelegationEntry, getDelegatedEntryIds } from "@/lib/delegation";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 
@@ -137,7 +137,14 @@ export async function toolListCredentials(
     }),
   );
 
-  return { result: { entries } };
+  // Mark delegated entries
+  const delegatedIds = await getDelegatedEntryIds(token.userId!, token.tokenId);
+  const enriched = entries.map((e) => ({
+    ...e,
+    delegated: delegatedIds.has(e.id),
+  }));
+
+  return { result: { entries: enriched } };
 }
 
 export async function toolGetCredential(

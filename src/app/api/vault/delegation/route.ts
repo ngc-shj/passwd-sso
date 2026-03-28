@@ -264,6 +264,26 @@ async function handleGET(_request: NextRequest) {
     }),
   );
 
+  // Also return available MCP tokens with credentials:decrypt scope
+  const availableTokens = await withBypassRls(prisma, () =>
+    prisma.mcpAccessToken.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: new Date() },
+      },
+      select: {
+        id: true,
+        scope: true,
+        expiresAt: true,
+        mcpClient: {
+          select: { name: true, clientId: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
+
   return NextResponse.json({
     sessions: sessions.map((s) => ({
       id: s.id,
@@ -274,6 +294,13 @@ async function handleGET(_request: NextRequest) {
       note: s.note,
       expiresAt: s.expiresAt.toISOString(),
       createdAt: s.createdAt.toISOString(),
+    })),
+    availableTokens: availableTokens.map((t) => ({
+      id: t.id,
+      mcpClientName: t.mcpClient.name,
+      mcpClientId: t.mcpClient.clientId,
+      hasDecryptScope: t.scope.split(",").map((s) => s.trim()).includes("credentials:decrypt"),
+      expiresAt: t.expiresAt.toISOString(),
     })),
   });
 }

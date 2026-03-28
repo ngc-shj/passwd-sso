@@ -136,7 +136,7 @@
   "actorName": "アクター",
   "delegation": {
     "title": "委任アクセス",
-    "description": "復号したボールトエントリをMCPセッションと共有し、AIエージェントにアクセスを許可します。",
+    "description": "復号した保管庫エントリをMCPセッションと共有し、AIエージェントにアクセスを許可します。",
     "noSessions": "アクティブな委任セッションはありません",
     "newDelegation": "新規委任",
     "revokeAll": "すべて失効",
@@ -156,6 +156,8 @@
     "revokedAll": "すべての委任セッションを失効しました",
     "noDecryptScope": "このトークンにはcredentials:decryptスコープがありません。MCPクライアントを再認可して委任を有効にしてください。",
     "bannerActive": "{count} 件のアクティブな委任があります。",
-    "bannerManage": "管理"
+    "bannerManage": "管理",
+    "back": "戻る",
+    "next": "次へ"
   }
 }

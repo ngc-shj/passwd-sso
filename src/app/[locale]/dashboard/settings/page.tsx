@@ -1,9 +1,9 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { UserRound, Monitor, Shield, Code, Fingerprint, Plane, KeyRound } from "lucide-react";
+import { UserRound, Monitor, Shield, Code, Fingerprint, Plane, KeyRound, Terminal, Key, Handshake } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SessionsCard } from "@/components/sessions/sessions-card";
 import { CliTokenCard } from "@/components/settings/cli-token-card";
@@ -16,6 +16,9 @@ import { DelegationManager } from "@/components/settings/delegation-manager";
 
 export default function SettingsPage() {
   const t = useTranslations("Sessions");
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") ?? "account";
+  const initialSubTab = searchParams.get("subtab") ?? undefined;
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
@@ -32,7 +35,7 @@ export default function SettingsPage() {
           </div>
         </Card>
 
-        <Tabs defaultValue="account" className="space-y-4">
+        <Tabs defaultValue={initialTab} className="space-y-4">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="account"><Monitor className="h-4 w-4 mr-2" />{t("tabAccount")}</TabsTrigger>
             <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />{t("tabSecurity")}</TabsTrigger>
@@ -63,11 +66,22 @@ export default function SettingsPage() {
           </TabsContent>
           <TabsContent value="developer" className="mt-0 space-y-4">
             <TabDescription>{t("tabDeveloperDesc")}</TabDescription>
-            <CliTokenCard />
-            <Separator />
-            <ApiKeyManager />
-            <Separator />
-            <DelegationManager />
+            <Tabs defaultValue={initialSubTab ?? "cli"} className="space-y-4">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="cli"><Terminal className="h-4 w-4 mr-2" />{t("subTabCli")}</TabsTrigger>
+                <TabsTrigger value="api"><Key className="h-4 w-4 mr-2" />{t("subTabApi")}</TabsTrigger>
+                <TabsTrigger value="delegation"><Handshake className="h-4 w-4 mr-2" />{t("subTabDelegation")}</TabsTrigger>
+              </TabsList>
+              <TabsContent value="cli" className="mt-0">
+                <CliTokenCard />
+              </TabsContent>
+              <TabsContent value="api" className="mt-0">
+                <ApiKeyManager />
+              </TabsContent>
+              <TabsContent value="delegation" className="mt-0">
+                <DelegationManager />
+              </TabsContent>
+            </Tabs>
           </TabsContent>
         </Tabs>
       </div>

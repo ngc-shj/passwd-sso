@@ -16,6 +16,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { Handshake, Plus } from "lucide-react";
+import { CreateDelegationDialog } from "@/components/settings/create-delegation-dialog";
+
+interface AvailableToken {
+  id: string;
+  mcpClientName: string;
+  mcpClientId: string;
+  hasDecryptScope: boolean;
+  expiresAt: string;
+}
 
 interface DelegationSession {
   id: string;
@@ -32,6 +42,8 @@ export function DelegationManager() {
   const t = useTranslations("MachineIdentity.delegation");
   const { status } = useVault();
   const [sessions, setSessions] = useState<DelegationSession[]>([]);
+  const [availableTokens, setAvailableTokens] = useState<AvailableToken[]>([]);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   // Update "now" every 30s for TTL display
@@ -40,23 +52,33 @@ export function DelegationManager() {
     return () => clearInterval(interval);
   }, []);
 
-  const fetchSessions = useCallback(async (): Promise<DelegationSession[] | undefined> => {
+  const fetchData = useCallback(async () => {
     try {
       const res = await fetchApi(API_PATH.VAULT_DELEGATION);
       if (!res.ok) return undefined;
-      const data = await res.json();
-      return data.sessions ?? [];
+      return await res.json() as { sessions: DelegationSession[]; availableTokens: AvailableToken[] };
     } catch {
       return undefined;
     }
   }, []);
 
+  const reload = useCallback(async () => {
+    const data = await fetchData();
+    if (data) {
+      setSessions(data.sessions ?? []);
+      setAvailableTokens(data.availableTokens ?? []);
+    }
+  }, [fetchData]);
+
   useEffect(() => {
     if (status !== VAULT_STATUS.UNLOCKED) return;
     let cancelled = false;
     const load = async () => {
-      const data = await fetchSessions().catch(() => undefined);
-      if (!cancelled && data) setSessions(data);
+      const data = await fetchData();
+      if (!cancelled && data) {
+        setSessions(data.sessions ?? []);
+        setAvailableTokens(data.availableTokens ?? []);
+      }
     };
     load();
     const interval = setInterval(load, 30_000);
@@ -64,7 +86,7 @@ export function DelegationManager() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [status, fetchSessions]);
+  }, [status, fetchData]);
 
   const handleRevoke = async (sessionId: string) => {
     try {
@@ -102,18 +124,28 @@ export function DelegationManager() {
   if (status !== VAULT_STATUS.UNLOCKED) return null;
 
   return (
+    <>
     <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>{t("title")}</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              <Handshake className="h-5 w-5" />
+              {t("title")}
+            </CardTitle>
             <CardDescription>{t("description")}</CardDescription>
           </div>
-          {sessions.length > 0 && (
-            <Button variant="destructive" size="sm" onClick={handleRevokeAll}>
-              {t("revokeAll")}
+          <div className="flex gap-2">
+            {sessions.length > 0 && (
+              <Button variant="destructive" size="sm" onClick={handleRevokeAll}>
+                {t("revokeAll")}
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setDialogOpen(true)}>
+              <Plus className="mr-1 h-4 w-4" />
+              {t("newDelegation")}
             </Button>
-          )}
+          </div>
         </div>
       </CardHeader>
       <CardContent>
@@ -158,5 +190,12 @@ export function DelegationManager() {
         )}
       </CardContent>
     </Card>
+    <CreateDelegationDialog
+      open={dialogOpen}
+      onOpenChange={setDialogOpen}
+      availableTokens={availableTokens}
+      onCreated={reload}
+    />
+    </>
   );
 }

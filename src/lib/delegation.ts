@@ -153,6 +153,23 @@ export async function evictDelegationRedisKeys(
   await pipeline.exec();
 }
 
+// ─── Query Helpers ─────────────────────────────────────────────
+
+export async function getDelegatedEntryIds(
+  userId: string,
+  mcpTokenId: string,
+): Promise<Set<string>> {
+  const session = await findActiveDelegationSession(userId, mcpTokenId);
+  if (!session) return new Set();
+
+  const redis = getRedis();
+  if (!redis) return new Set();
+
+  const indexKey = delegationIndexKey(userId, session.id);
+  const ids = await redis.smembers(indexKey);
+  return new Set(ids);
+}
+
 // ─── DB Operations ─────────────────────────────────────────────
 
 export async function findActiveDelegationSession(

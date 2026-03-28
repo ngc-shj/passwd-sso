@@ -106,6 +106,9 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockPasswordEntryFindMany,
       findFirst: mockPasswordEntryFindFirst,
     },
+    delegationSession: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 

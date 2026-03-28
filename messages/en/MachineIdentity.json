@@ -156,6 +156,8 @@
     "revokedAll": "All delegations revoked",
     "noDecryptScope": "This token does not have the credentials:decrypt scope. Re-authorize the MCP client to enable delegation.",
     "bannerActive": "You have {count} active delegation(s) for AI agents.",
-    "bannerManage": "Manage"
+    "bannerManage": "Manage",
+    "back": "Back",
+    "next": "Next"
   }
 }
