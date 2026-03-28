@@ -199,5 +199,6 @@
   "groupDelegation": "Delegation",
   "delegationListMeta": "Listed {entryCount} delegated entries",
   "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",
+  "delegationGetMeta": "Retrieved delegated credential",
   "delegationCreateMeta": "Delegated {entryCount} entries"
 }

@@ -25,6 +25,9 @@ export function useDelegationAuditLabel() {
         ? t("delegationSearchMeta", { query, entryCount })
         : t("delegationListMeta", { entryCount });
     }
+    if (action === "DELEGATION_READ" && metadata.tool === "get") {
+      return t("delegationGetMeta");
+    }
     if (action === "DELEGATION_CREATE") {
       return t("delegationCreateMeta", { entryCount });
     }
