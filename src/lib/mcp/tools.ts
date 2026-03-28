@@ -240,6 +240,7 @@ export async function toolSearchCredentials(
 export async function toolGetDecryptedCredential(
   token: McpTokenData,
   rawInput: unknown,
+  ip?: string | null,
 ) {
   const parsed = getCredentialSchema.safeParse(rawInput);
   if (!parsed.success) {
@@ -271,6 +272,7 @@ export async function toolGetDecryptedCredential(
     tenantId: token.tenantId,
     targetId: id,
     metadata: { delegationSessionId: session.id, mcpClientId: token.clientId },
+    ip: ip ?? undefined,
   };
   logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
   logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });

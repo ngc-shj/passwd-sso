@@ -22,6 +22,13 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   LogIn,
   LogOut,
   Plus,
@@ -168,6 +175,7 @@ export default function AuditLogsPage() {
   const [dateTo, setDateTo] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [actorTypeFilter, setActorTypeFilter] = useState<string>("ALL");
   const td = useTranslations("AuditDownload");
 
   const resolveEntryNames = useCallback(
@@ -203,13 +211,14 @@ export default function AuditLogsPage() {
         endOfDay.setHours(23, 59, 59, 999);
         params.set("to", endOfDay.toISOString());
       }
+      if (actorTypeFilter !== "ALL") params.set("actorType", actorTypeFilter);
       if (cursor) params.set("cursor", cursor);
 
       const res = await fetchApi(`${API_PATH.AUDIT_LOGS}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
-    [selectedActions, dateFrom, dateTo]
+    [selectedActions, dateFrom, dateTo, actorTypeFilter]
   );
 
   useEffect(() => {
@@ -560,6 +569,19 @@ export default function AuditLogsPage() {
       <Card className="rounded-xl border bg-card/80 p-4">
         <div className="space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
+            <div className="space-y-1">
+              <Label className="text-xs">{t("actorTypeLabel")}</Label>
+              <Select value={actorTypeFilter} onValueChange={setActorTypeFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                  <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                  <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1">
               <Label className="text-xs">{t("dateFrom")}</Label>
               <Input

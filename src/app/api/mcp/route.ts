@@ -31,7 +31,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const response = await handleMcpRequest(body, tokenResult.data);
+  const ip = req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? null;
+  const response = await handleMcpRequest(body, tokenResult.data, ip);
   return NextResponse.json(response);
 }
 
