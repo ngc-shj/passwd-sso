@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.0...passwd-sso-v0.4.1) (2026-03-28)
+
+
+### Bug Fixes
+
+* enforce RLS in dev by separating DB roles (passwd_app / passwd_user) ([#267](https://github.com/ngc-shj/passwd-sso/issues/267)) ([05cb302](https://github.com/ngc-shj/passwd-sso/commit/05cb3028aac3d4d62e4f022c828589111c95b163))
+
 ## [0.4.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.12...passwd-sso-v0.4.0) (2026-03-28)
 
 
