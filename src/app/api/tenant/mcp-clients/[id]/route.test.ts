@@ -5,7 +5,7 @@ import { createRequest, createParams, parseResponse } from "../../../../../__tes
 const {
   mockAuth,
   mockRequireTenantPermission,
-  mockWithBypassRls,
+  mockWithTenantRls,
   mockLogAudit,
   mockMcpClientFindFirst,
   mockMcpClientUpdate,
@@ -13,7 +13,7 @@ const {
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
   mockMcpClientFindFirst: vi.fn(),
   mockMcpClientUpdate: vi.fn(),
@@ -44,7 +44,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", () => ({
-  withBypassRls: mockWithBypassRls,
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,

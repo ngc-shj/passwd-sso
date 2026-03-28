@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { randomBytes } from "node:crypto";
 import { hashToken } from "@/lib/crypto-server";
@@ -14,7 +14,12 @@ import { z } from "zod";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
-  redirectUris: z.array(z.string().url()).min(1).max(10),
+  redirectUris: z.array(
+    z.string().url().refine(
+      (u) => u.startsWith("https://") || u.startsWith("http://localhost"),
+      { message: "redirect_uri must use https:// or http://localhost" },
+    ),
+  ).min(1).max(10),
   allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1),
 });
 
@@ -32,7 +37,7 @@ export async function GET(_req: NextRequest) {
     throw err;
   }
 
-  const clients = await withBypassRls(prisma, async () =>
+  const clients = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findMany({
       where: { tenantId: actor.tenantId },
       select: {
@@ -81,7 +86,7 @@ export async function POST(req: NextRequest) {
   const { name, redirectUris, allowedScopes } = parsed.data;
 
   // Enforce tenant limit
-  const count = await withBypassRls(prisma, async () =>
+  const count = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.count({ where: { tenantId: actor.tenantId } }),
   );
   if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
@@ -92,7 +97,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Check name uniqueness
-  const existing = await withBypassRls(prisma, async () =>
+  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } }),
   );
   if (existing) {
@@ -104,7 +109,7 @@ export async function POST(req: NextRequest) {
   const clientSecret = randomBytes(32).toString("base64url");
   const clientSecretHash = hashToken(clientSecret);
 
-  const client = await withBypassRls(prisma, async () =>
+  const client = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.create({
       data: {
         tenantId: actor.tenantId,

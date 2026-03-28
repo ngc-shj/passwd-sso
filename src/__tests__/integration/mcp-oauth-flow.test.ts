@@ -111,6 +111,7 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
+  withTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/audit", () => ({

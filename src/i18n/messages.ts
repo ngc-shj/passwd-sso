@@ -66,6 +66,7 @@ export const NAMESPACES = [
   "DirectorySync",
   "PrivacyPolicy",
   "Breakglass",
+  "UnifiedAccess",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

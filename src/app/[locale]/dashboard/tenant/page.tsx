@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Building2, Link2, FolderSync, Webhook, Users, Shield, ScrollText } from "lucide-react";
+import { Building2, Link2, FolderSync, Webhook, Users, Shield, ScrollText, Bot, Key, Network, GitPullRequestArrow } from "lucide-react";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { Card } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -12,6 +12,9 @@ import { TenantSessionPolicyCard } from "@/components/settings/tenant-session-po
 import { TenantAccessRestrictionCard } from "@/components/settings/tenant-access-restriction-card";
 import { TenantAuditLogCard } from "@/components/settings/tenant-audit-log-card";
 import { TenantWebhookCard } from "@/components/settings/tenant-webhook-card";
+import { ServiceAccountCard } from "@/components/settings/service-account-card";
+import { McpClientCard } from "@/components/settings/mcp-client-card";
+import { AccessRequestCard } from "@/components/settings/access-request-card";
 import { Loader2 } from "lucide-react";
 import { TabDescription } from "@/components/settings/tab-description";
 
@@ -57,10 +60,11 @@ export default function TenantSettingsPage() {
         </Card>
 
         <Tabs defaultValue="members" className="space-y-4">
-          <TabsList className="grid w-full grid-cols-2 md:grid-cols-5">
+          <TabsList className="grid w-full grid-cols-2 md:grid-cols-6">
             <TabsTrigger value="members"><Users className="h-4 w-4 mr-2" />{t("tenantTabMembers")}</TabsTrigger>
             <TabsTrigger value="security"><Shield className="h-4 w-4 mr-2" />{t("tenantTabSecurity")}</TabsTrigger>
             <TabsTrigger value="provisioning"><Link2 className="h-4 w-4 mr-2" />{t("tenantTabProvisioning")}</TabsTrigger>
+            <TabsTrigger value="unified-access"><Bot className="h-4 w-4 mr-2" />{t("tenantTabUnifiedAccess")}</TabsTrigger>
             <TabsTrigger value="audit-log"><ScrollText className="h-4 w-4 mr-2" />{t("tenantTabAuditLog")}</TabsTrigger>
             <TabsTrigger value="webhooks"><Webhook className="h-4 w-4 mr-2" />{t("tenantTabWebhooks")}</TabsTrigger>
           </TabsList>
@@ -91,6 +95,34 @@ export default function TenantSettingsPage() {
               </TabsContent>
               <TabsContent value="directory-sync" className="mt-0 space-y-4">
                 <DirectorySyncCard />
+              </TabsContent>
+            </Tabs>
+          </TabsContent>
+          <TabsContent value="unified-access" className="mt-0 space-y-4">
+            <TabDescription>{t("tenantTabUnifiedAccessDesc")}</TabDescription>
+            <Tabs defaultValue="service-accounts" className="space-y-4">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="service-accounts">
+                  <Key className="h-4 w-4 mr-2" />
+                  {t("tenantTabServiceAccounts")}
+                </TabsTrigger>
+                <TabsTrigger value="mcp-clients">
+                  <Network className="h-4 w-4 mr-2" />
+                  {t("tenantTabMcpClients")}
+                </TabsTrigger>
+                <TabsTrigger value="access-requests">
+                  <GitPullRequestArrow className="h-4 w-4 mr-2" />
+                  {t("tenantTabAccessRequests")}
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent value="service-accounts" className="mt-0 space-y-4">
+                <ServiceAccountCard />
+              </TabsContent>
+              <TabsContent value="mcp-clients" className="mt-0 space-y-4">
+                <McpClientCard />
+              </TabsContent>
+              <TabsContent value="access-requests" className="mt-0 space-y-4">
+                <AccessRequestCard />
               </TabsContent>
             </Tabs>
           </TabsContent>

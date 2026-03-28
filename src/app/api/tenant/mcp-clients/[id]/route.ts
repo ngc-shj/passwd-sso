@@ -1,7 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
@@ -12,7 +12,12 @@ import { z } from "zod";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
-  redirectUris: z.array(z.string().url()).min(1).max(10).optional(),
+  redirectUris: z.array(
+    z.string().url().refine(
+      (u) => u.startsWith("https://") || u.startsWith("http://localhost"),
+      { message: "redirect_uri must use https:// or http://localhost" },
+    ),
+  ).min(1).max(10).optional(),
   allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1).optional(),
   isActive: z.boolean().optional(),
 });
@@ -35,7 +40,7 @@ export async function GET(
     throw err;
   }
 
-  const client = await withBypassRls(prisma, async () =>
+  const client = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findFirst({
       where: { id, tenantId: actor.tenantId },
       select: {
@@ -73,7 +78,7 @@ export async function PUT(
     throw err;
   }
 
-  const existing = await withBypassRls(prisma, async () =>
+  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -95,7 +100,7 @@ export async function PUT(
   if (data.allowedScopes !== undefined) updateData.allowedScopes = data.allowedScopes.join(",");
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
-  const updated = await withBypassRls(prisma, async () =>
+  const updated = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.update({
       where: { id },
       data: updateData,
@@ -134,13 +139,13 @@ export async function DELETE(
     throw err;
   }
 
-  const existing = await withBypassRls(prisma, async () =>
+  const existing = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
   if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  await withBypassRls(prisma, async () =>
-    prisma.mcpClient.delete({ where: { id } }),
+  await withTenantRls(prisma, actor.tenantId, async () =>
+    prisma.mcpClient.delete({ where: { id, tenantId: actor.tenantId } }),
   );
 
   logAudit({

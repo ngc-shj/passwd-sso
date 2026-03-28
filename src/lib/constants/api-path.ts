@@ -72,6 +72,8 @@ export const API_PATH = {
   HEALTH_LIVE: "/api/health/live",
   HEALTH_READY: "/api/health/ready",
   TENANT_SERVICE_ACCOUNTS: "/api/tenant/service-accounts",
+  TENANT_MCP_CLIENTS: "/api/tenant/mcp-clients",
+  TENANT_ACCESS_REQUESTS: "/api/tenant/access-requests",
 } as const;
 
 export const apiPath = {
@@ -184,4 +186,12 @@ export const apiPath = {
     `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}/tokens`,
   tenantServiceAccountTokenById: (saId: string, tokenId: string) =>
     `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}/tokens/${tokenId}`,
+  tenantMcpClients: () => API_PATH.TENANT_MCP_CLIENTS,
+  tenantMcpClientById: (clientId: string) =>
+    `${API_PATH.TENANT_MCP_CLIENTS}/${clientId}`,
+  tenantAccessRequests: () => API_PATH.TENANT_ACCESS_REQUESTS,
+  tenantAccessRequestApprove: (requestId: string) =>
+    `${API_PATH.TENANT_ACCESS_REQUESTS}/${requestId}/approve`,
+  tenantAccessRequestDeny: (requestId: string) =>
+    `${API_PATH.TENANT_ACCESS_REQUESTS}/${requestId}/deny`,
 } as const;
