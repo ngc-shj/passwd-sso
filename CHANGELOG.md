@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.12...passwd-sso-v0.4.0) (2026-03-28)
+
+
+### Features
+
+* add Machine Identity — service accounts, MCP Gateway & JIT access ([#264](https://github.com/ngc-shj/passwd-sso/issues/264)) ([4acb958](https://github.com/ngc-shj/passwd-sso/commit/4acb9586acc4dded248838dc2a868e144f16422f))
+
 ## [0.3.12](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.11...passwd-sso-v0.3.12) (2026-03-27)
 
 
