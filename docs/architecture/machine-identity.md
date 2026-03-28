@@ -4,7 +4,7 @@
 
 passwd-sso's Machine Identity feature enables AI agents and automated systems to interact with the password vault alongside human users, while preserving the zero-knowledge encryption model.
 
-Inspired by [1Password's Machine Identity](https://1password.com/product/unified-access), this feature introduces non-human identities as first-class entities with scoped access, approval workflows, and cross-actor audit tracking.
+Inspired by [1Password's Unified Identity](https://1password.com/product/unified-access), this feature introduces non-human identities as first-class entities with scoped access, approval workflows, and cross-actor audit tracking.
 
 ## Architecture
 
