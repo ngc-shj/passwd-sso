@@ -13,6 +13,7 @@ This guide describes a production-oriented GCP deployment.
 ## Required app configuration
 
 - `DATABASE_URL`
+- `MIGRATION_DATABASE_URL` (SUPERUSER role — used for `prisma migrate deploy` only)
 - `AUTH_SECRET`
 - `AUTH_URL`
 - `SHARE_MASTER_KEY`

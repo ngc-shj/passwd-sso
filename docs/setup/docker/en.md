@@ -123,6 +123,8 @@ docker compose ps
 npx prisma migrate dev --name init
 ```
 
+> **Note**: Local migrations require `MIGRATION_DATABASE_URL` in `.env.local` pointing to the SUPERUSER role (`passwd_user`). See `.env.example` for the correct value.
+
 ### 5. Seed Default Data
 
 ```bash

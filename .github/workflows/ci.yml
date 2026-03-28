@@ -274,6 +274,104 @@ jobs:
           path: e2e/playwright-report/
           retention-days: 7
 
+  # ─── RLS Role Enforcement Smoke Test ────────────────────────
+  rls-smoke:
+    name: "RLS: Role separation smoke test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: passwd_user
+          POSTGRES_PASSWORD: passwd_pass
+          POSTGRES_DB: passwd_sso
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U passwd_user -d passwd_sso"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Create app role and grant privileges
+        run: |
+          psql postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS
+              NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+            REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+            GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
+            GRANT USAGE ON SCHEMA public TO passwd_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+              GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+              GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
+          SQL
+
+      - name: Run migrations as SUPERUSER
+        run: npx prisma migrate deploy
+        env:
+          MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+
+      - name: Re-grant and seed test data
+        run: |
+          psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            -- Re-grant DML on tables created by migration
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+
+            -- Seed test rows as SUPERUSER (bypasses RLS) to make assertions meaningful.
+            -- Without data, count(*) = 0 is vacuously true regardless of RLS.
+            -- Create parent records first to satisfy FK constraints.
+            INSERT INTO tenants (id, name, slug, created_at, updated_at)
+              VALUES ('00000000-0000-0000-0000-000000000001', 'rls-smoke-tenant', 'rls-smoke-tenant', NOW(), NOW());
+            INSERT INTO users (id, tenant_id, email, created_at, updated_at)
+              VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'rls-smoke@test.local', NOW(), NOW());
+            INSERT INTO teams (id, tenant_id, name, slug, created_at, updated_at)
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke', 'rls-smoke', NOW(), NOW());
+            INSERT INTO service_accounts (id, tenant_id, name, identity_type, is_active, created_by_id, created_at, updated_at)
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, '00000000-0000-0000-0000-000000000002', NOW(), NOW());
+          SQL
+
+      - name: Verify RLS enforcement
+        run: |
+          # Connect as passwd_app (non-SUPERUSER) — MUST use this role
+          psql postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso <<'SQL'
+            -- 1. Verify role flags
+            DO $$ BEGIN
+              ASSERT (SELECT NOT rolsuper FROM pg_roles WHERE rolname = current_user),
+                'passwd_app must not be SUPERUSER';
+              ASSERT (SELECT NOT rolbypassrls FROM pg_roles WHERE rolname = current_user),
+                'passwd_app must not have BYPASSRLS';
+            END $$;
+
+            -- 2. Verify RLS blocks access to seeded rows without app.tenant_id
+            DO $$ BEGIN
+              ASSERT (SELECT count(*) = 0 FROM teams),
+                'RLS must block access to teams without app.tenant_id';
+              ASSERT (SELECT count(*) = 0 FROM service_accounts),
+                'RLS must block access to service_accounts without app.tenant_id';
+            END $$;
+          SQL
+          echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
+
   # ─── Container Scan (Trivy) ─────────────────────────────────
   container-scan:
     name: "Trivy: Container image scan"

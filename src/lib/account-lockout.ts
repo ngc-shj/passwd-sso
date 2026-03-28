@@ -11,6 +11,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
+import { withBypassRls } from "@/lib/tenant-rls";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -46,10 +47,13 @@ export interface RecordFailureResult {
  * Simple DB read — no row locking needed.
  */
 export async function checkLockout(userId: string): Promise<LockoutStatus> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { accountLockedUntil: true },
-  });
+  // withBypassRls required: called outside tenant RLS context (pre-unlock check)
+  const user = await withBypassRls(prisma, async () =>
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { accountLockedUntil: true },
+    }),
+  );
 
   if (!user?.accountLockedUntil) {
     return { locked: false, lockedUntil: null };
@@ -85,7 +89,10 @@ export async function recordFailure(
   const now = new Date();
 
   try {
-    const result = await prisma.$transaction(async (tx) => {
+    // withBypassRls required: called outside tenant RLS context (post-auth side effect).
+    // The prisma proxy re-uses the bypass transaction for nested $transaction calls.
+    const result = await withBypassRls(prisma, async () =>
+      prisma.$transaction(async (tx) => {
       // Set lock_timeout to prevent indefinite waits
       await tx.$executeRaw`SET LOCAL lock_timeout = '200ms'`;
 
@@ -168,7 +175,8 @@ export async function recordFailure(
         lockMinutes,
         thresholdCrossed,
       };
-    });
+    }),
+    );
 
     // Async nonblocking audit: VAULT_UNLOCK_FAILED (every failure)
     // NOTE: logAudit() internally swallows exceptions, so this catch is
@@ -266,14 +274,17 @@ export async function recordFailure(
  */
 export async function resetLockout(userId: string): Promise<void> {
   try {
-    await prisma.user.update({
-      where: { id: userId },
-      data: {
-        failedUnlockAttempts: 0,
-        lastFailedUnlockAt: null,
-        accountLockedUntil: null,
-      },
-    });
+    // withBypassRls required: called outside tenant RLS context (post-auth side effect)
+    await withBypassRls(prisma, async () =>
+      prisma.user.update({
+        where: { id: userId },
+        data: {
+          failedUnlockAttempts: 0,
+          lastFailedUnlockAt: null,
+          accountLockedUntil: null,
+        },
+      }),
+    );
   } catch (err) {
     getLogger().error({ err, userId }, "vault.lockout.resetLockout.error");
     // Swallow — do not block successful unlock

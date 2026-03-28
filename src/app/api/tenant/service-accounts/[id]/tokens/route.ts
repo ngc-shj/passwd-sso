@@ -128,25 +128,27 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   let token;
   try {
-    token = await prisma.$transaction(async (tx) => {
-      const activeTokenCount = await tx.serviceAccountToken.count({
-        where: { serviceAccountId: id, revokedAt: null },
-      });
-      if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
-        throw new Error("Token limit exceeded");
-      }
-      return tx.serviceAccountToken.create({
-        data: {
-          serviceAccountId: id,
-          tenantId: actor.tenantId,
-          tokenHash,
-          prefix,
-          name: result.data.name,
-          scope,
-          expiresAt: result.data.expiresAt,
-        },
-      });
-    });
+    token = await withTenantRls(prisma, actor.tenantId, async () =>
+      prisma.$transaction(async (tx) => {
+        const activeTokenCount = await tx.serviceAccountToken.count({
+          where: { serviceAccountId: id, revokedAt: null },
+        });
+        if (activeTokenCount >= MAX_SA_TOKENS_PER_ACCOUNT) {
+          throw new Error("Token limit exceeded");
+        }
+        return tx.serviceAccountToken.create({
+          data: {
+            serviceAccountId: id,
+            tenantId: actor.tenantId,
+            tokenHash,
+            prefix,
+            name: result.data.name,
+            scope,
+            expiresAt: result.data.expiresAt,
+          },
+        });
+      }),
+    );
   } catch (err) {
     if (err instanceof Error && err.message === "Token limit exceeded") {
       return NextResponse.json(

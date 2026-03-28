@@ -14,6 +14,11 @@ export default defineConfig({
   },
 
   datasource: {
-    url: env("DATABASE_URL"),
+    // MIGRATION_DATABASE_URL (SUPERUSER) for Prisma CLI (migrate, studio).
+    // Falls back to DATABASE_URL (non-SUPERUSER app role) when unset.
+    // env() throws on missing vars, so guard with process.env first.
+    url: process.env.MIGRATION_DATABASE_URL
+      ? env("MIGRATION_DATABASE_URL")
+      : env("DATABASE_URL"),
   },
 });
