@@ -209,8 +209,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const zeroSensitiveKeys = () => {
-      fetch("/api/vault/delegation", { method: "DELETE", keepalive: true }).catch(() => {});
       if (secretKeyRef.current) {
+        // Vault is unlocked — revoke delegations before zeroing keys
+        fetch("/api/vault/delegation", { method: "DELETE", keepalive: true }).catch(() => {});
         secretKeyRef.current.fill(0);
         secretKeyRef.current = null;
       }

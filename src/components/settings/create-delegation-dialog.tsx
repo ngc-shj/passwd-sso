@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { API_PATH, apiPath } from "@/lib/constants/api-path";
@@ -81,6 +81,7 @@ export function CreateDelegationDialog({
   const [ttlSeconds, setTtlSeconds] = useState(900);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const loadedRef = useRef(false);
 
   const decryptableTokens = availableTokens.filter((t) => t.hasDecryptScope);
 
@@ -119,16 +120,17 @@ export function CreateDelegationDialog({
         }
       }
       setEntries(decrypted.sort((a, b) => a.title.localeCompare(b.title)));
+      loadedRef.current = true;
     } finally {
       setLoading(false);
     }
   }, [encryptionKey, userId]);
 
   useEffect(() => {
-    if (open && selectedTokenId && entries.length === 0) {
+    if (open && selectedTokenId && !loadedRef.current) {
       loadEntries();
     }
-  }, [open, selectedTokenId, entries.length, loadEntries]);
+  }, [open, selectedTokenId, loadEntries]);
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -138,6 +140,7 @@ export function CreateDelegationDialog({
       setSelectedEntryIds(new Set());
       setTtlSeconds(900);
       setSearch("");
+      loadedRef.current = false;
     }
   }, [open]);
 

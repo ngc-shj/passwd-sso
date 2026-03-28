@@ -171,8 +171,8 @@ async function handlePOST(request: NextRequest) {
   if (existingSession) {
     await evictDelegationRedisKeys(userId, existingSession.id).catch(() => {});
     await withBypassRls(prisma, () =>
-      prisma.delegationSession.update({
-        where: { id: existingSession.id },
+      prisma.delegationSession.updateMany({
+        where: { id: existingSession.id, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
     );
