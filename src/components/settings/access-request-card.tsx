@@ -359,18 +359,22 @@ export function AccessRequestCard() {
           <div className="space-y-4 py-2">
             <div className="space-y-2">
               <Label>{t("arServiceAccount")}</Label>
-              <Select value={selectedSaId} onValueChange={setSelectedSaId}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t("arSelectSa")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {saList.map((sa) => (
-                    <SelectItem key={sa.id} value={sa.id}>
-                      {sa.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {saList.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t("arNoActiveSa")}</p>
+              ) : (
+                <Select value={selectedSaId} onValueChange={setSelectedSaId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={t("arSelectSa")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {saList.map((sa) => (
+                      <SelectItem key={sa.id} value={sa.id}>
+                        {sa.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
             </div>
             <div className="space-y-2">
               <Label>{t("arScope")}</Label>
@@ -401,11 +405,11 @@ export function AccessRequestCard() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="30">30 min</SelectItem>
-                  <SelectItem value="60">1 hour</SelectItem>
-                  <SelectItem value="240">4 hours</SelectItem>
-                  <SelectItem value="480">8 hours</SelectItem>
-                  <SelectItem value="1440">24 hours</SelectItem>
+                  <SelectItem value="30">{t("arExpiry30m")}</SelectItem>
+                  <SelectItem value="60">{t("arExpiry1h")}</SelectItem>
+                  <SelectItem value="240">{t("arExpiry4h")}</SelectItem>
+                  <SelectItem value="480">{t("arExpiry8h")}</SelectItem>
+                  <SelectItem value="1440">{t("arExpiry24h")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
