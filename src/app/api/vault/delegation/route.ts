@@ -17,6 +17,7 @@ import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { extractClientIp } from "@/lib/ip-access";
 import {
   DELEGATION_DEFAULT_TTL_SEC,
   DELEGATION_MAX_TTL_SEC,
@@ -218,7 +219,7 @@ async function handlePOST(request: NextRequest) {
     tenantId,
     targetId: delegationSession.id,
     metadata: { entryCount: entryIds.length, mcpClientId: mcpToken.clientId },
-    ip: request.headers.get("x-forwarded-for") ?? request.headers.get("x-real-ip"),
+    ip: extractClientIp(request),
     userAgent: request.headers.get("user-agent"),
   };
   logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });

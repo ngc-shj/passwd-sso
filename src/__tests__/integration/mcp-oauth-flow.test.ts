@@ -28,8 +28,10 @@ const {
   mockMcpAuthCodeUpdate,
   mockMcpAccessTokenCreate,
   mockMcpAccessTokenFindUnique,
-  mockPasswordEntryFindMany,
-  mockPasswordEntryFindFirst,
+  // delegation
+  mockFindActiveDelegationSession,
+  mockFetchDelegationEntry,
+  mockGetDelegatedEntryIdsForSession,
   // crypto / rate-limit
   mockHashToken,
   mockRateLimiterCheck,
@@ -61,8 +63,9 @@ const {
     mockMcpAuthCodeUpdate: vi.fn(),
     mockMcpAccessTokenCreate: vi.fn(),
     mockMcpAccessTokenFindUnique: vi.fn(),
-    mockPasswordEntryFindMany: vi.fn(),
-    mockPasswordEntryFindFirst: vi.fn(),
+    mockFindActiveDelegationSession: vi.fn().mockResolvedValue(null),
+    mockFetchDelegationEntry: vi.fn().mockResolvedValue(null),
+    mockGetDelegatedEntryIdsForSession: vi.fn().mockResolvedValue(new Set()),
     mockHashToken: vi.fn((token: string) => `hashed:${token}`),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockPrismaTransaction,
@@ -102,10 +105,6 @@ vi.mock("@/lib/prisma", () => ({
       create: mockMcpAccessTokenCreate,
       findUnique: mockMcpAccessTokenFindUnique,
     },
-    passwordEntry: {
-      findMany: mockPasswordEntryFindMany,
-      findFirst: mockPasswordEntryFindFirst,
-    },
     delegationSession: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
@@ -128,6 +127,12 @@ vi.mock("@/lib/rate-limit", () => ({
 
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
+}));
+
+vi.mock("@/lib/delegation", () => ({
+  findActiveDelegationSession: mockFindActiveDelegationSession,
+  fetchDelegationEntry: mockFetchDelegationEntry,
+  getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
 }));
 
 // ─── Imports (after mocks) ────────────────────────────────────
@@ -650,6 +655,92 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     expect("error" in response).toBe(true);
     if ("error" in response) {
       expect(response.error.code).toBe(-32603);
+    }
+  });
+
+  it("get_credential returns plaintext entry when delegation session is active", async () => {
+    const entryId = "c3d4e5f6-a7b8-4c9d-8e1f-2a3b4c5d6e7f";
+    const mockEntry = {
+      id: entryId,
+      title: "GitHub",
+      username: "alice",
+      password: "s3cret",
+      url: "https://github.com",
+      notes: null,
+    };
+
+    mockFindActiveDelegationSession.mockResolvedValueOnce({
+      id: "deleg-session-1",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
+
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
+
+    const response = await handleMcpRequest(
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: {
+          name: "get_credential",
+          arguments: { id: entryId },
+        },
+      },
+      token,
+    );
+
+    expect("result" in response).toBe(true);
+    if ("result" in response) {
+      const content = response.result as { content: { type: string; text: string }[] };
+      const parsed = JSON.parse(content.content[0].text);
+      expect(parsed.entry.id).toBe(entryId);
+      expect(parsed.entry.title).toBe("GitHub");
+      expect(parsed.entry.password).toBe("s3cret");
+    }
+    // Audit logged for both scopes
+    expect(mockLogAudit).toHaveBeenCalledTimes(2);
+  });
+
+  it("list_credentials returns entries when delegation session is active", async () => {
+    const entryId = "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f80";
+    const mockEntry = {
+      id: entryId,
+      title: "AWS",
+      username: "admin",
+      password: "pw",
+      url: "https://aws.amazon.com",
+      notes: null,
+    };
+
+    mockFindActiveDelegationSession.mockResolvedValueOnce({
+      id: "deleg-session-2",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mockGetDelegatedEntryIdsForSession.mockResolvedValueOnce(new Set([entryId]));
+    mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
+
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
+
+    const response = await handleMcpRequest(
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: {
+          name: "list_credentials",
+          arguments: {},
+        },
+      },
+      token,
+    );
+
+    expect("result" in response).toBe(true);
+    if ("result" in response) {
+      const content = response.result as { content: { type: string; text: string }[] };
+      const parsed = JSON.parse(content.content[0].text);
+      expect(parsed.entries).toHaveLength(1);
+      expect(parsed.total).toBe(1);
     }
   });
 });

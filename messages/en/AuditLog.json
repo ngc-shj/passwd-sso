@@ -200,5 +200,6 @@
   "delegationListMeta": "Listed {entryCount} delegated entries",
   "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",
   "delegationGetMeta": "Retrieved delegated credential",
-  "delegationCreateMeta": "Delegated {entryCount} entries"
+  "delegationCreateMeta": "Delegated {entryCount} entries",
+  "delegationRevokeMeta": "Revoked {revokedCount, plural, one {# session} other {# sessions}} ({reason})"
 }

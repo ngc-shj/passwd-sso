@@ -200,5 +200,6 @@
   "delegationListMeta": "委任済み {entryCount} 件を一覧表示",
   "delegationSearchMeta": "「{query}」を検索 — {entryCount} 件",
   "delegationGetMeta": "委任された認証情報を取得",
-  "delegationCreateMeta": "{entryCount} 件のエントリを委任"
+  "delegationCreateMeta": "{entryCount} 件のエントリを委任",
+  "delegationRevokeMeta": "{revokedCount} 件のセッションを失効（{reason}）"
 }

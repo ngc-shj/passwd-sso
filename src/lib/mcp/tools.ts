@@ -205,7 +205,8 @@ export async function toolSearchCredentials(
   if (!parsed.success) {
     return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
   }
-  const { query, limit, offset } = parsed.data;
+  const { query: rawQuery, limit, offset } = parsed.data;
+  const query = rawQuery?.trim() || undefined;
 
   const guard = requireDelegation(token);
   if (guard) return guard;

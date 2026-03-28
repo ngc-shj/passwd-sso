@@ -31,6 +31,11 @@ export function useDelegationAuditLabel() {
     if (action === "DELEGATION_CREATE") {
       return t("delegationCreateMeta", { entryCount });
     }
+    if (action === "DELEGATION_REVOKE") {
+      const revokedCount = typeof metadata.revokedCount === "number" ? metadata.revokedCount : 1;
+      const reason = typeof metadata.reason === "string" ? metadata.reason : "manual";
+      return t("delegationRevokeMeta", { revokedCount, reason });
+    }
     return null;
   };
 }

@@ -1,6 +1,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { handleMcpRequest } from "@/lib/mcp/server";
+import { extractClientIp } from "@/lib/ip-access";
 
 export async function POST(req: NextRequest) {
   // Validate MCP access token
@@ -31,7 +32,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const ip = req.headers.get("x-forwarded-for") ?? req.headers.get("x-real-ip") ?? null;
+  const ip = extractClientIp(req);
   const response = await handleMcpRequest(body, tokenResult.data, ip);
   return NextResponse.json(response);
 }
