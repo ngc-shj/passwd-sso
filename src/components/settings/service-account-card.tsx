@@ -121,7 +121,13 @@ export function ServiceAccountCard() {
       const res = await fetchApi(apiPath.tenantServiceAccountTokens(saId));
       if (res.ok) {
         const data = await res.json();
-        setSaTokens((prev) => ({ ...prev, [saId]: data.tokens ?? [] }));
+        const rawTokens = Array.isArray(data) ? data : data.tokens ?? [];
+        // Backend returns scope as CSV string; normalize to array for UI
+        const normalized = rawTokens.map((tok: Record<string, unknown>) => ({
+          ...tok,
+          scope: typeof tok.scope === "string" ? (tok.scope as string).split(",").filter(Boolean) : tok.scope,
+        }));
+        setSaTokens((prev) => ({ ...prev, [saId]: normalized }));
       }
     } catch {
       // silently fail
@@ -304,12 +310,18 @@ export function ServiceAccountCard() {
           body: JSON.stringify(body),
         }
       );
-      if (res.status === 409) {
-        toast.error(t("tokenLimitReached"));
-        return;
-      }
       if (!res.ok) {
-        toast.error(t("tokenCreateFailed"));
+        const errData = await res.json().catch(() => null);
+        const code = errData?.error;
+        if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
+          toast.error(t("tokenLimitReached"));
+        } else if (res.status === 409) {
+          toast.error(t("saInactive"));
+        } else if (res.status === 400) {
+          toast.error(t("tokenValidationError"));
+        } else {
+          toast.error(t("tokenCreateFailed"));
+        }
         return;
       }
       const data = await res.json();
