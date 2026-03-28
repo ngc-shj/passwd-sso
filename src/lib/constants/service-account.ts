@@ -10,6 +10,7 @@ export const SA_TOKEN_SCOPE = {
   FOLDERS_WRITE: "folders:write",
   TEAM_PASSWORDS_READ: "team:passwords:read",
   TEAM_PASSWORDS_WRITE: "team:passwords:write",
+  ACCESS_REQUEST_CREATE: "access-request:create",
 } as const;
 
 export type SaTokenScope =

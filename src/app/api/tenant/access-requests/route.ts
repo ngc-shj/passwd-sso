@@ -14,7 +14,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { z } from "zod";
-import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
+import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 
 const accessRequestCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 20 });
 
@@ -111,7 +111,14 @@ async function handlePOST(req: NextRequest) {
   let expiresInMinutes: number;
 
   if (authResult.type === "service_account") {
-    // SA self-service: serviceAccountId from token
+    // SA self-service: requires access-request:create scope
+    if (!authResult.scopes.includes(SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE)) {
+      return NextResponse.json(
+        { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
+        { status: 403 },
+      );
+    }
+
     tenantId = authResult.tenantId;
     serviceAccountId = authResult.serviceAccountId;
 
