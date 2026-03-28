@@ -93,8 +93,9 @@ describe("toolGetCredential", () => {
       actorType: "MCP_AGENT",
       userId: "user-1",
       tenantId: "t-1",
+      targetType: "PasswordEntry",
       targetId: entryId,
-      metadata: { delegationSessionId: "session-1", mcpClientId: "c-1" },
+      metadata: expect.objectContaining({ tool: "get", delegationSessionId: "session-1", mcpClientId: "c-1" }),
     }));
     expect(mockLogAudit).toHaveBeenCalledWith(expect.objectContaining({
       scope: "TENANT",

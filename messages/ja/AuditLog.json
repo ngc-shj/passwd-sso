@@ -196,5 +196,8 @@
   "DELEGATION_REVOKE": "委任セッションを失効",
   "DELEGATION_EXPIRE": "委任セッションが期限切れ",
   "DELEGATION_READ": "委任された認証情報にアクセス",
-  "groupDelegation": "委任"
+  "groupDelegation": "委任",
+  "delegationListMeta": "委任済み {entryCount} 件を一覧表示",
+  "delegationSearchMeta": "「{query}」を検索 — {entryCount} 件",
+  "delegationCreateMeta": "{entryCount} 件のエントリを委任"
 }

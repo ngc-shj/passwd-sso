@@ -42,6 +42,7 @@ import { formatDateTime } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { BreakGlassDialog } from "@/components/breakglass/breakglass-dialog";
 import { BreakGlassGrantList } from "@/components/breakglass/breakglass-grant-list";
+import { DelegationAuditDetail } from "@/components/audit/delegation-audit-detail";
 
 interface AuditLogItem {
   id: string;
@@ -510,6 +511,7 @@ export function TenantAuditLogCard() {
                         </Badge>
                       )}
                     </div>
+                    <DelegationAuditDetail action={log.action} metadata={log.metadata} />
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {log.user && (
                         <span className="truncate">{formatUser(log.user)}</span>

@@ -8,7 +8,7 @@ CLIENT_ID="${1:?Usage: $0 <client_id> <client_secret> [server_url]}"
 CLIENT_SECRET="${2:?Usage: $0 <client_id> <client_secret> [server_url]}"
 SERVER="${3:-https://localhost:3000}"
 REDIRECT_URI="http://localhost:3000/callback"
-SCOPE="credentials:list credentials:read credentials:decrypt"
+SCOPE="credentials:decrypt"
 
 # Generate PKCE pair
 CODE_VERIFIER=$(openssl rand -base64 32 | tr -d '=/+' | head -c 43)

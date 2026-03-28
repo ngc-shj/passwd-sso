@@ -196,5 +196,8 @@
   "DELEGATION_REVOKE": "Delegation session revoked",
   "DELEGATION_EXPIRE": "Delegation session expired",
   "DELEGATION_READ": "Delegated credential accessed",
-  "groupDelegation": "Delegation"
+  "groupDelegation": "Delegation",
+  "delegationListMeta": "Listed {entryCount} delegated entries",
+  "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",
+  "delegationCreateMeta": "Delegated {entryCount} entries"
 }

@@ -18,6 +18,7 @@ import {
 } from "@/lib/delegation";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 
 // ─── Tool definitions ─────────────────────────────────────────
 
@@ -100,14 +101,27 @@ async function getSession(token: McpTokenData) {
   return { session };
 }
 
-function auditRead(token: McpTokenData, targetId: string, sessionId: string, ip?: string | null) {
+function auditDelegationAccess(
+  token: McpTokenData,
+  tool: "list" | "get" | "search",
+  sessionId: string,
+  ip?: string | null,
+  extra?: { targetId?: string; entryCount?: number; query?: string },
+) {
   const auditBase = {
     action: AUDIT_ACTION.DELEGATION_READ,
     userId: token.userId!,
     actorType: "MCP_AGENT" as const,
     tenantId: token.tenantId,
-    targetId,
-    metadata: { delegationSessionId: sessionId, mcpClientId: token.clientId },
+    targetType: extra?.targetId ? AUDIT_TARGET_TYPE.PASSWORD_ENTRY : undefined,
+    targetId: extra?.targetId,
+    metadata: {
+      tool,
+      delegationSessionId: sessionId,
+      mcpClientId: token.clientId,
+      ...(extra?.entryCount !== undefined ? { entryCount: extra.entryCount } : {}),
+      ...(extra?.query ? { query: extra.query } : {}),
+    },
     ip: ip ?? undefined,
   };
   logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
@@ -150,9 +164,7 @@ export async function toolListCredentials(
   // Apply pagination
   const paginated = entries.slice(offset, offset + limit);
 
-  for (const entry of paginated) {
-    auditRead(token, entry.id, session.id, ip);
-  }
+  auditDelegationAccess(token, "list", session.id, ip, { entryCount: paginated.length });
 
   return { result: { entries: paginated, total: entries.length } };
 }
@@ -180,7 +192,7 @@ export async function toolGetCredential(
     return { error: { code: -32603, message: "Entry not delegated or delegation expired" } };
   }
 
-  auditRead(token, id, session.id, ip);
+  auditDelegationAccess(token, "get", session.id, ip, { targetId: id });
 
   return { result: { entry } };
 }
@@ -224,9 +236,7 @@ export async function toolSearchCredentials(
 
   const results = filtered.slice(0, limit);
 
-  for (const entry of results) {
-    auditRead(token, entry.id, session.id, ip);
-  }
+  auditDelegationAccess(token, "search", session.id, ip, { entryCount: results.length, query });
 
   return { result: { entries: results } };
 }

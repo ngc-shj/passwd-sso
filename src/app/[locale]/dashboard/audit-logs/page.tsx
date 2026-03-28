@@ -68,6 +68,7 @@ import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatUserName } from "@/lib/format-user";
+import { useDelegationAuditLabel } from "@/components/audit/delegation-audit-detail";
 import { downloadBlob } from "@/lib/download-blob";
 
 interface AuditLogItem {
@@ -177,6 +178,7 @@ export default function AuditLogsPage() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [actorTypeFilter, setActorTypeFilter] = useState<string>("ALL");
   const td = useTranslations("AuditDownload");
+  const getDelegationLabel = useDelegationAuditLabel();
 
   const resolveEntryNames = useCallback(
     async (overviews: EntryOverviewMap) => {
@@ -451,6 +453,10 @@ export default function AuditLogsPage() {
       const lockMinutes = typeof meta.lockMinutes === "number" ? meta.lockMinutes : 0;
       return t("lockoutMeta", { attempts, lockMinutes });
     }
+
+    // Delegation: show tool-specific detail
+    const delegationLabel = getDelegationLabel(log.action, meta);
+    if (delegationLabel) return delegationLabel;
 
     // Session revoke all: show revoked count
     if (log.action === AUDIT_ACTION.SESSION_REVOKE_ALL && typeof meta?.revokedCount === "number") {
