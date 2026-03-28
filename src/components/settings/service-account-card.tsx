@@ -316,7 +316,7 @@ export function ServiceAccountCard() {
         if (res.status === 409 && code === "SA_TOKEN_LIMIT_EXCEEDED") {
           toast.error(t("tokenLimitReached"));
         } else if (res.status === 409) {
-          toast.error(t("saInactive"));
+          toast.error(t("saInactiveError"));
         } else if (res.status === 400) {
           toast.error(t("tokenValidationError"));
         } else {
@@ -638,15 +638,22 @@ export function ServiceAccountCard() {
                 placeholder={t("saDescriptionPlaceholder")}
               />
             </div>
-            <div className="flex items-center gap-3">
-              <Switch
-                id="sa-active"
-                checked={editIsActive}
-                onCheckedChange={setEditIsActive}
-              />
-              <Label htmlFor="sa-active">
-                {editIsActive ? t("saActive") : t("saInactive")}
-              </Label>
+            <div className="space-y-2">
+              <div className="flex items-center gap-3">
+                <Switch
+                  id="sa-active"
+                  checked={editIsActive}
+                  onCheckedChange={setEditIsActive}
+                />
+                <Label htmlFor="sa-active" className={editIsActive ? "" : "text-destructive"}>
+                  {editIsActive ? t("saActive") : t("saInactive")}
+                </Label>
+              </div>
+              {!editIsActive && (
+                <p className="text-xs text-destructive">
+                  {t("saDeactivateWarning")}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>
