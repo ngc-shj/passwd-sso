@@ -8,26 +8,24 @@ description: "Use a vault credential to execute a command without exposing the p
 Executes a command using a vault credential. The password never appears in the conversation context — it is consumed inside a subshell and piped directly to the target command.
 
 **Prerequisites:**
-- Decrypt agent running: `eval $(npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts agent --decrypt --eval)`
+- Decrypt agent running: `passwd-sso agent --decrypt` (or `eval $(passwd-sso agent --decrypt --eval)`)
 - `$PSSO_AGENT_SOCK` environment variable set
 - Active delegation session (create via vault UI)
 
 ---
 
-## Step 1: Identify the Credential
+## Step 1: Get MCP Client ID
+
+Call `whoami` MCP tool to get the client ID (`mcpc_xxx`). This is needed for the decrypt command.
+
+---
+
+## Step 2: Identify the Credential
 
 Call `list_credentials` MCP tool to find the entry. Note the `id` and `username`.
 
 If no delegation session is active, instruct the user:
 > Please create a delegation session in the vault UI (Settings > Delegation > New Delegation), then try again.
-
----
-
-## Step 2: Identify the MCP Client ID
-
-The MCP client ID (`mcpc_xxx`) is needed for authorization. This is the public client identifier from the OAuth registration — NOT an internal token UUID.
-
-To find it, check the MCP server connection config or the delegation UI in the browser. The client ID is stable across token refreshes.
 
 ---
 
@@ -94,7 +92,7 @@ Generate and execute a **subshell command** that:
 
 Replace:
 - `ENTRY_ID` — entry UUID from `list_credentials`
-- `MCP_CLIENT_ID` — MCP client ID (mcpc_xxx) for authorization
+- `MCP_CLIENT_ID` — client ID (`mcpc_xxx`) from `whoami`
 - `USERNAME` — username from `list_credentials`
 - `TARGET_URL` — the URL to authenticate against
 - `COMMAND_USING_CRED` — any command that uses `${_CRED}`
@@ -106,6 +104,6 @@ Replace:
 Report only the command's output (e.g., HTTP status, success/failure). NEVER report the credential value itself.
 
 If the command fails, report the error and suggest troubleshooting steps:
-- Agent not running → "Start the agent with `eval $(passwd-sso agent --decrypt --eval)`"
+- Agent not running → "Start the agent with `passwd-sso agent --decrypt`"
 - Entry not delegated → "Add this entry to the delegation session in the vault UI"
 - Session expired → "Create a new delegation session in the vault UI"
