@@ -105,4 +105,5 @@ describe("DELETE /api/vault/delegation/[id]", () => {
     const json = await res.json();
     expect(json.error).toBeDefined();
   });
+
 });

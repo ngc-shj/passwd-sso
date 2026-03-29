@@ -337,12 +337,16 @@ for (const [tableName, info] of tables) {
   const unquotedAlts = [...allNames].map(escapeRe).join("|");
   const tablePattern = `(?:${quotedAlts}|${unquotedAlts})`;
 
-  // ENABLE ROW LEVEL SECURITY — table name may be quoted or unquoted
+  // ENABLE ROW LEVEL SECURITY — must not be a comment line
   const enablePattern = new RegExp(
     `alter\\s+table\\s+${tablePattern}\\s+enable\\s+row\\s+level\\s+security`,
     "i",
   );
-  if (!enablePattern.test(allSql)) {
+  const enableLines = allSql.split("\n").filter((ln) => {
+    const trimmed = ln.trim();
+    return !trimmed.startsWith("--") && enablePattern.test(trimmed);
+  });
+  if (enableLines.length === 0) {
     rlsIssues.push(`Table "${tableName}": missing ENABLE ROW LEVEL SECURITY`);
   }
 
@@ -359,13 +363,16 @@ for (const [tableName, info] of tables) {
     rlsIssues.push(`Table "${tableName}": missing FORCE ROW LEVEL SECURITY`);
   }
 
-  // CREATE POLICY <name> ON <table> — table name may be quoted or unquoted;
-  // policy name may be just "tenant_isolation" or "<table>_tenant_isolation".
+  // CREATE POLICY <name> ON <table> — must not be a comment line
   const policyPattern = new RegExp(
     `create\\s+policy\\s+"?\\S*tenant_isolation"?\\s+on\\s+${tablePattern}(?:\\s|$)`,
     "i",
   );
-  if (!policyPattern.test(allSql)) {
+  const policyLines = allSql.split("\n").filter((ln) => {
+    const trimmed = ln.trim();
+    return !trimmed.startsWith("--") && policyPattern.test(trimmed);
+  });
+  if (policyLines.length === 0) {
     rlsIssues.push(
       `Table "${tableName}": missing CREATE POLICY <table>_tenant_isolation`,
     );
