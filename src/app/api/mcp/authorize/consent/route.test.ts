@@ -12,6 +12,7 @@ const {
   mockMcpClientCount,
   mockMcpClientUpdateMany,
   mockMcpClientFindUnique,
+  mockTxFindFirst,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
@@ -23,6 +24,7 @@ const {
   mockMcpClientCount: vi.fn().mockResolvedValue(0),
   mockMcpClientUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
   mockMcpClientFindUnique: vi.fn(),
+  mockTxFindFirst: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({
@@ -43,9 +45,10 @@ vi.mock("@/lib/prisma", () => ({
       fn({
         mcpClient: {
           count: mockMcpClientCount,
-          findFirst: mockFindFirst,
+          findFirst: mockTxFindFirst,
           updateMany: mockMcpClientUpdateMany,
           deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+          delete: vi.fn().mockResolvedValue({}),
         },
       }),
     ),
@@ -117,12 +120,13 @@ describe("POST /api/mcp/authorize/consent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(VALID_SESSION);
-    // withBypassRls: first call returns client, second call returns user
-    mockWithBypassRls
-      .mockImplementationOnce(async (_p: unknown, fn: () => unknown) => fn())
-      .mockImplementationOnce(async (_p: unknown, fn: () => unknown) => fn());
+    // withBypassRls: always execute callback (may be called 2+ times for claiming)
+    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
     mockFindFirst.mockResolvedValue(VALID_CLIENT);
     mockFindUnique.mockResolvedValue(VALID_USER);
+    mockTxFindFirst.mockResolvedValue(null); // default: no existing same-name client
+    mockMcpClientCount.mockResolvedValue(0);
+    mockMcpClientUpdateMany.mockResolvedValue({ count: 1 });
     mockCreateAuthorizationCode.mockResolvedValue({
       code: "auth-code-abc123",
       expiresAt: new Date(Date.now() + 60000),
@@ -334,12 +338,10 @@ describe("POST /api/mcp/authorize/consent", () => {
   });
 
   it("claims DCR client on Allow and issues authorization code", async () => {
-    // Call order for mockFindFirst:
-    // 1. Client lookup (foundClient) → unclaimed DCR client
-    // 2. $transaction: existing same-name check → null (no conflict)
-    mockFindFirst
-      .mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null })
-      .mockResolvedValueOnce(null);
+    // mockFindFirst: client lookup → unclaimed DCR client
+    // mockTxFindFirst: $transaction existing same-name check → null (no conflict)
+    mockFindFirst.mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    mockTxFindFirst.mockResolvedValueOnce(null);
     mockMcpClientCount.mockResolvedValueOnce(0);
     mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
 
