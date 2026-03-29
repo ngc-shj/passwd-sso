@@ -77,6 +77,7 @@ const ALLOWED_USAGE = new Map([
   // Delegated Decryption: cross-tenant session lookup + delegation CRUD
   ["src/lib/delegation.ts", ["delegationSession"]],
   ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
+  ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)

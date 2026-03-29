@@ -19,7 +19,8 @@
     "clipboardy": "^4.0.0",
     "commander": "^13.1.0",
     "inquirer": "^12.6.0",
-    "otpauth": "^9.4.0"
+    "otpauth": "^9.4.0",
+    "zod": "^4.3.6"
   },
   "optionalDependencies": {
     "keytar": "^7.9.0"

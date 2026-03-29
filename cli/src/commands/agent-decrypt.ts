@@ -216,7 +216,7 @@ function handleConnection(socket: Socket): void {
           if (!parsed.success) {
             response = {
               ok: false,
-              error: `Invalid request: ${parsed.error.issues.map((i) => i.message).join(", ")}`,
+              error: `Invalid request: ${parsed.error.issues.map((i: { message: string }) => i.message).join(", ")}`,
             };
           } else {
             response = await handleDecryptRequest(parsed.data);
