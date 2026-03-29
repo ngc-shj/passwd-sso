@@ -353,6 +353,16 @@ All tools require an **active delegation session**. The human user selects entri
 | Agent Unix socket (0600) | Same-user-only access to decrypt daemon |
 | No authorization cache | Every decrypt request verified against server — revocation is immediate |
 
+#### MCP Client Compatibility
+
+| Client | Metadata (list/search) | Credential Usage | Notes |
+|--------|:---------------------:|:----------------:|-------|
+| Claude Code (CLI) | Yes | Yes (Skill + agent) | Full zero-knowledge flow via `/use-credential` Skill and `block-bare-decrypt` hook |
+| Claude Desktop | Yes | No | No Skill/hook mechanism; metadata-only access |
+| Other MCP clients | Yes | No | Standard MCP protocol — no agent socket integration |
+
+Credential usage requires the CLI agent daemon running on the same machine as the MCP client. Claude Desktop and other MCP clients can browse entry metadata but cannot decrypt or use credentials. This is a deliberate security boundary — extending credential usage to other clients would require equivalent Skill/hook protections to prevent plaintext exposure to the LLM context.
+
 ### E2E Encryption Strategy
 
 | Phase | Approach | Status |
