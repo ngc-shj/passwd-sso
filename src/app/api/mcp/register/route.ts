@@ -24,9 +24,9 @@ const dcrRateLimiter = createRateLimiter({
   max: DCR_RATE_LIMIT_MAX,
 });
 
-// RFC 8252 §8.3: loopback redirect URIs must use 127.0.0.1 (not "localhost")
-// and must include a port number. HTTPS is allowed for all other origins.
-const LOOPBACK_REDIRECT_RE = /^http:\/\/127\.0\.0\.1:\d+\//;
+// Loopback redirect URIs: allow both 127.0.0.1 and localhost with a port.
+// RFC 8252 §7.3 recommends 127.0.0.1 but real clients (Claude Code) use localhost.
+const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//;
 
 const dcrSchema = z.object({
   client_name: z.string().min(1).max(100),
@@ -46,12 +46,13 @@ const dcrSchema = z.object({
         }),
       {
         message:
-          "redirect_uris must use https:// or http://127.0.0.1:<port>/ (RFC 8252 §8.3)",
+          "redirect_uris must use https:// or http://localhost:<port>/ or http://127.0.0.1:<port>/",
       },
     ),
   grant_types: z.array(z.string()).optional(),
   response_types: z.array(z.string()).optional(),
   token_endpoint_auth_method: z.string().optional(),
+  scope: z.string().optional(), // Space-separated scopes (ignored, server controls scopes)
 });
 
 export async function POST(req: NextRequest) {
@@ -110,12 +111,13 @@ export async function POST(req: NextRequest) {
 
   const tokenEndpointAuthMethod =
     body.token_endpoint_auth_method ?? "client_secret_post";
+  const isPublicClient = tokenEndpointAuthMethod === "none";
   const validatedUris = body.redirect_uris;
 
-  // Generate client credentials
+  // Generate client credentials (public clients don't get a secret)
   const clientId = MCP_CLIENT_ID_PREFIX + randomBytes(16).toString("hex");
-  const clientSecret = randomBytes(32).toString("base64url");
-  const clientSecretHash = hashToken(clientSecret);
+  const clientSecret = isPublicClient ? null : randomBytes(32).toString("base64url");
+  const clientSecretHash = clientSecret ? hashToken(clientSecret) : "";
   const dcrExpiresAt = new Date(Date.now() + MCP_DCR_UNCLAIMED_EXPIRY_SEC * 1000);
 
   // Count + create atomically with bypass RLS (no tenant context for DCR)
@@ -178,20 +180,21 @@ export async function POST(req: NextRequest) {
     ip,
   });
 
-  return NextResponse.json(
-    {
-      client_id: client.clientId,
-      client_secret: clientSecret,
-      client_name: body.client_name,
-      redirect_uris: validatedUris,
-      grant_types: ["authorization_code"],
-      response_types: ["code"],
-      token_endpoint_auth_method: tokenEndpointAuthMethod,
-      client_id_issued_at: Math.floor(client.createdAt.getTime() / 1000),
-      client_secret_expires_at: 0,
-    },
-    { status: 201 },
-  );
+  const responseBody: Record<string, unknown> = {
+    client_id: client.clientId,
+    client_name: body.client_name,
+    redirect_uris: validatedUris,
+    grant_types: body.grant_types ?? ["authorization_code"],
+    response_types: ["code"],
+    token_endpoint_auth_method: tokenEndpointAuthMethod,
+    client_id_issued_at: Math.floor(client.createdAt.getTime() / 1000),
+  };
+  if (clientSecret) {
+    responseBody.client_secret = clientSecret;
+    responseBody.client_secret_expires_at = 0;
+  }
+
+  return NextResponse.json(responseBody, { status: 201 });
 }
 
 class CapExceededError extends Error {}

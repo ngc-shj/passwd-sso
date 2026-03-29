@@ -156,11 +156,24 @@ describe("POST /api/mcp/register", () => {
     expect(status).toBe(201);
   });
 
-  it("rejects http://localhost redirect URIs", async () => {
+  it("accepts http://localhost with port redirect URIs", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",
         redirect_uris: ["http://localhost:3000/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+  });
+
+  it("rejects http://localhost without port redirect URIs", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://localhost/callback"],
       },
     });
     const res = await POST(req);

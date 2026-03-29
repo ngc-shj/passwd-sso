@@ -47,7 +47,8 @@ export async function POST(req: NextRequest) {
   if (grantType === "authorization_code") {
     const { code, redirect_uri, client_id, client_secret, code_verifier } = body;
 
-    if (!code || !redirect_uri || !client_id || !client_secret || !code_verifier) {
+    // client_secret is optional for public clients (token_endpoint_auth_method: "none")
+    if (!code || !redirect_uri || !client_id || !code_verifier) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
@@ -60,7 +61,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const clientSecretHash = hashToken(client_secret);
+    const clientSecretHash = client_secret ? hashToken(client_secret) : "";
 
     const result = await exchangeCodeForToken({
       code,
