@@ -65,6 +65,8 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Service accounts as first-class non-human identities with `sa_` prefix tokens
 - MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
 - OAuth 2.1 Authorization Code + PKCE for MCP client authentication
+- Dynamic Client Registration (DCR, RFC 7591) at `/api/mcp/register` — clients register without pre-configuration; unclaimed clients expire after 24h
+- Refresh token rotation: each exchange issues a new token pair grouped by `familyId`; replay detection revokes the entire family
 - Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
 - Delegated Decryption (Phase 5): browser decrypts vault entries, relays plaintext to MCP session via envelope-encrypted Redis cache with short TTLs
 - Delegation session management: `POST/GET/DELETE /api/vault/delegation`, per-session revoke via `DELETE /api/vault/delegation/[id]`
@@ -332,7 +334,9 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/tenant/mcp-clients/[id]` | GET, PUT, DELETE | CRUD single MCP client |
 | `/api/mcp` | POST, GET | MCP Streamable HTTP (JSON-RPC) + SSE |
 | `/api/mcp/authorize` | GET | OAuth 2.1 authorization (PKCE) |
+| `/api/mcp/authorize/consent` | POST | Process OAuth consent form |
 | `/api/mcp/token` | POST | OAuth 2.1 token exchange |
+| `/api/mcp/register` | POST | Dynamic Client Registration (RFC 7591) |
 | `/api/mcp/.well-known/oauth-authorization-server` | GET | OAuth discovery metadata |
 
 #### Health & Infrastructure
@@ -345,6 +349,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/user/locale` | PUT | Update user locale preference |
 | `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
 | `/api/maintenance/purge-history` | POST | System-wide history purge (admin-only, bearer token) |
+| `/api/maintenance/dcr-cleanup` | POST | Clean up expired DCR clients (admin-only) |
 
 ### i18n
 

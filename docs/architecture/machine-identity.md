@@ -116,6 +116,79 @@ SA (sa_ token)                    Admin (browser session)
 
 ## MCP Gateway
 
+### Native OAuth Flow (Dynamic Client Registration)
+
+Claude Code and Claude Desktop connect with just a URL.
+
+**Claude Code CLI:**
+
+```bash
+claude mcp add passwd-sso --transport http https://sso.example.com/api/mcp
+```
+
+**Claude Desktop (`claude_desktop_config.json`):**
+
+```json
+{ "mcpServers": { "passwd-sso": { "url": "https://sso.example.com/api/mcp" } } }
+```
+
+> **Base path**: If the app is served under a base path (e.g. `NEXT_PUBLIC_BASE_PATH=/passwd-sso`),
+> include it in the URL: `https://sso.example.com/passwd-sso/api/mcp`
+
+#### Reverse Proxy Setup
+
+The MCP spec requires the OAuth discovery endpoint at `/.well-known/oauth-authorization-server` on the **domain root** — not under the base path. When using a reverse proxy with `NEXT_PUBLIC_BASE_PATH`, this root-level path must be explicitly forwarded to the Next.js backend.
+
+> **Note**: Replace `$BASE_PATH` with your `NEXT_PUBLIC_BASE_PATH` value (e.g. `/passwd-sso`).
+> Replace `$BACKEND` with your Next.js server address (e.g. `https+insecure://localhost:3001` or `https://backend:3001`).
+
+**Tailscale Serve:**
+
+```bash
+# App proxy (existing)
+tailscale serve --bg --set-path $BASE_PATH $BACKEND$BASE_PATH
+
+# OAuth discovery — must be at domain root (MCP spec requirement)
+tailscale serve --bg --set-path /.well-known/oauth-authorization-server \
+  $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
+```
+
+**Apache:**
+
+```apache
+# OAuth discovery — add BEFORE the app ProxyPass
+ProxyPass        /.well-known/oauth-authorization-server $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
+ProxyPassReverse /.well-known/oauth-authorization-server $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
+```
+
+If the app is served at the domain root (no base path), the discovery endpoint is already accessible at the correct path and no additional proxy rule is needed.
+
+#### Flow
+
+1. Client discovers `/.well-known/oauth-authorization-server` → gets `registration_endpoint`
+2. Client POSTs to `/api/mcp/register` (RFC 7591) → receives `client_id`; public clients omit `client_secret` by sending `token_endpoint_auth_method: "none"`
+3. Client opens browser to `/api/mcp/authorize` with PKCE params
+4. User sees consent screen at `/{locale}/mcp/authorize`, clicks Allow — **claiming happens here** (the DCR client is bound to the user's tenant at Allow time, not on page load; clicking Deny leaves the client unclaimed so the user can retry)
+5. Client receives authorization code, exchanges for `access_token` + `refresh_token`
+6. Client uses `access_token` for MCP requests, `refresh_token` for renewal
+
+> **Client types**: Both public clients (`token_endpoint_auth_method: "none"`, e.g. Claude Code CLI) and confidential clients (`client_secret_post`) are supported. Public clients skip `client_secret` at registration and token exchange. Same-name re-registration (e.g. Claude Code retrying) issues a new `client_id` each time — unclaimed duplicates expire after 24h.
+
+#### Refresh Token Rotation
+
+- Each refresh token exchange issues a new access + refresh token pair
+- Tokens are grouped by `familyId` for efficient bulk revocation
+- Replay detection: if a rotated refresh token is reused, the entire family is revoked
+- Refresh tokens expire after 7 days; access tokens after 1 hour
+
+#### DCR Client Lifecycle
+
+- DCR-registered clients start with `tenantId = null` (unclaimed)
+- At consent time, the client is "claimed" — bound to the user's tenant
+- Unclaimed clients expire after 24 hours (auto-cleanup)
+- Rate limited: 20 registrations per IP per hour (IPv6 uses /64 prefix)
+- Global cap: 100 unclaimed clients system-wide
+
 ### Transport
 
 MCP Server implemented as Next.js API route at `/api/mcp`:
@@ -147,9 +220,9 @@ MCP Client                    passwd-sso                      User
 ```
 
 - PKCE S256 required (no plain)
-- `client_secret` hashed with SHA-256 (same as SA tokens)
+- `client_secret` hashed with SHA-256 (same as SA tokens); omitted for public clients
 - Code exchange wrapped in `prisma.$transaction` to prevent replay
-- Redirect URIs restricted to `https://` or `http://localhost` (RFC 8252)
+- Redirect URIs restricted to `https://` or `http://localhost` / `http://127.0.0.1` (RFC 8252; both localhost forms accepted)
 
 ### Tools
 
@@ -217,7 +290,7 @@ Tenant audit log UI includes an actor type filter dropdown. The API accepts an o
 | `AccessRequest` | JIT access request (PENDING → APPROVED/DENIED/EXPIRED) |
 | `McpClient` | OAuth 2.1 client registration |
 | `McpAuthorizationCode` | PKCE authorization code (5-min expiry) |
-| `McpAccessToken` | MCP access token (1-hour expiry) |
+| `McpAccessToken` | MCP access token (1-hour expiry); cascade-deletes associated `DelegationSession` records on client deletion |
 
 ## Connecting with Claude Desktop
 

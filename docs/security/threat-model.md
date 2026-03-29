@@ -105,6 +105,9 @@ TB6: Client <-> WebAuthn Authenticator
 | D2: Expensive KDF computation exhausts client | Client | Argon2id parameters tuned for target hardware; fallback to PBKDF2 on resource-constrained devices | User on very low-end device gets PBKDF2 (lower security) |
 | D3: Large attachment upload exhausts storage | TB1 | File size limits enforced server-side; per-user storage quotas | Quota enforcement depends on billing/admin configuration |
 | D4: API abuse via extension token | TB5 | Token scope limits operations; rate limiting applies equally | Token holder can make rapid requests within scope |
+| D5: IPv6 subnet rotation bypasses rate limiting | All IP-based rate limits | Rate limit keys use /64 prefix for IPv6 (treats entire subnet as one entity) | Attacker with /48 or larger allocation |
+| D6: DCR endpoint abuse (mass registration) | /api/mcp/register | IP rate limit (20/hr, IPv6 /64), global cap (100 unclaimed), 24h auto-expiry | Distributed registration from many IPs |
+| D7: OAuth consent form CSRF (localhost redirect) | /api/mcp/authorize | CSP `form-action` allows `http://localhost:*` and `http://127.0.0.1:*` in all environments (required for RFC 8252 native app OAuth — Claude Code/Desktop use localhost callback) | XSS prerequisite; form-action alone cannot exfiltrate data without script execution |
 
 ### 3.6 Elevation of Privilege
 
@@ -125,7 +128,7 @@ TB6: Client <-> WebAuthn Authenticator
 | Auth.js database sessions | S1 |
 | WebAuthn / Passkey | S4 |
 | FORCE RLS + tenant isolation | S5 |
-| CSP (nonce + strict-dynamic) | S1 (XSS mitigation) |
+| CSP (nonce + strict-dynamic; `form-action` localhost dev-only) | S1 (XSS mitigation), D7 |
 | Rate limiting (Redis) | D1, D4 |
 | Audit logging | R1, R2, R3 |
 | Sentry scrubbing | I4 |

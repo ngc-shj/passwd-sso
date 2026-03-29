@@ -35,6 +35,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: () => "1.2.3.4",
+  rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: (_prisma: unknown, fn: () => unknown) => fn(),

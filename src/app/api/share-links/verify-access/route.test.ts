@@ -43,6 +43,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+  rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,

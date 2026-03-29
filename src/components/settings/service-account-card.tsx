@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/dialog";
 import { ChevronDown, Loader2, Plus, Trash2, Pencil, KeyRound } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format-datetime";
@@ -66,6 +67,7 @@ export function ServiceAccountCard() {
 
   const [accounts, setAccounts] = useState<ServiceAccount[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showInactiveSa, setShowInactiveSa] = useState(false);
   const [expandedSa, setExpandedSa] = useState<Set<string>>(new Set());
   const [saTokens, setSaTokens] = useState<Record<string, SaToken[]>>({});
   const [tokenLoading, setTokenLoading] = useState<Set<string>>(new Set());
@@ -360,6 +362,9 @@ export function ServiceAccountCard() {
     setTokenScopeError("");
   };
 
+  const activeAccounts = accounts.filter((a) => a.isActive);
+  const inactiveAccounts = accounts.filter((a) => !a.isActive);
+
   return (
     <Card className="p-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -376,7 +381,10 @@ export function ServiceAccountCard() {
         <p className="text-center text-muted-foreground">{t("noServiceAccounts")}</p>
       ) : (
         <div className="space-y-2">
-          {accounts.map((sa) => (
+          {activeAccounts.length === 0 && inactiveAccounts.length > 0 && (
+            <p className="text-sm text-muted-foreground">{t("noActiveServiceAccounts")}</p>
+          )}
+          {activeAccounts.map((sa) => (
             <Collapsible
               key={sa.id}
               open={expandedSa.has(sa.id)}
@@ -541,6 +549,179 @@ export function ServiceAccountCard() {
               </div>
             </Collapsible>
           ))}
+          {inactiveAccounts.length > 0 && (
+            <Collapsible open={showInactiveSa} onOpenChange={setShowInactiveSa}>
+              <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
+                {t("saInactive")} ({inactiveAccounts.length})
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showInactiveSa && "rotate-180")} />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-2 mt-2">
+                {inactiveAccounts.map((sa) => (
+                  <Collapsible
+                    key={sa.id}
+                    open={expandedSa.has(sa.id)}
+                    onOpenChange={() => toggleExpand(sa.id)}
+                  >
+                    <div className="border rounded-md">
+                      <div className="flex items-center justify-between p-3">
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
+                          <CollapsibleTrigger asChild>
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                            >
+                              <ChevronDown
+                                className={`h-4 w-4 shrink-0 transition-transform text-muted-foreground ${expandedSa.has(sa.id) ? "rotate-0" : "-rotate-90"}`}
+                              />
+                              <span className="text-sm font-medium truncate">{sa.name}</span>
+                              {sa.description && (
+                                <span className="text-xs text-muted-foreground truncate hidden sm:block">
+                                  {sa.description}
+                                </span>
+                              )}
+                              <Badge variant="secondary" className="shrink-0">
+                                {t("saInactive")}
+                              </Badge>
+                            </button>
+                          </CollapsibleTrigger>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => openEdit(sa)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  {t("saDeleteConfirm", { name: sa.name })}
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {t("saDeleteWarning")}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => handleDelete(sa.id)}>
+                                  {tCommon("delete")}
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </div>
+                      </div>
+                      <CollapsibleContent>
+                        <div className="border-t px-3 pb-3 pt-2 space-y-2 bg-muted/20">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-medium text-muted-foreground">
+                              {t("tokens")}
+                            </p>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => openTokenCreate(sa.id)}
+                              disabled
+                            >
+                              <KeyRound className="h-3 w-3 mr-1" />
+                              {t("createToken")}
+                            </Button>
+                          </div>
+                          {tokenLoading.has(sa.id) ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : !saTokens[sa.id] || saTokens[sa.id].length === 0 ? (
+                            <p className="text-xs text-muted-foreground">{t("noTokens")}</p>
+                          ) : (
+                            <div className="space-y-1">
+                              {saTokens[sa.id].map((token) => (
+                                <div
+                                  key={token.id}
+                                  className="flex items-center justify-between border rounded p-2 bg-background"
+                                >
+                                  <div className="space-y-0.5 min-w-0 flex-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs font-medium truncate">
+                                        {token.name}
+                                      </span>
+                                      <span className="text-xs text-muted-foreground font-mono shrink-0">
+                                        {token.prefix}…
+                                      </span>
+                                      {token.revokedAt && (
+                                        <Badge variant="destructive" className="text-[10px] px-1 h-3.5 shrink-0">
+                                          {t("tokenRevoked")}
+                                        </Badge>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-wrap gap-1">
+                                      {token.scope.map((s) => (
+                                        <Badge key={s} variant="outline" className="text-[10px] px-1 h-3.5">
+                                          {s}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                    <div className="text-[10px] text-muted-foreground space-x-2">
+                                      <span>
+                                        {t("tokenLastUsed")}:{" "}
+                                        {token.lastUsedAt
+                                          ? formatDateTime(token.lastUsedAt, locale)
+                                          : t("tokenNeverUsed")}
+                                      </span>
+                                      <span>
+                                        {t("tokenExpires")}:{" "}
+                                        {token.expiresAt
+                                          ? formatDateTime(token.expiresAt, locale)
+                                          : t("tokenNeverExpires")}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  {!token.revokedAt && (
+                                    <AlertDialog>
+                                      <AlertDialogTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0">
+                                          <Trash2 className="h-3 w-3 text-destructive" />
+                                        </Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent>
+                                        <AlertDialogHeader>
+                                          <AlertDialogTitle>
+                                            {t("tokenRevokeConfirm", { name: token.name })}
+                                          </AlertDialogTitle>
+                                          <AlertDialogDescription>
+                                            {t("tokenRevokeWarning")}
+                                          </AlertDialogDescription>
+                                        </AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+                                          <AlertDialogAction
+                                            onClick={() => handleRevokeToken(sa.id, token.id)}
+                                          >
+                                            {t("revokeToken")}
+                                          </AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </CollapsibleContent>
+                    </div>
+                  </Collapsible>
+                ))}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
       )}
 

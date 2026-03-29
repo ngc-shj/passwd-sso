@@ -55,6 +55,7 @@ export async function GET(
         redirectUris: true,
         allowedScopes: true,
         isActive: true,
+        isDcr: true,
         createdAt: true,
         updatedAt: true,
       },
@@ -109,7 +110,7 @@ export async function PUT(
     prisma.mcpClient.update({
       where: { id },
       data: updateData,
-      select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, updatedAt: true },
+      select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, isDcr: true, updatedAt: true },
     }),
   );
 

@@ -37,12 +37,56 @@ const qualifierSchema = z.string().refine(
 );
 
 /**
+ * Allowlist of valid resource:action pairs (defense-in-depth).
+ * All SA and MCP scopes combined. Unknown pairs are rejected by parseScope().
+ */
+const VALID_RESOURCE_ACTIONS = new Set([
+  // SA scopes (from service-account.ts)
+  "passwords:read",
+  "passwords:write",
+  "passwords:list",
+  "tags:read",
+  "folders:read",
+  "folders:write",
+  "vault:status",
+  "access-request:create",
+  // MCP scopes (from mcp.ts)
+  "credentials:decrypt",
+]);
+
+/**
+ * Flat scopes that don't follow resource:action[:qualifier] format
+ * (e.g., team:credentials:read has 3 parts but is NOT a team-uuid-scoped scope).
+ * These are matched against the full raw string before qualifier validation.
+ */
+const VALID_FLAT_SCOPES = new Set([
+  // MCP flat team scope (not team:<uuid>:resource:action pattern)
+  "team:credentials:read",
+]);
+
+/** Valid resource:action pairs for team-scoped scopes (team:<uuid>:resource:action). */
+const VALID_TEAM_RESOURCE_ACTIONS = new Set([
+  "passwords:read",
+  "passwords:write",
+  "credentials:read",
+]);
+
+/**
  * Parse a single scope token (e.g., `passwords:read:folder/<uuid>`).
  * Returns null if the scope is malformed.
  */
 export function parseScope(raw: string): ParsedScope | null {
   const parts = raw.split(":");
   if (parts.length < 2) return null;
+
+  // Handle known flat scopes (e.g., "team:credentials:read") before UUID-based routing.
+  // These don't follow the team:<uuid>:resource:action pattern.
+  if (VALID_FLAT_SCOPES.has(raw)) {
+    // Treat last segment as action, everything before as resource.
+    const action = parts[parts.length - 1]!;
+    const resource = parts.slice(0, -1).join(":");
+    return { resource, action, raw };
+  }
 
   // Handle team-scoped: team:<uuid>:resource:action
   if (parts[0] === "team" && parts.length >= 4) {
@@ -51,6 +95,7 @@ export function parseScope(raw: string): ParsedScope | null {
     const resource = parts[2];
     const action = parts[3];
     const qualifier = parts.length > 4 ? parts.slice(4).join(":") : undefined;
+    if (!VALID_TEAM_RESOURCE_ACTIONS.has(`${resource}:${action}`)) return null;
     return { resource: `team:${teamId}:${resource}`, action, qualifier, raw };
   }
 
@@ -62,6 +107,8 @@ export function parseScope(raw: string): ParsedScope | null {
     const result = qualifierSchema.safeParse(qualifier);
     if (!result.success) return null;
   }
+
+  if (!VALID_RESOURCE_ACTIONS.has(`${resource}:${action}`)) return null;
 
   return { resource, action, qualifier, raw };
 }

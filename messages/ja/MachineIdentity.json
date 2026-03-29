@@ -1,6 +1,7 @@
 {
   "serviceAccounts": "サービスアカウント",
   "noServiceAccounts": "サービスアカウントがありません",
+  "noActiveServiceAccounts": "有効なサービスアカウントがありません",
   "createServiceAccount": "サービスアカウントを作成",
   "editServiceAccount": "サービスアカウントを編集",
   "deleteServiceAccount": "サービスアカウントを削除",
@@ -84,6 +85,8 @@
   "mcpNameConflict": "同じ名前のクライアントが既に存在します",
   "mcpActive": "有効",
   "mcpInactive": "無効",
+  "noActiveMcpClients": "有効な MCP クライアントがありません",
+  "mcpDcrFieldsReadOnly": "クライアントIDとリダイレクトURIはDCR登録時に設定され、変更できません。",
   "accessRequests": "アクセスリクエスト",
   "noAccessRequests": "アクセスリクエストがありません",
   "arStatus": "ステータス",

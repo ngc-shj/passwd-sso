@@ -24,3 +24,11 @@ export const MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
 export const MCP_PROTOCOL_VERSION = "2025-03-26";
 export const MCP_SERVER_NAME = "passwd-sso";
 export const MCP_SERVER_VERSION = "1.0.0";
+
+// DCR (Dynamic Client Registration) constants
+export const MCP_REFRESH_TOKEN_PREFIX = "mcpr_";
+export const MCP_REFRESH_TOKEN_EXPIRY_SEC = 604800; // 7 days
+export const MCP_DCR_UNCLAIMED_EXPIRY_SEC = 86400; // 24 hours
+export const MAX_UNCLAIMED_DCR_CLIENTS = 100;
+export const DCR_RATE_LIMIT_WINDOW_MS = 3_600_000; // 1 hour
+export const DCR_RATE_LIMIT_MAX = 20; // per IP (/64 for IPv6)
