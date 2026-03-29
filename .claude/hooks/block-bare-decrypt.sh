@@ -27,7 +27,7 @@ except:
 " 2>/dev/null)
 
 # Skip if not a decrypt command
-if ! echo "$COMMAND" | grep -q "decrypt.*--field\|decrypt.*--mcp-token"; then
+if ! echo "$COMMAND" | grep -qP 'passwd-sso\s+decrypt\b|index\.ts\s+decrypt\b'; then
   exit 0
 fi
 

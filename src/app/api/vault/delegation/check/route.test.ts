@@ -16,7 +16,10 @@ const {
   mockLogAudit: vi.fn(),
 }));
 
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/auth-or-token", () => ({
+  authOrToken: mockAuthOrToken,
+  hasUserId: (auth: { type: string }) => "userId" in auth,
+}));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     delegationSession: mockPrismaDelegationSession,

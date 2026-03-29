@@ -33,6 +33,7 @@ const makeToken = (overrides?: Partial<McpTokenData>): McpTokenData => ({
   tokenId: "tok-1",
   tenantId: "t-1",
   clientId: "c-1",
+  mcpClientId: "mcpc_test123",
   userId: "user-1",
   serviceAccountId: null,
   scopes: ["credentials:list"],

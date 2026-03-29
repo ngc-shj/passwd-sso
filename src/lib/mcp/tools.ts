@@ -114,7 +114,7 @@ function auditDelegationAccess(
     metadata: {
       tool,
       delegationSessionId: sessionId,
-      mcpClientId: token.clientId,
+      mcpClientId: token.mcpClientId,
       ...(extra?.entryCount !== undefined ? { entryCount: extra.entryCount } : {}),
       ...(extra?.query ? { query: extra.query } : {}),
     },

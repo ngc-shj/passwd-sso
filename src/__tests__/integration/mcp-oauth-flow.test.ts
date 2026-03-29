@@ -168,6 +168,7 @@ const makeTokenData = (overrides: Partial<{
   tokenId: string;
   tenantId: string;
   clientId: string;
+  mcpClientId: string;
   userId: string | null;
   serviceAccountId: string | null;
   scopes: McpScope[];
@@ -175,6 +176,7 @@ const makeTokenData = (overrides: Partial<{
   tokenId: "token-id",
   tenantId: "tenant-1",
   clientId: "client-uuid-1",
+  mcpClientId: "mcpc_testclient1",
   userId: "user-uuid-1",
   serviceAccountId: null,
   scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] as McpScope[],

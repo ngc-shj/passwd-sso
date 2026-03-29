@@ -11,7 +11,7 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authOrToken } from "@/lib/auth-or-token";
+import { authOrToken, hasUserId } from "@/lib/auth-or-token";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
@@ -32,6 +32,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authorized: false, reason: "unauthorized" }, { status: 401 });
   }
   if (authResult.type === "scope_insufficient") {
+    return NextResponse.json({ authorized: false, reason: "unauthorized" }, { status: 403 });
+  }
+  if (!hasUserId(authResult)) {
     return NextResponse.json({ authorized: false, reason: "unauthorized" }, { status: 403 });
   }
 
