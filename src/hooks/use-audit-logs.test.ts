@@ -73,7 +73,7 @@ describe("useAuditLogs — URL parameter building (buildFilterParams)", () => {
 
   it("produces no extra params when all filters are empty", async () => {
     const { fetchApi } = await import("@/lib/url-helpers");
-    const { result } = renderHook(() => useAuditLogs(makeConfig()));
+    renderHook(() => useAuditLogs(makeConfig()));
 
     // Wait for initial fetch triggered by useEffect
     await act(async () => {});
@@ -174,7 +174,7 @@ describe("useAuditLogs — URL parameter building (buildFilterParams)", () => {
 
   it("does not set actorType param when actorTypeFilter is ALL", async () => {
     const { fetchApi } = await import("@/lib/url-helpers");
-    const { result } = renderHook(() => useAuditLogs(makeConfig()));
+    renderHook(() => useAuditLogs(makeConfig()));
     await act(async () => {});
 
     const url: string = vi.mocked(fetchApi).mock.calls[0][0] as string;
