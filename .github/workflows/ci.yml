@@ -348,6 +348,16 @@ jobs:
               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke', 'rls-smoke', NOW(), NOW());
             INSERT INTO service_accounts (id, tenant_id, name, identity_type, is_active, created_by_id, created_at, updated_at)
               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, '00000000-0000-0000-0000-000000000002', NOW(), NOW());
+            INSERT INTO tenant_webhooks (id, tenant_id, url, events, is_active, created_at, updated_at)
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'https://rls-smoke.test/hook', '{"test"}', true, NOW(), NOW());
+            INSERT INTO mcp_clients (id, tenant_id, name, client_id, client_secret_hash, redirect_uris, is_active, created_at, updated_at)
+              VALUES ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001', 'rls-smoke-mcp', 'mcpc_rlssmoke', 'hash', '{"http://localhost"}', true, NOW(), NOW());
+            INSERT INTO mcp_access_tokens (id, tenant_id, token_hash, client_id, user_id, scope, expires_at, created_at)
+              VALUES ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'rlssmokehash', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000002', 'credentials:list', NOW() + interval '1 hour', NOW());
+            INSERT INTO mcp_refresh_tokens (id, tenant_id, token_hash, family_id, client_id, access_token_id, scope, expires_at, created_at)
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rlssmokerefresh', gen_random_uuid(), '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000011', 'credentials:list', NOW() + interval '1 hour', NOW());
+            INSERT INTO delegation_sessions (id, tenant_id, user_id, mcp_token_id, entry_ids, expires_at, created_at)
+              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000011', '{}', NOW() + interval '1 hour', NOW());
           SQL
 
       - name: Verify RLS enforcement
@@ -368,6 +378,12 @@ jobs:
                 'RLS must block access to teams without app.tenant_id';
               ASSERT (SELECT count(*) = 0 FROM service_accounts),
                 'RLS must block access to service_accounts without app.tenant_id';
+              ASSERT (SELECT count(*) = 0 FROM tenant_webhooks),
+                'RLS must block access to tenant_webhooks without app.tenant_id';
+              ASSERT (SELECT count(*) = 0 FROM mcp_refresh_tokens),
+                'RLS must block access to mcp_refresh_tokens without app.tenant_id';
+              ASSERT (SELECT count(*) = 0 FROM delegation_sessions),
+                'RLS must block access to delegation_sessions without app.tenant_id';
             END $$;
           SQL
           echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
