@@ -53,3 +53,13 @@ ALTER TABLE "mcp_refresh_tokens" ADD CONSTRAINT "mcp_refresh_tokens_client_id_fk
 
 -- AddForeignKey
 ALTER TABLE "mcp_refresh_tokens" ADD CONSTRAINT "mcp_refresh_tokens_access_token_id_fkey" FOREIGN KEY ("access_token_id") REFERENCES "mcp_access_tokens"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- Update DelegationSession FK to cascade (only if table exists — created by MCP Gateway migration)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'delegation_sessions') THEN
+    ALTER TABLE "delegation_sessions" DROP CONSTRAINT IF EXISTS "delegation_sessions_mcp_token_id_fkey";
+    ALTER TABLE "delegation_sessions" ADD CONSTRAINT "delegation_sessions_mcp_token_id_fkey"
+      FOREIGN KEY ("mcp_token_id") REFERENCES "mcp_access_tokens"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+  END IF;
+END $$;
