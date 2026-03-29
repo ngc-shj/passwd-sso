@@ -82,12 +82,12 @@ export class AuditLogsPage {
    * The card containing log entries (divide-y card).
    */
   get logListCard() {
-    return this.page.locator("[data-slot='card'].divide-y");
+    return this.page.locator("[data-testid='audit-log-list']");
   }
 
   /** All individual log entry rows. */
   get logRows() {
-    return this.logListCard.locator("> div");
+    return this.page.locator("[data-testid='audit-log-row']");
   }
 
   /** "Load more" pagination button. */

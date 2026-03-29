@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
  * Resolve delegation audit log detail text.
  * Used by both personal and tenant audit log views.
  */
-export function useDelegationAuditLabel() {
+export function useAuditDelegationLabel() {
   const t = useTranslations("AuditLog");
 
   return function getDelegationLabel(
@@ -45,8 +45,8 @@ interface Props {
   metadata: Record<string, unknown> | null;
 }
 
-export function DelegationAuditDetail({ action, metadata }: Props) {
-  const getLabel = useDelegationAuditLabel();
+export function AuditDelegationDetail({ action, metadata }: Props) {
+  const getLabel = useAuditDelegationLabel();
   const label = getLabel(action, metadata);
   if (!label) return null;
   return <p className="text-xs text-muted-foreground">{label}</p>;
