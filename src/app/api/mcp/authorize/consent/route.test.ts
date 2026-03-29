@@ -68,6 +68,10 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: mockExtractRequestMeta,
 }));
 
+vi.mock("@/lib/csrf", () => ({
+  assertOrigin: vi.fn().mockReturnValue(null),
+}));
+
 import { POST } from "@/app/api/mcp/authorize/consent/route";
 
 const VALID_SESSION = { user: { id: "user-uuid-123" } };
@@ -147,6 +151,13 @@ describe("POST /api/mcp/authorize/consent", () => {
   });
 
   it("returns 403 when Origin header does not match host (CSRF check)", async () => {
+    const { assertOrigin } = await import("@/lib/csrf");
+    const mockAssertOrigin = vi.mocked(assertOrigin);
+    const { NextResponse } = await import("next/server");
+    mockAssertOrigin.mockReturnValueOnce(
+      NextResponse.json({ error: "INVALID_ORIGIN" }, { status: 403 }),
+    );
+
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
       VALID_FORM_FIELDS,
