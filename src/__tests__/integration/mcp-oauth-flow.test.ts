@@ -589,18 +589,34 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     }
   });
 
-  it("get_credential without credentials:decrypt scope → -32003 insufficient scope", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.VAULT_STATUS] });
+  it("unknown tool → -32601", async () => {
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
 
     const response = await handleMcpRequest(
       {
         jsonrpc: "2.0",
         id: 2,
         method: "tools/call",
-        params: {
-          name: "get_credential",
-          arguments: { id: "00000000-0000-0000-0000-000000000001" },
-        },
+        params: { name: "get_credential", arguments: {} },
+      },
+      token,
+    );
+
+    expect("error" in response).toBe(true);
+    if ("error" in response) {
+      expect(response.error.code).toBe(-32601);
+    }
+  });
+
+  it("list_credentials without credentials:list scope → -32003 insufficient scope", async () => {
+    const token = makeTokenData({ scopes: [MCP_SCOPE.VAULT_STATUS] });
+
+    const response = await handleMcpRequest(
+      {
+        jsonrpc: "2.0",
+        id: 3,
+        method: "tools/call",
+        params: { name: "list_credentials", arguments: {} },
       },
       token,
     );
@@ -609,111 +625,19 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     if ("error" in response) {
       expect(response.error.code).toBe(-32003);
       expect(response.error.message).toContain("Insufficient scope");
-      expect(response.error.message).toContain("credentials:decrypt");
+      expect(response.error.message).toContain("credentials:list");
     }
   });
 
-  it("get_credential with credentials:decrypt scope → -32603 when no active delegation session", async () => {
-    // delegationSession.findFirst returns null (no active delegation)
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
-    const entryId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"; // valid UUIDv4
-
-    const response = await handleMcpRequest(
-      {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: {
-          name: "get_credential",
-          arguments: { id: entryId },
-        },
-      },
-      token,
-    );
-
-    expect("error" in response).toBe(true);
-    if ("error" in response) {
-      expect(response.error.code).toBe(-32603);
-      expect(response.error.message).toContain("delegation");
-    }
-  });
-
-  it("get_credential with credentials:decrypt scope → -32603 when entry not delegated", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
-    const entryId = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"; // valid UUIDv4
-
-    const response = await handleMcpRequest(
-      {
-        jsonrpc: "2.0",
-        id: 4,
-        method: "tools/call",
-        params: {
-          name: "get_credential",
-          arguments: { id: entryId },
-        },
-      },
-      token,
-    );
-
-    expect("error" in response).toBe(true);
-    if ("error" in response) {
-      expect(response.error.code).toBe(-32603);
-    }
-  });
-
-  it("get_credential returns plaintext entry when delegation session is active", async () => {
-    const entryId = "c3d4e5f6-a7b8-4c9d-8e1f-2a3b4c5d6e7f";
-    const mockEntry = {
-      id: entryId,
-      title: "GitHub",
-      username: "alice",
-      password: "s3cret",
-      url: "https://github.com",
-      notes: null,
-    };
-
-    mockFindActiveDelegationSession.mockResolvedValueOnce({
-      id: "deleg-session-1",
-      expiresAt: new Date(Date.now() + 60_000),
-    });
-    mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
-
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
-
-    const response = await handleMcpRequest(
-      {
-        jsonrpc: "2.0",
-        id: 5,
-        method: "tools/call",
-        params: {
-          name: "get_credential",
-          arguments: { id: entryId },
-        },
-      },
-      token,
-    );
-
-    expect("result" in response).toBe(true);
-    if ("result" in response) {
-      const content = response.result as { content: { type: string; text: string }[] };
-      const parsed = JSON.parse(content.content[0].text);
-      expect(parsed.entry.id).toBe(entryId);
-      expect(parsed.entry.title).toBe("GitHub");
-      expect(parsed.entry.password).toBe("s3cret");
-    }
-    // Audit logged for both scopes
-    expect(mockLogAudit).toHaveBeenCalledTimes(2);
-  });
-
-  it("list_credentials returns entries when delegation session is active", async () => {
+  it("list_credentials returns metadata-only entries when delegation session is active", async () => {
     const entryId = "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f80";
+    // Metadata-only fixture — no password/notes/url
     const mockEntry = {
       id: entryId,
       title: "AWS",
       username: "admin",
-      password: "pw",
-      url: "https://aws.amazon.com",
-      notes: null,
+      urlHost: "aws.amazon.com",
+      tags: null,
     };
 
     mockFindActiveDelegationSession.mockResolvedValueOnce({
@@ -744,6 +668,10 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
       const parsed = JSON.parse(content.content[0].text);
       expect(parsed.entries).toHaveLength(1);
       expect(parsed.total).toBe(1);
+      // Verify metadata-only: no secret fields
+      expect(parsed.entries[0]).not.toHaveProperty("password");
+      expect(parsed.entries[0]).not.toHaveProperty("notes");
+      expect(parsed.entries[0]).not.toHaveProperty("url");
     }
   });
 });

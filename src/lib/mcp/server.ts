@@ -14,17 +14,21 @@ import {
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
 } from "@/lib/constants/mcp";
-import { MCP_TOOLS, toolListCredentials, toolGetCredential, toolSearchCredentials } from "@/lib/mcp/tools";
+import { MCP_TOOLS, toolListCredentials, toolSearchCredentials } from "@/lib/mcp/tools";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
 
 // ─── Tool → required scope mapping ───────────────────────────
 
 const TOOL_SCOPE_MAP: Record<string, McpScope> = {
-  list_credentials: MCP_SCOPE.CREDENTIALS_DECRYPT,
-  get_credential: MCP_SCOPE.CREDENTIALS_DECRYPT,
-  search_credentials: MCP_SCOPE.CREDENTIALS_DECRYPT,
+  list_credentials: MCP_SCOPE.CREDENTIALS_LIST,
+  search_credentials: MCP_SCOPE.CREDENTIALS_LIST,
 };
+
+// hasRequiredScope checks for the specific required scope OR the legacy credentials:decrypt alias
+function hasRequiredScope(tokenScopes: string[], required: string): boolean {
+  return tokenScopes.includes(required) || tokenScopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT);
+}
 
 // ─── Rate limiting ────────────────────────────────────────────
 
@@ -89,9 +93,9 @@ async function handleToolsCall(
   const p = params as { name?: string; arguments?: unknown };
   if (!p?.name) return err(id, -32602, "Missing tool name");
 
-  // Scope enforcement
+  // Scope enforcement — also accepts legacy credentials:decrypt as an alias
   const requiredScope = TOOL_SCOPE_MAP[p.name];
-  if (requiredScope && !token.scopes.includes(requiredScope)) {
+  if (requiredScope && !hasRequiredScope(token.scopes, requiredScope)) {
     return err(id, -32003, `Insufficient scope: requires ${requiredScope}`);
   }
 
@@ -100,9 +104,6 @@ async function handleToolsCall(
   switch (p.name) {
     case "list_credentials":
       toolResult = await toolListCredentials(token, p.arguments, ip);
-      break;
-    case "get_credential":
-      toolResult = await toolGetCredential(token, p.arguments, ip);
       break;
     case "search_credentials":
       toolResult = await toolSearchCredentials(token, p.arguments, ip);

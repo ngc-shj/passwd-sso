@@ -186,6 +186,20 @@ describe("VALID_RESOURCE_ACTIONS allowlist", () => {
     expect(parseScope("credentials:decrypt")).not.toBeNull();
   });
 
+  it("accepts valid MCP scope: credentials:list", () => {
+    const result = parseScope("credentials:list");
+    expect(result).not.toBeNull();
+    expect(result!.resource).toBe("credentials");
+    expect(result!.action).toBe("list");
+  });
+
+  it("accepts valid MCP scope: credentials:use", () => {
+    const result = parseScope("credentials:use");
+    expect(result).not.toBeNull();
+    expect(result!.resource).toBe("credentials");
+    expect(result!.action).toBe("use");
+  });
+
   it("rejects unknown resource:action pair: foo:bar", () => {
     expect(parseScope("foo:bar")).toBeNull();
   });
@@ -230,5 +244,15 @@ describe("VALID_TEAM_RESOURCE_ACTIONS allowlist", () => {
   it("rejects invalid team-scoped scope: team:<uuid>:credentials:decrypt", () => {
     // credentials:decrypt is only in SA allowlist, not team allowlist
     expect(parseScope(`team:${TEAM_UUID}:credentials:decrypt`)).toBeNull();
+  });
+
+  it("rejects invalid team-scoped scope: team:<uuid>:credentials:list", () => {
+    // credentials:list is personal-scope only, not team-scoped
+    expect(parseScope(`team:${TEAM_UUID}:credentials:list`)).toBeNull();
+  });
+
+  it("rejects invalid team-scoped scope: team:<uuid>:credentials:use", () => {
+    // credentials:use authorizes agent decrypt, not team-scoped
+    expect(parseScope(`team:${TEAM_UUID}:credentials:use`)).toBeNull();
   });
 });

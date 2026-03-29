@@ -2,8 +2,9 @@
  * Delegated Decryption — core library.
  *
  * Manages delegation sessions that allow MCP agents to read
- * pre-approved decrypted vault entries. Plaintext is stored in Redis
- * with envelope encryption (AES-256-GCM) and short TTLs.
+ * pre-approved vault entry metadata. Metadata (title, username, urlHost, tags)
+ * is stored in Redis with envelope encryption (AES-256-GCM) and short TTLs.
+ * Secret fields (password, notes, url) are never stored on the server.
  */
 
 import { prisma } from "@/lib/prisma";
@@ -72,19 +73,21 @@ export function decryptDelegationEntry(
 
 // ─── Redis Operations ──────────────────────────────────────────
 
-export interface DelegationEntryData {
+// DelegationMetadata contains only non-secret fields safe to store on the server.
+// Old Redis entries that still contain password/notes fields are silently ignored —
+// those fields are simply dropped when parsed into this type. TTL expiry handles cleanup.
+export interface DelegationMetadata {
   id: string;
   title: string;
   username?: string | null;
-  password?: string | null;
-  url?: string | null;
-  notes?: string | null;
+  urlHost?: string | null;
+  tags?: string[] | null;
 }
 
 export async function storeDelegationEntries(
   userId: string,
   sessionId: string,
-  entries: DelegationEntryData[],
+  entries: DelegationMetadata[],
   ttlMs: number,
 ): Promise<void> {
   const redis = getRedis();
@@ -117,7 +120,7 @@ export async function fetchDelegationEntry(
   userId: string,
   sessionId: string,
   entryId: string,
-): Promise<DelegationEntryData | null> {
+): Promise<DelegationMetadata | null> {
   const redis = getRedis();
   if (!redis) return null;
 
@@ -127,7 +130,15 @@ export async function fetchDelegationEntry(
 
   const payload: DelegationEncryptedPayload = JSON.parse(raw);
   const plaintext = decryptDelegationEntry(payload, key);
-  return JSON.parse(plaintext) as DelegationEntryData;
+  // Cast to DelegationMetadata — extra fields (password/notes from old entries) are ignored
+  const parsed = JSON.parse(plaintext) as Record<string, unknown>;
+  return {
+    id: parsed.id as string,
+    title: parsed.title as string,
+    username: parsed.username as string | null | undefined,
+    urlHost: parsed.urlHost as string | null | undefined,
+    tags: parsed.tags as string[] | null | undefined,
+  };
 }
 
 export async function evictDelegationRedisKeys(

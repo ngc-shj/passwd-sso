@@ -29,7 +29,7 @@ interface UnlockData {
   accountSalt: string;
 }
 
-async function readPassphrase(prompt: string): Promise<string> {
+export async function readPassphrase(prompt: string): Promise<string> {
   process.stdout.write(prompt);
 
   if (process.stdin.isTTY) {
@@ -81,7 +81,7 @@ async function readPassphrase(prompt: string): Promise<string> {
  * Core unlock logic — derives encryption key from passphrase and stores it.
  * Returns true on success, false on failure.
  */
-async function unlockWithPassphrase(passphrase: string): Promise<boolean> {
+export async function unlockWithPassphrase(passphrase: string): Promise<boolean> {
   const res = await apiRequest<UnlockData>("/api/vault/unlock/data");
   if (!res.ok) {
     output.error(`Failed to fetch vault data: ${res.status}`);

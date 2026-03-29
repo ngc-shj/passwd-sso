@@ -228,22 +228,39 @@ MCP Client                    passwd-sso                      User
 
 | Tool | Required Scope | Returns |
 |------|---------------|---------|
-| `list_credentials` | `credentials:decrypt` | Plaintext overviews of delegated entries |
-| `get_credential` | `credentials:decrypt` | Plaintext fields (title, username, password, url, notes) |
-| `search_credentials` | `credentials:decrypt` | Plaintext overviews filtered by keyword |
+| `list_credentials` | `credentials:list` | Metadata only (title, username, urlHost, tags) |
+| `search_credentials` | `credentials:list` | Metadata filtered by keyword |
 
-All tools require an **active delegation session**. The human user unlocks their vault in the browser, selects entries to delegate, and the browser relays plaintext to an envelope-encrypted Redis cache with short TTLs. The server never stores or derives encryption keys.
+Legacy `credentials:decrypt` scope is expanded to `credentials:list + credentials:use` at consent time.
+
+All tools require an **active delegation session**. The human user selects entries to delegate in the browser, which sends only non-secret metadata (title, username, urlHost, tags) to the server. **Passwords, notes, and full URLs are never sent to the server.**
+
+### Zero-Knowledge Architecture (Phase 7)
+
+| Actor | Responsibility | What it holds | What it never sees |
+|-------|---------------|---------------|-------------------|
+| Human (Delegation UI) | Decides which entries to allow, for how long | Full vault access | — |
+| Server (DelegationSession) | Answers "is this request authorized?" | Metadata + entryIds allowlist | Vault key, plaintext passwords |
+| Agent daemon (CLI) | Decrypts when authorized | Vault key in memory | Authorization decisions |
+| AI (Claude Code) | Uses credentials via Skill/hook | Metadata + operation results | Plaintext passwords |
+
+**Credential usage flow (Claude Code specific):**
+1. Claude Code calls `list_credentials` via MCP → receives metadata only
+2. Claude invokes a Bash command (Skill/hook) that pipes the credential through stdin
+3. `passwd-sso decrypt` connects to the agent daemon via Unix socket
+4. Agent checks authorization with server (`GET /api/vault/delegation/check`)
+5. If authorized: agent decrypts locally and returns the field value
+6. The credential is consumed in the pipe — **never appears in Claude's conversation context**
 
 ### E2E Encryption Strategy
 
 | Phase | Approach | Status |
 |-------|----------|--------|
 | Phase 3 | Encrypted data only — AI agents receive ciphertext | Implemented |
-| Phase 5 | Delegated Decryption — human unlocks vault, browser relays plaintext to MCP session | Implemented |
+| Phase 5 | Delegated Decryption — browser relays metadata to MCP session | Implemented |
+| Phase 7 | Zero-Knowledge CLI Decrypt — agent daemon, no plaintext to server or AI | Implemented |
 
-**Why not decrypt server-side?** The server has never had access to plaintext passwords — that's the core security guarantee. Breaking this would require storing the encryption key server-side, which defeats zero-knowledge.
-
-**Delegated Decryption** keeps decryption in the browser: the human user unlocks their vault, selects entries to delegate (max 20), and the browser relays plaintext to an envelope-encrypted Redis cache (AES-256-GCM + AAD) with configurable TTLs (5–60 min). MCP tools read from this cache only when an active delegation session exists.
+**Why not decrypt server-side?** The server has never had access to plaintext passwords — that's the core security guarantee. Phase 7 extends this: even the MCP client (AI) never sees plaintext. Decryption happens in the CLI agent daemon process, and credentials are consumed in Unix pipes without reaching the LLM context.
 
 ## Unified Audit
 

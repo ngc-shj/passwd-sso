@@ -8,7 +8,18 @@ describe("MCP_SCOPE", () => {
     expect(MCP_SCOPES.length).toBe(scopeValues.length);
   });
 
-  it("includes credentials:decrypt scope", () => {
-    expect(MCP_SCOPES).toContain("credentials:decrypt");
+  it("includes credentials:list scope", () => {
+    expect(MCP_SCOPES).toContain(MCP_SCOPE.CREDENTIALS_LIST);
+    expect(MCP_SCOPE.CREDENTIALS_LIST).toBe("credentials:list");
+  });
+
+  it("includes credentials:use scope", () => {
+    expect(MCP_SCOPES).toContain(MCP_SCOPE.CREDENTIALS_USE);
+    expect(MCP_SCOPE.CREDENTIALS_USE).toBe("credentials:use");
+  });
+
+  it("includes credentials:decrypt legacy scope", () => {
+    expect(MCP_SCOPES).toContain(MCP_SCOPE.CREDENTIALS_DECRYPT);
+    expect(MCP_SCOPE.CREDENTIALS_DECRYPT).toBe("credentials:decrypt");
   });
 });

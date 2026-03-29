@@ -27,7 +27,7 @@ import {
   evictDelegationRedisKeys,
   revokeAllDelegationSessions,
 } from "@/lib/delegation";
-import type { DelegationEntryData } from "@/lib/delegation";
+import type { DelegationMetadata } from "@/lib/delegation";
 
 export const runtime = "nodejs";
 
@@ -45,10 +45,9 @@ const createDelegationSchema = z.object({
       z.object({
         id: z.string().uuid(),
         title: z.string().max(200),
-        username: z.string().max(200).nullable().optional(),
-        password: z.string().max(1024).nullable().optional(),
-        url: z.string().max(512).nullable().optional(),
-        notes: z.string().max(2000).nullable().optional(),
+        username: z.string().max(200).nullish(),
+        urlHost: z.string().max(200).nullish(),
+        tags: z.array(z.string()).max(20).nullish(),
       }),
     )
     .min(1)
@@ -88,9 +87,9 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  // Extract plaintext entries immediately — never pass to logging
+  // Extract metadata entries — no secrets in request body
   const { mcpTokenId, ttlSeconds, note, entries } = parsed.data;
-  const plaintextEntries: DelegationEntryData[] = entries;
+  const metadataEntries: DelegationMetadata[] = entries;
 
   // Verify MCP token belongs to this user's tenant, not expired/revoked, has decrypt scope
   const mcpToken = await withBypassRls(prisma, () =>
@@ -111,9 +110,13 @@ async function handlePOST(request: NextRequest) {
   }
 
   const scopes = mcpToken.scope.split(",").map((s) => s.trim());
-  if (!scopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT)) {
+  const hasDelegationScope =
+    scopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
+    scopes.includes(MCP_SCOPE.CREDENTIALS_USE) ||
+    scopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT);
+  if (!hasDelegationScope) {
     return NextResponse.json(
-      { error: "MCP token does not have credentials:decrypt scope" },
+      { error: "MCP token does not have credentials:list, credentials:use, or credentials:decrypt scope" },
       { status: 403 },
     );
   }
@@ -134,7 +137,7 @@ async function handlePOST(request: NextRequest) {
   const effectiveTtl = Math.min(ttlSeconds ?? defaultTtl, maxTtl);
 
   // Verify entry ownership (userId + tenantId)
-  const entryIds = plaintextEntries.map((e) => e.id);
+  const entryIds = metadataEntries.map((e) => e.id);
   const ownedEntries = await withBypassRls(prisma, () =>
     prisma.passwordEntry.findMany({
       where: {
@@ -194,12 +197,12 @@ async function handlePOST(request: NextRequest) {
     }),
   );
 
-  // Store entries in Redis — rollback DB session on failure
+  // Store metadata entries in Redis — rollback DB session on failure
   try {
     await storeDelegationEntries(
       userId,
       delegationSession.id,
-      plaintextEntries,
+      metadataEntries,
       effectiveTtl * 1000,
     );
   } catch {
@@ -271,7 +274,7 @@ async function handleGET(_request: NextRequest) {
     }),
   );
 
-  // Also return available MCP tokens with credentials:decrypt scope
+  // Also return available MCP tokens with delegation-relevant scopes
   const availableTokens = await withBypassRls(prisma, () =>
     prisma.mcpAccessToken.findMany({
       where: {
@@ -303,13 +306,19 @@ async function handleGET(_request: NextRequest) {
       expiresAt: s.expiresAt.toISOString(),
       createdAt: s.createdAt.toISOString(),
     })),
-    availableTokens: availableTokens.map((t) => ({
-      id: t.id,
-      mcpClientName: t.mcpClient.name,
-      mcpClientId: t.mcpClient.clientId,
-      hasDecryptScope: t.scope.split(",").map((s) => s.trim()).includes("credentials:decrypt"),
-      expiresAt: t.expiresAt.toISOString(),
-    })),
+    availableTokens: availableTokens.map((t) => {
+      const tokenScopes = t.scope.split(",").map((s) => s.trim());
+      return {
+        id: t.id,
+        mcpClientName: t.mcpClient.name,
+        mcpClientId: t.mcpClient.clientId,
+        hasDelegationScope:
+          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
+          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_USE) ||
+          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT),
+        expiresAt: t.expiresAt.toISOString(),
+      };
+    }),
   });
 }
 

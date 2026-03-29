@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
-import { API_PATH, apiPath } from "@/lib/constants/api-path";
+import { API_PATH } from "@/lib/constants/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
@@ -32,7 +32,7 @@ interface AvailableToken {
   id: string;
   mcpClientName: string;
   mcpClientId: string;
-  hasDecryptScope: boolean;
+  hasDelegationScope: boolean;
   expiresAt: string;
 }
 
@@ -83,7 +83,7 @@ export function CreateDelegationDialog({
   const [submitting, setSubmitting] = useState(false);
   const loadedRef = useRef(false);
 
-  const decryptableTokens = availableTokens.filter((t) => t.hasDecryptScope);
+  const decryptableTokens = availableTokens.filter((t) => t.hasDelegationScope);
 
   // Load and decrypt entries on open
   const loadEntries = useCallback(async () => {
@@ -162,47 +162,34 @@ export function CreateDelegationDialog({
     setSubmitting(true);
 
     try {
+      // Build metadata-only entries from already-decrypted overview data
+      // Secret fields (password, notes, url) are intentionally excluded
       const delegationEntries: Array<{
         id: string;
         title: string;
         username?: string | null;
-        password?: string | null;
-        url?: string | null;
-        notes?: string | null;
+        urlHost?: string | null;
+        tags?: string[] | null;
       }> = [];
 
       const failedIds: string[] = [];
       for (const entryId of selectedEntryIds) {
-        try {
-          const res = await fetchApi(apiPath.passwordById(entryId));
-          if (!res.ok) { failedIds.push(entryId); continue; }
-          const raw = await res.json();
-          const aad =
-            raw.aadVersion >= 1
-              ? buildPersonalEntryAAD(userId, raw.id)
-              : undefined;
-          const blob = JSON.parse(
-            await decryptData(
-              raw.encryptedBlob as EncryptedData,
-              encryptionKey,
-              aad,
-            ),
-          );
+        // Find from already-loaded overview data to avoid extra decryption round-trips
+        const entry = entries.find((e) => e.id === entryId);
+        if (entry) {
           delegationEntries.push({
             id: entryId,
-            title: blob.title ?? "",
-            username: blob.username ?? null,
-            password: blob.password ?? blob.content ?? null,
-            url: blob.url ?? null,
-            notes: blob.notes ?? null,
+            title: entry.title,
+            username: entry.username ?? null,
+            urlHost: entry.urlHost ?? null,
           });
-        } catch {
+        } else {
           failedIds.push(entryId);
         }
       }
 
       if (failedIds.length > 0 && delegationEntries.length === 0) {
-        toast.error("Failed to decrypt selected entries");
+        toast.error("Failed to build delegation entries");
         return;
       }
 

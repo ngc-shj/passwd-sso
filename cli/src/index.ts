@@ -22,6 +22,7 @@ import { envCommand } from "./commands/env.js";
 import { runCommand } from "./commands/run.js";
 import { apiKeyListCommand, apiKeyCreateCommand, apiKeyRevokeCommand } from "./commands/api-key.js";
 import { agentCommand } from "./commands/agent.js";
+import { decryptCommand } from "./commands/decrypt.js";
 import { isUnlocked, lockVault } from "./lib/vault-state.js";
 import { clearPendingClipboard } from "./lib/clipboard.js";
 import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRefresh } from "./lib/api-client.js";
@@ -129,9 +130,17 @@ apiKeyCmd
 
 program
   .command("agent")
-  .description("Start SSH agent backed by vault SSH keys")
+  .description("Start SSH agent or decrypt agent backed by vault")
   .option("--eval", "Output shell eval-compatible commands")
-  .action((opts) => agentCommand({ eval: opts.eval }));
+  .option("--decrypt", "Start decrypt agent mode (Unix socket)")
+  .action((opts) => agentCommand({ eval: opts.eval, decrypt: opts.decrypt }));
+
+program
+  .command("decrypt <id>")
+  .description("Decrypt a credential field via agent socket (for hooks)")
+  .requiredOption("--mcp-token <tokenId>", "MCP token ID for authorization")
+  .option("--field <field>", "Field to decrypt", "password")
+  .action((id: string, opts) => decryptCommand(id, { field: opts.field, mcpToken: opts.mcpToken }));
 
 program.parse();
 
@@ -240,6 +249,24 @@ async function interactiveMode(): Promise<void> {
           break;
         }
 
+        case "decrypt": {
+          if (!args[1]) {
+            output.error("Usage: decrypt <id> --mcp-token <tokenId> [--field <field>]");
+          } else {
+            const tokenIdx = args.indexOf("--mcp-token");
+            const mcpToken = tokenIdx !== -1 ? args[tokenIdx + 1] : undefined;
+            if (!mcpToken || mcpToken.startsWith("-")) {
+              output.error("Usage: decrypt <id> --mcp-token <tokenId> [--field <field>]");
+              break;
+            }
+            const fieldIdx = args.indexOf("--field");
+            const fieldArg = fieldIdx !== -1 ? args[fieldIdx + 1] : undefined;
+            const field = fieldArg && !fieldArg.startsWith("-") ? fieldArg : undefined;
+            await decryptCommand(args[1], { field, mcpToken });
+          }
+          break;
+        }
+
         case "api-key": {
           const sub = args[1];
           if (sub === "list") {
@@ -269,16 +296,17 @@ async function interactiveMode(): Promise<void> {
         case "?":
           console.log(`
 Commands:
-  list [--json]                    List all entries
-  get <id> [--copy] [--json]       Show entry details
-  get <id> --field password --copy Copy a specific field
-  totp <id> [--copy] [--json]      Generate TOTP code
-  generate [-l N] [--copy] [--json] Generate password
-  export [--format json|csv] [-o file]  Export vault
-  env [--format shell|dotenv|json] Output vault secrets as env vars
-  api-key list [--json]            List API keys
-  status [--json]                  Show connection status
-  lock                             Lock vault and exit
+  list [--json]                                 List all entries
+  get <id> [--copy] [--json]                    Show entry details
+  get <id> --field password --copy              Copy a specific field
+  totp <id> [--copy] [--json]                   Generate TOTP code
+  generate [-l N] [--copy] [--json]             Generate password
+  export [--format json|csv] [-o file]          Export vault
+  env [--format shell|dotenv|json]              Output vault secrets as env vars
+  decrypt <id> --mcp-token <tokenId> [--field]  Decrypt via agent socket
+  api-key list [--json]                         List API keys
+  status [--json]                               Show connection status
+  lock                                          Lock vault and exit
           `.trim());
           break;
 

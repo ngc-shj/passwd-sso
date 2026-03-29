@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# MCP OAuth 2.1 re-authorization script with credentials:decrypt scope
+# MCP OAuth 2.1 re-authorization script with credentials:list credentials:use scopes
 # Usage: bash scripts/mcp-reauth.sh <client_id> <client_secret> [server_url]
 
 set -euo pipefail
@@ -8,7 +8,7 @@ CLIENT_ID="${1:?Usage: $0 <client_id> <client_secret> [server_url]}"
 CLIENT_SECRET="${2:?Usage: $0 <client_id> <client_secret> [server_url]}"
 SERVER="${3:-https://localhost:3000}"
 REDIRECT_URI="http://localhost:3000/callback"
-SCOPE="credentials:decrypt"
+SCOPE="credentials:list credentials:use"
 
 # Generate PKCE pair
 CODE_VERIFIER=$(openssl rand -base64 32 | tr -d '=/+' | head -c 43)
