@@ -17,9 +17,7 @@ import {
   DCR_RATE_LIMIT_WINDOW_MS,
   DCR_RATE_LIMIT_MAX,
 } from "@/lib/constants/mcp";
-
-// Nil UUID used as userId placeholder for system-level audit entries without a user context
-const SYSTEM_USER_ID = "00000000-0000-0000-0000-000000000000";
+import { NIL_UUID } from "@/lib/constants/app";
 
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,
@@ -172,7 +170,7 @@ export async function POST(req: NextRequest) {
   logAudit({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MCP_CLIENT_DCR_REGISTER,
-    userId: SYSTEM_USER_ID,
+    userId: NIL_UUID,
     actorType: "SYSTEM",
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: client.id,

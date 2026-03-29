@@ -130,19 +130,19 @@ export default async function McpConsentPage({
           </div>
         );
       }
-      // Already claimed by our tenant — proceed
+      // Already claimed by our tenant — proceed (no audit, we didn't claim it)
+    } else {
+      // We actually claimed it — audit
+      logAudit({
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.MCP_CLIENT_DCR_CLAIM,
+        userId: session.user.id,
+        tenantId: userTenantId,
+        targetType: "McpClient",
+        targetId: client.id,
+        metadata: { clientId: client.clientId },
+      });
     }
-
-    // Audit: DCR claim
-    logAudit({
-      scope: AUDIT_SCOPE.TENANT,
-      action: AUDIT_ACTION.MCP_CLIENT_DCR_CLAIM,
-      userId: session.user.id,
-      tenantId: userTenantId,
-      targetType: "McpClient",
-      targetId: client.id,
-      metadata: { clientId: client.clientId },
-    });
   } else if (client.tenantId !== userTenantId) {
     return (
       <div className="flex items-center justify-center min-h-screen">

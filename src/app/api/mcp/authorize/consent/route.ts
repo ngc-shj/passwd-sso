@@ -6,14 +6,16 @@ import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { assertOrigin } from "@/lib/csrf";
 
 export async function POST(req: NextRequest) {
-  // CSRF protection: verify Origin header matches our host
+  // CSRF protection: Origin header is mandatory for consent (defense-in-depth)
   const origin = req.headers.get("origin");
-  const host = req.headers.get("host");
-  if (!origin || !host || new URL(origin).host !== host) {
-    return NextResponse.json({ error: "invalid_request", error_description: "CSRF check failed" }, { status: 403 });
+  if (!origin) {
+    return NextResponse.json({ error: "INVALID_ORIGIN" }, { status: 403 });
   }
+  const originError = assertOrigin(req);
+  if (originError) return originError;
 
   const session = await auth();
   if (!session?.user?.id) {

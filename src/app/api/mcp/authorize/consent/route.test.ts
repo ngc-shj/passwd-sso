@@ -117,7 +117,7 @@ describe("POST /api/mcp/authorize/consent", () => {
 
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("invalid_request");
+    expect(json.error).toBe("INVALID_ORIGIN");
   });
 
   it("returns 403 when Origin header does not match host (CSRF check)", async () => {
@@ -130,7 +130,7 @@ describe("POST /api/mcp/authorize/consent", () => {
 
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("invalid_request");
+    expect(json.error).toBe("INVALID_ORIGIN");
   });
 
   it("returns 302 redirect with code and state on valid consent", async () => {

@@ -282,7 +282,7 @@ export async function exchangeRefreshToken(params: {
   clientSecretHash: string;
 }): Promise<
   | { ok: true; accessToken: string; refreshToken: string; expiresIn: number; scope: string; tenantId: string; userId: string | null }
-  | { ok: false; error: "invalid_grant" | "invalid_client"; reason?: "replay" | "expired" | "revoked" }
+  | { ok: false; error: "invalid_grant" | "invalid_client"; reason?: "replay" | "expired" | "revoked"; tenantId?: string; familyId?: string }
 > {
   const tokenHash = hashToken(params.refreshToken);
 
@@ -313,7 +313,7 @@ export async function exchangeRefreshToken(params: {
             data: { revokedAt: new Date() },
           });
         }
-        return { ok: false as const, error: "invalid_grant" as const, reason: "replay" as const };
+        return { ok: false as const, error: "invalid_grant" as const, reason: "replay" as const, tenantId: rt.tenantId, familyId: rt.familyId };
       }
 
       // Validate: not expired, not revoked

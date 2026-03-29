@@ -9,6 +9,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { NIL_UUID } from "@/lib/constants/app";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -114,13 +115,13 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok) {
-      if (result.reason === "replay") {
+      if (result.reason === "replay" && result.tenantId) {
         logAudit({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
-          userId: "system",
-          tenantId: "unknown",
-          metadata: { clientId: clientIdValue },
+          userId: NIL_UUID,
+          tenantId: result.tenantId,
+          metadata: { clientId: clientIdValue, familyId: result.familyId },
         });
       }
       return NextResponse.json(
