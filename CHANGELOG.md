@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.2...passwd-sso-v0.4.3) (2026-03-29)
+
+
+### Bug Fixes
+
+* Phase 6 — DCR + Native OAuth for MCP clients ([#272](https://github.com/ngc-shj/passwd-sso/issues/272)) ([a676507](https://github.com/ngc-shj/passwd-sso/commit/a676507c4f0d1415261bff59fa34fa090a9ebb51))
+
 ## [0.4.2](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.1...passwd-sso-v0.4.2) (2026-03-29)
 
 
