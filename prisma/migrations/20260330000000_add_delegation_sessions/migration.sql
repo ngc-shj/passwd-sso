@@ -57,6 +57,12 @@ CREATE POLICY delegation_sessions_tenant_isolation ON "delegation_sessions"
     OR "tenant_id" = current_setting('app.tenant_id', true)::uuid
   );
 
+-- Fix: FORCE RLS on batch_f tables (created in 20260306000000 with ENABLE but missing FORCE)
+ALTER TABLE "api_keys" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "webauthn_credentials" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "directory_sync_configs" FORCE ROW LEVEL SECURITY;
+ALTER TABLE "directory_sync_logs" FORCE ROW LEVEL SECURITY;
+
 -- Fix: Enable RLS on tenant_webhooks (policy already exists from 20260321110000 but RLS was never enabled)
 ALTER TABLE "tenant_webhooks" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "tenant_webhooks" FORCE ROW LEVEL SECURITY;

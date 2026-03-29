@@ -8,7 +8,7 @@
 
 ## Testing
 
-- [ ] CI checks pass
+- [ ] `npm run pre-pr` passed (lint, static checks, migration drift, tests, build)
 - [ ] Manually tested in browser
 
 ## E2E Safety (if applicable)
