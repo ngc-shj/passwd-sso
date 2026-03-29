@@ -353,6 +353,7 @@ docs/                     # Documentation (architecture, security, operations, s
 - [Deployment Operations](docs/operations/deployment.md)
 - [Backup & Recovery](docs/operations/backup-recovery/en.md) / [日本語](docs/operations/backup-recovery/ja.md)
 - [Redis HA](docs/operations/redis-ha.md) — Redis Sentinel/Cluster configuration
+- [Machine Identity & MCP Gateway](docs/architecture/machine-identity.md) — service accounts, OAuth 2.1 PKCE, DCR, delegated decryption
 - [Audit Log Reference](docs/operations/audit-log-reference.md)
 - [Incident Runbook](docs/operations/incident-runbook.md)
 - [All docs](docs/README.md)

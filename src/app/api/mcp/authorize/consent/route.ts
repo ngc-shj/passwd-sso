@@ -105,18 +105,18 @@ export async function POST(req: NextRequest) {
           where: { tenantId: userTenantId },
         });
         if (tenantClientCount >= MAX_MCP_CLIENTS_PER_TENANT) {
-          return { error: "tenant_cap" as const, reuse: null };
+          return { error: "tenant_cap" as const };
         }
-        // If a same-name DCR client already exists in this tenant, reuse it.
+        // If a same-name DCR client already exists in this tenant, replace it.
         // Claude Code registers a new client on each auth attempt — without
-        // reuse, deny → retry would always hit a name conflict.
+        // replacement, deny → retry would always hit a name conflict.
+        // We delete the OLD client and claim the NEW one so that Claude Code's
+        // client_id matches (it only knows the latest registered client_id).
         const existing = await tx.mcpClient.findFirst({
           where: { tenantId: userTenantId, name: clientName, isDcr: true },
         });
         if (existing) {
-          // Delete the new unclaimed duplicate, reuse the existing one
-          await tx.mcpClient.deleteMany({ where: { id: clientIdDb, tenantId: { equals: null } } });
-          return { error: null as null, reuse: existing };
+          await tx.mcpClient.delete({ where: { id: existing.id } });
         }
         // Atomic CAS: only claim if still unclaimed
         const updated = await tx.mcpClient.updateMany({
@@ -124,9 +124,9 @@ export async function POST(req: NextRequest) {
           data: { tenantId: userTenantId, createdById: session.user.id, dcrExpiresAt: null },
         });
         if (updated.count === 0) {
-          return { error: "already_claimed" as const, reuse: null };
+          return { error: "already_claimed" as const };
         }
-        return { error: null as null, reuse: null };
+        return { error: null as null };
       }),
     );
 
@@ -144,8 +144,6 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "access_denied" }, { status: 403 });
       }
       effectiveClient = refetched;
-    } else if (claimResult.reuse) {
-      effectiveClient = claimResult.reuse;
     } else {
       // Freshly claimed
       const { ip: claimIp } = extractRequestMeta(req);

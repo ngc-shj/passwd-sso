@@ -166,11 +166,13 @@ If the app is served at the domain root (no base path), the discovery endpoint i
 #### Flow
 
 1. Client discovers `/.well-known/oauth-authorization-server` → gets `registration_endpoint`
-2. Client POSTs to `/api/mcp/register` (RFC 7591) → receives `client_id` + `client_secret`
+2. Client POSTs to `/api/mcp/register` (RFC 7591) → receives `client_id`; public clients omit `client_secret` by sending `token_endpoint_auth_method: "none"`
 3. Client opens browser to `/api/mcp/authorize` with PKCE params
-4. User sees consent screen at `/{locale}/mcp/authorize`, clicks Allow
+4. User sees consent screen at `/{locale}/mcp/authorize`, clicks Allow — **claiming happens here** (the DCR client is bound to the user's tenant at Allow time, not on page load; clicking Deny leaves the client unclaimed so the user can retry)
 5. Client receives authorization code, exchanges for `access_token` + `refresh_token`
 6. Client uses `access_token` for MCP requests, `refresh_token` for renewal
+
+> **Client types**: Both public clients (`token_endpoint_auth_method: "none"`, e.g. Claude Code CLI) and confidential clients (`client_secret_post`) are supported. Public clients skip `client_secret` at registration and token exchange. Same-name re-registration (e.g. Claude Code retrying) issues a new `client_id` each time — unclaimed duplicates expire after 24h.
 
 #### Refresh Token Rotation
 
@@ -218,9 +220,9 @@ MCP Client                    passwd-sso                      User
 ```
 
 - PKCE S256 required (no plain)
-- `client_secret` hashed with SHA-256 (same as SA tokens)
+- `client_secret` hashed with SHA-256 (same as SA tokens); omitted for public clients
 - Code exchange wrapped in `prisma.$transaction` to prevent replay
-- Redirect URIs restricted to `https://` or `http://localhost` (RFC 8252)
+- Redirect URIs restricted to `https://` or `http://localhost` / `http://127.0.0.1` (RFC 8252; both localhost forms accepted)
 
 ### Tools
 
@@ -288,7 +290,7 @@ Tenant audit log UI includes an actor type filter dropdown. The API accepts an o
 | `AccessRequest` | JIT access request (PENDING → APPROVED/DENIED/EXPIRED) |
 | `McpClient` | OAuth 2.1 client registration |
 | `McpAuthorizationCode` | PKCE authorization code (5-min expiry) |
-| `McpAccessToken` | MCP access token (1-hour expiry) |
+| `McpAccessToken` | MCP access token (1-hour expiry); cascade-deletes associated `DelegationSession` records on client deletion |
 
 ## Connecting with Claude Desktop
 

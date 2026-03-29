@@ -1,6 +1,6 @@
 # Audit Log Reference
 
-This document lists all audit log action types (101 total), their scopes, metadata fields, and UI/export behavior.
+This document lists all audit log action types (117 total), their scopes, metadata fields, and UI/export behavior.
 
 ---
 
@@ -360,7 +360,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 
 ## Action Group Definitions
 
-### Personal Scope (14 groups)
+### Personal Scope (15 groups)
 
 | Group | Actions |
 |-------|---------|
@@ -378,6 +378,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:apiKeys` | API_KEY_CREATE, API_KEY_REVOKE |
 | `group:travelMode` | TRAVEL_MODE_ENABLE, TRAVEL_MODE_DISABLE, TRAVEL_MODE_DISABLE_FAILED |
 | `group:webauthn` | WEBAUTHN_CREDENTIAL_REGISTER, WEBAUTHN_CREDENTIAL_DELETE |
+| `group:delegation` | DELEGATION_CREATE, DELEGATION_REVOKE, DELEGATION_EXPIRE, DELEGATION_READ |
 
 ### Team Scope (10 groups)
 
@@ -395,15 +396,18 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `group:scim` | SCIM_TOKEN_CREATE, SCIM_TOKEN_REVOKE, SCIM_USER_CREATE, SCIM_USER_UPDATE, SCIM_USER_DEACTIVATE, SCIM_USER_REACTIVATE, SCIM_USER_DELETE, SCIM_GROUP_UPDATE |
 | `group:webhook` | WEBHOOK_CREATE, WEBHOOK_DELETE, WEBHOOK_DELIVERY_FAILED |
 
-### Tenant Scope (5 groups)
+### Tenant Scope (8 groups)
 
 | Group | Actions |
 |-------|---------|
-| `group:admin` | ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE, ADMIN_VAULT_RESET_REVOKE, TENANT_ROLE_UPDATE |
+| `group:admin` | ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE, ADMIN_VAULT_RESET_REVOKE, TENANT_ROLE_UPDATE, HISTORY_PURGE |
 | `group:scim` | SCIM_TOKEN_CREATE, SCIM_TOKEN_REVOKE, SCIM_USER_CREATE, SCIM_USER_UPDATE, SCIM_USER_DEACTIVATE, SCIM_USER_REACTIVATE, SCIM_USER_DELETE, SCIM_GROUP_UPDATE |
 | `group:directorySync` | DIRECTORY_SYNC_CONFIG_CREATE, DIRECTORY_SYNC_CONFIG_UPDATE, DIRECTORY_SYNC_CONFIG_DELETE, DIRECTORY_SYNC_RUN, DIRECTORY_SYNC_STALE_RESET |
 | `group:breakglass` | PERSONAL_LOG_ACCESS_REQUEST, PERSONAL_LOG_ACCESS_VIEW, PERSONAL_LOG_ACCESS_REVOKE, PERSONAL_LOG_ACCESS_EXPIRE |
 | `group:tenantWebhook` | TENANT_WEBHOOK_CREATE, TENANT_WEBHOOK_DELETE, TENANT_WEBHOOK_DELIVERY_FAILED |
+| `group:serviceAccount` | SERVICE_ACCOUNT_CREATE, SERVICE_ACCOUNT_UPDATE, SERVICE_ACCOUNT_DELETE, SERVICE_ACCOUNT_TOKEN_CREATE, SERVICE_ACCOUNT_TOKEN_REVOKE, ACCESS_REQUEST_CREATE, ACCESS_REQUEST_APPROVE, ACCESS_REQUEST_DENY |
+| `group:mcpClient` | MCP_CLIENT_CREATE, MCP_CLIENT_UPDATE, MCP_CLIENT_DELETE, MCP_CLIENT_DCR_REGISTER, MCP_CLIENT_DCR_CLAIM, MCP_CLIENT_DCR_CLEANUP, MCP_CONSENT_GRANT, MCP_CONSENT_DENY, MCP_REFRESH_TOKEN_ROTATE, MCP_REFRESH_TOKEN_REPLAY |
+| `group:delegation` | DELEGATION_CREATE, DELEGATION_REVOKE, DELEGATION_EXPIRE, DELEGATION_READ |
 
 ---
 

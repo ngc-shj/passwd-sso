@@ -1,70 +1,47 @@
 # Code Review: dcr-native-oauth
 Date: 2026-03-29
-Review round: 1
+Review rounds: 4
 
-## Changes from Previous Round
-Initial review
+## Summary
 
-## Functionality Findings
+4 rounds of expert review (functionality, security, testing) with real-world Claude Code testing.
 
-### [F-01] Critical: Claiming doesn't enforce MAX_MCP_CLIENTS_PER_TENANT
-- File: src/app/[locale]/mcp/authorize/page.tsx:76-98
-- Merged with: S-04
+### Round 1 — Initial review
+- Critical 6, Major 7, Minor 15
+- Key fixes: atomic CAS claiming, TOCTOU in DCR register, consent CSRF, empty scope guard, IP rate limit for both grants, refresh token audit logs, scope-parser flat scopes
 
-### [F-02] Critical: MCP_CLIENT_DCR_CLAIM audit log never dispatched
-- File: src/app/[locale]/mcp/authorize/page.tsx:87-98
+### Round 2 — NIL_UUID unification + audit fixes
+- Unified NIL_UUID constant across 6 files
+- Fixed DCR_CLAIM audit (only on actual claim, not already_claimed)
+- Fixed replay audit tenantId/familyId from exchangeRefreshToken result
+- Replaced custom CSRF with assertOrigin()
 
-### [F-03] Critical: MCP_CONSENT_DENY audit log never dispatched (client-side deny)
-- File: src/app/[locale]/mcp/authorize/consent-form.tsx:72-77
-- Merged with: S-08
+### Round 3 — Public client + real-world testing
+- Fixed refresh_token grant for public clients (client_secret optional)
+- CSP form-action localhost only in dev
+- Added public client tests (T-14, T-15), replay audit test (T-13)
+- README: added MIGRATION_DATABASE_URL
 
-### [F-04] Critical: DCR register count+create not in $transaction (TOCTOU)
-- File: src/app/api/mcp/register/route.ts:126-158
-- Merged with: S-03
+### Round 4 — Final review
+- No Critical/Major/High findings
+- Minor: jest.Mock type leak, IP rate limit mock coverage, ROTATE audit test gap
 
-### [F-05] Major: team:credentials:read scope rejected by scope-parser allowlist
-- File: src/lib/scope-parser.ts:68-94
+### Post-review (real-world testing)
+- basePath support for all MCP endpoints (serverAppUrl, withBasePath, BASE_PATH)
+- Tailscale Serve + Apache reverse proxy discovery setup
+- DCR redirect_uri: accept localhost (Claude Code uses it)
+- Public client support (token_endpoint_auth_method: "none")
+- CSP form-action for OAuth callback redirect
+- authorize redirect using serverAppUrl (not req.url internal origin)
+- Claiming moved from page load to Allow click (deny → retry works)
+- Same-name DCR client reuse (Claude Code registers per attempt)
+- DelegationSession onDelete: Cascade (FK constraint on client delete)
+- i18n: consent page error messages, ボールト → 保管庫
 
-### [F-06] Major: IP rate limiter not applied to authorization_code grant
-- File: src/app/api/mcp/token/route.ts:31-76
-- Merged with: S-06
-
-### [F-07] Major: Refresh token exchange doesn't emit audit logs
-- File: src/lib/mcp/oauth-server.ts + src/app/api/mcp/token/route.ts
-
-### [F-08] Critical: Claiming race condition — no CAS guard (cross-tenant hijack)
-- File: src/app/[locale]/mcp/authorize/page.tsx:76-98
-- Merged with: S-01
-
-### [F-09] Major: consent/route.ts doesn't verify DCR client is claimed
-- File: src/app/api/mcp/authorize/consent/route.ts:47-57
-- Merged with: S-05
-
-### [F-10] Major: Scope descriptions hardcoded English in consent-form.tsx
-- File: src/app/[locale]/mcp/authorize/consent-form.tsx:18-22
-
-### [F-11] Minor: localhost vs 127.0.0.1 inconsistency in admin API
-- File: src/components/settings/mcp-client-card.tsx:60-69
-
-## Security Findings
-
-### [S-02] Critical: Consent POST has no CSRF protection
-- File: src/app/api/mcp/authorize/consent/route.ts
-
-### [S-07] Medium: IPv6 loopback (::1) not supported in DCR redirect_uri
-- File: src/app/api/mcp/register/route.ts:31
-
-## Testing Findings
-
-### [T-01] High: refresh_token grant tests completely missing
-- File: src/app/api/mcp/token/route.test.ts
-
-### [T-02] High: invalid_client 401 status code untested for refresh_token
-- File: src/app/api/mcp/token/route.test.ts
-
-### [T-03-T-07] Medium: Various coverage gaps (revokedAt filter, replacedByHash, DCR null tenant, scope normalization, isDcr UI)
-
-### [T-08-T-11] Low: Minor test improvements
+## Deferred (Low)
+- S-16: Loopback port range validation (1-65535)
+- S-18: APP_URL startup validation
+- F-11: Admin API localhost/127.0.0.1 alignment with DCR
 
 ## Resolution Status
-Pending fixes.
+All Critical, Major, and High findings resolved. Remaining Low items deferred.
