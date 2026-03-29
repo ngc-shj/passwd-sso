@@ -351,8 +351,8 @@ jobs:
               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, '00000000-0000-0000-0000-000000000002', NOW(), NOW());
             INSERT INTO tenant_webhooks (id, tenant_id, url, secret_encrypted, secret_iv, secret_auth_tag, events, is_active, created_at, updated_at)
               VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'https://rls-smoke.test/hook', 'enc', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', '{"test"}', true, NOW(), NOW());
-            INSERT INTO mcp_clients (id, tenant_id, name, client_id, client_secret_hash, redirect_uris, is_active, created_at, updated_at)
-              VALUES ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001', 'rls-smoke-mcp', 'mcpc_rlssmoke', 'hash', '{"http://localhost"}', true, NOW(), NOW());
+            INSERT INTO mcp_clients (id, tenant_id, name, client_id, client_secret_hash, redirect_uris, allowed_scopes, is_active, created_at, updated_at)
+              VALUES ('00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000001', 'rls-smoke-mcp', 'mcpc_rlssmoke', 'hash', '{"http://localhost"}', 'credentials:list', true, NOW(), NOW());
             INSERT INTO mcp_access_tokens (id, tenant_id, token_hash, client_id, user_id, scope, expires_at, created_at)
               VALUES ('00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'rlssmokehash', '00000000-0000-0000-0000-000000000010', '00000000-0000-0000-0000-000000000002', 'credentials:list', NOW() + interval '1 hour', NOW());
             INSERT INTO mcp_refresh_tokens (id, tenant_id, token_hash, family_id, client_id, access_token_id, scope, expires_at, created_at)
