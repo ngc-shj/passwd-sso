@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.1...passwd-sso-v0.4.2) (2026-03-29)
+
+
+### Bug Fixes
+
+* Delegated Decryption review fixes — tests, audit display, IP extraction, docs ([37ba683](https://github.com/ngc-shj/passwd-sso/commit/37ba683e463be95f461634665c64424f4d5e01ac))
+
 ## [0.4.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.0...passwd-sso-v0.4.1) (2026-03-28)
 
 
