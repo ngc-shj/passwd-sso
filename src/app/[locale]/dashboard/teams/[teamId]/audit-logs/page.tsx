@@ -1,26 +1,9 @@
 "use client";
 
 import { use, useState, useEffect, useCallback } from "react";
-import { useLocale, useTranslations } from "next-intl";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   LogIn,
   LogOut,
@@ -34,9 +17,7 @@ import {
   UserPlus,
   UserMinus,
   ShieldCheck,
-  ChevronDown,
   ScrollText,
-  Loader2,
   Link as LinkIcon,
   Link2Off,
 } from "lucide-react";
@@ -48,26 +29,19 @@ import {
   apiPath,
   type AuditActionValue,
 } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format-datetime";
-import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
-import { downloadBlob } from "@/lib/download-blob";
 import { useTeamVaultOptional } from "@/lib/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
 import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto-aad";
-
-interface TeamAuditLogItem {
-  id: string;
-  action: string;
-  targetType: string | null;
-  targetId: string | null;
-  metadata: Record<string, unknown> | null;
-  ip: string | null;
-  userAgent: string | null;
-  createdAt: string;
-  user: { id: string; name: string | null; email: string | null; image: string | null };
-}
+import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
+import { getActionLabel } from "@/lib/audit-action-label";
+import { getCommonTargetLabel } from "@/lib/audit-target-label";
+import { AuditActionFilter } from "@/components/audit/audit-action-filter";
+import { AuditDateFilter } from "@/components/audit/audit-date-filter";
+import { AuditDownloadButton } from "@/components/audit/audit-download-button";
+import { AuditLogList } from "@/components/audit/audit-log-list";
+import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
 
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
@@ -95,21 +69,9 @@ const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
 };
 
 const ACTION_GROUPS = [
-  {
-    label: "groupEntry",
-    value: AUDIT_ACTION_GROUP.ENTRY,
-    actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ENTRY],
-  },
-  {
-    label: "groupBulk",
-    value: AUDIT_ACTION_GROUP.BULK,
-    actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.BULK],
-  },
-  {
-    label: "groupTransfer",
-    value: AUDIT_ACTION_GROUP.TRANSFER,
-    actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TRANSFER],
-  },
+  { label: "groupEntry", value: AUDIT_ACTION_GROUP.ENTRY, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ENTRY] },
+  { label: "groupBulk", value: AUDIT_ACTION_GROUP.BULK, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.BULK] },
+  { label: "groupTransfer", value: AUDIT_ACTION_GROUP.TRANSFER, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TRANSFER] },
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ATTACHMENT] },
   { label: "groupTeam", value: AUDIT_ACTION_GROUP.TEAM, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.TEAM] },
   { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.SHARE] },
@@ -135,32 +97,18 @@ export default function TeamAuditLogsPage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("AuditLog");
-  const locale = useLocale();
   const teamVault = useTeamVaultOptional();
-  const [logs, setLogs] = useState<TeamAuditLogItem[]>([]);
-  const [entryNames, setEntryNames] = useState<Record<string, string>>({});
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
-  const [actionSearch, setActionSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [downloading, setDownloading] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
   const [exportAllowed, setExportAllowed] = useState(true);
-  const td = useTranslations("AuditDownload");
 
   const resolveTeamEntryNames = useCallback(
-    async (overviews: Record<string, TeamEntryOverview>): Promise<Record<string, string>> => {
-      if (!teamVault) return {};
+    async (overviews: Record<string, TeamEntryOverview>): Promise<Map<string, string>> => {
+      if (!teamVault) return new Map();
       const teamKey = await teamVault.getTeamEncryptionKey(teamId);
-      if (!teamKey) return {};
+      if (!teamKey) return new Map();
 
-      const names: Record<string, string> = {};
+      const names = new Map<string, string>();
       for (const [entryId, ov] of Object.entries(overviews)) {
         try {
-          // Unwrap ItemKey
           const ikAad = buildItemKeyWrapAAD(teamId, entryId, ov.teamKeyVersion);
           const rawItemKey = await unwrapItemKey(
             { ciphertext: ov.encryptedItemKey, iv: ov.itemKeyIv, authTag: ov.itemKeyAuthTag },
@@ -170,7 +118,6 @@ export default function TeamAuditLogsPage({
           const itemEncKey = await deriveItemEncryptionKey(rawItemKey);
           rawItemKey.fill(0);
 
-          // Decrypt overview
           const overviewAad = ov.aadVersion >= 1
             ? buildTeamEntryAAD(teamId, entryId, "overview", ov.itemKeyVersion)
             : undefined;
@@ -181,7 +128,7 @@ export default function TeamAuditLogsPage({
               overviewAad,
             ),
           );
-          if (overview.title) names[entryId] = overview.title;
+          if (overview.title) names.set(entryId, overview.title);
         } catch {
           // Decryption failed — entry will show as "deletedEntry"
         }
@@ -191,46 +138,14 @@ export default function TeamAuditLogsPage({
     [teamId, teamVault],
   );
 
-  const fetchLogs = useCallback(
-    async (cursor?: string) => {
-      const params = new URLSearchParams();
-      if (selectedActions.size > 0) {
-        params.set("actions", Array.from(selectedActions).join(","));
-      }
-      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-      if (dateTo) {
-        const endOfDay = new Date(dateTo);
-        endOfDay.setHours(23, 59, 59, 999);
-        params.set("to", endOfDay.toISOString());
-      }
-      if (cursor) params.set("cursor", cursor);
-
-      const res = await fetchApi(
-        `${apiPath.teamAuditLogs(teamId)}?${params.toString()}`
-      );
-      if (!res.ok) return null;
-      return res.json();
+  const resolveEntryNames = useCallback(
+    async (data: unknown): Promise<Map<string, string>> => {
+      const d = data as { entryOverviews?: Record<string, TeamEntryOverview> };
+      if (!d.entryOverviews) return new Map();
+      return resolveTeamEntryNames(d.entryOverviews);
     },
-    [teamId, selectedActions, dateFrom, dateTo]
+    [resolveTeamEntryNames],
   );
-
-  useEffect(() => {
-    let stale = false;
-    setLoading(true);
-    fetchLogs().then(async (data) => {
-      if (stale) return;
-      if (data) {
-        setLogs(data.items);
-        setNextCursor(data.nextCursor);
-        if (data.entryOverviews) {
-          const names = await resolveTeamEntryNames(data.entryOverviews);
-          if (!stale) setEntryNames(names);
-        }
-      }
-      setLoading(false);
-    });
-    return () => { stale = true; };
-  }, [fetchLogs, resolveTeamEntryNames]);
 
   useEffect(() => {
     fetchApi(apiPath.teamPolicy(teamId))
@@ -241,449 +156,140 @@ export default function TeamAuditLogsPage({
       .catch(() => {});
   }, [teamId]);
 
-  const handleLoadMore = async () => {
-    if (!nextCursor) return;
-    setLoadingMore(true);
-    const data = await fetchLogs(nextCursor);
-    if (data) {
-      setLogs((prev) => [...prev, ...data.items]);
-      setNextCursor(data.nextCursor);
-      if (data.entryOverviews) {
-        const names = await resolveTeamEntryNames(data.entryOverviews);
-        setEntryNames((prev) => ({ ...prev, ...names }));
-      }
-    }
-    setLoadingMore(false);
-  };
+  const audit = useAuditLogs({
+    fetchEndpoint: apiPath.teamAuditLogs(teamId),
+    downloadEndpoint: `${apiPath.teamAuditLogs(teamId)}/download`,
+    downloadFilename: "team-audit-logs",
+    actionGroups: ACTION_GROUPS,
+    resolveEntryNames,
+  });
 
-  const formatDate = (iso: string) => formatDateTime(iso, locale);
-
-  const getTargetLabel = (log: TeamAuditLogItem): string | null => {
-    const meta =
-      log.metadata && typeof log.metadata === "object"
+  const getTargetLabel = useCallback(
+    (log: AuditLogItem): string | null => {
+      const meta = log.metadata && typeof log.metadata === "object"
         ? (log.metadata as Record<string, unknown>)
         : null;
 
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_TRASH && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const movedCount =
-        typeof meta.movedCount === "number" ? meta.movedCount : 0;
-      const notMovedCount = Math.max(0, requestedCount - movedCount);
-      return t("bulkTrashMeta", {
-        requestedCount,
-        movedCount,
-        notMovedCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH && meta) {
-      const deletedCount =
-        typeof meta.deletedCount === "number" ? meta.deletedCount : 0;
-      return t("emptyTrashMeta", { deletedCount });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const archivedCount =
-        typeof meta.archivedCount === "number" ? meta.archivedCount : 0;
-      const notArchivedCount = Math.max(0, requestedCount - archivedCount);
-      return t("bulkArchiveMeta", {
-        requestedCount,
-        archivedCount,
-        notArchivedCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const unarchivedCount =
-        typeof meta.unarchivedCount === "number" ? meta.unarchivedCount : 0;
-      const alreadyActiveCount = Math.max(0, requestedCount - unarchivedCount);
-      return t("bulkUnarchiveMeta", {
-        requestedCount,
-        unarchivedCount,
-        alreadyActiveCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const restoredCount =
-        typeof meta.restoredCount === "number" ? meta.restoredCount : 0;
-      const notRestoredCount = Math.max(0, requestedCount - restoredCount);
-      return t("bulkRestoreMeta", {
-        requestedCount,
-        restoredCount,
-        notRestoredCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_IMPORT && meta) {
-      const requestedCount = typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const successCount = typeof meta.successCount === "number" ? meta.successCount : 0;
-      const failedCount = typeof meta.failedCount === "number" ? meta.failedCount : 0;
-      const filename = typeof meta.filename === "string" ? meta.filename : "-";
-      const format = typeof meta.format === "string" ? meta.format : "-";
-      const encrypted = meta.encrypted === true;
-      return t("importMeta", {
-        requestedCount,
-        successCount,
-        failedCount,
-        filename,
-        format,
-        encrypted: encrypted ? t("yes") : t("no"),
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta) {
-      const filename = typeof meta.filename === "string" ? meta.filename : null;
-      const encrypted = meta.encrypted === true;
-      const format = typeof meta.format === "string" ? meta.format : "-";
-      const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
-      return t("exportMetaTeam", {
-        filename: filename ?? "-",
-        format,
-        entryCount,
-        encrypted: encrypted ? t("yes") : t("no"),
-      });
-    }
-
-    // Entry operations: show resolved entry name
-    if (log.targetType === AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY && log.targetId) {
-      const name = entryNames[log.targetId];
-      if (name) {
-        if (
-          log.action === AUDIT_ACTION.ENTRY_PERMANENT_DELETE ||
-          (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent === true)
-        ) {
-          return `${name}（${t("permanentDelete")}）`;
-        }
-        return name;
-      }
-      return t("deletedEntry");
-    }
-
-    // Attachment operations: show filename
-    if (meta?.filename) {
-      return String(meta.filename);
-    }
-
-    // Member operations: show email
-    if (
-      (log.action === AUDIT_ACTION.TEAM_MEMBER_INVITE || log.action === AUDIT_ACTION.TEAM_MEMBER_REMOVE) &&
-      meta?.email
-    ) {
-      return String(meta.email);
-    }
-
-    // Role updates: show role change
-    if (log.action === AUDIT_ACTION.TEAM_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
-      return t("roleChange", {
-        from: String(meta.previousRole),
-        to: String(meta.newRole),
-      });
-    }
-
-    return null;
-  };
-
-  const actionLabel = (action: AuditActionValue | string) => {
-    const key = normalizeAuditActionKey(String(action));
-    return t.has(key as never) ? t(key as never) : String(action);
-  };
-  const getActionLabel = (log: TeamAuditLogItem) =>
-    log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
-      ? t("ENTRY_BULK_TRASH")
-      : log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH
-        ? t("ENTRY_EMPTY_TRASH")
-      : log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE
-        ? t("ENTRY_BULK_ARCHIVE")
-        : log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE
-          ? t("ENTRY_BULK_UNARCHIVE")
-          : log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE
-            ? t("ENTRY_BULK_RESTORE")
-            : log.action === AUDIT_ACTION.ENTRY_TRASH
-              ? t("ENTRY_TRASH")
-              : log.action === AUDIT_ACTION.ENTRY_PERMANENT_DELETE
-                ? t("ENTRY_PERMANENT_DELETE")
-        : actionLabel(log.action);
-
-  const filteredActions = (actions: readonly AuditActionValue[]) => {
-    if (!actionSearch) return actions;
-    const q = actionSearch.toLowerCase();
-    return actions.filter((a) => {
-      const label = actionLabel(a).toLowerCase();
-      return label.includes(q) || a.toLowerCase().includes(q);
-    });
-  };
-
-  const isActionSelected = (action: AuditActionValue) => selectedActions.has(action);
-
-  const toggleAction = (action: AuditActionValue, checked: boolean) => {
-    setSelectedActions((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(action);
-      else next.delete(action);
-      return next;
-    });
-  };
-
-  const setGroupSelection = (actions: readonly AuditActionValue[], checked: boolean) => {
-    setSelectedActions((prev) => {
-      const next = new Set(prev);
-      for (const action of actions) {
-        if (checked) next.add(action);
-        else next.delete(action);
-      }
-      return next;
-    });
-  };
-
-  const clearActions = () => setSelectedActions(new Set());
-
-  const handleDownload = async (format: "jsonl" | "csv") => {
-    setDownloading(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("format", format);
-      if (selectedActions.size > 0) {
-        params.set("actions", Array.from(selectedActions).join(","));
-      }
-      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-      if (dateTo) {
-        const endOfDay = new Date(dateTo);
-        endOfDay.setHours(23, 59, 59, 999);
-        params.set("to", endOfDay.toISOString());
-      }
-      const res = await fetchApi(
-        `${apiPath.teamAuditLogs(teamId)}/download?${params.toString()}`
+      const common = getCommonTargetLabel(
+        t as Parameters<typeof getCommonTargetLabel>[0],
+        log,
+        audit.entryNames,
+        AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+        "exportMetaTeam",
       );
-      if (!res.ok) {
-        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
-        return;
-      }
-      await downloadBlob(res, `team-audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
+      if (common !== null) return common;
 
-  const selectedCount = selectedActions.size;
-  const actionSummary =
-    selectedCount === 0
-      ? t("allActions")
-      : selectedCount === 1
-        ? actionLabel(Array.from(selectedActions)[0])
-        : t("actionsSelected", { count: selectedCount });
+      // Member operations: show email
+      if (
+        (log.action === AUDIT_ACTION.TEAM_MEMBER_INVITE || log.action === AUDIT_ACTION.TEAM_MEMBER_REMOVE) &&
+        meta?.email
+      ) {
+        return String(meta.email);
+      }
+
+      return null;
+    },
+    [t, audit.entryNames],
+  );
+
+  const renderItem = useCallback(
+    (log: AuditLogItem) => {
+      const targetLabel = getTargetLabel(log);
+      const user = log.user;
+      return (
+        <AuditLogItemRow
+          key={log.id}
+          id={log.id}
+          icon={ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
+          actionLabel={getActionLabel(t as Parameters<typeof getActionLabel>[0], log.action, audit.actionLabel)}
+          badges={
+            user ? (
+              <Avatar className="h-6 w-6 shrink-0">
+                <AvatarImage src={user.image ?? undefined} />
+                <AvatarFallback className="text-xs">
+                  {user.name?.[0]?.toUpperCase() ?? "?"}
+                </AvatarFallback>
+              </Avatar>
+            ) : undefined
+          }
+          detail={
+            <>
+              {user && (
+                <p className="text-xs text-muted-foreground truncate">
+                  {t("operatedBy", { name: user.email ? `${user.name} (${user.email})` : (user.name ?? "") })}
+                </p>
+              )}
+              {targetLabel && (
+                <p className="text-xs text-muted-foreground truncate">
+                  {targetLabel}
+                </p>
+              )}
+            </>
+          }
+          timestamp={audit.formatDate(log.createdAt)}
+          ip={log.ip}
+        />
+      );
+    },
+    [t, audit, getTargetLabel],
+  );
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
-      <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-        <div className="flex items-center gap-3">
-          <ScrollText className="h-6 w-6" />
-          <div>
-            <h1 className="text-2xl font-bold">
-              {t("title")}
-            </h1>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="rounded-xl border bg-card/80 p-4">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">{t("dateFrom")}</Label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-[160px]"
-              />
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-center gap-3">
+            <ScrollText className="h-6 w-6" />
+            <div>
+              <h1 className="text-2xl font-bold">{t("title")}</h1>
             </div>
-            <div className="space-y-1">
-              <Label className="text-xs">{t("dateTo")}</Label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-[160px]"
-              />
-            </div>
-          </div>
-
-          <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
-            <div className="flex items-center gap-2">
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" size="sm" className="justify-between gap-2">
-                  <span className="text-xs">{t("action")}: {actionSummary}</span>
-                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${filterOpen ? "rotate-180" : ""}`} />
-                </Button>
-              </CollapsibleTrigger>
-              {selectedActions.size > 0 && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearActions}>
-                  {t("allActions")}
-                </Button>
-              )}
-            </div>
-            <CollapsibleContent>
-              <div className="mt-2 space-y-2">
-                <Input
-                  placeholder={t("actionSearch")}
-                  value={actionSearch}
-                  onChange={(e) => setActionSearch(e.target.value)}
-                />
-                <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
-                  {ACTION_GROUPS.map((group) => {
-                    const actions = filteredActions(group.actions);
-                    if (actions.length === 0) return null;
-                    const allSelected = group.actions.every((a) => selectedActions.has(a));
-                    return (
-                      <Collapsible key={group.value}>
-                        <div className="flex items-center gap-2 py-1">
-                          <Checkbox
-                            checked={allSelected}
-                            onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
-                          />
-                          <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
-                            {t(group.label as never)}
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </CollapsibleTrigger>
-                        </div>
-                        <CollapsibleContent className="pl-6 space-y-1">
-                          {actions.map((action) => (
-                            <label key={action} className="flex items-center gap-2 text-sm py-0.5">
-                              <Checkbox
-                                checked={isActionSelected(action)}
-                                onCheckedChange={(checked) => toggleAction(action, !!checked)}
-                              />
-                              {actionLabel(action)}
-                            </label>
-                          ))}
-                        </CollapsibleContent>
-                      </Collapsible>
-                    );
-                  })}
-                </div>
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
-      </Card>
-
-      {/* Download */}
-      <div className="flex justify-end">
-        {exportAllowed ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" disabled={downloading}>
-                {downloading ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Download className="h-4 w-4 mr-2" />
-                )}
-                {downloading ? td("downloading") : td("download")}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleDownload("csv")}>
-                {td("formatCsv")}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-                {td("formatJsonl")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={0}>
-                  <Button variant="outline" size="sm" disabled>
-                    <Download className="h-4 w-4 mr-2" />
-                    {td("download")}
-                  </Button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>{td("exportDisabled")}</p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        )}
-      </div>
-
-      {loading ? (
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <div className="flex justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         </Card>
-      ) : logs.length === 0 ? (
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <p className="text-center text-muted-foreground">{t("noLogs")}</p>
-        </Card>
-      ) : (
-        <>
-          <Card className="rounded-xl border bg-card/80 divide-y">
-            {logs.map((log) => {
-              const targetLabel = getTargetLabel(log);
-              return (
-                <div key={log.id} className="px-4 py-3 flex items-start gap-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
-                  <div className="shrink-0 text-muted-foreground mt-0.5">
-                    {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
-                  </div>
-                  <Avatar className="h-6 w-6 shrink-0">
-                    <AvatarImage src={log.user.image ?? undefined} />
-                    <AvatarFallback className="text-xs">
-                      {log.user.name?.[0]?.toUpperCase() ?? "?"}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">
-                      {getActionLabel(log)}
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {t("operatedBy", { name: log.user.email ? `${log.user.name} (${log.user.email})` : (log.user.name ?? "") })}
-                    </p>
-                    {targetLabel && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {targetLabel}
-                      </p>
-                    )}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-muted-foreground whitespace-nowrap">
-                      {formatDate(log.createdAt)}
-                    </p>
-                    {log.ip && (
-                      <p className="text-xs text-muted-foreground">{log.ip}</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </Card>
 
-          {nextCursor && (
-            <div className="flex justify-center pt-4">
-              <Button
-                variant="outline"
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-              >
-                {loadingMore && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {t("loadMore")}
-              </Button>
+        <Card className="rounded-xl border bg-card/80 p-4">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <AuditDateFilter
+                dateFrom={audit.dateFrom}
+                dateTo={audit.dateTo}
+                setDateFrom={audit.setDateFrom}
+                setDateTo={audit.setDateTo}
+              />
             </div>
-          )}
-        </>
-      )}
+            <AuditActionFilter
+              actionGroups={ACTION_GROUPS}
+              selectedActions={audit.selectedActions}
+              actionSearch={audit.actionSearch}
+              filterOpen={audit.filterOpen}
+              actionSummary={audit.actionSummary}
+              actionLabel={audit.actionLabel}
+              filteredActions={audit.filteredActions}
+              isActionSelected={audit.isActionSelected}
+              toggleAction={audit.toggleAction}
+              setGroupSelection={audit.setGroupSelection}
+              clearActions={audit.clearActions}
+              setActionSearch={audit.setActionSearch}
+              setFilterOpen={audit.setFilterOpen}
+            />
+          </div>
+        </Card>
+
+        <div className="flex justify-end">
+          <AuditDownloadButton
+            downloading={audit.downloading}
+            onDownload={audit.handleDownload}
+            exportAllowed={exportAllowed}
+          />
+        </div>
+
+        <AuditLogList
+          logs={audit.logs}
+          loading={audit.loading}
+          loadingMore={audit.loadingMore}
+          nextCursor={audit.nextCursor}
+          onLoadMore={audit.handleLoadMore}
+          renderItem={renderItem}
+        />
       </div>
     </div>
   );
