@@ -13,7 +13,46 @@ jobs:
     name: "Release Please"
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-cli:
+    name: "Publish CLI to npm"
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install and build CLI
+        working-directory: cli
+        run: |
+          npm ci
+          npm run build
+
+      - name: Verify package contents
+        working-directory: cli
+        run: |
+          FILES=$(npm pack --dry-run 2>&1)
+          echo "$FILES"
+          echo "$FILES" | grep -qP ' dist/index\.js$' || { echo "::error::dist/index.js missing from package"; exit 1; }
+          echo "$FILES" | grep -q '\.js\.map' && { echo "::error::source maps should not be in package"; exit 1; } || true
+
+      - name: Publish to npm
+        working-directory: cli
+        run: npm publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

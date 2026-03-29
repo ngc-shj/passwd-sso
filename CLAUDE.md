@@ -455,7 +455,7 @@ npm run version:bump -- 0.3.0  # Explicit version
 | `package.json` | Single source of truth (SSOT) |
 | `cli/package.json` | Synced by `bump-version.sh` |
 | `extension/package.json` | Synced by `bump-version.sh` |
-| `cli/src/index.ts` | Reads root `package.json` at runtime via `createRequire` |
+| `cli/src/index.ts` | Reads `cli/package.json` at runtime via `createRequire` |
 | `extension/manifest.config.ts` | Imports root `package.json` at build time |
 | `src/lib/openapi-spec.ts` | Independent API version (`1.0.0`) — not synced |
 

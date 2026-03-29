@@ -1,14 +1,36 @@
 {
   "name": "passwd-sso-cli",
   "version": "0.4.3",
-  "private": true,
+  "description": "CLI for passwd-sso password manager",
   "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ngc-shj/passwd-sso.git",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/ngc-shj/passwd-sso/tree/main/cli",
+  "keywords": [
+    "password-manager",
+    "cli",
+    "sso",
+    "vault",
+    "ssh-agent"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "passwd-sso": "./dist/index.js"
   },
+  "files": [
+    "dist/**/*.js",
+    "dist/**/*.d.ts"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
+    "prepublishOnly": "tsc",
     "test": "vitest run",
     "test:watch": "vitest"
   },

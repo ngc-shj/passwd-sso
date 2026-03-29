@@ -29,14 +29,14 @@ import { setInsecure, clearTokenCache, startBackgroundRefresh, stopBackgroundRef
 import * as output from "./lib/output.js";
 
 const require = createRequire(import.meta.url);
-const rootPkg = require("../../package.json") as { version: string };
+const cliPkg = require("../package.json") as { version: string };
 
 const program = new Command();
 
 program
   .name("passwd-sso")
   .description("Password manager CLI")
-  .version(rootPkg.version)
+  .version(cliPkg.version)
   .option("-k, --insecure", "Allow self-signed TLS certificates")
   .hook("preAction", () => {
     if (program.opts().insecure) {
