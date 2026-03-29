@@ -8,7 +8,7 @@
  * - Token validation (for /api/mcp tool calls)
  */
 
-import { randomBytes, createHash } from "node:crypto";
+import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -16,6 +16,8 @@ import {
   MCP_TOKEN_PREFIX,
   MCP_CODE_EXPIRY_SEC,
   MCP_TOKEN_EXPIRY_SEC,
+  MCP_REFRESH_TOKEN_PREFIX,
+  MCP_REFRESH_TOKEN_EXPIRY_SEC,
   type McpScope,
 } from "@/lib/constants/mcp";
 
@@ -113,6 +115,11 @@ export interface TokenExchangeResult {
   tokenType: "Bearer";
   expiresIn: number;
   scope: string;
+  tokenId: string;
+  clientDbId: string;
+  tenantId: string;
+  userId: string | null;
+  serviceAccountId: string | null;
 }
 
 export type TokenExchangeError =
@@ -140,12 +147,18 @@ export async function exchangeCodeForToken(
       if (authCode.usedAt) return { error: "invalid_grant" as const };
       if (authCode.expiresAt < new Date()) return { error: "invalid_grant" as const };
 
-      // Verify client identity
+      // Verify client identity (public clients have empty clientSecretHash)
       if (authCode.mcpClient.clientId !== params.clientId)
         return { error: "invalid_client" as const };
-      if (authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
+      const isPublicClient = authCode.mcpClient.clientSecretHash === "";
+      if (!isPublicClient && authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
         return { error: "invalid_client" as const };
       if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
+
+      // Null guard for DCR clients (must be claimed before token exchange)
+      if (!authCode.tenantId || !authCode.mcpClient.tenantId) {
+        return { error: "invalid_client" as const };
+      }
 
       // Tenant boundary guard
       if (authCode.tenantId !== authCode.mcpClient.tenantId)
@@ -176,7 +189,7 @@ export async function exchangeCodeForToken(
       );
       const expiresAt = new Date(Date.now() + expirySeconds * 1000);
 
-      await tx.mcpAccessToken.create({
+      const newAccessToken = await tx.mcpAccessToken.create({
         data: {
           tokenHash,
           clientId: authCode.clientId,
@@ -193,6 +206,11 @@ export async function exchangeCodeForToken(
         accessToken: plainToken,
         expiresIn: expirySeconds,
         scope: authCode.scope,
+        tokenId: newAccessToken.id,
+        clientDbId: authCode.clientId,
+        tenantId: authCode.tenantId,
+        userId: authCode.userId,
+        serviceAccountId: authCode.serviceAccountId,
       };
     }),
   );
@@ -207,8 +225,168 @@ export async function exchangeCodeForToken(
       tokenType: "Bearer",
       expiresIn: result.expiresIn,
       scope: result.scope,
+      tokenId: result.tokenId,
+      clientDbId: result.clientDbId,
+      tenantId: result.tenantId,
+      userId: result.userId,
+      serviceAccountId: result.serviceAccountId,
     },
   };
+}
+
+// ─── Refresh token ────────────────────────────────────────────
+
+/**
+ * Create a refresh token for an MCP client.
+ * familyId groups tokens in a rotation chain for bulk revocation.
+ */
+export async function createRefreshToken(params: {
+  accessTokenId: string;
+  clientId: string; // McpClient.id (UUID)
+  tenantId: string;
+  userId?: string | null;
+  serviceAccountId?: string | null;
+  scope: string;
+  familyId?: string; // Reuse for rotation, generate new for initial issue
+}): Promise<{ refreshToken: string; expiresAt: Date }> {
+  const token = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+  const tokenHash = hashToken(token);
+  const familyId = params.familyId ?? randomUUID();
+  const expiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
+
+  await withBypassRls(prisma, async () => {
+    await prisma.mcpRefreshToken.create({
+      data: {
+        tokenHash,
+        familyId,
+        accessTokenId: params.accessTokenId,
+        clientId: params.clientId,
+        tenantId: params.tenantId,
+        userId: params.userId ?? undefined,
+        serviceAccountId: params.serviceAccountId ?? undefined,
+        scope: params.scope,
+        expiresAt,
+      },
+    });
+  });
+
+  return { refreshToken: token, expiresAt };
+}
+
+/**
+ * Exchange a refresh token for a new access + refresh token pair.
+ * Implements OAuth 2.1 rotation with replay detection.
+ */
+export async function exchangeRefreshToken(params: {
+  refreshToken: string;
+  clientId: string; // McpClient.clientId (mcpc_xxx)
+  clientSecretHash: string;
+}): Promise<
+  | { ok: true; accessToken: string; refreshToken: string; expiresIn: number; scope: string; tenantId: string; userId: string | null }
+  | { ok: false; error: "invalid_grant" | "invalid_client"; reason?: "replay" | "expired" | "revoked"; tenantId?: string; familyId?: string }
+> {
+  const tokenHash = hashToken(params.refreshToken);
+
+  return await withBypassRls(prisma, async () =>
+    prisma.$transaction(async (tx) => {
+      const rt = await tx.mcpRefreshToken.findUnique({
+        where: { tokenHash },
+        include: { mcpClient: true },
+      });
+
+      if (!rt) return { ok: false as const, error: "invalid_grant" as const };
+
+      // Replay detection: if already rotated, revoke entire family
+      if (rt.rotatedAt) {
+        await tx.mcpRefreshToken.updateMany({
+          where: { familyId: rt.familyId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        });
+        // Also revoke associated access tokens
+        const familyTokens = await tx.mcpRefreshToken.findMany({
+          where: { familyId: rt.familyId },
+          select: { accessTokenId: true },
+        });
+        const accessTokenIds = [...new Set(familyTokens.map((t) => t.accessTokenId))];
+        if (accessTokenIds.length > 0) {
+          await tx.mcpAccessToken.updateMany({
+            where: { id: { in: accessTokenIds }, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        return { ok: false as const, error: "invalid_grant" as const, reason: "replay" as const, tenantId: rt.tenantId, familyId: rt.familyId };
+      }
+
+      // Validate: not expired, not revoked
+      if (rt.revokedAt || rt.expiresAt < new Date()) {
+        const reason = rt.revokedAt ? "revoked" as const : "expired" as const;
+        return { ok: false as const, error: "invalid_grant" as const, reason };
+      }
+
+      // Validate client identity (public clients have empty clientSecretHash)
+      const isPublicClient = rt.mcpClient.clientSecretHash === "";
+      if (
+        rt.mcpClient.clientId !== params.clientId ||
+        (!isPublicClient && rt.mcpClient.clientSecretHash !== params.clientSecretHash) ||
+        !rt.mcpClient.isActive
+      ) {
+        return { ok: false as const, error: "invalid_client" as const };
+      }
+
+      // Mark old refresh token as rotated
+      const newAccessToken = MCP_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      const newAccessTokenHash = hashToken(newAccessToken);
+      const accessExpiresAt = new Date(Date.now() + MCP_TOKEN_EXPIRY_SEC * 1000);
+
+      const newRefreshToken = MCP_REFRESH_TOKEN_PREFIX + randomBytes(32).toString("base64url");
+      const newRefreshTokenHash = hashToken(newRefreshToken);
+      const refreshExpiresAt = new Date(Date.now() + MCP_REFRESH_TOKEN_EXPIRY_SEC * 1000);
+
+      // Create new access token
+      const newAccess = await tx.mcpAccessToken.create({
+        data: {
+          tokenHash: newAccessTokenHash,
+          clientId: rt.clientId,
+          tenantId: rt.tenantId,
+          userId: rt.userId,
+          serviceAccountId: rt.serviceAccountId,
+          scope: rt.scope,
+          expiresAt: accessExpiresAt,
+        },
+      });
+
+      // Create new refresh token (same family)
+      await tx.mcpRefreshToken.create({
+        data: {
+          tokenHash: newRefreshTokenHash,
+          familyId: rt.familyId,
+          accessTokenId: newAccess.id,
+          clientId: rt.clientId,
+          tenantId: rt.tenantId,
+          userId: rt.userId,
+          serviceAccountId: rt.serviceAccountId,
+          scope: rt.scope,
+          expiresAt: refreshExpiresAt,
+        },
+      });
+
+      // Mark old as rotated
+      await tx.mcpRefreshToken.update({
+        where: { id: rt.id },
+        data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
+      });
+
+      return {
+        ok: true as const,
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+        expiresIn: MCP_TOKEN_EXPIRY_SEC,
+        scope: rt.scope,
+        tenantId: rt.tenantId,
+        userId: rt.userId,
+      };
+    }),
+  );
 }
 
 // ─── Token validation ─────────────────────────────────────────

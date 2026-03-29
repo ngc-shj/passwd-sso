@@ -212,6 +212,7 @@ const sampleClients = [
     redirectUris: ["https://agent.example.com/callback"],
     allowedScopes: "credentials:read,credentials:list",
     isActive: true,
+    isDcr: false,
     createdAt: "2025-01-01T00:00:00Z",
   },
   {
@@ -221,7 +222,18 @@ const sampleClients = [
     redirectUris: ["https://other.example.com/callback"],
     allowedScopes: "vault:status",
     isActive: false,
+    isDcr: false,
     createdAt: "2025-01-02T00:00:00Z",
+  },
+  {
+    id: "client-3",
+    name: "DCR Agent",
+    clientId: "mcpc_dcr789",
+    redirectUris: ["https://dcr.example.com/callback"],
+    allowedScopes: "credentials:read",
+    isActive: true,
+    isDcr: true,
+    createdAt: "2025-01-03T00:00:00Z",
   },
 ];
 
@@ -303,12 +315,20 @@ describe("McpClientCard", () => {
       expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
     });
 
+    // Active client is visible immediately
     expect(screen.getByText("mcpc_abc123")).toBeInTheDocument();
-    expect(screen.getByText("Another Agent")).toBeInTheDocument();
+
+    // Inactive client is hidden behind the collapsible trigger; expand it first
+    const inactiveTrigger = screen.getByText(/mcpInactive/);
+    fireEvent.click(inactiveTrigger);
+
+    await waitFor(() => {
+      expect(screen.getByText("Another Agent")).toBeInTheDocument();
+    });
     expect(screen.getByText("mcpc_def456")).toBeInTheDocument();
 
     // Scope badges
-    expect(screen.getByText("credentials:read")).toBeInTheDocument();
+    expect(screen.getAllByText("credentials:read").length).toBeGreaterThan(0);
     expect(screen.getByText("credentials:list")).toBeInTheDocument();
     expect(screen.getByText("vault:status")).toBeInTheDocument();
 
@@ -316,6 +336,22 @@ describe("McpClientCard", () => {
     const badges = screen.getAllByTestId("badge");
     expect(badges.some((b) => b.textContent === "mcpActive")).toBe(true);
     expect(badges.some((b) => b.textContent === "mcpInactive")).toBe(true);
+  });
+
+  it("renders DCR badge for clients with isDcr: true", async () => {
+    setupFetchClients();
+
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("DCR Agent")).toBeInTheDocument();
+    });
+
+    // DCR badge should be visible for the active DCR client
+    const badges = screen.getAllByTestId("badge");
+    expect(badges.some((b) => b.textContent === "DCR")).toBe(true);
   });
 
   it("create client — fills form, submits, verifies fetchApi called", async () => {

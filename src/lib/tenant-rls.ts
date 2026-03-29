@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { NIL_UUID } from "@/lib/constants/app";
 
 type TenantRlsContext = {
   tx: Prisma.TransactionClient;
@@ -24,11 +25,6 @@ export async function withTenantRls<T>(
   });
 }
 
-// Nil UUID used as safe default for app.tenant_id to prevent
-// "invalid input syntax for type uuid" errors in RLS policy evaluation.
-// PostgreSQL does NOT guarantee short-circuit evaluation of OR in policies,
-// so even when app.bypass_rls = 'on', the tenant_id comparison may execute.
-const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 
 export async function withBypassRls<T>(
   prisma: PrismaClient,

@@ -37,7 +37,7 @@ describe("namespace-groups", () => {
 
   it("NS_DASHBOARD_ALL covers all namespaces except page-specific ones", () => {
     // Page-specific namespaces intentionally excluded from NS_DASHBOARD_ALL
-    const excluded = new Set(["Metadata", "Recovery", "VaultReset", "PrivacyPolicy"]);
+    const excluded = new Set(["Metadata", "Recovery", "VaultReset", "PrivacyPolicy", "McpConsent"]);
     const uncovered = NAMESPACES.filter(
       (ns) => !NS_DASHBOARD_ALL.includes(ns) && !excluded.has(ns),
     );

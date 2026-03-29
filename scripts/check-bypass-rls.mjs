@@ -65,8 +65,12 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
   ["src/lib/service-account-token.ts", ["serviceAccountToken"]],
-  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken"]],
+  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
+  ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
+  ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
+  ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
+  ["src/app/api/maintenance/dcr-cleanup/route.ts", ["mcpClient", "tenantMember"]],
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],

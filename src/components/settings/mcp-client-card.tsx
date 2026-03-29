@@ -12,6 +12,11 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CopyButton } from "@/components/passwords/copy-button";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -29,8 +34,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Plus, Trash2, Pencil } from "lucide-react";
+import { ChevronDown, Loader2, Plus, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { fetchApi } from "@/lib/url-helpers";
@@ -42,6 +48,7 @@ interface McpClient {
   redirectUris: string[];
   allowedScopes: string;
   isActive: boolean;
+  isDcr: boolean;
   createdAt: string;
 }
 
@@ -67,6 +74,7 @@ export function McpClientCard() {
 
   const [clients, setClients] = useState<McpClient[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showInactive, setShowInactive] = useState(false);
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -208,10 +216,13 @@ export function McpClientCard() {
     try {
       const body: Record<string, unknown> = {
         name: editName.trim(),
-        redirectUris: uris,
         allowedScopes: Array.from(editScopes),
         isActive: editIsActive,
       };
+      // Only include redirectUris for non-DCR clients; DCR clients have immutable redirect URIs
+      if (!editClient.isDcr) {
+        body.redirectUris = uris;
+      }
       const res = await fetchApi(apiPath.tenantMcpClientById(editClient.id), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -282,6 +293,80 @@ export function McpClientCard() {
     setNewCredentials(null);
   };
 
+  const renderClientItem = (client: McpClient) => (
+    <div
+      key={client.id}
+      className="flex items-center justify-between border rounded-md p-3"
+    >
+      <div className="space-y-1 min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium truncate">{client.name}</span>
+          <Badge
+            variant={client.isActive ? "default" : "secondary"}
+            className="shrink-0"
+          >
+            {client.isActive ? t("mcpActive") : t("mcpInactive")}
+          </Badge>
+          {client.isDcr && (
+            <Badge variant="outline" className="shrink-0">
+              DCR
+            </Badge>
+          )}
+        </div>
+        <p className="text-xs text-muted-foreground font-mono">
+          {client.clientId}
+        </p>
+        <div className="flex flex-wrap gap-1">
+          {client.allowedScopes
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((scope) => (
+              <Badge key={scope} variant="outline" className="text-xs font-normal">
+                {scope}
+              </Badge>
+            ))}
+        </div>
+      </div>
+      <div className="flex items-center gap-1 shrink-0">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8"
+          onClick={() => openEdit(client)}
+        >
+          <Pencil className="h-4 w-4" />
+        </Button>
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t("mcpDeleteConfirm", { name: client.name })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("mcpDeleteWarning")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+              <AlertDialogAction onClick={() => handleDelete(client.id)}>
+                {tCommon("delete")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    </div>
+  );
+
+  const activeClients = clients.filter((c) => c.isActive);
+  const inactiveClients = clients.filter((c) => !c.isActive);
+
   return (
     <Card className="p-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -298,71 +383,21 @@ export function McpClientCard() {
         <p className="text-center text-muted-foreground">{t("noMcpClients")}</p>
       ) : (
         <div className="space-y-2">
-          {clients.map((client) => (
-            <div
-              key={client.id}
-              className="flex items-center justify-between border rounded-md p-3"
-            >
-              <div className="space-y-1 min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium truncate">{client.name}</span>
-                  <Badge
-                    variant={client.isActive ? "default" : "secondary"}
-                    className="shrink-0"
-                  >
-                    {client.isActive ? t("mcpActive") : t("mcpInactive")}
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground font-mono">
-                  {client.clientId}
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {client.allowedScopes
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean)
-                    .map((scope) => (
-                      <Badge key={scope} variant="outline" className="text-xs font-normal">
-                        {scope}
-                      </Badge>
-                    ))}
-                </div>
-              </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={() => openEdit(client)}
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="icon" className="h-8 w-8">
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>
-                        {t("mcpDeleteConfirm", { name: client.name })}
-                      </AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {t("mcpDeleteWarning")}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => handleDelete(client.id)}>
-                        {tCommon("delete")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              </div>
-            </div>
-          ))}
+          {activeClients.length === 0 && inactiveClients.length > 0 && (
+            <p className="text-sm text-muted-foreground">{t("noActiveMcpClients")}</p>
+          )}
+          {activeClients.map(renderClientItem)}
+          {inactiveClients.length > 0 && (
+            <Collapsible open={showInactive} onOpenChange={setShowInactive}>
+              <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:underline">
+                {t("mcpInactive")} ({inactiveClients.length})
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showInactive && "rotate-180")} />
+              </CollapsibleTrigger>
+              <CollapsibleContent className="space-y-2 mt-2">
+                {inactiveClients.map(renderClientItem)}
+              </CollapsibleContent>
+            </Collapsible>
+          )}
         </div>
       )}
 
@@ -507,22 +542,35 @@ export function McpClientCard() {
                 <p className="text-sm text-destructive">{editNameError}</p>
               )}
             </div>
-            <div className="space-y-2">
-              <Label>{t("mcpRedirectUris")}</Label>
-              <Textarea
-                value={editRedirectUris}
-                onChange={(e) => {
-                  setEditRedirectUris(e.target.value);
-                  setEditUriError("");
-                }}
-                placeholder={t("mcpRedirectUrisPlaceholder")}
-                rows={3}
-              />
-              <p className="text-xs text-muted-foreground">{t("mcpRedirectUrisHint")}</p>
-              {editUriError && (
-                <p className="text-sm text-destructive">{editUriError}</p>
-              )}
-            </div>
+            {editClient?.isDcr ? (
+              <div className="space-y-2">
+                <Label>{t("mcpClientId")}</Label>
+                <Input
+                  value={editClient.clientId}
+                  readOnly
+                  disabled
+                  className="font-mono text-xs"
+                />
+                <p className="text-xs text-muted-foreground">{t("mcpDcrFieldsReadOnly")}</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>{t("mcpRedirectUris")}</Label>
+                <Textarea
+                  value={editRedirectUris}
+                  onChange={(e) => {
+                    setEditRedirectUris(e.target.value);
+                    setEditUriError("");
+                  }}
+                  placeholder={t("mcpRedirectUrisPlaceholder")}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">{t("mcpRedirectUrisHint")}</p>
+                {editUriError && (
+                  <p className="text-sm text-destructive">{editUriError}</p>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label>{t("mcpAllowedScopes")}</Label>
               <div className="border rounded-md p-3 space-y-1">

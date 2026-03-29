@@ -148,3 +148,87 @@ describe("scopeStringSatisfies", () => {
     expect(scopeStringSatisfies("passwords:read", "invalid")).toBe(false);
   });
 });
+
+describe("VALID_RESOURCE_ACTIONS allowlist", () => {
+  it("accepts valid SA scope: passwords:read", () => {
+    expect(parseScope("passwords:read")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: passwords:write", () => {
+    expect(parseScope("passwords:write")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: passwords:list", () => {
+    expect(parseScope("passwords:list")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: tags:read", () => {
+    expect(parseScope("tags:read")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: folders:read", () => {
+    expect(parseScope("folders:read")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: folders:write", () => {
+    expect(parseScope("folders:write")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: vault:status", () => {
+    expect(parseScope("vault:status")).not.toBeNull();
+  });
+
+  it("accepts valid SA scope: access-request:create", () => {
+    expect(parseScope("access-request:create")).not.toBeNull();
+  });
+
+  it("accepts valid MCP scope: credentials:decrypt", () => {
+    expect(parseScope("credentials:decrypt")).not.toBeNull();
+  });
+
+  it("rejects unknown resource:action pair: foo:bar", () => {
+    expect(parseScope("foo:bar")).toBeNull();
+  });
+
+  it("rejects unknown resource:action pair: admin:delete", () => {
+    expect(parseScope("admin:delete")).toBeNull();
+  });
+
+  it("rejects unknown resource:action pair: passwords:delete", () => {
+    expect(parseScope("passwords:delete")).toBeNull();
+  });
+
+  it("rejects unknown resource:action pair: credentials:read (not in allowlist)", () => {
+    // credentials:read is only valid for team-scoped, not bare
+    expect(parseScope("credentials:read")).toBeNull();
+  });
+});
+
+describe("VALID_TEAM_RESOURCE_ACTIONS allowlist", () => {
+  const TEAM_UUID = "550e8400-e29b-41d4-a716-446655440000";
+
+  it("accepts valid team-scoped scope: team:<uuid>:passwords:read", () => {
+    expect(parseScope(`team:${TEAM_UUID}:passwords:read`)).not.toBeNull();
+  });
+
+  it("accepts valid team-scoped scope: team:<uuid>:passwords:write", () => {
+    expect(parseScope(`team:${TEAM_UUID}:passwords:write`)).not.toBeNull();
+  });
+
+  it("accepts valid team-scoped scope: team:<uuid>:credentials:read", () => {
+    expect(parseScope(`team:${TEAM_UUID}:credentials:read`)).not.toBeNull();
+  });
+
+  it("rejects invalid team-scoped scope: team:<uuid>:foo:bar", () => {
+    expect(parseScope(`team:${TEAM_UUID}:foo:bar`)).toBeNull();
+  });
+
+  it("rejects invalid team-scoped scope: team:<uuid>:admin:delete", () => {
+    expect(parseScope(`team:${TEAM_UUID}:admin:delete`)).toBeNull();
+  });
+
+  it("rejects invalid team-scoped scope: team:<uuid>:credentials:decrypt", () => {
+    // credentials:decrypt is only in SA allowlist, not team allowlist
+    expect(parseScope(`team:${TEAM_UUID}:credentials:decrypt`)).toBeNull();
+  });
+});

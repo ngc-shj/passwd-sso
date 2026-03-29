@@ -124,6 +124,29 @@ export function normalizeIp(ip: string): string {
 }
 
 /**
+ * Convert an IP address to a rate limit key.
+ * IPv6: use /64 prefix (first 4 groups) to prevent subnet rotation bypass.
+ * IPv4: use full address.
+ */
+export function rateLimitKeyFromIp(ip: string): string {
+  const normalized = normalizeIp(ip);
+  if (!normalized.includes(":")) return normalized; // IPv4 passthrough
+
+  // Expand abbreviated IPv6 and take first 4 groups (/64 prefix)
+  const parts = normalized.split(":");
+  // Handle :: expansion for abbreviated addresses
+  if (normalized.includes("::")) {
+    const sides = normalized.split("::");
+    const left = sides[0] ? sides[0].split(":") : [];
+    const right = sides[1] ? sides[1].split(":") : [];
+    const missing = 8 - left.length - right.length;
+    const expanded = [...left, ...Array(missing).fill("0000"), ...right];
+    return expanded.slice(0, 4).join(":") + "::/64";
+  }
+  return parts.slice(0, 4).join(":") + "::/64";
+}
+
+/**
  * Parse a CIDR notation string into a structured representation.
  * Returns null if the CIDR is invalid.
  */

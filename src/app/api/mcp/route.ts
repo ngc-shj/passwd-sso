@@ -2,6 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { handleMcpRequest } from "@/lib/mcp/server";
 import { extractClientIp } from "@/lib/ip-access";
+import { BASE_PATH } from "@/lib/url-helpers";
 
 export async function POST(req: NextRequest) {
   // Validate MCP access token
@@ -54,7 +55,7 @@ export async function GET(req: NextRequest) {
   const stream = new ReadableStream({
     start(controller) {
       const enc = new TextEncoder();
-      controller.enqueue(enc.encode("event: endpoint\ndata: /api/mcp\n\n"));
+      controller.enqueue(enc.encode(`event: endpoint\ndata: ${BASE_PATH}/api/mcp\n\n`));
       controller.close();
     },
   });

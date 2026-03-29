@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { rateLimitKeyFromIp } from "@/lib/ip-access";
 import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";
@@ -66,7 +67,7 @@ async function handlePOST(request: Request) {
     request.headers.get("x-forwarded-for") ??
     request.headers.get("x-real-ip") ??
     "unknown";
-  const rl = await cspLimiter.check(`rl:csp_report:${ip}`);
+  const rl = await cspLimiter.check(`rl:csp_report:${rateLimitKeyFromIp(ip)}`);
   if (!rl.allowed) return new NextResponse(null, { status: 204 });
 
   const contentType = request.headers.get("content-type") ?? "";

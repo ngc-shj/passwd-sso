@@ -1,6 +1,7 @@
 {
   "serviceAccounts": "Service Accounts",
   "noServiceAccounts": "No service accounts",
+  "noActiveServiceAccounts": "No active service accounts",
   "createServiceAccount": "Create Service Account",
   "editServiceAccount": "Edit Service Account",
   "deleteServiceAccount": "Delete Service Account",
@@ -84,6 +85,8 @@
   "mcpNameConflict": "A client with this name already exists",
   "mcpActive": "Active",
   "mcpInactive": "Inactive",
+  "noActiveMcpClients": "No active MCP clients",
+  "mcpDcrFieldsReadOnly": "Client ID and redirect URIs are set at DCR registration time and cannot be changed.",
   "accessRequests": "Access Requests",
   "noAccessRequests": "No access requests",
   "arStatus": "Status",
