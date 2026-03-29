@@ -135,6 +135,34 @@ claude mcp add passwd-sso --transport http https://sso.example.com/api/mcp
 > **Base path**: If the app is served under a base path (e.g. `NEXT_PUBLIC_BASE_PATH=/passwd-sso`),
 > include it in the URL: `https://sso.example.com/passwd-sso/api/mcp`
 
+#### Reverse Proxy Setup
+
+The MCP spec requires the OAuth discovery endpoint at `/.well-known/oauth-authorization-server` on the **domain root** — not under the base path. When using a reverse proxy with `NEXT_PUBLIC_BASE_PATH`, this root-level path must be explicitly forwarded to the Next.js backend.
+
+> **Note**: Replace `$BASE_PATH` with your `NEXT_PUBLIC_BASE_PATH` value (e.g. `/passwd-sso`).
+> Replace `$BACKEND` with your Next.js server address (e.g. `https+insecure://localhost:3001` or `https://backend:3001`).
+
+**Tailscale Serve:**
+
+```bash
+# App proxy (existing)
+tailscale serve --bg --set-path $BASE_PATH $BACKEND$BASE_PATH
+
+# OAuth discovery — must be at domain root (MCP spec requirement)
+tailscale serve --bg --set-path /.well-known/oauth-authorization-server \
+  $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
+```
+
+**Apache:**
+
+```apache
+# OAuth discovery — add BEFORE the app ProxyPass
+ProxyPass        /.well-known/oauth-authorization-server $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
+ProxyPassReverse /.well-known/oauth-authorization-server $BACKEND$BASE_PATH/api/mcp/.well-known/oauth-authorization-server
+```
+
+If the app is served at the domain root (no base path), the discovery endpoint is already accessible at the correct path and no additional proxy rule is needed.
+
 #### Flow
 
 1. Client discovers `/.well-known/oauth-authorization-server` → gets `registration_endpoint`
