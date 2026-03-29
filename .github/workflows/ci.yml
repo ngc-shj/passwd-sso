@@ -124,6 +124,7 @@ jobs:
       - run: npm run check:team-auth-rls
       - run: npm run check:bypass-rls
       - run: npm run check:crypto-domains
+      - run: npm run check:migration-drift
       - run: npm test
       - run: npm run test:coverage
       - run: npm run build
@@ -338,45 +339,11 @@ jobs:
           MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
 
       - name: Re-grant and seed test data
-        run: |
-          psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
-            -- Re-grant DML on tables created by migration
-            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
-            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
-
-            -- Seed test rows as SUPERUSER (bypasses RLS) to make assertions meaningful.
-            -- Without data, count(*) = 0 is vacuously true regardless of RLS.
-            -- Create parent records first to satisfy FK constraints.
-            INSERT INTO tenants (id, name, slug, created_at, updated_at)
-              VALUES ('00000000-0000-0000-0000-000000000001', 'rls-smoke-tenant', 'rls-smoke-tenant', NOW(), NOW());
-            INSERT INTO users (id, tenant_id, email, created_at, updated_at)
-              VALUES ('00000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000001', 'rls-smoke@test.local', NOW(), NOW());
-            INSERT INTO teams (id, tenant_id, name, slug, created_at, updated_at)
-              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke', 'rls-smoke', NOW(), NOW());
-            INSERT INTO service_accounts (id, tenant_id, name, identity_type, is_active, created_by_id, created_at, updated_at)
-              VALUES (gen_random_uuid(), '00000000-0000-0000-0000-000000000001', 'rls-smoke-sa', 'SERVICE_ACCOUNT', true, '00000000-0000-0000-0000-000000000002', NOW(), NOW());
-          SQL
+        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-seed.sql
 
       - name: Verify RLS enforcement
         run: |
-          # Connect as passwd_app (non-SUPERUSER) — MUST use this role
-          psql postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso <<'SQL'
-            -- 1. Verify role flags
-            DO $$ BEGIN
-              ASSERT (SELECT NOT rolsuper FROM pg_roles WHERE rolname = current_user),
-                'passwd_app must not be SUPERUSER';
-              ASSERT (SELECT NOT rolbypassrls FROM pg_roles WHERE rolname = current_user),
-                'passwd_app must not have BYPASSRLS';
-            END $$;
-
-            -- 2. Verify RLS blocks access to seeded rows without app.tenant_id
-            DO $$ BEGIN
-              ASSERT (SELECT count(*) = 0 FROM teams),
-                'RLS must block access to teams without app.tenant_id';
-              ASSERT (SELECT count(*) = 0 FROM service_accounts),
-                'RLS must block access to service_accounts without app.tenant_id';
-            END $$;
-          SQL
+          psql -v ON_ERROR_STOP=1 postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-verify.sql
           echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
 
   # ─── Container Scan (Trivy) ─────────────────────────────────
