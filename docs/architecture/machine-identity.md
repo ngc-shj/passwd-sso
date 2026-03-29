@@ -118,7 +118,15 @@ SA (sa_ token)                    Admin (browser session)
 
 ### Native OAuth Flow (Dynamic Client Registration)
 
-Claude Code and Claude Desktop connect with just a URL configuration:
+Claude Code and Claude Desktop connect with just a URL.
+
+**Claude Code CLI:**
+
+```bash
+claude mcp add passwd-sso --transport http https://sso.example.com/api/mcp
+```
+
+**Claude Desktop (`claude_desktop_config.json`):**
 
 ```json
 { "mcpServers": { "passwd-sso": { "url": "https://sso.example.com/api/mcp" } } }
