@@ -27,7 +27,24 @@ export function assertOrigin(request: Request): NextResponse | null {
   const appUrl = getAppOrigin();
 
   if (!appUrl) {
-    // If APP_URL is not configured, skip check (dev convenience)
+    // Derive expected origin from Host header when APP_URL is not configured
+    const host = request.headers.get("host");
+    if (!host || !origin) return null;
+    const proto = request.headers.get("x-forwarded-proto") || "http";
+    const expectedOrigin = `${proto}://${host}`;
+    try {
+      if (new URL(origin).origin !== new URL(expectedOrigin).origin) {
+        return NextResponse.json(
+          { error: API_ERROR.INVALID_ORIGIN },
+          { status: 403 },
+        );
+      }
+    } catch {
+      return NextResponse.json(
+        { error: API_ERROR.INVALID_ORIGIN },
+        { status: 403 },
+      );
+    }
     return null;
   }
 

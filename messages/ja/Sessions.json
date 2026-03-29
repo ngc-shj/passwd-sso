@@ -29,5 +29,8 @@
   "subTabPasskey": "パスキー",
   "subTabTravelMode": "トラベルモード",
   "subTabKeyRotation": "鍵のローテーション",
-  "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。"
+  "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。",
+  "subTabCli": "CLI",
+  "subTabApi": "API",
+  "subTabDelegation": "委任"
 }

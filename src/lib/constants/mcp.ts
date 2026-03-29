@@ -3,8 +3,7 @@ export const MCP_CLIENT_ID_PREFIX = "mcpc_";
 
 // MCP scope values (subset of SA scopes, read-only for safety)
 export const MCP_SCOPE = {
-  CREDENTIALS_READ: "credentials:read",
-  CREDENTIALS_LIST: "credentials:list",
+  CREDENTIALS_DECRYPT: "credentials:decrypt",
   TEAM_CREDENTIALS_READ: "team:credentials:read",
   VAULT_STATUS: "vault:status",
 } as const;

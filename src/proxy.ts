@@ -173,6 +173,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.API_KEYS) ||
     pathname.startsWith(API_PATH.TRAVEL_MODE) ||
     pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
+    pathname.startsWith(API_PATH.VAULT_DELEGATION) ||
     pathname.startsWith(API_PATH.WEBAUTHN)
   ) {
     const session = await getSessionInfo(request);

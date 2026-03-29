@@ -93,4 +93,5 @@ export const METADATA_BLOCKLIST = new Set([
   "idToken",
   "accountSalt",
   "passphraseVerifierHmac",
+  "entries",
 ]);

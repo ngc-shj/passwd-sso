@@ -72,6 +72,7 @@ describe("POST /api/mcp", () => {
     expect(mockHandleMcpRequest).toHaveBeenCalledWith(
       expect.objectContaining({ method: "tools/list" }),
       VALID_TOKEN_DATA,
+      null,
     );
   });
 

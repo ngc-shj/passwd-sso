@@ -28,8 +28,10 @@ const {
   mockMcpAuthCodeUpdate,
   mockMcpAccessTokenCreate,
   mockMcpAccessTokenFindUnique,
-  mockPasswordEntryFindMany,
-  mockPasswordEntryFindFirst,
+  // delegation
+  mockFindActiveDelegationSession,
+  mockFetchDelegationEntry,
+  mockGetDelegatedEntryIdsForSession,
   // crypto / rate-limit
   mockHashToken,
   mockRateLimiterCheck,
@@ -61,8 +63,9 @@ const {
     mockMcpAuthCodeUpdate: vi.fn(),
     mockMcpAccessTokenCreate: vi.fn(),
     mockMcpAccessTokenFindUnique: vi.fn(),
-    mockPasswordEntryFindMany: vi.fn(),
-    mockPasswordEntryFindFirst: vi.fn(),
+    mockFindActiveDelegationSession: vi.fn().mockResolvedValue(null),
+    mockFetchDelegationEntry: vi.fn().mockResolvedValue(null),
+    mockGetDelegatedEntryIdsForSession: vi.fn().mockResolvedValue(new Set()),
     mockHashToken: vi.fn((token: string) => `hashed:${token}`),
     mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
     mockPrismaTransaction,
@@ -102,9 +105,8 @@ vi.mock("@/lib/prisma", () => ({
       create: mockMcpAccessTokenCreate,
       findUnique: mockMcpAccessTokenFindUnique,
     },
-    passwordEntry: {
-      findMany: mockPasswordEntryFindMany,
-      findFirst: mockPasswordEntryFindFirst,
+    delegationSession: {
+      findFirst: vi.fn().mockResolvedValue(null),
     },
   },
 }));
@@ -127,6 +129,12 @@ vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
+vi.mock("@/lib/delegation", () => ({
+  findActiveDelegationSession: mockFindActiveDelegationSession,
+  fetchDelegationEntry: mockFetchDelegationEntry,
+  getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
+}));
+
 // ─── Imports (after mocks) ────────────────────────────────────
 
 import { computeS256Challenge } from "@/lib/mcp/oauth-server";
@@ -135,7 +143,7 @@ import { POST as postToken } from "@/app/api/mcp/token/route";
 
 import { GET as getDiscovery } from "@/app/api/mcp/.well-known/oauth-authorization-server/route";
 import { handleMcpRequest } from "@/lib/mcp/server";
-import { MCP_SCOPE } from "@/lib/constants/mcp";
+import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
 
 // ─── Shared fixtures ──────────────────────────────────────────
 
@@ -146,7 +154,7 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   clientId: "mcpc_abc123def456",
   name: "test-mcp-client",
   redirectUris: ["https://example.com/callback"],
-  allowedScopes: "credentials:read,credentials:list",
+  allowedScopes: "credentials:decrypt",
   isActive: true,
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -159,14 +167,14 @@ const makeTokenData = (overrides: Partial<{
   clientId: string;
   userId: string | null;
   serviceAccountId: string | null;
-  scopes: string[];
+  scopes: McpScope[];
 }> = {}) => ({
   tokenId: "token-id",
   tenantId: "tenant-1",
   clientId: "client-uuid-1",
   userId: "user-uuid-1",
   serviceAccountId: null,
-  scopes: ["credentials:read", "credentials:list"],
+  scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] as McpScope[],
   ...overrides,
 });
 
@@ -186,7 +194,7 @@ describe("Scenario 1: MCP Client Registration", () => {
       body: {
         name: "test-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:read", "credentials:list"],
+        allowedScopes: ["credentials:decrypt"],
       },
     });
     const res = await postClients(req);
@@ -276,7 +284,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn().mockResolvedValue({}),
         },
@@ -304,7 +312,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
     expect(json.access_token).toMatch(/^mcp_/);
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBeGreaterThan(0);
-    expect(json.scope).toBe("credentials:read");
+    expect(json.scope).toBe("credentials:decrypt");
   });
 });
 
@@ -346,7 +354,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -386,7 +394,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: "any-challenge",
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -426,7 +434,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: "any-challenge",
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -469,7 +477,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -516,7 +524,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback", // stored URI
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:read",
+            scope: "credentials:decrypt",
           }),
           update: vi.fn(),
         },
@@ -556,9 +564,10 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
 describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("list_credentials with credentials:list scope → success", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
-    mockPasswordEntryFindMany.mockResolvedValue([]);
+  it("list_credentials with credentials:decrypt scope → -32603 when no active delegation session", async () => {
+    // delegationSession.findFirst is mocked to return null (no active session)
+    // so list_credentials errors with "No active delegation session"
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
 
     const response = await handleMcpRequest(
       {
@@ -570,16 +579,15 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
       token,
     );
 
-    expect("result" in response).toBe(true);
-    if ("result" in response) {
-      const result = response.result as { content: { type: string; text: string }[] };
-      expect(Array.isArray(result.content)).toBe(true);
-      expect(result.content[0].type).toBe("text");
+    expect("error" in response).toBe(true);
+    if ("error" in response) {
+      expect(response.error.code).toBe(-32603);
+      expect(response.error.message).toContain("delegation");
     }
   });
 
-  it("get_credential with only credentials:list scope → -32003 insufficient scope", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
+  it("get_credential without credentials:decrypt scope → -32003 insufficient scope", async () => {
+    const token = makeTokenData({ scopes: [MCP_SCOPE.VAULT_STATUS] });
 
     const response = await handleMcpRequest(
       {
@@ -598,30 +606,14 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     if ("error" in response) {
       expect(response.error.code).toBe(-32003);
       expect(response.error.message).toContain("Insufficient scope");
-      expect(response.error.message).toContain("credentials:read");
+      expect(response.error.message).toContain("credentials:decrypt");
     }
   });
 
-  it("get_credential with credentials:read scope → success (entry found)", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_READ] });
+  it("get_credential with credentials:decrypt scope → -32603 when no active delegation session", async () => {
+    // delegationSession.findFirst returns null (no active delegation)
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
     const entryId = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"; // valid UUIDv4
-    const mockEntry = {
-      id: entryId,
-      encryptedBlob: "blob-data",
-      blobIv: "iv",
-      blobAuthTag: "tag",
-      encryptedOverview: "overview",
-      overviewIv: "oiv",
-      overviewAuthTag: "otag",
-      keyVersion: 1,
-      aadVersion: 1,
-      entryType: "LOGIN",
-      isFavorite: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      folderId: null,
-    };
-    mockPasswordEntryFindFirst.mockResolvedValue(mockEntry);
 
     const response = await handleMcpRequest(
       {
@@ -636,19 +628,16 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
       token,
     );
 
-    expect("result" in response).toBe(true);
-    if ("result" in response) {
-      const result = response.result as { content: { type: string; text: string }[] };
-      expect(result.content[0].type).toBe("text");
-      const parsed = JSON.parse(result.content[0].text);
-      expect(parsed.entry.id).toBe(entryId);
+    expect("error" in response).toBe(true);
+    if ("error" in response) {
+      expect(response.error.code).toBe(-32603);
+      expect(response.error.message).toContain("delegation");
     }
   });
 
-  it("get_credential with credentials:read scope → -32603 when entry not found", async () => {
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_READ] });
+  it("get_credential with credentials:decrypt scope → -32603 when entry not delegated", async () => {
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
     const entryId = "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e"; // valid UUIDv4
-    mockPasswordEntryFindFirst.mockResolvedValue(null);
 
     const response = await handleMcpRequest(
       {
@@ -666,6 +655,92 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     expect("error" in response).toBe(true);
     if ("error" in response) {
       expect(response.error.code).toBe(-32603);
+    }
+  });
+
+  it("get_credential returns plaintext entry when delegation session is active", async () => {
+    const entryId = "c3d4e5f6-a7b8-4c9d-8e1f-2a3b4c5d6e7f";
+    const mockEntry = {
+      id: entryId,
+      title: "GitHub",
+      username: "alice",
+      password: "s3cret",
+      url: "https://github.com",
+      notes: null,
+    };
+
+    mockFindActiveDelegationSession.mockResolvedValueOnce({
+      id: "deleg-session-1",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
+
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
+
+    const response = await handleMcpRequest(
+      {
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: {
+          name: "get_credential",
+          arguments: { id: entryId },
+        },
+      },
+      token,
+    );
+
+    expect("result" in response).toBe(true);
+    if ("result" in response) {
+      const content = response.result as { content: { type: string; text: string }[] };
+      const parsed = JSON.parse(content.content[0].text);
+      expect(parsed.entry.id).toBe(entryId);
+      expect(parsed.entry.title).toBe("GitHub");
+      expect(parsed.entry.password).toBe("s3cret");
+    }
+    // Audit logged for both scopes
+    expect(mockLogAudit).toHaveBeenCalledTimes(2);
+  });
+
+  it("list_credentials returns entries when delegation session is active", async () => {
+    const entryId = "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f80";
+    const mockEntry = {
+      id: entryId,
+      title: "AWS",
+      username: "admin",
+      password: "pw",
+      url: "https://aws.amazon.com",
+      notes: null,
+    };
+
+    mockFindActiveDelegationSession.mockResolvedValueOnce({
+      id: "deleg-session-2",
+      expiresAt: new Date(Date.now() + 60_000),
+    });
+    mockGetDelegatedEntryIdsForSession.mockResolvedValueOnce(new Set([entryId]));
+    mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
+
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
+
+    const response = await handleMcpRequest(
+      {
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: {
+          name: "list_credentials",
+          arguments: {},
+        },
+      },
+      token,
+    );
+
+    expect("result" in response).toBe(true);
+    if ("result" in response) {
+      const content = response.result as { content: { type: string; text: string }[] };
+      const parsed = JSON.parse(content.content[0].text);
+      expect(parsed.entries).toHaveLength(1);
+      expect(parsed.total).toBe(1);
     }
   });
 });

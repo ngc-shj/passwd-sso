@@ -66,11 +66,13 @@ const ALLOWED_USAGE = new Map([
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
   ["src/lib/service-account-token.ts", ["serviceAccountToken"]],
   ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken"]],
-  ["src/lib/mcp/tools.ts", ["passwordEntry"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
+  // Delegated Decryption: cross-tenant session lookup + delegation CRUD
+  ["src/lib/delegation.ts", ["delegationSession"]],
+  ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)
