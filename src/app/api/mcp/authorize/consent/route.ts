@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
-import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
+import { MCP_SCOPES, MCP_SCOPE, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { assertOrigin } from "@/lib/csrf";
@@ -174,13 +174,22 @@ export async function POST(req: NextRequest) {
     return NextResponse.redirect(url.toString(), 302);
   }
 
+  // Expand legacy credentials:decrypt scope into credentials:list + credentials:use
+  const expandedScopes = grantedScopes.flatMap((s) =>
+    s === MCP_SCOPE.CREDENTIALS_DECRYPT
+      ? [MCP_SCOPE.CREDENTIALS_LIST, MCP_SCOPE.CREDENTIALS_USE]
+      : [s],
+  );
+  // Deduplicate in case both legacy and new scopes were requested
+  const finalScopes = [...new Set(expandedScopes)];
+
   // Create authorization code
   const { code } = await createAuthorizationCode({
     clientId: effectiveClient.id,
     tenantId: userTenantId,
     userId: session.user.id,
     redirectUri,
-    scope: grantedScopes.join(","),
+    scope: finalScopes.join(","),
     codeChallenge,
     codeChallengeMethod,
   });
@@ -194,7 +203,7 @@ export async function POST(req: NextRequest) {
     tenantId: userTenantId,
     targetType: "McpClient",
     targetId: effectiveClient.id,
-    metadata: { clientId: effectiveClient.clientId, scopes: grantedScopes },
+    metadata: { clientId: effectiveClient.clientId, scopes: finalScopes },
     ip: ip ?? undefined,
     userAgent: userAgent ?? undefined,
   });

@@ -23,7 +23,7 @@ interface AvailableToken {
   id: string;
   mcpClientName: string;
   mcpClientId: string;
-  hasDecryptScope: boolean;
+  hasDelegationScope: boolean;
   expiresAt: string;
 }
 

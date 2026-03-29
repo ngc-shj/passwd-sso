@@ -326,6 +326,14 @@ describe("POST /api/mcp/authorize/consent", () => {
         userId: VALID_SESSION.user.id,
         redirectUri: "https://example.com/callback",
         codeChallenge: "test-challenge-value-base64url",
+        // Legacy credentials:decrypt is expanded to credentials:list + credentials:use
+        scope: expect.stringContaining("credentials:list"),
+      }),
+    );
+    // Verify legacy scope is NOT stored as-is
+    expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: expect.not.stringContaining("credentials:decrypt"),
       }),
     );
   });

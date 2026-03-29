@@ -88,5 +88,8 @@ extension/node_modules/
 # Temporary docs (review notes, scratch)
 docs/temp/
 
-# Claude
-.claude/
+# Claude (allow skills, hooks, settings; ignore sessions/cache)
+.claude/*
+!.claude/skills/
+!.claude/hooks/
+!.claude/settings.json

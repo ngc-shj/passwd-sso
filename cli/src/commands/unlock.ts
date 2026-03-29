@@ -12,7 +12,7 @@ import {
   deriveEncryptionKey,
   verifyKey,
 } from "../lib/crypto.js";
-import { setEncryptionKey, isUnlocked } from "../lib/vault-state.js";
+import { setEncryptionKey, setSecretKeyBytes, isUnlocked } from "../lib/vault-state.js";
 import * as output from "../lib/output.js";
 import type { EncryptedData } from "../lib/crypto.js";
 
@@ -29,8 +29,11 @@ interface UnlockData {
   accountSalt: string;
 }
 
-async function readPassphrase(prompt: string): Promise<string> {
-  process.stdout.write(prompt);
+export async function readPassphrase(prompt: string, opts?: { useStderr?: boolean }): Promise<string> {
+  // When used with eval $(...), stdout is captured by the shell.
+  // Write prompt to stderr so it's visible but not evaluated.
+  const out = opts?.useStderr ? process.stderr : process.stdout;
+  out.write(prompt);
 
   if (process.stdin.isTTY) {
     process.stdin.setRawMode?.(true);
@@ -81,7 +84,7 @@ async function readPassphrase(prompt: string): Promise<string> {
  * Core unlock logic — derives encryption key from passphrase and stores it.
  * Returns true on success, false on failure.
  */
-async function unlockWithPassphrase(passphrase: string): Promise<boolean> {
+export async function unlockWithPassphrase(passphrase: string): Promise<boolean> {
   const res = await apiRequest<UnlockData>("/api/vault/unlock/data");
   if (!res.ok) {
     output.error(`Failed to fetch vault data: ${res.status}`);
@@ -116,6 +119,7 @@ async function unlockWithPassphrase(passphrase: string): Promise<boolean> {
     }
 
     setEncryptionKey(encryptionKey, data.userId);
+    setSecretKeyBytes(secretKey);
     return true;
   } catch {
     output.error("Failed to unlock vault. Check your passphrase.");

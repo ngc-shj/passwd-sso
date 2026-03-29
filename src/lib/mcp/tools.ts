@@ -2,8 +2,8 @@
  * MCP tool implementations.
  *
  * All tools require an active delegation session. Only delegated
- * (pre-approved) entries are returned, always as plaintext.
- * The server retrieves plaintext from Redis envelope-encrypted cache.
+ * (pre-approved) entries are returned as metadata only — no secrets.
+ * Secret fields (password, notes, url) are never returned to the AI.
  *
  * Tool inputs are strictly typed with Zod (no URL args — SSRF prevention).
  */
@@ -14,7 +14,7 @@ import {
   findActiveDelegationSession,
   fetchDelegationEntry,
   getDelegatedEntryIdsForSession,
-  type DelegationEntryData,
+  type DelegationMetadata,
 } from "@/lib/delegation";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
@@ -26,9 +26,9 @@ export const MCP_TOOLS = [
   {
     name: "list_credentials",
     description:
-      "List delegated credential entries. Returns plaintext overviews for entries " +
-      "the user has pre-approved via the vault UI. Requires credentials:decrypt scope " +
-      "and an active delegation session.",
+      "List delegated credential entries. Returns metadata only (title, username, urlHost, tags) " +
+      "for entries the user has pre-approved via the vault UI. " +
+      "Requires credentials:list scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -39,24 +39,11 @@ export const MCP_TOOLS = [
     },
   },
   {
-    name: "get_credential",
-    description:
-      "Get a single delegated credential by ID. Returns plaintext fields (title, username, " +
-      "password, url, notes). Requires credentials:decrypt scope and an active delegation session.",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        id: { type: "string", description: "Credential entry UUID" },
-      },
-      required: ["id"],
-      additionalProperties: false,
-    },
-  },
-  {
     name: "search_credentials",
     description:
       "Search delegated credential entries by keyword. Searches title and username fields " +
-      "of delegated entries. Requires credentials:decrypt scope and an active delegation session.",
+      "of delegated entries. Returns metadata only (no secrets). " +
+      "Requires credentials:list scope and an active delegation session.",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -67,6 +54,18 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "whoami",
+    description:
+      "Returns the MCP client identity (client ID, scopes). " +
+      "Use this to obtain the mcpc_xxx client ID needed for CLI decrypt commands. " +
+      "Requires no special scope.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 // ─── Input schemas ────────────────────────────────────────────
@@ -74,10 +73,6 @@ export const MCP_TOOLS = [
 const listCredentialsSchema = z.object({
   limit: z.number().int().min(1).max(200).default(50),
   offset: z.number().int().min(0).default(0),
-});
-
-const getCredentialSchema = z.object({
-  id: z.string().uuid(),
 });
 
 const searchCredentialsSchema = z.object({
@@ -105,22 +100,21 @@ async function getSession(token: McpTokenData) {
 
 function auditDelegationAccess(
   token: McpTokenData,
-  tool: "list" | "get" | "search",
+  tool: "list" | "search",
   sessionId: string,
   ip?: string | null,
-  extra?: { targetId?: string; entryCount?: number; query?: string },
+  extra?: { entryCount?: number; query?: string },
 ) {
   const auditBase = {
     action: AUDIT_ACTION.DELEGATION_READ,
     userId: token.userId!,
     actorType: "MCP_AGENT" as const,
     tenantId: token.tenantId,
-    targetType: extra?.targetId ? AUDIT_TARGET_TYPE.PASSWORD_ENTRY : undefined,
-    targetId: extra?.targetId,
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     metadata: {
       tool,
       delegationSessionId: sessionId,
-      mcpClientId: token.clientId,
+      mcpClientId: token.mcpClientId,
       ...(extra?.entryCount !== undefined ? { entryCount: extra.entryCount } : {}),
       ...(extra?.query ? { query: extra.query } : {}),
     },
@@ -153,8 +147,8 @@ export async function toolListCredentials(
   // Get all delegated entry IDs from Redis index (uses session.id directly — no double DB lookup)
   const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
-  // Fetch plaintext for each delegated entry
-  const entries: DelegationEntryData[] = [];
+  // Fetch metadata for each delegated entry
+  const entries: DelegationMetadata[] = [];
   for (const entryId of delegatedIds) {
     const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
     if (entry) entries.push(entry);
@@ -166,34 +160,6 @@ export async function toolListCredentials(
   auditDelegationAccess(token, "list", session.id, ip, { entryCount: paginated.length });
 
   return { result: { entries: paginated, total: entries.length } };
-}
-
-export async function toolGetCredential(
-  token: McpTokenData,
-  rawInput: unknown,
-  ip?: string | null,
-) {
-  const parsed = getCredentialSchema.safeParse(rawInput);
-  if (!parsed.success) {
-    return { error: { code: -32602, message: "Invalid params", data: parsed.error.issues } };
-  }
-  const { id } = parsed.data;
-
-  const guard = requireDelegation(token);
-  if (guard) return guard;
-
-  const result = await getSession(token);
-  if ("error" in result) return result;
-  const { session } = result;
-
-  const entry = await fetchDelegationEntry(token.userId!, session.id, id);
-  if (!entry) {
-    return { error: { code: -32603, message: "Entry not delegated or delegation expired" } };
-  }
-
-  auditDelegationAccess(token, "get", session.id, ip, { targetId: id });
-
-  return { result: { entry } };
 }
 
 export async function toolSearchCredentials(
@@ -217,13 +183,13 @@ export async function toolSearchCredentials(
 
   const delegatedIds = await getDelegatedEntryIdsForSession(token.userId!, session.id).catch(() => new Set<string>());
 
-  const entries: DelegationEntryData[] = [];
+  const entries: DelegationMetadata[] = [];
   for (const entryId of delegatedIds) {
     const entry = await fetchDelegationEntry(token.userId!, session.id, entryId);
     if (entry) entries.push(entry);
   }
 
-  // Filter by query if provided
+  // Filter by query if provided — search only title and username (no secret fields)
   const filtered = query
     ? entries.filter((e) => {
         const q = query.toLowerCase();
@@ -236,4 +202,13 @@ export async function toolSearchCredentials(
   auditDelegationAccess(token, "search", session.id, ip, { entryCount: paginated.length, query });
 
   return { result: { entries: paginated, total: filtered.length } };
+}
+
+export function toolWhoami(token: McpTokenData) {
+  return {
+    result: {
+      mcpClientId: token.mcpClientId,
+      scopes: token.scopes,
+    },
+  };
 }
