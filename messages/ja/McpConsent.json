@@ -8,5 +8,15 @@
     "credentials:decrypt": "資格情報の読み取りと復号",
     "team:credentials:read": "チーム資格情報の読み取り",
     "vault:status": "ボールトのステータス確認"
+  },
+  "errors": {
+    "missingParams": "必須パラメータが不足しています",
+    "unknownClient": "不明なクライアントです",
+    "invalidRedirectUri": "無効なリダイレクトURIです",
+    "noTenant": "アカウントにテナントが関連付けられていません",
+    "tenantClientLimit": "テナントのクライアント上限に達しています",
+    "nameConflict": "この名前のクライアントはテナントに既に存在します",
+    "alreadyClaimedOtherTenant": "このクライアントは別のテナントに属しています",
+    "tenantMismatch": "テナントが一致しません"
   }
 }

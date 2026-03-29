@@ -8,5 +8,15 @@
     "credentials:decrypt": "Read and decrypt vault credentials",
     "team:credentials:read": "Read team credentials",
     "vault:status": "Check vault status"
+  },
+  "errors": {
+    "missingParams": "Missing required parameters",
+    "unknownClient": "Unknown client",
+    "invalidRedirectUri": "Invalid redirect URI",
+    "noTenant": "No tenant associated with your account",
+    "tenantClientLimit": "Client limit reached for your tenant",
+    "nameConflict": "A client with this name already exists in your tenant",
+    "alreadyClaimedOtherTenant": "This client belongs to another tenant",
+    "tenantMismatch": "Tenant mismatch"
   }
 }

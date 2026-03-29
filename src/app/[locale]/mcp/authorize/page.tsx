@@ -5,6 +5,7 @@ import { withBypassRls } from "@/lib/tenant-rls";
 import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { getTranslations } from "next-intl/server";
 import { ConsentForm } from "./consent-form";
 
 type SearchParams = Promise<Record<string, string | string[] | undefined>>;
@@ -21,6 +22,8 @@ export default async function McpConsentPage({
     redirect(`/api/auth/signin?callbackUrl=${encodeURIComponent(callbackUrl)}`);
   }
 
+  const t = await getTranslations("McpConsent");
+
   const clientId = params.client_id as string;
   const redirectUri = params.redirect_uri as string;
   const scope = params.scope as string | undefined;
@@ -31,7 +34,7 @@ export default async function McpConsentPage({
   if (!clientId || !redirectUri || !codeChallenge) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p>Missing required parameters</p>
+        <p>{t("errors.missingParams")}</p>
       </div>
     );
   }
@@ -44,7 +47,7 @@ export default async function McpConsentPage({
   if (!client) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p>Unknown client</p>
+        <p>{t("errors.unknownClient")}</p>
       </div>
     );
   }
@@ -53,7 +56,7 @@ export default async function McpConsentPage({
   if (!client.redirectUris.includes(redirectUri)) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p>Invalid redirect URI</p>
+        <p>{t("errors.invalidRedirectUri")}</p>
       </div>
     );
   }
@@ -69,7 +72,7 @@ export default async function McpConsentPage({
   if (!userTenantId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p>No tenant</p>
+        <p>{t("errors.noTenant")}</p>
       </div>
     );
   }
@@ -107,14 +110,14 @@ export default async function McpConsentPage({
     if (claimResult.error === "tenant_cap") {
       return (
         <div className="flex items-center justify-center min-h-screen">
-          <p className="text-destructive">Client limit reached for your tenant</p>
+          <p className="text-destructive">{t("errors.tenantClientLimit")}</p>
         </div>
       );
     }
     if (claimResult.error === "name_conflict") {
       return (
         <div className="flex items-center justify-center min-h-screen">
-          <p className="text-destructive">A client with this name already exists in your tenant</p>
+          <p className="text-destructive">{t("errors.nameConflict")}</p>
         </div>
       );
     }
@@ -126,7 +129,7 @@ export default async function McpConsentPage({
       if (!refetched || refetched.tenantId !== userTenantId) {
         return (
           <div className="flex items-center justify-center min-h-screen">
-            <p className="text-destructive">This client belongs to another tenant</p>
+            <p className="text-destructive">{t("errors.alreadyClaimedOtherTenant")}</p>
           </div>
         );
       }
@@ -146,7 +149,7 @@ export default async function McpConsentPage({
   } else if (client.tenantId !== userTenantId) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <p>Tenant mismatch</p>
+        <p>{t("errors.tenantMismatch")}</p>
       </div>
     );
   }

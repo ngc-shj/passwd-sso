@@ -1565,7 +1565,7 @@ model DelegationSession {
 
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  mcpAccessToken McpAccessToken @relation(fields: [mcpTokenId], references: [id], onDelete: Restrict)
+  mcpAccessToken McpAccessToken @relation(fields: [mcpTokenId], references: [id], onDelete: Cascade)
 
   @@index([userId, revokedAt, expiresAt])
   @@index([mcpTokenId, revokedAt])
