@@ -54,6 +54,18 @@ export const MCP_TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    name: "whoami",
+    description:
+      "Returns the MCP client identity (client ID, scopes). " +
+      "Use this to obtain the mcpc_xxx client ID needed for CLI decrypt commands. " +
+      "Requires no special scope.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {},
+      additionalProperties: false,
+    },
+  },
 ] as const;
 
 // ─── Input schemas ────────────────────────────────────────────
@@ -190,4 +202,13 @@ export async function toolSearchCredentials(
   auditDelegationAccess(token, "search", session.id, ip, { entryCount: paginated.length, query });
 
   return { result: { entries: paginated, total: filtered.length } };
+}
+
+export function toolWhoami(token: McpTokenData) {
+  return {
+    result: {
+      mcpClientId: token.mcpClientId,
+      scopes: token.scopes,
+    },
+  };
 }

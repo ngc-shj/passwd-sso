@@ -14,7 +14,7 @@ import {
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
 } from "@/lib/constants/mcp";
-import { MCP_TOOLS, toolListCredentials, toolSearchCredentials } from "@/lib/mcp/tools";
+import { MCP_TOOLS, toolListCredentials, toolSearchCredentials, toolWhoami } from "@/lib/mcp/tools";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
 
@@ -107,6 +107,9 @@ async function handleToolsCall(
       break;
     case "search_credentials":
       toolResult = await toolSearchCredentials(token, p.arguments, ip);
+      break;
+    case "whoami":
+      toolResult = toolWhoami(token);
       break;
     default:
       return err(id, -32601, `Unknown tool: ${p.name}`);
