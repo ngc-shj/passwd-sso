@@ -261,7 +261,7 @@ describe("exchangeRefreshToken", () => {
     // All tokens in the family must be revoked
     expect(mockRefreshUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ familyId: VALID_RT.familyId }),
+        where: expect.objectContaining({ familyId: VALID_RT.familyId, revokedAt: null }),
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
@@ -348,7 +348,10 @@ describe("exchangeRefreshToken", () => {
     expect(mockRefreshUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: VALID_RT.id },
-        data: expect.objectContaining({ rotatedAt: expect.any(Date) }),
+        data: expect.objectContaining({
+          rotatedAt: expect.any(Date),
+          replacedByHash: expect.any(String),
+        }),
       }),
     );
   });

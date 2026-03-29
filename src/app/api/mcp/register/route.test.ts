@@ -31,6 +31,14 @@ vi.mock("@/lib/prisma", () => ({
       create: mockPrismaCreate,
       deleteMany: vi.fn().mockResolvedValue({}),
     },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        mcpClient: {
+          count: mockPrismaCount,
+          create: mockPrismaCreate,
+        },
+      }),
+    ),
   },
 }));
 
@@ -232,19 +240,8 @@ describe("POST /api/mcp/register", () => {
   });
 
   it("returns 503 when MAX_UNCLAIMED_DCR_CLIENTS cap is reached", async () => {
-    // withBypassRls runs the callback which calls count then conditionally create
-    // Simulate cap exceeded by making count return 100 (MAX_UNCLAIMED_DCR_CLIENTS)
-    mockWithBypassRls.mockImplementationOnce(async (_p: unknown, fn: () => unknown) => {
-      // Override count to return cap
-      const { prisma } = await import("@/lib/prisma");
-      const originalCount = (prisma.mcpClient as unknown as { count: typeof mockPrismaCount }).count;
-      mockPrismaCount.mockResolvedValueOnce(100);
-      try {
-        return await fn();
-      } finally {
-        (prisma.mcpClient as unknown as { count: typeof mockPrismaCount }).count = originalCount;
-      }
-    });
+    // $transaction injects tx with mockPrismaCount — set it to return cap value
+    mockPrismaCount.mockResolvedValueOnce(100);
 
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: VALID_BODY,

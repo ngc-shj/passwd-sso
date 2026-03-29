@@ -123,30 +123,32 @@ export async function POST(req: NextRequest) {
   // Count + create atomically with bypass RLS (no tenant context for DCR)
   let client: { id: string; clientId: string; createdAt: Date };
   try {
-    client = await withBypassRls(prisma, async () => {
-      // Global cap: reject if too many unclaimed DCR clients exist
-      const unclaimedCount = await prisma.mcpClient.count({
-        where: { isDcr: true, tenantId: null },
-      });
-      if (unclaimedCount >= MAX_UNCLAIMED_DCR_CLIENTS) {
-        throw new CapExceededError();
-      }
+    client = await withBypassRls(prisma, async () =>
+      prisma.$transaction(async (tx) => {
+        // Global cap: reject if too many unclaimed DCR clients exist
+        const unclaimedCount = await tx.mcpClient.count({
+          where: { isDcr: true, tenantId: null },
+        });
+        if (unclaimedCount >= MAX_UNCLAIMED_DCR_CLIENTS) {
+          throw new CapExceededError();
+        }
 
-      return prisma.mcpClient.create({
-        data: {
-          clientId,
-          clientSecretHash,
-          name: body.client_name,
-          redirectUris: validatedUris,
-          allowedScopes: MCP_SCOPES.join(","),
-          isDcr: true,
-          dcrExpiresAt,
-          // tenantId: null (omitted)
-          // createdById: null (omitted)
-        },
-        select: { id: true, clientId: true, createdAt: true },
-      });
-    });
+        return tx.mcpClient.create({
+          data: {
+            clientId,
+            clientSecretHash,
+            name: body.client_name,
+            redirectUris: validatedUris,
+            allowedScopes: MCP_SCOPES.join(","),
+            isDcr: true,
+            dcrExpiresAt,
+            // tenantId: null (omitted)
+            // createdById: null (omitted)
+          },
+          select: { id: true, clientId: true, createdAt: true },
+        });
+      }),
+    );
   } catch (err) {
     if (err instanceof CapExceededError) {
       return NextResponse.json(

@@ -54,6 +54,16 @@ const VALID_RESOURCE_ACTIONS = new Set([
   "credentials:decrypt",
 ]);
 
+/**
+ * Flat scopes that don't follow resource:action[:qualifier] format
+ * (e.g., team:credentials:read has 3 parts but is NOT a team-uuid-scoped scope).
+ * These are matched against the full raw string before qualifier validation.
+ */
+const VALID_FLAT_SCOPES = new Set([
+  // MCP flat team scope (not team:<uuid>:resource:action pattern)
+  "team:credentials:read",
+]);
+
 /** Valid resource:action pairs for team-scoped scopes (team:<uuid>:resource:action). */
 const VALID_TEAM_RESOURCE_ACTIONS = new Set([
   "passwords:read",
@@ -68,6 +78,15 @@ const VALID_TEAM_RESOURCE_ACTIONS = new Set([
 export function parseScope(raw: string): ParsedScope | null {
   const parts = raw.split(":");
   if (parts.length < 2) return null;
+
+  // Handle known flat scopes (e.g., "team:credentials:read") before UUID-based routing.
+  // These don't follow the team:<uuid>:resource:action pattern.
+  if (VALID_FLAT_SCOPES.has(raw)) {
+    // Treat last segment as action, everything before as resource.
+    const action = parts[parts.length - 1]!;
+    const resource = parts.slice(0, -1).join(":");
+    return { resource, action, raw };
+  }
 
   // Handle team-scoped: team:<uuid>:resource:action
   if (parts[0] === "team" && parts.length >= 4) {

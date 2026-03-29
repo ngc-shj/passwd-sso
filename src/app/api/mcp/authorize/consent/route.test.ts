@@ -68,9 +68,18 @@ function buildFormData(fields: Record<string, string>): FormData {
   return fd;
 }
 
-function createFormRequest(url: string, fields: Record<string, string>) {
+function createFormRequest(url: string, fields: Record<string, string>, headers: Record<string, string> = {}) {
   const fd = buildFormData(fields);
-  return new Request(url, { method: "POST", body: fd });
+  const urlObj = new URL(url);
+  return new Request(url, {
+    method: "POST",
+    body: fd,
+    headers: {
+      origin: urlObj.origin,
+      host: urlObj.host,
+      ...headers,
+    },
+  });
 }
 
 const VALID_FORM_FIELDS = {
@@ -96,6 +105,32 @@ describe("POST /api/mcp/authorize/consent", () => {
       code: "auth-code-abc123",
       expiresAt: new Date(Date.now() + 60000),
     });
+  });
+
+  it("returns 403 when Origin header is missing (CSRF check)", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+      { origin: "" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_request");
+  });
+
+  it("returns 403 when Origin header does not match host (CSRF check)", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+      { origin: "https://evil.example.com" },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(403);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_request");
   });
 
   it("returns 302 redirect with code and state on valid consent", async () => {
@@ -274,5 +309,54 @@ describe("POST /api/mcp/authorize/consent", () => {
         targetId: VALID_CLIENT.id,
       }),
     );
+  });
+
+  it("returns 400 when DCR client has not been claimed (no tenantId)", async () => {
+    mockFindFirst.mockResolvedValue({
+      ...VALID_CLIENT,
+      isDcr: true,
+      tenantId: null,
+    });
+
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      VALID_FORM_FIELDS,
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("invalid_client");
+    expect(json.error_description).toBe("DCR client not yet claimed");
+  });
+
+  it("redirects with error=access_denied and calls logAudit on deny action", async () => {
+    const req = createFormRequest(
+      "http://localhost/api/mcp/authorize/consent",
+      {
+        action: "deny",
+        client_id: "mcpc_testclient",
+        redirect_uri: "https://example.com/callback",
+        state: "random-state-value",
+      },
+    );
+    const res = await POST(req as unknown as import("next/server").NextRequest);
+
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location");
+    expect(location).toBeTruthy();
+    const url = new URL(location!);
+    expect(url.searchParams.get("error")).toBe("access_denied");
+    expect(url.searchParams.get("state")).toBe("random-state-value");
+
+    expect(mockLogAudit).toHaveBeenCalledOnce();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: VALID_SESSION.user.id,
+        tenantId: VALID_USER.tenantId,
+        targetId: VALID_CLIENT.id,
+      }),
+    );
+    expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
   });
 });

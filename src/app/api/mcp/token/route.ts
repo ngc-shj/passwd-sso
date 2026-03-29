@@ -7,6 +7,8 @@ import {
 } from "@/lib/mcp/oauth-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { logAudit } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -27,6 +29,19 @@ export async function POST(req: NextRequest) {
   }
 
   const grantType = body.grant_type;
+
+  // IP rate limit applies to all grant types
+  const ip = extractClientIp(req);
+  if (ip) {
+    const ipRl = await ipRateLimiter.check(`rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`);
+    if (!ipRl.allowed) {
+      const retryAfter = Math.ceil((ipRl.retryAfterMs ?? 60_000) / 1000);
+      return NextResponse.json(
+        { error: "slow_down" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+  }
 
   if (grantType === "authorization_code") {
     const { code, redirect_uri, client_id, client_secret, code_verifier } = body;
@@ -83,18 +98,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
-    const ip = extractClientIp(req);
-    if (ip) {
-      const ipRl = await ipRateLimiter.check(`rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`);
-      if (!ipRl.allowed) {
-        const retryAfter = Math.ceil((ipRl.retryAfterMs ?? 60_000) / 1000);
-        return NextResponse.json(
-          { error: "slow_down" },
-          { status: 429, headers: { "Retry-After": String(retryAfter) } },
-        );
-      }
-    }
-
     const clientRl = await tokenRateLimiter.check(`mcp:token:${clientIdValue}`);
     if (!clientRl.allowed) {
       const retryAfter = Math.ceil((clientRl.retryAfterMs ?? 60_000) / 1000);
@@ -111,11 +114,28 @@ export async function POST(req: NextRequest) {
     });
 
     if (!result.ok) {
+      if (result.reason === "replay") {
+        logAudit({
+          scope: AUDIT_SCOPE.TENANT,
+          action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
+          userId: "system",
+          tenantId: "unknown",
+          metadata: { clientId: clientIdValue },
+        });
+      }
       return NextResponse.json(
         { error: result.error },
         { status: result.error === "invalid_client" ? 401 : 400 },
       );
     }
+
+    logAudit({
+      scope: AUDIT_SCOPE.TENANT,
+      action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
+      userId: result.userId ?? "system",
+      tenantId: result.tenantId,
+      metadata: { clientId: clientIdValue },
+    });
 
     return NextResponse.json({
       access_token: result.accessToken,

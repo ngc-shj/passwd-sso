@@ -281,8 +281,8 @@ export async function exchangeRefreshToken(params: {
   clientId: string; // McpClient.clientId (mcpc_xxx)
   clientSecretHash: string;
 }): Promise<
-  | { ok: true; accessToken: string; refreshToken: string; expiresIn: number; scope: string }
-  | { ok: false; error: "invalid_grant" | "invalid_client" }
+  | { ok: true; accessToken: string; refreshToken: string; expiresIn: number; scope: string; tenantId: string; userId: string | null }
+  | { ok: false; error: "invalid_grant" | "invalid_client"; reason?: "replay" | "expired" | "revoked" }
 > {
   const tokenHash = hashToken(params.refreshToken);
 
@@ -313,12 +313,13 @@ export async function exchangeRefreshToken(params: {
             data: { revokedAt: new Date() },
           });
         }
-        return { ok: false as const, error: "invalid_grant" as const };
+        return { ok: false as const, error: "invalid_grant" as const, reason: "replay" as const };
       }
 
       // Validate: not expired, not revoked
       if (rt.revokedAt || rt.expiresAt < new Date()) {
-        return { ok: false as const, error: "invalid_grant" as const };
+        const reason = rt.revokedAt ? "revoked" as const : "expired" as const;
+        return { ok: false as const, error: "invalid_grant" as const, reason };
       }
 
       // Validate client identity
@@ -379,6 +380,8 @@ export async function exchangeRefreshToken(params: {
         refreshToken: newRefreshToken,
         expiresIn: MCP_TOKEN_EXPIRY_SEC,
         scope: rt.scope,
+        tenantId: rt.tenantId,
+        userId: rt.userId,
       };
     }),
   );

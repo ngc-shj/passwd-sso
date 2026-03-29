@@ -3,5 +3,10 @@
   "description": "がボールトへのアクセスを要求しています",
   "requestedScopes": "要求されている権限",
   "allow": "許可",
-  "deny": "拒否"
+  "deny": "拒否",
+  "scopeDescriptions": {
+    "credentials:decrypt": "資格情報の読み取りと復号",
+    "team:credentials:read": "チーム資格情報の読み取り",
+    "vault:status": "ボールトのステータス確認"
+  }
 }

@@ -12,14 +12,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ShieldCheck, ShieldX, Loader2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useMessages } from "next-intl";
 
-// Scope descriptions for display
-const SCOPE_DESCRIPTIONS: Record<string, string> = {
-  "credentials:decrypt": "Read and decrypt vault credentials",
-  "team:credentials:read": "Read team credentials",
-  "vault:status": "Check vault status",
-};
 
 interface ConsentFormProps {
   clientName: string;
@@ -43,6 +37,8 @@ export function ConsentForm({
   codeChallengeMethod,
 }: ConsentFormProps) {
   const t = useTranslations("McpConsent");
+  const messages = useMessages();
+  const scopeDescriptions = (messages.McpConsent as Record<string, unknown>)?.scopeDescriptions as Record<string, string> | undefined;
   const [loading, setLoading] = useState(false);
 
   const handleAllow = () => {
@@ -70,10 +66,25 @@ export function ConsentForm({
   };
 
   const handleDeny = () => {
-    const url = new URL(redirectUri);
-    url.searchParams.set("error", "access_denied");
-    if (state) url.searchParams.set("state", state);
-    window.location.href = url.toString();
+    setLoading(true);
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/mcp/authorize/consent";
+    const fields = {
+      action: "deny",
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      state,
+    };
+    for (const [key, value] of Object.entries(fields)) {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = key;
+      input.value = value;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
   };
 
   return (
@@ -102,7 +113,7 @@ export function ConsentForm({
                   {scope}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
-                  {SCOPE_DESCRIPTIONS[scope] ?? scope}
+                  {scopeDescriptions?.[scope] ?? scope}
                 </span>
               </div>
             ))}

@@ -3,5 +3,10 @@
   "description": "wants to access your vault",
   "requestedScopes": "Requested permissions",
   "allow": "Allow",
-  "deny": "Deny"
+  "deny": "Deny",
+  "scopeDescriptions": {
+    "credentials:decrypt": "Read and decrypt vault credentials",
+    "team:credentials:read": "Read team credentials",
+    "vault:status": "Check vault status"
+  }
 }

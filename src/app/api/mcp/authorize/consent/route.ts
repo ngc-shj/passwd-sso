@@ -8,6 +8,13 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 
 export async function POST(req: NextRequest) {
+  // CSRF protection: verify Origin header matches our host
+  const origin = req.headers.get("origin");
+  const host = req.headers.get("host");
+  if (!origin || !host || new URL(origin).host !== host) {
+    return NextResponse.json({ error: "invalid_request", error_description: "CSRF check failed" }, { status: 403 });
+  }
+
   const session = await auth();
   if (!session?.user?.id) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -17,20 +24,14 @@ export async function POST(req: NextRequest) {
   const formData = await req.formData();
   const clientId = formData.get("client_id") as string;
   const redirectUri = formData.get("redirect_uri") as string;
-  const scope = formData.get("scope") as string;
-  const codeChallenge = formData.get("code_challenge") as string;
-  const codeChallengeMethod = (formData.get("code_challenge_method") as string) || "S256";
   const state = formData.get("state") as string;
+  const action = formData.get("action") as string;
 
-  if (!clientId || !redirectUri || !scope || !codeChallenge) {
+  if (!clientId || !redirectUri) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  if (codeChallengeMethod !== "S256") {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
-
-  // Validate client
+  // Validate client (must happen before redirect to prevent open redirect)
   const client = await withBypassRls(prisma, async () =>
     prisma.mcpClient.findFirst({ where: { clientId, isActive: true } }),
   );
@@ -39,9 +40,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
   }
 
-  // Validate redirect_uri
+  // Validate redirect_uri (must happen before redirect to prevent open redirect)
   if (!client.redirectUris.includes(redirectUri)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  // DCR clients must be claimed before consent
+  if (client.isDcr && !client.tenantId) {
+    return NextResponse.json(
+      { error: "invalid_client", error_description: "DCR client not yet claimed" },
+      { status: 400 },
+    );
   }
 
   // Tenant check
@@ -54,6 +63,38 @@ export async function POST(req: NextRequest) {
   const userTenantId = userRecord?.tenantId;
   if (!userTenantId || (client.tenantId && client.tenantId !== userTenantId)) {
     return NextResponse.json({ error: "access_denied" }, { status: 403 });
+  }
+
+  // Handle deny action
+  if (action === "deny") {
+    const { ip, userAgent } = extractRequestMeta(req);
+    logAudit({
+      scope: AUDIT_SCOPE.TENANT,
+      action: AUDIT_ACTION.MCP_CONSENT_DENY,
+      userId: session.user.id,
+      tenantId: userTenantId,
+      targetType: "McpClient",
+      targetId: client.id,
+      metadata: { clientId },
+      ip: ip ?? undefined,
+      userAgent: userAgent ?? undefined,
+    });
+    const denyUrl = new URL(redirectUri);
+    denyUrl.searchParams.set("error", "access_denied");
+    if (state) denyUrl.searchParams.set("state", state);
+    return NextResponse.redirect(denyUrl.toString(), 302);
+  }
+
+  const scope = formData.get("scope") as string;
+  const codeChallenge = formData.get("code_challenge") as string;
+  const codeChallengeMethod = (formData.get("code_challenge_method") as string) || "S256";
+
+  if (!scope || !codeChallenge) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+
+  if (codeChallengeMethod !== "S256") {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
   // Validate scopes
