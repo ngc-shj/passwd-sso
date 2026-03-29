@@ -12,7 +12,7 @@ import {
   deriveEncryptionKey,
   verifyKey,
 } from "../lib/crypto.js";
-import { setEncryptionKey, isUnlocked } from "../lib/vault-state.js";
+import { setEncryptionKey, setSecretKeyBytes, isUnlocked } from "../lib/vault-state.js";
 import * as output from "../lib/output.js";
 import type { EncryptedData } from "../lib/crypto.js";
 
@@ -29,8 +29,11 @@ interface UnlockData {
   accountSalt: string;
 }
 
-export async function readPassphrase(prompt: string): Promise<string> {
-  process.stdout.write(prompt);
+export async function readPassphrase(prompt: string, opts?: { useStderr?: boolean }): Promise<string> {
+  // When used with eval $(...), stdout is captured by the shell.
+  // Write prompt to stderr so it's visible but not evaluated.
+  const out = opts?.useStderr ? process.stderr : process.stdout;
+  out.write(prompt);
 
   if (process.stdin.isTTY) {
     process.stdin.setRawMode?.(true);
@@ -116,6 +119,7 @@ export async function unlockWithPassphrase(passphrase: string): Promise<boolean>
     }
 
     setEncryptionKey(encryptionKey, data.userId);
+    setSecretKeyBytes(secretKey);
     return true;
   } catch {
     output.error("Failed to unlock vault. Check your passphrase.");

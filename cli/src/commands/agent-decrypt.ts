@@ -15,7 +15,7 @@ import { z } from "zod";
 import { apiRequest, startBackgroundRefresh } from "../lib/api-client.js";
 import { decryptData, hexEncode } from "../lib/crypto.js";
 import { buildPersonalEntryAAD } from "../lib/crypto-aad.js";
-import { getEncryptionKey, getUserId, setEncryptionKey } from "../lib/vault-state.js";
+import { getEncryptionKey, getUserId, getSecretKeyBytes, setEncryptionKey } from "../lib/vault-state.js";
 import { readPassphrase, unlockWithPassphrase } from "./unlock.js";
 import * as output from "../lib/output.js";
 
@@ -267,7 +267,8 @@ export async function decryptAgentCommand(opts: DecryptAgentOptions): Promise<vo
     process.exit(1);
   }
 
-  const passphrase = await readPassphrase("Master passphrase: ");
+  // In --eval mode, stdout is captured by the shell — write prompt to stderr
+  const passphrase = await readPassphrase("Master passphrase: ", { useStderr: opts.eval });
   if (!passphrase) {
     process.stderr.write("Error: Passphrase is required.\n");
     process.exit(1);
@@ -291,28 +292,31 @@ export async function decryptAgentCommand(opts: DecryptAgentOptions): Promise<vo
  * --eval mode: fork a detached child, pass vault key via IPC, output eval commands, exit.
  */
 async function forkDaemon(socketPath: string): Promise<void> {
-  const key = getEncryptionKey();
-  if (!key) {
-    process.stderr.write("Error: Vault key not available.\n");
+  const secretBytes = getSecretKeyBytes();
+  if (!secretBytes) {
+    process.stderr.write("Error: Secret key bytes not available.\n");
     process.exit(1);
   }
 
-  // Export raw key bytes for IPC transfer
-  const rawKeyBytes = await crypto.subtle.exportKey("raw", key);
-  const keyHex = hexEncode(rawKeyBytes);
+  // Send secret key bytes (not derived CryptoKey) — child will derive encryption key
+  const secretHex = hexEncode(secretBytes);
   const userId = getUserId();
 
-  // Reconstruct args for child: remove --eval, add internal daemon flag
-  const childArgs = process.argv.slice(1).filter((a) => a !== "--eval");
+  // Reconstruct args for child: remove --eval, add internal daemon flag.
+  // Preserve tsx loader flags (--require, --import) so .ts files work in child.
+  const childArgs = [
+    ...process.execArgv.filter((a) => !a.startsWith("--eval")),
+    ...process.argv.slice(1).filter((a) => a !== "--eval"),
+  ];
 
   const child = spawn(process.execPath, childArgs, {
     detached: true,
-    stdio: ["ignore", "ignore", "ignore", "ipc"],
+    stdio: ["ignore", "ignore", "inherit", "ipc"],
     env: { ...process.env, _PSSO_DAEMON: "1" },
   });
 
-  // Send vault key + userId to child via IPC
-  child.send({ keyHex, userId });
+  // Send secret key bytes + userId to child via IPC (child derives encryption key)
+  child.send({ secretHex, userId });
 
   // Wait briefly for child to acknowledge, then output eval commands
   child.on("message", () => {
@@ -345,18 +349,12 @@ async function forkDaemon(socketPath: string): Promise<void> {
  */
 function runDaemonChild(): Promise<void> {
   return new Promise((resolve) => {
-    process.on("message", async (msg: { keyHex: string; userId: string | null }) => {
+    process.on("message", async (msg: { secretHex: string; userId: string | null }) => {
       try {
-        // Import vault key from hex
-        const { hexDecode } = await import("../lib/crypto.js");
-        const rawBytes = hexDecode(msg.keyHex);
-        const key = await crypto.subtle.importKey(
-          "raw",
-          new Uint8Array(rawBytes).buffer as ArrayBuffer,
-          { name: "AES-GCM", length: 256 },
-          false,
-          ["encrypt", "decrypt"],
-        );
+        // Derive encryption key from secret key bytes
+        const { hexDecode, deriveEncryptionKey } = await import("../lib/crypto.js");
+        const secretBytes = hexDecode(msg.secretHex);
+        const key = await deriveEncryptionKey(secretBytes);
         setEncryptionKey(key, msg.userId ?? undefined);
 
         // Acknowledge to parent
