@@ -31,7 +31,7 @@ import { AuditDownloadButton } from "@/components/audit/audit-download-button";
 import { AuditLogList } from "@/components/audit/audit-log-list";
 import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
 import { AuditActorTypeBadge } from "@/components/audit/audit-actor-type-badge";
-import { DelegationAuditDetail } from "@/components/audit/delegation-audit-detail";
+import { AuditDelegationDetail } from "@/components/audit/audit-delegation-detail";
 import { BreakGlassDialog } from "@/components/breakglass/breakglass-dialog";
 import { BreakGlassGrantList } from "@/components/breakglass/breakglass-grant-list";
 
@@ -168,7 +168,7 @@ export function TenantAuditLogCard() {
       }
       detail={
         <>
-          <DelegationAuditDetail action={log.action} metadata={log.metadata} />
+          <AuditDelegationDetail action={log.action} metadata={log.metadata} />
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             {log.user && (
               <span className="truncate">{formatUserName(log.user)}</span>

@@ -47,7 +47,7 @@ import {
   type AuditActionValue,
 } from "@/lib/constants";
 import { formatUserName } from "@/lib/format-user";
-import { useDelegationAuditLabel } from "@/components/audit/delegation-audit-detail";
+import { useAuditDelegationLabel } from "@/components/audit/audit-delegation-detail";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
 import { getActionLabel } from "@/lib/audit-action-label";
 import { getCommonTargetLabel } from "@/lib/audit-target-label";
@@ -122,7 +122,7 @@ export default function AuditLogsPage() {
   const { data: session } = useSession();
   const { encryptionKey } = useVault();
   const [relatedUsers, setRelatedUsers] = useState<UserMap>({});
-  const getDelegationLabel = useDelegationAuditLabel();
+  const getDelegationLabel = useAuditDelegationLabel();
 
   const resolveEntryNames = useCallback(
     async (data: unknown) => {
