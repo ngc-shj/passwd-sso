@@ -68,8 +68,9 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Dynamic Client Registration (DCR, RFC 7591) at `/api/mcp/register` — clients register without pre-configuration; unclaimed clients expire after 24h
 - Refresh token rotation: each exchange issues a new token pair grouped by `familyId`; replay detection revokes the entire family
 - Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
-- Delegated Decryption (Phase 5): browser decrypts vault entries, relays plaintext to MCP session via envelope-encrypted Redis cache with short TTLs
-- Delegation session management: `POST/GET/DELETE /api/vault/delegation`, per-session revoke via `DELETE /api/vault/delegation/[id]`
+- Zero-Knowledge CLI Decrypt (Phase 7): browser delegates entry metadata only (no passwords); CLI agent daemon holds vault key in memory, decrypts locally after server authorization check; credentials consumed in Unix pipe — never reach server or AI context
+- Scopes: `credentials:list` (metadata), `credentials:use` (authorize agent decrypt), `credentials:decrypt` (legacy alias → expanded to list+use at consent)
+- Delegation session management: `POST/GET/DELETE /api/vault/delegation`, per-session revoke via `DELETE /api/vault/delegation/[id]`, authorization check via `GET /api/vault/delegation/check`
 
 ### E2E Encryption Architecture
 
@@ -112,6 +113,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/reset` | POST | Full vault deletion (last resort) |
 | `/api/vault/delegation` | GET, POST, DELETE | Delegation session CRUD (list/create/revoke-all) |
 | `/api/vault/delegation/[id]` | DELETE | Revoke single delegation session |
+| `/api/vault/delegation/check` | GET | Authorization check for CLI agent decrypt |
 
 #### Passwords & Entries
 

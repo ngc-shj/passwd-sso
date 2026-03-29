@@ -461,6 +461,7 @@ describe("validateMcpToken", () => {
         id: "token-id",
         tenantId: "tenant-uuid",
         clientId: "client-uuid",
+        mcpClient: { clientId: "mcpc_testclient123" },
         userId: "user-uuid",
         serviceAccountId: null,
         scope: "credentials:read,credentials:list",
@@ -475,6 +476,7 @@ describe("validateMcpToken", () => {
       expect(result.data.tokenId).toBe("token-id");
       expect(result.data.tenantId).toBe("tenant-uuid");
       expect(result.data.userId).toBe("user-uuid");
+      expect(result.data.mcpClientId).toBe("mcpc_testclient123");
       expect(result.data.scopes).toEqual(["credentials:read", "credentials:list"]);
     }
   });

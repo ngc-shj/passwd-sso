@@ -51,7 +51,9 @@ const VALID_RESOURCE_ACTIONS = new Set([
   "vault:status",
   "access-request:create",
   // MCP scopes (from mcp.ts)
-  "credentials:decrypt",
+  "credentials:list",
+  "credentials:use",
+  "credentials:decrypt", // Legacy — kept for backward compatibility
 ]);
 
 /**

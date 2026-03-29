@@ -24,7 +24,8 @@ import {
 export interface McpTokenData {
   tokenId: string;
   tenantId: string;
-  clientId: string;
+  clientId: string;        // Internal DB UUID (McpClient FK)
+  mcpClientId: string;     // Public client ID (mcpc_xxx)
   userId: string | null;
   serviceAccountId: string | null;
   scopes: McpScope[];
@@ -407,6 +408,7 @@ export async function validateMcpToken(
         id: true,
         tenantId: true,
         clientId: true,
+        mcpClient: { select: { clientId: true } },
         userId: true,
         serviceAccountId: true,
         scope: true,
@@ -426,6 +428,7 @@ export async function validateMcpToken(
       tokenId: record.id,
       tenantId: record.tenantId,
       clientId: record.clientId,
+      mcpClientId: record.mcpClient.clientId,
       userId: record.userId,
       serviceAccountId: record.serviceAccountId,
       scopes: record.scope.split(",").map((s) => s.trim()).filter(Boolean) as McpScope[],

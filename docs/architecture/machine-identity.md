@@ -228,22 +228,151 @@ MCP Client                    passwd-sso                      User
 
 | Tool | Required Scope | Returns |
 |------|---------------|---------|
-| `list_credentials` | `credentials:decrypt` | Plaintext overviews of delegated entries |
-| `get_credential` | `credentials:decrypt` | Plaintext fields (title, username, password, url, notes) |
-| `search_credentials` | `credentials:decrypt` | Plaintext overviews filtered by keyword |
+| `list_credentials` | `credentials:list` | Metadata only (title, username, urlHost, tags) |
+| `search_credentials` | `credentials:list` | Metadata filtered by keyword |
+| `whoami` | (none) | MCP client ID (`mcpc_xxx`) and granted scopes |
 
-All tools require an **active delegation session**. The human user unlocks their vault in the browser, selects entries to delegate, and the browser relays plaintext to an envelope-encrypted Redis cache with short TTLs. The server never stores or derives encryption keys.
+Legacy `credentials:decrypt` scope is expanded to `credentials:list + credentials:use` at consent time. New tokens receive the expanded scopes directly.
+
+All tools require an **active delegation session**. The human user selects entries to delegate in the browser, which sends only non-secret metadata (title, username, urlHost, tags) to the server. **Passwords, notes, and full URLs are never sent to the server.**
+
+### Zero-Knowledge Architecture (Phase 7)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Zero-Knowledge MCP Flow                           │
+│                                                                             │
+│  ┌───────────┐     ┌───────────────┐     ┌──────────────┐    ┌───────────┐ │
+│  │   Human    │     │    Server     │     │ Agent daemon │    │ Claude    │ │
+│  │ (Browser)  │     │  (Next.js)    │     │   (CLI)      │    │ Code (AI) │ │
+│  └─────┬─────┘     └───────┬───────┘     └──────┬───────┘    └─────┬─────┘ │
+│        │                   │                     │                  │       │
+│   1. Delegation UI         │                     │                  │       │
+│   ─────────────────────────>                     │                  │       │
+│   select entries + TTL     │                     │                  │       │
+│   (metadata only,          │                     │                  │       │
+│    NO passwords sent)      │                     │                  │       │
+│        │                   │                     │                  │       │
+│   2. passwd-sso agent      │                     │                  │       │
+│      --decrypt             │                     │                  │       │
+│   ─────────────────────────────────────────────> │                  │       │
+│   (passphrase via TTY,     │                     │ vault key        │       │
+│    key held in memory)     │                     │ in memory        │       │
+│        │                   │                     │                  │       │
+│        │              3. MCP: whoami             │                  │       │
+│        │                   <──────────────────────────────────────── │       │
+│        │                   │ { mcpClientId }     │                  │       │
+│        │                   ────────────────────────────────────────> │       │
+│        │                   │                     │                  │       │
+│        │              4. MCP: list_credentials   │                  │       │
+│        │                   <──────────────────────────────────────── │       │
+│        │                   │ metadata only       │                  │       │
+│        │                   │ (title, username,    │                  │       │
+│        │                   │  urlHost, tags)      │                  │       │
+│        │                   ────────────────────────────────────────> │       │
+│        │                   │                     │                  │       │
+│        │              5. Skill/hook: Bash (subshell)                │       │
+│        │                   │                     │  <───────────────│       │
+│        │                   │                     │  passwd-sso      │       │
+│        │                   │                     │  decrypt <id>    │       │
+│        │                   │                     │  --mcp-client    │       │
+│        │                   │                     │  mcpc_xxx        │       │
+│        │                   │                     │                  │       │
+│        │              6. Authorization check     │                  │       │
+│        │                   <──────────────────── │                  │       │
+│        │                   │ GET /delegation/    │                  │       │
+│        │                   │ check?clientId=     │                  │       │
+│        │                   │ mcpc_xxx&entryId=.. │                  │       │
+│        │                   │                     │                  │       │
+│        │                   │ 200 OK / 403        │                  │       │
+│        │                   ────────────────────> │                  │       │
+│        │                   │                     │                  │       │
+│        │              7. Fetch encrypted blob    │                  │       │
+│        │                   <──────────────────── │                  │       │
+│        │                   │ GET /api/passwords/ │                  │       │
+│        │                   │ <id> (encrypted)    │                  │       │
+│        │                   ────────────────────> │                  │       │
+│        │                   │                     │                  │       │
+│        │                   │               8. Decrypt locally       │       │
+│        │                   │                     │ vault key + AAD  │       │
+│        │                   │                     │ → plaintext      │       │
+│        │                   │                     │                  │       │
+│        │              9. Credential consumed in pipe                │       │
+│        │                   │                     │ ────────────────>│       │
+│        │                   │                     │ (pipe to curl)   │       │
+│        │                   │                     │                  │       │
+│        │             10. Only result reaches AI  │                  │       │
+│        │                   │                     │   "HTTP 200"  ──>│       │
+│        │                   │                     │   (no password)  │       │
+│        │                   │                     │                  │       │
+│  ┌─────┴─────┐     ┌───────┴───────┐     ┌──────┴───────┐    ┌─────┴─────┐ │
+│  │  Sees:     │     │  Sees:        │     │  Sees:       │    │  Sees:    │ │
+│  │  everything│     │  metadata     │     │  plaintext   │    │  metadata │ │
+│  │  (owner)   │     │  entryIds     │     │  (in memory  │    │  HTTP     │ │
+│  │            │     │  NO passwords │     │   only)      │    │  results  │ │
+│  │            │     │  NO vault key │     │              │    │  NO       │ │
+│  │            │     │               │     │              │    │  passwords│ │
+│  └───────────┘     └───────────────┘     └──────────────┘    └───────────┘ │
+│                                                                             │
+│  Security boundaries:                                                       │
+│  ├─ Server ↔ AI: HTTPS + MCP OAuth 2.1 (metadata only)                     │
+│  ├─ Agent ↔ Server: HTTPS + Bearer token (auth check, encrypted blob)      │
+│  ├─ Agent ↔ Hook: Unix socket 0600 (plaintext, same-user only)             │
+│  └─ Hook ↔ AI: stdout pipe (result only, credential consumed in subshell)  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Actor Responsibility Matrix
+
+| Actor | Responsibility | What it holds | What it never sees |
+|-------|---------------|---------------|-------------------|
+| Human (Delegation UI) | Decides which entries to allow, for how long | Full vault access | — |
+| Server (DelegationSession) | Answers "is this request authorized?" | Metadata + entryIds allowlist | Vault key, plaintext passwords |
+| Agent daemon (CLI) | Decrypts when authorized | Vault key in memory | Authorization decisions |
+| AI (Claude Code) | Uses credentials via Skill/hook | Metadata + operation results | Plaintext passwords |
+
+#### Credential Usage Flow (Claude Code)
+
+1. `whoami` MCP tool → obtains `mcpc_xxx` client ID
+2. `list_credentials` MCP tool → receives metadata only (title, username, urlHost, tags)
+3. Claude invokes `/use-credential` Skill → generates safe subshell command
+4. `passwd-sso decrypt --mcp-client mcpc_xxx` → connects to agent daemon via Unix socket
+5. Agent checks authorization with server (`GET /api/vault/delegation/check?clientId=mcpc_xxx&entryId=...`)
+6. If authorized: agent fetches encrypted blob → decrypts locally with vault key + AAD
+7. Credential is consumed in pipe (e.g., `| curl --config -`) → **never appears in Claude's context**
+8. Claude sees only the operation result (e.g., "HTTP 200")
+
+#### Protection Mechanisms
+
+| Mechanism | Purpose |
+|-----------|---------|
+| `block-bare-decrypt` hook | Blocks direct `passwd-sso decrypt` in Bash (must use Skill subshell pattern) |
+| `/use-credential` Skill | Generates safe subshell commands that consume credentials in pipe |
+| `credentials:list` scope | Grants metadata access only — no decrypt capability |
+| `credentials:use` scope | Authorizes agent to respond to decrypt requests |
+| Delegation session (JIT) | Human-controlled allowlist of entries + TTL |
+| Agent Unix socket (0600) | Same-user-only access to decrypt daemon |
+| No authorization cache | Every decrypt request verified against server — revocation is immediate |
+
+#### MCP Client Compatibility
+
+| Client | Metadata (list/search) | Credential Usage | Notes |
+|--------|:---------------------:|:----------------:|-------|
+| Claude Code (CLI) | Yes | Yes (Skill + agent) | Full zero-knowledge flow via `/use-credential` Skill and `block-bare-decrypt` hook |
+| Claude Desktop | Yes | No | No Skill/hook mechanism; metadata-only access |
+| Other MCP clients | Yes | No | Standard MCP protocol — no agent socket integration |
+
+Credential usage requires the CLI agent daemon running on the same machine as the MCP client. Claude Desktop and other MCP clients can browse entry metadata but cannot decrypt or use credentials. This is a deliberate security boundary — extending credential usage to other clients would require equivalent Skill/hook protections to prevent plaintext exposure to the LLM context.
 
 ### E2E Encryption Strategy
 
 | Phase | Approach | Status |
 |-------|----------|--------|
 | Phase 3 | Encrypted data only — AI agents receive ciphertext | Implemented |
-| Phase 5 | Delegated Decryption — human unlocks vault, browser relays plaintext to MCP session | Implemented |
+| Phase 5 | Delegated Decryption — browser relays metadata to MCP session | Implemented |
+| Phase 7 | Zero-Knowledge CLI Decrypt — agent daemon, no plaintext to server or AI | Implemented |
 
-**Why not decrypt server-side?** The server has never had access to plaintext passwords — that's the core security guarantee. Breaking this would require storing the encryption key server-side, which defeats zero-knowledge.
-
-**Delegated Decryption** keeps decryption in the browser: the human user unlocks their vault, selects entries to delegate (max 20), and the browser relays plaintext to an envelope-encrypted Redis cache (AES-256-GCM + AAD) with configurable TTLs (5–60 min). MCP tools read from this cache only when an active delegation session exists.
+**Why not decrypt server-side?** The server has never had access to plaintext passwords — that's the core security guarantee. Phase 7 extends this: even the MCP client (AI) never sees plaintext. Decryption happens in the CLI agent daemon process, and credentials are consumed in Unix pipes without reaching the LLM context.
 
 ## Unified Audit
 
@@ -390,18 +519,18 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 
 Restart Claude Desktop. The MCP tools panel should show 3 tools:
 
-- `list_credentials` — List encrypted credential entries
-- `get_credential` — Get a single encrypted entry by ID
-- `search_credentials` — Search encrypted overviews
+- `whoami` — Get MCP client ID and scopes
+- `list_credentials` — List delegated entry metadata (title, username, urlHost, tags)
+- `search_credentials` — Search delegated entries by keyword
 
 ### What You Can Do
 
-Claude can query your vault metadata (entry count, folder distribution, timestamps) but **cannot read plaintext passwords** — all data is E2E encrypted. This is by design.
+Claude Desktop can browse delegated entry **metadata only** (title, username, host). Plaintext passwords are never sent to the server or to the AI. Credential usage (decrypt + login) requires Claude Code CLI with the agent daemon — see [MCP Client Compatibility](#mcp-client-compatibility) above.
 
-| Capability | Status |
-|-----------|--------|
-| List delegated entries (plaintext) | ✅ Working |
-| Get delegated entry (plaintext) | ✅ Working |
-| Read plaintext passwords | ✅ Via Delegated Decryption (requires active delegation session) |
-| Create/update entries | ❌ Not yet implemented |
-| Team vault access | ❌ Requires ECDH key distribution to SA |
+| Capability | Client | Status |
+|-----------|--------|--------|
+| List delegated entries (metadata) | All | ✅ Working |
+| Search delegated entries | All | ✅ Working |
+| Use credentials (decrypt + login) | Claude Code only | ✅ Via agent daemon + `/use-credential` Skill |
+| Create/update entries | — | ❌ Not yet implemented |
+| Team vault access | — | ❌ Requires ECDH key distribution to SA |
