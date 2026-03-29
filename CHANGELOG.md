@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.3...passwd-sso-v0.5.0) (2026-03-29)
+
+
+### Features
+
+* Phase 7 — zero-knowledge MCP with CLI decrypt agent ([3b901df](https://github.com/ngc-shj/passwd-sso/commit/3b901df7dddcaec4afdc3161add024dd5b151455))
+
 ## [0.4.3](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.2...passwd-sso-v0.4.3) (2026-03-29)
 
 
