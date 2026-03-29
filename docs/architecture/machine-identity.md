@@ -230,8 +230,9 @@ MCP Client                    passwd-sso                      User
 |------|---------------|---------|
 | `list_credentials` | `credentials:list` | Metadata only (title, username, urlHost, tags) |
 | `search_credentials` | `credentials:list` | Metadata filtered by keyword |
+| `whoami` | (none) | MCP client ID (`mcpc_xxx`) and granted scopes |
 
-Legacy `credentials:decrypt` scope is expanded to `credentials:list + credentials:use` at consent time.
+Legacy `credentials:decrypt` scope is expanded to `credentials:list + credentials:use` at consent time. New tokens receive the expanded scopes directly.
 
 All tools require an **active delegation session**. The human user selects entries to delegate in the browser, which sends only non-secret metadata (title, username, urlHost, tags) to the server. **Passwords, notes, and full URLs are never sent to the server.**
 
@@ -518,18 +519,18 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
 
 Restart Claude Desktop. The MCP tools panel should show 3 tools:
 
-- `list_credentials` — List encrypted credential entries
-- `get_credential` — Get a single encrypted entry by ID
-- `search_credentials` — Search encrypted overviews
+- `whoami` — Get MCP client ID and scopes
+- `list_credentials` — List delegated entry metadata (title, username, urlHost, tags)
+- `search_credentials` — Search delegated entries by keyword
 
 ### What You Can Do
 
-Claude can query your vault metadata (entry count, folder distribution, timestamps) but **cannot read plaintext passwords** — all data is E2E encrypted. This is by design.
+Claude Desktop can browse delegated entry **metadata only** (title, username, host). Plaintext passwords are never sent to the server or to the AI. Credential usage (decrypt + login) requires Claude Code CLI with the agent daemon — see [MCP Client Compatibility](#mcp-client-compatibility) above.
 
-| Capability | Status |
-|-----------|--------|
-| List delegated entries (plaintext) | ✅ Working |
-| Get delegated entry (plaintext) | ✅ Working |
-| Read plaintext passwords | ✅ Via Delegated Decryption (requires active delegation session) |
-| Create/update entries | ❌ Not yet implemented |
-| Team vault access | ❌ Requires ECDH key distribution to SA |
+| Capability | Client | Status |
+|-----------|--------|--------|
+| List delegated entries (metadata) | All | ✅ Working |
+| Search delegated entries | All | ✅ Working |
+| Use credentials (decrypt + login) | Claude Code only | ✅ Via agent daemon + `/use-credential` Skill |
+| Create/update entries | — | ❌ Not yet implemented |
+| Team vault access | — | ❌ Requires ECDH key distribution to SA |
