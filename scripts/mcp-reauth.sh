@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # MCP OAuth 2.1 re-authorization script with credentials:list credentials:use scopes
-# Usage: bash scripts/mcp-reauth.sh <client_id> <client_secret> [server_url]
+# Usage: bash scripts/mcp-reauth.sh <client_id> [client_secret] [server_url]
+# For public clients (DCR), omit client_secret or pass ""
 
 set -euo pipefail
 
-CLIENT_ID="${1:?Usage: $0 <client_id> <client_secret> [server_url]}"
-CLIENT_SECRET="${2:?Usage: $0 <client_id> <client_secret> [server_url]}"
+CLIENT_ID="${1:?Usage: $0 <client_id> [client_secret] [server_url]}"
+CLIENT_SECRET="${2:-}"
 SERVER="${3:-https://localhost:3000}"
-REDIRECT_URI="http://localhost:3000/callback"
+REDIRECT_URI="${4:-http://localhost:3000/callback}"
 SCOPE="credentials:list credentials:use"
 
 # Generate PKCE pair

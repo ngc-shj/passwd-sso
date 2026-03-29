@@ -5,7 +5,10 @@
  *
  * Usage:
  *   passwd-sso decrypt <entryId> --field password --mcp-token <tokenId>
+ *   passwd-sso decrypt <entryId> --json --mcp-token <tokenId>
  *   passwd-sso decrypt abc123 --field password --mcp-token <uuid> | curl --config - ...
+ *
+ * --json outputs all decrypted fields as JSON (ignores --field).
  */
 
 import { createConnection } from "node:net";
@@ -18,7 +21,7 @@ interface DecryptResponse {
 
 export async function decryptCommand(
   id: string,
-  options: { field?: string; mcpToken: string },
+  options: { field?: string; mcpToken: string; json?: boolean },
 ): Promise<void> {
   const socketPath = process.env.PSSO_AGENT_SOCK;
   if (!socketPath) {
@@ -29,7 +32,13 @@ export async function decryptCommand(
     process.exit(1);
   }
 
-  const field = options.field ?? "password";
+  if (options.json && options.field) {
+    process.stderr.write("Error: --json and --field are mutually exclusive\n");
+    process.exitCode = 1;
+    return;
+  }
+
+  const field = options.json ? "_json" : (options.field ?? "password");
   const request = JSON.stringify({
     entryId: id,
     mcpTokenId: options.mcpToken,
@@ -67,7 +76,11 @@ export async function decryptCommand(
           const res = JSON.parse(trimmed) as DecryptResponse;
 
           if (res.ok && res.value !== undefined) {
-            process.stdout.write(res.value);
+            // Write value + newline to stdout.
+            // When piped (e.g., to curl), the trailing newline is typically
+            // consumed by the receiving process. For interactive use, it
+            // ensures the value is visible before the next shell prompt.
+            process.stdout.write(res.value + "\n");
             finish();
           } else {
             process.stderr.write(`Error: ${res.error ?? "Decrypt failed"}\n`);

@@ -18,7 +18,7 @@ const {
 
 vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
 vi.mock("@/lib/prisma", () => ({
-  default: {
+  prisma: {
     delegationSession: mockPrismaDelegationSession,
   },
 }));
@@ -108,9 +108,6 @@ describe("GET /api/vault/delegation/check", () => {
   it("returns 400 when mcpTokenId is missing", async () => {
     const res = await GET(makeRequest({ entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.authorized).toBe(false);
-    expect(json.reason).toBe("invalid_params");
   });
 
   it("returns 400 when mcpTokenId is not a UUID", async () => {

@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
   const { mcpTokenId, entryId } = parsed.data;
 
   // Single-query: find active delegation session AND check entryId in one DB call
-  const { default: prisma } = await import("@/lib/prisma");
+  const { prisma } = await import("@/lib/prisma");
   const { withBypassRls } = await import("@/lib/tenant-rls");
 
   const session = await withBypassRls(prisma, () =>

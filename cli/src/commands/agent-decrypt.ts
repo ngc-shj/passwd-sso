@@ -24,7 +24,7 @@ import * as output from "../lib/output.js";
 const DecryptRequestSchema = z.object({
   entryId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/),
   mcpTokenId: z.string().uuid(),
-  field: z.enum(["password", "username", "url", "notes", "totp"]).default("password"),
+  field: z.enum(["password", "username", "url", "notes", "totp", "title", "_json"]).default("password"),
 });
 
 type DecryptRequest = z.infer<typeof DecryptRequestSchema>;
@@ -158,13 +158,16 @@ async function handleDecryptRequest(req: DecryptRequest): Promise<DecryptRespons
     const plaintext = await decryptData(entry.encryptedBlob, encryptionKey, aad);
     const blob: EntryBlob = JSON.parse(plaintext);
 
-    // Step 4: Extract requested field
+    // Step 4: Extract requested field or return full JSON
+    if (req.field === "_json") {
+      return { ok: true, value: JSON.stringify(blob) };
+    }
+
     const fieldValue = blob[req.field];
     if (fieldValue === undefined || fieldValue === null) {
       return { ok: false, error: `Field "${req.field}" not found in entry` };
     }
 
-    // For totp field, return the secret as a string
     const value = typeof fieldValue === "object"
       ? JSON.stringify(fieldValue)
       : String(fieldValue);
@@ -385,6 +388,11 @@ async function startForegroundAgent(socketPath: string): Promise<void> {
 
   server.listen(socketPath, () => {
     chmodSync(socketPath, 0o600);
+    output.success("Decrypt agent started.");
+    output.info(`Socket: ${socketPath}`);
+    output.info("In another terminal, run:");
+    console.log(`  export PSSO_AGENT_SOCK='${socketPath}'`);
+    output.info("Press Ctrl+C to stop the agent.");
   });
 
   server.on("error", (err) => {

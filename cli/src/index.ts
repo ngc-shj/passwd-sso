@@ -139,8 +139,9 @@ program
   .command("decrypt <id>")
   .description("Decrypt a credential field via agent socket (for hooks)")
   .requiredOption("--mcp-token <tokenId>", "MCP token ID for authorization")
-  .option("--field <field>", "Field to decrypt", "password")
-  .action((id: string, opts) => decryptCommand(id, { field: opts.field, mcpToken: opts.mcpToken }));
+  .option("--field <field>", "Field to decrypt (default: password, ignored with --json)")
+  .option("--json", "Output all decrypted fields as JSON (ignores --field)")
+  .action((id: string, opts) => decryptCommand(id, { field: opts.field, mcpToken: opts.mcpToken, json: opts.json }));
 
 program.parse();
 
@@ -262,7 +263,8 @@ async function interactiveMode(): Promise<void> {
             const fieldIdx = args.indexOf("--field");
             const fieldArg = fieldIdx !== -1 ? args[fieldIdx + 1] : undefined;
             const field = fieldArg && !fieldArg.startsWith("-") ? fieldArg : undefined;
-            await decryptCommand(args[1], { field, mcpToken });
+            const json = args.includes("--json");
+            await decryptCommand(args[1], { field, mcpToken, json });
           }
           break;
         }
