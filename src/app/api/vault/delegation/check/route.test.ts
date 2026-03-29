@@ -43,7 +43,7 @@ vi.mock("@/lib/logger", () => ({
 import { GET } from "./route";
 import { NextRequest } from "next/server";
 
-const VALID_MCP_TOKEN_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
+const VALID_CLIENT_ID = "mcpc_f47ac10b58cc4372a5670e02b2c3d479";
 const VALID_ENTRY_ID = "entry-abc-123";
 const SESSION_ID = "session-id-abc";
 const EXPIRES_AT = new Date("2099-01-01T00:00:00Z");
@@ -66,7 +66,7 @@ describe("GET /api/vault/delegation/check", () => {
 
   it("returns 401 when not authenticated", async () => {
     mockAuthOrToken.mockResolvedValue(null);
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.authorized).toBe(false);
@@ -75,7 +75,7 @@ describe("GET /api/vault/delegation/check", () => {
 
   it("returns 403 when scope is insufficient", async () => {
     mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.authorized).toBe(false);
@@ -89,7 +89,7 @@ describe("GET /api/vault/delegation/check", () => {
       entryIds: [VALID_ENTRY_ID],
     });
 
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.authorized).toBe(true);
@@ -97,7 +97,7 @@ describe("GET /api/vault/delegation/check", () => {
 
   it("returns 429 when rate limited", async () => {
     mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 30000 });
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(429);
     const json = await res.json();
     expect(json.authorized).toBe(false);
@@ -105,29 +105,29 @@ describe("GET /api/vault/delegation/check", () => {
     expect(res.headers.get("Retry-After")).toBe("30");
   });
 
-  it("returns 400 when mcpTokenId is missing", async () => {
+  it("returns 400 when clientId is missing", async () => {
     const res = await GET(makeRequest({ entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(400);
   });
 
-  it("returns 400 when mcpTokenId is not a UUID", async () => {
-    const res = await GET(makeRequest({ mcpTokenId: "not-a-uuid", entryId: VALID_ENTRY_ID }));
+  it("returns 400 when clientId does not start with mcpc_", async () => {
+    const res = await GET(makeRequest({ clientId: "not-valid", entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when entryId is missing", async () => {
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID }));
     expect(res.status).toBe(400);
   });
 
   it("returns 400 when entryId contains invalid characters", async () => {
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: "entry id!" }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: "entry id!" }));
     expect(res.status).toBe(400);
   });
 
   it("returns 403 with reason no_session when no active delegation exists", async () => {
     mockPrismaDelegationSession.findFirst.mockResolvedValue(null);
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.reason).toBe("no_session");
@@ -140,7 +140,7 @@ describe("GET /api/vault/delegation/check", () => {
       entryIds: ["other-entry-1", "other-entry-2"],
     });
 
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.reason).toBe("entry_not_delegated");
@@ -153,7 +153,7 @@ describe("GET /api/vault/delegation/check", () => {
       entryIds: [],
     });
 
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.reason).toBe("entry_not_delegated");
@@ -166,7 +166,7 @@ describe("GET /api/vault/delegation/check", () => {
       entryIds: [VALID_ENTRY_ID, "other-entry"],
     });
 
-    const res = await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.authorized).toBe(true);
@@ -181,7 +181,7 @@ describe("GET /api/vault/delegation/check", () => {
       entryIds: [VALID_ENTRY_ID],
     });
 
-    await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
 
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -190,7 +190,7 @@ describe("GET /api/vault/delegation/check", () => {
         userId: "user-1",
         targetId: VALID_ENTRY_ID,
         metadata: expect.objectContaining({
-          mcpTokenId: VALID_MCP_TOKEN_ID,
+          clientId: VALID_CLIENT_ID,
           sessionId: SESSION_ID,
         }),
       }),
@@ -199,24 +199,26 @@ describe("GET /api/vault/delegation/check", () => {
 
   it("does not fire audit log on failure", async () => {
     mockPrismaDelegationSession.findFirst.mockResolvedValue(null);
-    await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
     expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
-  it("queries DB with correct userId and mcpTokenId", async () => {
+  it("queries DB with correct userId and clientId via join", async () => {
     mockPrismaDelegationSession.findFirst.mockResolvedValue({
       id: SESSION_ID,
       expiresAt: EXPIRES_AT,
       entryIds: [VALID_ENTRY_ID],
     });
 
-    await GET(makeRequest({ mcpTokenId: VALID_MCP_TOKEN_ID, entryId: VALID_ENTRY_ID }));
+    await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
 
     expect(mockPrismaDelegationSession.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           userId: "user-1",
-          mcpTokenId: VALID_MCP_TOKEN_ID,
+          mcpAccessToken: expect.objectContaining({
+            mcpClient: expect.objectContaining({ clientId: VALID_CLIENT_ID }),
+          }),
           revokedAt: null,
         }),
       }),

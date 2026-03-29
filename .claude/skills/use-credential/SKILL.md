@@ -23,10 +23,11 @@ If no delegation session is active, instruct the user:
 
 ---
 
-## Step 2: Identify the MCP Token ID
+## Step 2: Identify the MCP Client ID
 
-The MCP token ID is needed for authorization. Use the token ID from the current MCP session.
-To find it, check the active delegation sessions or use the token ID from the MCP connection.
+The MCP client ID (`mcpc_xxx`) is needed for authorization. This is the public client identifier from the OAuth registration — NOT an internal token UUID.
+
+To find it, check the MCP server connection config or the delegation UI in the browser. The client ID is stable across token refreshes.
 
 ---
 
@@ -47,7 +48,7 @@ Generate and execute a **subshell command** that:
 
 ```bash
 (
-  _CRED=$(PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-token MCP_TOKEN_ID)
+  _CRED=$(PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-client MCP_CLIENT_ID)
   curl -s -u "USERNAME:${_CRED}" TARGET_URL
   echo "exit:$?"
 ) 2>/dev/null
@@ -57,7 +58,7 @@ Generate and execute a **subshell command** that:
 
 ```bash
 (
-  _CRED=$(PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-token MCP_TOKEN_ID)
+  _CRED=$(PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-client MCP_CLIENT_ID)
   curl -s -H "Authorization: Bearer ${_CRED}" TARGET_URL
   echo "exit:$?"
 ) 2>/dev/null
@@ -67,7 +68,7 @@ Generate and execute a **subshell command** that:
 
 ```bash
 (
-  _CRED=$(PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-token MCP_TOKEN_ID)
+  _CRED=$(PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-client MCP_CLIENT_ID)
   COMMAND_USING_CRED
   echo "exit:$?"
 ) 2>/dev/null
@@ -77,7 +78,7 @@ Generate and execute a **subshell command** that:
 
 ```bash
 (
-  PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-token MCP_TOKEN_ID | pbcopy
+  PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-client MCP_CLIENT_ID | pbcopy
   echo "Copied to clipboard"
 ) 2>/dev/null
 ```
@@ -86,14 +87,14 @@ Generate and execute a **subshell command** that:
 
 ```bash
 (
-  PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-token MCP_TOKEN_ID | xclip -selection clipboard
+  PSSO_AGENT_SOCK="${PSSO_AGENT_SOCK}" npx tsx ~/ghq/github.com/ngc-shj/passwd-sso/cli/src/index.ts decrypt ENTRY_ID --field password --mcp-client MCP_CLIENT_ID | xclip -selection clipboard
   echo "Copied to clipboard"
 ) 2>/dev/null
 ```
 
 Replace:
 - `ENTRY_ID` — entry UUID from `list_credentials`
-- `MCP_TOKEN_ID` — MCP token ID for authorization
+- `MCP_CLIENT_ID` — MCP client ID (mcpc_xxx) for authorization
 - `USERNAME` — username from `list_credentials`
 - `TARGET_URL` — the URL to authenticate against
 - `COMMAND_USING_CRED` — any command that uses `${_CRED}`

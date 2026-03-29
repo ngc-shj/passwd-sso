@@ -138,10 +138,10 @@ program
 program
   .command("decrypt <id>")
   .description("Decrypt a credential field via agent socket (for hooks)")
-  .requiredOption("--mcp-token <tokenId>", "MCP token ID for authorization")
+  .requiredOption("--mcp-client <clientId>", "MCP client ID (mcpc_xxx) for authorization")
   .option("--field <field>", "Field to decrypt (default: password, ignored with --json)")
   .option("--json", "Output all decrypted fields as JSON (ignores --field)")
-  .action((id: string, opts) => decryptCommand(id, { field: opts.field, mcpToken: opts.mcpToken, json: opts.json }));
+  .action((id: string, opts) => decryptCommand(id, { field: opts.field, mcpClient: opts.mcpClient, json: opts.json }));
 
 program.parse();
 
@@ -252,19 +252,19 @@ async function interactiveMode(): Promise<void> {
 
         case "decrypt": {
           if (!args[1]) {
-            output.error("Usage: decrypt <id> --mcp-token <tokenId> [--field <field>]");
+            output.error("Usage: decrypt <id> --mcp-client <mcpc_xxx> [--field <field>]");
           } else {
-            const tokenIdx = args.indexOf("--mcp-token");
-            const mcpToken = tokenIdx !== -1 ? args[tokenIdx + 1] : undefined;
-            if (!mcpToken || mcpToken.startsWith("-")) {
-              output.error("Usage: decrypt <id> --mcp-token <tokenId> [--field <field>]");
+            const tokenIdx = args.indexOf("--mcp-client");
+            const mcpClient = tokenIdx !== -1 ? args[tokenIdx + 1] : undefined;
+            if (!mcpClient || mcpClient.startsWith("-")) {
+              output.error("Usage: decrypt <id> --mcp-client <mcpc_xxx> [--field <field>]");
               break;
             }
             const fieldIdx = args.indexOf("--field");
             const fieldArg = fieldIdx !== -1 ? args[fieldIdx + 1] : undefined;
             const field = fieldArg && !fieldArg.startsWith("-") ? fieldArg : undefined;
             const json = args.includes("--json");
-            await decryptCommand(args[1], { field, mcpToken, json });
+            await decryptCommand(args[1], { field, mcpClient, json });
           }
           break;
         }
@@ -305,7 +305,7 @@ Commands:
   generate [-l N] [--copy] [--json]             Generate password
   export [--format json|csv] [-o file]          Export vault
   env [--format shell|dotenv|json]              Output vault secrets as env vars
-  decrypt <id> --mcp-token <tokenId> [--field]  Decrypt via agent socket
+  decrypt <id> --mcp-client <mcpc_xxx> [--field]  Decrypt via agent socket
   api-key list [--json]                         List API keys
   status [--json]                               Show connection status
   lock                                          Lock vault and exit

@@ -4,9 +4,9 @@
  * Used by Claude Code hooks to decrypt credentials without exposing them to the LLM.
  *
  * Usage:
- *   passwd-sso decrypt <entryId> --field password --mcp-token <tokenId>
- *   passwd-sso decrypt <entryId> --json --mcp-token <tokenId>
- *   passwd-sso decrypt abc123 --field password --mcp-token <uuid> | curl --config - ...
+ *   passwd-sso decrypt <entryId> --field password --mcp-client <mcpc_xxx>
+ *   passwd-sso decrypt <entryId> --json --mcp-client <mcpc_xxx>
+ *   passwd-sso decrypt abc123 --field password --mcp-client mcpc_xxx | curl --config - ...
  *
  * --json outputs all decrypted fields as JSON (ignores --field).
  */
@@ -21,7 +21,7 @@ interface DecryptResponse {
 
 export async function decryptCommand(
   id: string,
-  options: { field?: string; mcpToken: string; json?: boolean },
+  options: { field?: string; mcpClient: string; json?: boolean },
 ): Promise<void> {
   const socketPath = process.env.PSSO_AGENT_SOCK;
   if (!socketPath) {
@@ -41,7 +41,7 @@ export async function decryptCommand(
   const field = options.json ? "_json" : (options.field ?? "password");
   const request = JSON.stringify({
     entryId: id,
-    mcpTokenId: options.mcpToken,
+    clientId: options.mcpClient,
     field,
   });
 

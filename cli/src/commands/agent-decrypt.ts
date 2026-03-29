@@ -23,7 +23,7 @@ import * as output from "../lib/output.js";
 
 const DecryptRequestSchema = z.object({
   entryId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/),
-  mcpTokenId: z.string().uuid(),
+  clientId: z.string().startsWith("mcpc_").max(100),
   field: z.enum(["password", "username", "url", "notes", "totp", "title", "_json"]).default("password"),
 });
 
@@ -121,7 +121,7 @@ function prepareSocket(socketPath: string): void {
 async function handleDecryptRequest(req: DecryptRequest): Promise<DecryptResponse> {
   // Step 1: Check authorization with server (no caching — ensures immediate revocation)
   const checkRes = await apiRequest<{ authorized: boolean; reason?: string }>(
-    `/api/vault/delegation/check?mcpTokenId=${req.mcpTokenId}&entryId=${req.entryId}`,
+    `/api/vault/delegation/check?clientId=${req.clientId}&entryId=${req.entryId}`,
   );
 
   if (!checkRes.ok || !checkRes.data.authorized) {

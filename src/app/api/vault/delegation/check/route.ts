@@ -2,7 +2,7 @@
  * GET /api/vault/delegation/check
  *
  * Authorization check endpoint for the decrypt agent.
- * Returns whether a specific entry is delegated to a specific MCP token.
+ * Returns whether a specific entry is delegated for a specific MCP client.
  * The agent calls this before every decrypt operation (no caching).
  *
  * Auth: session cookie OR Bearer token (extension/API key).
@@ -14,13 +14,14 @@ import { z } from "zod";
 import { authOrToken } from "@/lib/auth-or-token";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 
 const checkRateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 
 const checkParamsSchema = z.object({
-  mcpTokenId: z.string().uuid(),
+  clientId: z.string().startsWith(MCP_CLIENT_ID_PREFIX).max(100),
   entryId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/),
 });
 
@@ -48,16 +49,16 @@ export async function GET(request: NextRequest) {
   // Parse query params
   const url = new URL(request.url);
   const parsed = checkParamsSchema.safeParse({
-    mcpTokenId: url.searchParams.get("mcpTokenId"),
+    clientId: url.searchParams.get("clientId"),
     entryId: url.searchParams.get("entryId"),
   });
   if (!parsed.success) {
     return NextResponse.json({ authorized: false, reason: "invalid_params" }, { status: 400 });
   }
 
-  const { mcpTokenId, entryId } = parsed.data;
+  const { clientId, entryId } = parsed.data;
 
-  // Single-query: find active delegation session AND check entryId in one DB call
+  // Find active delegation session via MCP client's public clientId
   const { prisma } = await import("@/lib/prisma");
   const { withBypassRls } = await import("@/lib/tenant-rls");
 
@@ -65,7 +66,9 @@ export async function GET(request: NextRequest) {
     prisma.delegationSession.findFirst({
       where: {
         userId,
-        mcpTokenId,
+        mcpAccessToken: {
+          mcpClient: { clientId },
+        },
         revokedAt: null,
         expiresAt: { gt: new Date() },
       },
@@ -82,13 +85,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ authorized: false, reason: "entry_not_delegated" }, { status: 403 });
   }
 
-  // Lightweight audit (success only — failed checks are visible via rate limit and 403 responses)
+  // Lightweight audit (success only)
   logAudit({
     action: AUDIT_ACTION.DELEGATION_CHECK,
     scope: AUDIT_SCOPE.PERSONAL,
     userId,
     targetId: entryId,
-    metadata: { mcpTokenId, sessionId: session.id },
+    metadata: { clientId, sessionId: session.id },
     ip: extractClientIp(request),
     userAgent: request.headers.get("user-agent"),
   });
