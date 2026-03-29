@@ -1,6 +1,6 @@
 # Audit Log Reference
 
-This document lists all audit log action types (94 total), their scopes, metadata fields, and UI/export behavior.
+This document lists all audit log action types (101 total), their scopes, metadata fields, and UI/export behavior.
 
 ---
 
@@ -336,6 +336,25 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 **Notes:**
 - Logged when IP/network access restrictions block a request.
 - userId may be `"unknown"` if no session exists at the time of denial.
+
+### MCP Clients (`group:mcpClient`)
+
+| Action | Scope | targetType | metadata | UI display |
+|--------|-------|------------|----------|------------|
+| `MCP_CLIENT_CREATE` | TENANT | McpClient | `{ name }` | name |
+| `MCP_CLIENT_UPDATE` | TENANT | McpClient | `{ name }` | name |
+| `MCP_CLIENT_DELETE` | TENANT | McpClient | `{ name }` | name |
+| `MCP_CLIENT_DCR_REGISTER` | TENANT | McpClient | `{ clientName, ip }` | clientName |
+| `MCP_CLIENT_DCR_CLAIM` | TENANT | McpClient | `{ clientId, tenantId }` | clientId |
+| `MCP_CLIENT_DCR_CLEANUP` | TENANT | — | `{ deleted }` | deleted count |
+| `MCP_CONSENT_GRANT` | TENANT | McpClient | `{ clientId, scopes }` | scopes |
+| `MCP_CONSENT_DENY` | TENANT | McpClient | `{ clientId }` | — |
+| `MCP_REFRESH_TOKEN_ROTATE` | TENANT | McpAccessToken | `{ clientId }` | — |
+| `MCP_REFRESH_TOKEN_REPLAY` | TENANT | McpAccessToken | `{ clientId, familyId }` | — (security event) |
+
+**Notes:**
+- `MCP_CLIENT_DCR_REGISTER` is a system event (no user session at registration time).
+- `MCP_REFRESH_TOKEN_REPLAY` is a security event indicating potential token theft.
 
 ---
 

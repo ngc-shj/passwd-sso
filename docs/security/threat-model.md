@@ -105,6 +105,8 @@ TB6: Client <-> WebAuthn Authenticator
 | D2: Expensive KDF computation exhausts client | Client | Argon2id parameters tuned for target hardware; fallback to PBKDF2 on resource-constrained devices | User on very low-end device gets PBKDF2 (lower security) |
 | D3: Large attachment upload exhausts storage | TB1 | File size limits enforced server-side; per-user storage quotas | Quota enforcement depends on billing/admin configuration |
 | D4: API abuse via extension token | TB5 | Token scope limits operations; rate limiting applies equally | Token holder can make rapid requests within scope |
+| D5: IPv6 subnet rotation bypasses rate limiting | All IP-based rate limits | Rate limit keys use /64 prefix for IPv6 (treats entire subnet as one entity) | Attacker with /48 or larger allocation |
+| D6: DCR endpoint abuse (mass registration) | /api/mcp/register | IP rate limit (20/hr, IPv6 /64), global cap (100 unclaimed), 24h auto-expiry | Distributed registration from many IPs |
 
 ### 3.6 Elevation of Privilege
 

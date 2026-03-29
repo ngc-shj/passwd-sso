@@ -116,6 +116,38 @@ SA (sa_ token)                    Admin (browser session)
 
 ## MCP Gateway
 
+### Native OAuth Flow (Dynamic Client Registration)
+
+Claude Code and Claude Desktop connect with just a URL configuration:
+
+```json
+{ "mcpServers": { "passwd-sso": { "url": "https://sso.example.com/api/mcp" } } }
+```
+
+#### Flow
+
+1. Client discovers `/.well-known/oauth-authorization-server` → gets `registration_endpoint`
+2. Client POSTs to `/api/mcp/register` (RFC 7591) → receives `client_id` + `client_secret`
+3. Client opens browser to `/api/mcp/authorize` with PKCE params
+4. User sees consent screen at `/{locale}/mcp/authorize`, clicks Allow
+5. Client receives authorization code, exchanges for `access_token` + `refresh_token`
+6. Client uses `access_token` for MCP requests, `refresh_token` for renewal
+
+#### Refresh Token Rotation
+
+- Each refresh token exchange issues a new access + refresh token pair
+- Tokens are grouped by `familyId` for efficient bulk revocation
+- Replay detection: if a rotated refresh token is reused, the entire family is revoked
+- Refresh tokens expire after 7 days; access tokens after 1 hour
+
+#### DCR Client Lifecycle
+
+- DCR-registered clients start with `tenantId = null` (unclaimed)
+- At consent time, the client is "claimed" — bound to the user's tenant
+- Unclaimed clients expire after 24 hours (auto-cleanup)
+- Rate limited: 20 registrations per IP per hour (IPv6 uses /64 prefix)
+- Global cap: 100 unclaimed clients system-wide
+
 ### Transport
 
 MCP Server implemented as Next.js API route at `/api/mcp`:

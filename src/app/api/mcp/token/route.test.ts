@@ -3,16 +3,22 @@ import { createRequest, parseResponse } from "../../../../__tests__/helpers/requ
 
 const {
   mockExchangeCodeForToken,
+  mockCreateRefreshToken,
+  mockExchangeRefreshToken,
   mockHashToken,
   mockRateLimiterCheck,
 } = vi.hoisted(() => ({
   mockExchangeCodeForToken: vi.fn(),
+  mockCreateRefreshToken: vi.fn().mockResolvedValue({ refreshToken: "mcp_rt_refreshtoken", expiresAt: new Date() }),
+  mockExchangeRefreshToken: vi.fn(),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
   mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
 vi.mock("@/lib/mcp/oauth-server", () => ({
   exchangeCodeForToken: mockExchangeCodeForToken,
+  createRefreshToken: mockCreateRefreshToken,
+  exchangeRefreshToken: mockExchangeRefreshToken,
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
@@ -43,6 +49,11 @@ describe("POST /api/mcp/token", () => {
         tokenType: "Bearer",
         expiresIn: 3600,
         scope: "credentials:read",
+        tokenId: "token-id-123",
+        clientDbId: "client-uuid-123",
+        tenantId: "tenant-uuid-123",
+        userId: "user-uuid-123",
+        serviceAccountId: null,
       },
     });
 
@@ -57,6 +68,7 @@ describe("POST /api/mcp/token", () => {
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBe(3600);
     expect(json.scope).toBe("credentials:read");
+    expect(json.refresh_token).toBe("mcp_rt_refreshtoken");
     expect(mockHashToken).toHaveBeenCalledWith("secret-value");
     expect(mockExchangeCodeForToken).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -65,6 +77,13 @@ describe("POST /api/mcp/token", () => {
         clientSecretHash: "hashed:secret-value",
         redirectUri: "https://example.com/callback",
         codeVerifier: "my-code-verifier",
+      }),
+    );
+    expect(mockCreateRefreshToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessTokenId: "token-id-123",
+        clientId: "client-uuid-123",
+        tenantId: "tenant-uuid-123",
       }),
     );
   });

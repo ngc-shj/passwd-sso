@@ -105,6 +105,9 @@ vi.mock("@/lib/prisma", () => ({
       create: mockMcpAccessTokenCreate,
       findUnique: mockMcpAccessTokenFindUnique,
     },
+    mcpRefreshToken: {
+      create: vi.fn().mockResolvedValue({}),
+    },
     delegationSession: {
       findFirst: vi.fn().mockResolvedValue(null),
     },
@@ -816,6 +819,6 @@ describe("Scenario 7: OAuth Discovery endpoint", () => {
     const { json } = await parseResponse(res);
 
     expect(json.response_types_supported).toEqual(["code"]);
-    expect(json.grant_types_supported).toEqual(["authorization_code"]);
+    expect(json.grant_types_supported).toEqual(["authorization_code", "refresh_token"]);
   });
 });

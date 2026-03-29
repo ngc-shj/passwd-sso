@@ -1,0 +1,290 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createRequest, parseResponse } from "../../../../__tests__/helpers/request-builder";
+
+const {
+  mockPrismaCount,
+  mockPrismaCreate,
+  mockWithBypassRls,
+  mockRateLimiterCheck,
+  mockExtractClientIp,
+  mockRateLimitKeyFromIp,
+  mockLogAudit,
+} = vi.hoisted(() => {
+  const mockCount = vi.fn();
+  const mockCreate = vi.fn();
+  const mockWithBypassRls = vi.fn(async (_p: unknown, fn: () => unknown) => fn());
+  return {
+    mockPrismaCount: mockCount,
+    mockPrismaCreate: mockCreate,
+    mockWithBypassRls,
+    mockRateLimiterCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockExtractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
+    mockRateLimitKeyFromIp: vi.fn((ip: string) => ip),
+    mockLogAudit: vi.fn(),
+  };
+});
+
+vi.mock("@/lib/prisma", () => ({
+  prisma: {
+    mcpClient: {
+      count: mockPrismaCount,
+      create: mockPrismaCreate,
+      deleteMany: vi.fn().mockResolvedValue({}),
+    },
+  },
+}));
+
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: mockWithBypassRls,
+}));
+
+vi.mock("@/lib/rate-limit", () => ({
+  createRateLimiter: () => ({ check: mockRateLimiterCheck }),
+}));
+
+vi.mock("@/lib/ip-access", () => ({
+  extractClientIp: mockExtractClientIp,
+  rateLimitKeyFromIp: mockRateLimitKeyFromIp,
+}));
+
+vi.mock("@/lib/audit", () => ({
+  logAudit: mockLogAudit,
+}));
+
+vi.mock("@/lib/crypto-server", () => ({
+  hashToken: vi.fn((token: string) => `hashed:${token}`),
+}));
+
+import { POST } from "@/app/api/mcp/register/route";
+
+const VALID_BODY = {
+  client_name: "Test MCP Client",
+  redirect_uris: ["https://example.com/callback"],
+};
+
+const MOCK_CREATED_CLIENT = {
+  id: "client-db-uuid",
+  clientId: "mcpc_abcdef1234567890abcdef1234567890",
+  createdAt: new Date("2024-01-01T00:00:00Z"),
+};
+
+describe("POST /api/mcp/register", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockPrismaCount.mockResolvedValue(0);
+    mockPrismaCreate.mockResolvedValue(MOCK_CREATED_CLIENT);
+    // withBypassRls executes the callback inline; first call is count, second is create
+    mockWithBypassRls.mockImplementation(async (_p: unknown, fn: () => unknown) => fn());
+  });
+
+  it("returns 201 with client credentials on valid registration", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(json.client_id).toBe(MOCK_CREATED_CLIENT.clientId);
+    expect(json.client_secret).toBeTruthy();
+    expect(typeof json.client_secret).toBe("string");
+    expect(json.client_name).toBe("Test MCP Client");
+    expect(json.redirect_uris).toEqual(["https://example.com/callback"]);
+    expect(json.grant_types).toEqual(["authorization_code"]);
+    expect(json.response_types).toEqual(["code"]);
+    expect(json.token_endpoint_auth_method).toBe("client_secret_post");
+    expect(json.client_id_issued_at).toBe(
+      Math.floor(MOCK_CREATED_CLIENT.createdAt.getTime() / 1000),
+    );
+    expect(json.client_secret_expires_at).toBe(0);
+  });
+
+  it("returns 400 with invalid_client_metadata when client_name is missing", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: { redirect_uris: ["https://example.com/callback"] },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("returns 400 when redirect_uris is empty array", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: { client_name: "Test", redirect_uris: [] },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("accepts https:// redirect URIs", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["https://app.example.com/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+  });
+
+  it("accepts http://127.0.0.1:<port>/ loopback redirect URIs (RFC 8252 §8.3)", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://127.0.0.1:3000/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+  });
+
+  it("rejects http://localhost redirect URIs", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://localhost:3000/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("rejects http://127.0.0.1/ without port", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://127.0.0.1/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("rejects plain http:// (non-loopback) redirect URIs", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://example.com/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("returns 400 when grant_types is provided without authorization_code", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        ...VALID_BODY,
+        grant_types: ["client_credentials"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("returns 400 when response_types is provided without code", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        ...VALID_BODY,
+        response_types: ["token"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
+  it("returns 429 when rate limit is exceeded", async () => {
+    mockRateLimiterCheck.mockResolvedValue({ allowed: false, retryAfterMs: 60000 });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(429);
+    expect(json.error).toBe("rate_limit_exceeded");
+  });
+
+  it("returns 503 when MAX_UNCLAIMED_DCR_CLIENTS cap is reached", async () => {
+    // withBypassRls runs the callback which calls count then conditionally create
+    // Simulate cap exceeded by making count return 100 (MAX_UNCLAIMED_DCR_CLIENTS)
+    mockWithBypassRls.mockImplementationOnce(async (_p: unknown, fn: () => unknown) => {
+      // Override count to return cap
+      const { prisma } = await import("@/lib/prisma");
+      const originalCount = (prisma.mcpClient as unknown as { count: typeof mockPrismaCount }).count;
+      mockPrismaCount.mockResolvedValueOnce(100);
+      try {
+        return await fn();
+      } finally {
+        (prisma.mcpClient as unknown as { count: typeof mockPrismaCount }).count = originalCount;
+      }
+    });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(503);
+    expect(json.error).toBe("temporarily_unavailable");
+  });
+
+  it("returns 400 when request body is invalid JSON", async () => {
+    const req = new (await import("next/server")).NextRequest(
+      "http://localhost/api/mcp/register",
+      {
+        method: "POST",
+        body: "not-json",
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_request");
+  });
+
+  it("calls logAudit after successful registration", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    await POST(req);
+
+    expect(mockLogAudit).toHaveBeenCalledOnce();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorType: "SYSTEM",
+        targetId: MOCK_CREATED_CLIENT.id,
+        metadata: expect.objectContaining({ client_name: "Test MCP Client" }),
+      }),
+    );
+  });
+});

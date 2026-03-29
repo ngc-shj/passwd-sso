@@ -1,0 +1,7 @@
+{
+  "title": "Authorize Application",
+  "description": "wants to access your vault",
+  "requestedScopes": "Requested permissions",
+  "allow": "Allow",
+  "deny": "Deny"
+}

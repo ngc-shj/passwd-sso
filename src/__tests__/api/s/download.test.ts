@@ -33,6 +33,7 @@ vi.mock("@/lib/share-access-token", () => ({
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: () => "1.2.3.4",
+  rateLimitKeyFromIp: (ip: string) => ip,
 }));
 
 import { GET } from "@/app/s/[token]/download/route";

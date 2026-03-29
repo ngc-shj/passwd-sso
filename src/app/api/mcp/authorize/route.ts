@@ -1,9 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
-import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
-import { MCP_SCOPES } from "@/lib/constants/mcp";
+import { detectBestLocaleFromAcceptLanguage } from "@/i18n/locale-utils";
 
 // GET /api/mcp/authorize?client_id=...&redirect_uri=...&response_type=code&scope=...&code_challenge=...&code_challenge_method=S256&state=...
 export async function GET(req: NextRequest) {
@@ -19,69 +16,27 @@ export async function GET(req: NextRequest) {
   const clientId = sp.get("client_id");
   const redirectUri = sp.get("redirect_uri");
   const responseType = sp.get("response_type");
-  const scope = sp.get("scope") ?? "";
   const codeChallenge = sp.get("code_challenge");
   const codeChallengeMethod = sp.get("code_challenge_method") ?? "S256";
-  const state = sp.get("state");
 
-  // Validate required params
+  // Validate required params before redirecting to consent page
   if (!clientId || !redirectUri || responseType !== "code" || !codeChallenge) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   if (codeChallengeMethod !== "S256") {
-    return NextResponse.json({ error: "invalid_request", error_description: "Only S256 code_challenge_method is supported" }, { status: 400 });
+    return NextResponse.json(
+      { error: "invalid_request", error_description: "Only S256 code_challenge_method is supported" },
+      { status: 400 },
+    );
   }
 
-  // Look up client
-  const client = await withBypassRls(prisma, async () =>
-    prisma.mcpClient.findFirst({
-      where: { clientId, isActive: true },
-    }),
-  );
-
-  if (!client) {
-    return NextResponse.json({ error: "invalid_client" }, { status: 400 });
-  }
-
-  // Validate redirect_uri
-  if (!client.redirectUris.includes(redirectUri)) {
-    return NextResponse.json({ error: "invalid_request", error_description: "redirect_uri not registered" }, { status: 400 });
-  }
-
-  // Verify client belongs to user's tenant
-  const userRecord = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({ where: { id: session.user.id }, select: { tenantId: true } }),
-  );
-
-  const userTenantId = userRecord?.tenantId;
-  if (!userTenantId || client.tenantId !== userTenantId) {
-    return NextResponse.json({ error: "access_denied" }, { status: 403 });
-  }
-
-  // Validate requested scopes against allowed
-  const allowedScopeSet = new Set(client.allowedScopes.split(",").map((s) => s.trim()).filter(Boolean));
-  const requestedScopes = scope.split(" ").filter(Boolean);
-  const grantedScopes = requestedScopes.filter((s) => allowedScopeSet.has(s) && (MCP_SCOPES as string[]).includes(s));
-
-  // TODO: Add user consent screen (OAuth 2.1 requires explicit consent for authorization).
-  // Currently auto-approves for same-tenant MCP clients. A consent UI page should be
-  // implemented when the frontend dashboard for MCP is built.
-
-  // Issue authorization code
-  const { code } = await createAuthorizationCode({
-    clientId: client.id,
-    tenantId: client.tenantId,
-    userId: session.user.id,
-    redirectUri,
-    scope: grantedScopes.join(","),
-    codeChallenge,
-    codeChallengeMethod,
+  // Detect locale from Accept-Language header and redirect to consent UI
+  const locale = detectBestLocaleFromAcceptLanguage(req.headers.get("accept-language"));
+  const consentUrl = new URL(`/${locale}/mcp/authorize`, req.url);
+  // Forward all original OAuth params to the consent page
+  sp.forEach((value, key) => {
+    consentUrl.searchParams.set(key, value);
   });
 
-  // Redirect to client with code
-  const redirectUrl = new URL(redirectUri);
-  redirectUrl.searchParams.set("code", code);
-  if (state) redirectUrl.searchParams.set("state", state);
-
-  return NextResponse.redirect(redirectUrl);
+  return NextResponse.redirect(consentUrl);
 }

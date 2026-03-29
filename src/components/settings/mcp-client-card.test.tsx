@@ -212,6 +212,7 @@ const sampleClients = [
     redirectUris: ["https://agent.example.com/callback"],
     allowedScopes: "credentials:read,credentials:list",
     isActive: true,
+    isDcr: false,
     createdAt: "2025-01-01T00:00:00Z",
   },
   {
@@ -221,6 +222,7 @@ const sampleClients = [
     redirectUris: ["https://other.example.com/callback"],
     allowedScopes: "vault:status",
     isActive: false,
+    isDcr: false,
     createdAt: "2025-01-02T00:00:00Z",
   },
 ];
@@ -303,8 +305,16 @@ describe("McpClientCard", () => {
       expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
     });
 
+    // Active client is visible immediately
     expect(screen.getByText("mcpc_abc123")).toBeInTheDocument();
-    expect(screen.getByText("Another Agent")).toBeInTheDocument();
+
+    // Inactive client is hidden behind the collapsible trigger; expand it first
+    const inactiveTrigger = screen.getByText(/mcpInactive/);
+    fireEvent.click(inactiveTrigger);
+
+    await waitFor(() => {
+      expect(screen.getByText("Another Agent")).toBeInTheDocument();
+    });
     expect(screen.getByText("mcpc_def456")).toBeInTheDocument();
 
     // Scope badges

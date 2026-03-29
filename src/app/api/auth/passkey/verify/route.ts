@@ -6,7 +6,7 @@ import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
-import { extractClientIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
@@ -33,7 +33,7 @@ async function handlePOST(req: NextRequest) {
 
   // Rate limit by IP
   const ip = extractClientIp(req) ?? "unknown";
-  const rl = await rateLimiter.check(`rl:webauthn_signin_verify:${ip}`);
+  const rl = await rateLimiter.check(`rl:webauthn_signin_verify:${rateLimitKeyFromIp(ip)}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

@@ -1,9 +1,15 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { hashToken } from "@/lib/crypto-server";
-import { exchangeCodeForToken } from "@/lib/mcp/oauth-server";
+import {
+  createRefreshToken,
+  exchangeCodeForToken,
+  exchangeRefreshToken,
+} from "@/lib/mcp/oauth-server";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
+const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 export async function POST(req: NextRequest) {
   let body: Record<string, string>;
@@ -20,42 +26,105 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  const { grant_type, code, redirect_uri, client_id, client_secret, code_verifier } = body;
+  const grantType = body.grant_type;
 
-  if (grant_type !== "authorization_code") {
+  if (grantType === "authorization_code") {
+    const { code, redirect_uri, client_id, client_secret, code_verifier } = body;
+
+    if (!code || !redirect_uri || !client_id || !client_secret || !code_verifier) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+
+    const rl = await tokenRateLimiter.check(`mcp:token:${client_id}`);
+    if (!rl.allowed) {
+      const retryAfter = Math.ceil((rl.retryAfterMs ?? 60_000) / 1000);
+      return NextResponse.json(
+        { error: "slow_down" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+
+    const clientSecretHash = hashToken(client_secret);
+
+    const result = await exchangeCodeForToken({
+      code,
+      clientId: client_id,
+      clientSecretHash,
+      redirectUri: redirect_uri,
+      codeVerifier: code_verifier,
+    });
+
+    if (!result.ok) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
+    const { refreshToken } = await createRefreshToken({
+      accessTokenId: result.data.tokenId,
+      clientId: result.data.clientDbId,
+      tenantId: result.data.tenantId,
+      userId: result.data.userId,
+      serviceAccountId: result.data.serviceAccountId,
+      scope: result.data.scope,
+    });
+
+    return NextResponse.json({
+      access_token: result.data.accessToken,
+      token_type: result.data.tokenType,
+      expires_in: result.data.expiresIn,
+      refresh_token: refreshToken,
+      scope: result.data.scope.replace(/,/g, " "),
+    });
+  } else if (grantType === "refresh_token") {
+    const refreshTokenValue = body.refresh_token;
+    const clientIdValue = body.client_id;
+    const clientSecretValue = body.client_secret;
+
+    if (!refreshTokenValue || !clientIdValue || !clientSecretValue) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+
+    const ip = extractClientIp(req);
+    if (ip) {
+      const ipRl = await ipRateLimiter.check(`rl:mcp:token:ip:${rateLimitKeyFromIp(ip)}`);
+      if (!ipRl.allowed) {
+        const retryAfter = Math.ceil((ipRl.retryAfterMs ?? 60_000) / 1000);
+        return NextResponse.json(
+          { error: "slow_down" },
+          { status: 429, headers: { "Retry-After": String(retryAfter) } },
+        );
+      }
+    }
+
+    const clientRl = await tokenRateLimiter.check(`mcp:token:${clientIdValue}`);
+    if (!clientRl.allowed) {
+      const retryAfter = Math.ceil((clientRl.retryAfterMs ?? 60_000) / 1000);
+      return NextResponse.json(
+        { error: "slow_down" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
+
+    const result = await exchangeRefreshToken({
+      refreshToken: refreshTokenValue,
+      clientId: clientIdValue,
+      clientSecretHash: hashToken(clientSecretValue),
+    });
+
+    if (!result.ok) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.error === "invalid_client" ? 401 : 400 },
+      );
+    }
+
+    return NextResponse.json({
+      access_token: result.accessToken,
+      token_type: "Bearer",
+      expires_in: result.expiresIn,
+      refresh_token: result.refreshToken,
+      scope: result.scope.replace(/,/g, " "),
+    });
+  } else {
     return NextResponse.json({ error: "unsupported_grant_type" }, { status: 400 });
   }
-  if (!code || !redirect_uri || !client_id || !client_secret || !code_verifier) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
-
-  const rl = await tokenRateLimiter.check(`mcp:token:${client_id}`);
-  if (!rl.allowed) {
-    const retryAfter = Math.ceil((rl.retryAfterMs ?? 60_000) / 1000);
-    return NextResponse.json(
-      { error: "slow_down" },
-      { status: 429, headers: { "Retry-After": String(retryAfter) } },
-    );
-  }
-
-  const clientSecretHash = hashToken(client_secret);
-
-  const result = await exchangeCodeForToken({
-    code,
-    clientId: client_id,
-    clientSecretHash,
-    redirectUri: redirect_uri,
-    codeVerifier: code_verifier,
-  });
-
-  if (!result.ok) {
-    return NextResponse.json({ error: result.error }, { status: 400 });
-  }
-
-  return NextResponse.json({
-    access_token: result.data.accessToken,
-    token_type: result.data.tokenType,
-    expires_in: result.data.expiresIn,
-    scope: result.data.scope,
-  });
 }

@@ -224,7 +224,7 @@ describe("exchangeCodeForToken", () => {
         id: "code-id",
         usedAt: null,
         expiresAt: new Date(Date.now() + 60000),
-        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true },
+        mcpClient: { clientId: "mcpc_test", clientSecretHash: "hashed:secret", isActive: true, tenantId: "tenant-uuid" },
         clientId: "client-uuid",
         tenantId: "tenant-uuid",
         userId: "user-uuid",
