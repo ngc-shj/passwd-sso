@@ -96,7 +96,8 @@ export async function POST(req: NextRequest) {
     const clientIdValue = body.client_id;
     const clientSecretValue = body.client_secret;
 
-    if (!refreshTokenValue || !clientIdValue || !clientSecretValue) {
+    // client_secret is optional for public clients (token_endpoint_auth_method: "none")
+    if (!refreshTokenValue || !clientIdValue) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
 
@@ -112,7 +113,7 @@ export async function POST(req: NextRequest) {
     const result = await exchangeRefreshToken({
       refreshToken: refreshTokenValue,
       clientId: clientIdValue,
-      clientSecretHash: hashToken(clientSecretValue),
+      clientSecretHash: clientSecretValue ? hashToken(clientSecretValue) : "",
     });
 
     if (!result.ok) {

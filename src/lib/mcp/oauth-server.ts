@@ -147,10 +147,11 @@ export async function exchangeCodeForToken(
       if (authCode.usedAt) return { error: "invalid_grant" as const };
       if (authCode.expiresAt < new Date()) return { error: "invalid_grant" as const };
 
-      // Verify client identity
+      // Verify client identity (public clients have empty clientSecretHash)
       if (authCode.mcpClient.clientId !== params.clientId)
         return { error: "invalid_client" as const };
-      if (authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
+      const isPublicClient = authCode.mcpClient.clientSecretHash === "";
+      if (!isPublicClient && authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
         return { error: "invalid_client" as const };
       if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
 
@@ -322,10 +323,11 @@ export async function exchangeRefreshToken(params: {
         return { ok: false as const, error: "invalid_grant" as const, reason };
       }
 
-      // Validate client identity
+      // Validate client identity (public clients have empty clientSecretHash)
+      const isPublicClient = rt.mcpClient.clientSecretHash === "";
       if (
         rt.mcpClient.clientId !== params.clientId ||
-        rt.mcpClient.clientSecretHash !== params.clientSecretHash ||
+        (!isPublicClient && rt.mcpClient.clientSecretHash !== params.clientSecretHash) ||
         !rt.mcpClient.isActive
       ) {
         return { ok: false as const, error: "invalid_client" as const };

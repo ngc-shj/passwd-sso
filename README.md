@@ -187,7 +187,8 @@ Edit `.env.local` — key variables:
 | `NEXT_PUBLIC_APP_NAME` | (Optional) Display name shown in the UI |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy (e.g., `/passwd-sso`). Set before build |
 | `APP_URL` | (Optional) External URL when behind reverse proxy/CDN (origin only) |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (app role, e.g. `passwd_app`) |
+| `MIGRATION_DATABASE_URL` | PostgreSQL connection for migrations (superuser role, e.g. `passwd_user`). Required for `npm run db:migrate` |
 | `AUTH_URL` | Application origin (e.g., `http://localhost:3000`) |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |

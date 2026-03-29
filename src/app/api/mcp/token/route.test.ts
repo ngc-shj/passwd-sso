@@ -249,4 +249,61 @@ describe("POST /api/mcp/token", () => {
     expect(status).toBe(429);
     expect(json.error).toBe("slow_down");
   });
+
+  // T-13: replay detection audit log
+  it("refresh_token: logs MCP_REFRESH_TOKEN_REPLAY audit on replay detection", async () => {
+    mockExchangeRefreshToken.mockResolvedValue({
+      ok: false,
+      error: "invalid_grant",
+      reason: "replay",
+      tenantId: "tenant-replay",
+      familyId: "family-001",
+    });
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_REFRESH_BODY,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_grant");
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "MCP_REFRESH_TOKEN_REPLAY",
+        tenantId: "tenant-replay",
+        metadata: expect.objectContaining({ familyId: "family-001" }),
+      }),
+    );
+  });
+
+  // T-15: public client token exchange without client_secret
+  it("authorization_code: succeeds without client_secret for public clients", async () => {
+    mockExchangeCodeForToken.mockResolvedValue({
+      ok: true,
+      data: {
+        accessToken: "mcp_public_access_token",
+        tokenType: "Bearer",
+        expiresIn: 3600,
+        scope: "vault:status",
+        tokenId: "token-id-public",
+        clientDbId: "client-uuid-public",
+        tenantId: "tenant-uuid-public",
+        userId: "user-uuid-public",
+        serviceAccountId: null,
+      },
+    });
+
+    // Public client: no client_secret in request
+    const { client_secret: _removed, ...publicBody } = VALID_BODY;
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: publicBody,
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.access_token).toBeDefined();
+    expect(json.refresh_token).toBeDefined();
+  });
 });

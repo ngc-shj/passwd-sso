@@ -282,6 +282,24 @@ describe("POST /api/mcp/register", () => {
     expect(json.error).toBe("invalid_request");
   });
 
+  // T-14: public client registration without client_secret
+  it("registers public client without client_secret when token_endpoint_auth_method is none", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        ...VALID_BODY,
+        token_endpoint_auth_method: "none",
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(json.client_id).toBeDefined();
+    expect(json.client_secret).toBeUndefined();
+    expect(json.client_secret_expires_at).toBeUndefined();
+    expect(json.token_endpoint_auth_method).toBe("none");
+  });
+
   it("calls logAudit after successful registration", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: VALID_BODY,
