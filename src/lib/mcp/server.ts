@@ -21,9 +21,9 @@ import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
 // ─── Tool → required scope mapping ───────────────────────────
 
 const TOOL_SCOPE_MAP: Record<string, McpScope> = {
-  list_credentials: MCP_SCOPE.CREDENTIALS_LIST,
-  get_credential: MCP_SCOPE.CREDENTIALS_READ,
-  search_credentials: MCP_SCOPE.CREDENTIALS_LIST,
+  list_credentials: MCP_SCOPE.CREDENTIALS_DECRYPT,
+  get_credential: MCP_SCOPE.CREDENTIALS_DECRYPT,
+  search_credentials: MCP_SCOPE.CREDENTIALS_DECRYPT,
 };
 
 // ─── Rate limiting ────────────────────────────────────────────
@@ -84,6 +84,7 @@ async function handleToolsCall(
   id: string | number | null,
   params: unknown,
   token: McpTokenData,
+  ip?: string | null,
 ): Promise<JsonRpcResponse> {
   const p = params as { name?: string; arguments?: unknown };
   if (!p?.name) return err(id, -32602, "Missing tool name");
@@ -98,13 +99,13 @@ async function handleToolsCall(
 
   switch (p.name) {
     case "list_credentials":
-      toolResult = await toolListCredentials(token, p.arguments);
+      toolResult = await toolListCredentials(token, p.arguments, ip);
       break;
     case "get_credential":
-      toolResult = await toolGetCredential(token, p.arguments);
+      toolResult = await toolGetCredential(token, p.arguments, ip);
       break;
     case "search_credentials":
-      toolResult = await toolSearchCredentials(token, p.arguments);
+      toolResult = await toolSearchCredentials(token, p.arguments, ip);
       break;
     default:
       return err(id, -32601, `Unknown tool: ${p.name}`);
@@ -129,6 +130,7 @@ async function handleToolsCall(
 export async function handleMcpRequest(
   body: unknown,
   token: McpTokenData,
+  ip?: string | null,
 ): Promise<JsonRpcResponse> {
   // Rate limit by client_id
   const rlResult = await mcpRateLimiter.check(`mcp:${token.clientId}`);
@@ -154,7 +156,7 @@ export async function handleMcpRequest(
     case "tools/list":
       return handleToolsList(id);
     case "tools/call":
-      return handleToolsCall(id, req.params, token);
+      return handleToolsCall(id, req.params, token, ip);
     default:
       return err(id, -32601, `Method not found: ${req.method}`);
   }

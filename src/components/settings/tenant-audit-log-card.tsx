@@ -42,6 +42,7 @@ import { formatDateTime } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { BreakGlassDialog } from "@/components/breakglass/breakglass-dialog";
 import { BreakGlassGrantList } from "@/components/breakglass/breakglass-grant-list";
+import { DelegationAuditDetail } from "@/components/audit/delegation-audit-detail";
 
 interface AuditLogItem {
   id: string;
@@ -106,6 +107,10 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.TEAM]: "groupTeam",
   [AUDIT_ACTION_GROUP.SHARE]: "groupShare",
   [AUDIT_ACTION_GROUP.WEBHOOK]: "groupWebhook",
+  [AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]: "groupServiceAccount",
+  [AUDIT_ACTION_GROUP.MCP_CLIENT]: "groupMcpClient",
+  [AUDIT_ACTION_GROUP.DELEGATION]: "groupDelegation",
+  [AUDIT_ACTION_GROUP.TENANT_WEBHOOK]: "groupTenantWebhook",
 };
 
 export function TenantAuditLogCard() {
@@ -498,7 +503,15 @@ export function TenantAuditLogCard() {
                       <Badge variant={log.scope === "TEAM" ? "secondary" : "outline"} className="text-[10px] px-1.5 py-0 h-4 shrink-0">
                         {log.scope === "TEAM" ? t("scopeTeam") : t("scopeTenant")}
                       </Badge>
+                      {log.actorType && log.actorType !== "HUMAN" && (
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+                          {log.actorType === "SERVICE_ACCOUNT" ? t("actorTypeSa")
+                            : log.actorType === "MCP_AGENT" ? t("actorTypeMcp")
+                            : log.actorType}
+                        </Badge>
+                      )}
                     </div>
+                    <DelegationAuditDetail action={log.action} metadata={log.metadata} />
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                       {log.user && (
                         <span className="truncate">{formatUser(log.user)}</span>

@@ -35,6 +35,7 @@ test.describe("Settings - API Keys", () => {
       await lockPage.unlockAndWait(vaultReady.passphrase!);
       await expect(settingsPage.developerTab).toBeVisible({ timeout: 10_000 });
       await settingsPage.switchTab("developer");
+      await settingsPage.switchDeveloperSubTab("api");
     });
 
     await test.step("API key manager section is visible", async () => {

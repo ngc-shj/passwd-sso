@@ -66,8 +66,8 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
 - OAuth 2.1 Authorization Code + PKCE for MCP client authentication
 - Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
-- E2E encryption preserved: MCP tools return encrypted data only (Phase 3)
-- Delegated Decryption planned for Phase 5 (browser-side decrypt → MCP relay)
+- Delegated Decryption (Phase 5): browser decrypts vault entries, relays plaintext to MCP session via envelope-encrypted Redis cache with short TTLs
+- Delegation session management: `POST/GET/DELETE /api/vault/delegation`, per-session revoke via `DELETE /api/vault/delegation/[id]`
 
 ### E2E Encryption Architecture
 
@@ -108,6 +108,8 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/recovery-key/generate` | POST | Save recovery key encrypted data |
 | `/api/vault/recovery-key/recover` | POST | Recover vault with recovery key (2-step: verify/reset) |
 | `/api/vault/reset` | POST | Full vault deletion (last resort) |
+| `/api/vault/delegation` | GET, POST, DELETE | Delegation session CRUD (list/create/revoke-all) |
+| `/api/vault/delegation/[id]` | DELETE | Revoke single delegation session |
 
 #### Passwords & Entries
 

@@ -98,7 +98,8 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **OAuth 2.1 + PKCE** — Authorization Code flow for MCP client authentication
 - **Just-in-Time Access** — SA self-service scope requests with admin approval workflow
 - **Cross-Actor Audit** — All actions tracked with `actorType` (Human/Service Account/MCP Agent) across personal, team, and tenant logs
-- **Zero-Knowledge Preserved** — MCP Gateway returns encrypted data only; server never sees plaintext (Delegated Decryption planned)
+- **Delegated Decryption** — Human unlocks vault in browser, selectively delegates plaintext entries to MCP sessions with per-entry consent and short TTLs
+- **Zero-Knowledge Preserved** — Server never sees plaintext; MCP agents access delegated entries only through envelope-encrypted Redis cache
 
 ### UI & Localization
 

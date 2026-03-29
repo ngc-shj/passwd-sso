@@ -19,7 +19,15 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   LogIn,
   LogOut,
@@ -60,11 +68,13 @@ import { formatDateTime } from "@/lib/format-datetime";
 import { normalizeAuditActionKey } from "@/lib/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatUserName } from "@/lib/format-user";
+import { useDelegationAuditLabel } from "@/components/audit/delegation-audit-detail";
 import { downloadBlob } from "@/lib/download-blob";
 
 interface AuditLogItem {
   id: string;
   action: string;
+  actorType?: string;
   targetType: string | null;
   targetId: string | null;
   metadata: Record<string, unknown> | null;
@@ -142,6 +152,11 @@ const ACTION_GROUPS = [
     value: AUDIT_ACTION_GROUP.EMERGENCY,
     actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.EMERGENCY],
   },
+  ...(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.DELEGATION] ? [{
+    label: "groupDelegation" as const,
+    value: AUDIT_ACTION_GROUP.DELEGATION,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.DELEGATION],
+  }] : []),
 ] as const;
 
 export default function AuditLogsPage() {
@@ -161,7 +176,9 @@ export default function AuditLogsPage() {
   const [dateTo, setDateTo] = useState("");
   const [downloading, setDownloading] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
+  const [actorTypeFilter, setActorTypeFilter] = useState<string>("ALL");
   const td = useTranslations("AuditDownload");
+  const getDelegationLabel = useDelegationAuditLabel();
 
   const resolveEntryNames = useCallback(
     async (overviews: EntryOverviewMap) => {
@@ -196,13 +213,14 @@ export default function AuditLogsPage() {
         endOfDay.setHours(23, 59, 59, 999);
         params.set("to", endOfDay.toISOString());
       }
+      if (actorTypeFilter !== "ALL") params.set("actorType", actorTypeFilter);
       if (cursor) params.set("cursor", cursor);
 
       const res = await fetchApi(`${API_PATH.AUDIT_LOGS}?${params.toString()}`);
       if (!res.ok) return null;
       return res.json();
     },
-    [selectedActions, dateFrom, dateTo]
+    [selectedActions, dateFrom, dateTo, actorTypeFilter]
   );
 
   useEffect(() => {
@@ -436,6 +454,10 @@ export default function AuditLogsPage() {
       return t("lockoutMeta", { attempts, lockMinutes });
     }
 
+    // Delegation: show tool-specific detail
+    const delegationLabel = getDelegationLabel(log.action, meta);
+    if (delegationLabel) return delegationLabel;
+
     // Session revoke all: show revoked count
     if (log.action === AUDIT_ACTION.SESSION_REVOKE_ALL && typeof meta?.revokedCount === "number") {
       return t("revokedSessionsMeta", { revokedCount: meta.revokedCount });
@@ -553,6 +575,19 @@ export default function AuditLogsPage() {
       <Card className="rounded-xl border bg-card/80 p-4">
         <div className="space-y-3">
           <div className="flex flex-wrap gap-3 items-end">
+            <div className="space-y-1">
+              <Label className="text-xs">{t("actorTypeLabel")}</Label>
+              <Select value={actorTypeFilter} onValueChange={setActorTypeFilter}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                  <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                  <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <div className="space-y-1">
               <Label className="text-xs">{t("dateFrom")}</Label>
               <Input
@@ -677,7 +712,16 @@ export default function AuditLogsPage() {
                     {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{getActionLabel(log)}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-sm font-medium">{getActionLabel(log)}</p>
+                      {log.actorType && log.actorType !== "HUMAN" && (
+                        <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 shrink-0">
+                          {log.actorType === "SERVICE_ACCOUNT" ? t("actorTypeSa")
+                            : log.actorType === "MCP_AGENT" ? t("actorTypeMcp")
+                            : log.actorType}
+                        </Badge>
+                      )}
+                    </div>
                     {targetLabel && (
                       <p className="text-xs text-muted-foreground truncate">
                         {targetLabel}

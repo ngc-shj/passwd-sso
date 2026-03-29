@@ -191,5 +191,15 @@
   "actorTypeAll": "All actors",
   "actorTypeHuman": "Human",
   "actorTypeSa": "Service Account",
-  "actorTypeMcp": "MCP Agent"
+  "actorTypeMcp": "MCP Agent",
+  "DELEGATION_CREATE": "Delegation session created",
+  "DELEGATION_REVOKE": "Delegation session revoked",
+  "DELEGATION_EXPIRE": "Delegation session expired",
+  "DELEGATION_READ": "Delegated credential accessed",
+  "groupDelegation": "Delegation",
+  "delegationListMeta": "Listed {entryCount} delegated entries",
+  "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",
+  "delegationGetMeta": "Retrieved delegated credential",
+  "delegationCreateMeta": "Delegated {entryCount} entries",
+  "delegationRevokeMeta": "Revoked {revokedCount, plural, one {# session} other {# sessions}} ({reason})"
 }
