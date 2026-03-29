@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
-import { MCP_SCOPES } from "@/lib/constants/mcp";
+import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { assertOrigin } from "@/lib/csrf";
@@ -34,25 +34,17 @@ export async function POST(req: NextRequest) {
   }
 
   // Validate client (must happen before redirect to prevent open redirect)
-  const client = await withBypassRls(prisma, async () =>
+  const foundClient = await withBypassRls(prisma, async () =>
     prisma.mcpClient.findFirst({ where: { clientId, isActive: true } }),
   );
 
-  if (!client) {
+  if (!foundClient) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
   }
 
   // Validate redirect_uri (must happen before redirect to prevent open redirect)
-  if (!client.redirectUris.includes(redirectUri)) {
+  if (!foundClient.redirectUris.includes(redirectUri)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
-
-  // DCR clients must be claimed before consent
-  if (client.isDcr && !client.tenantId) {
-    return NextResponse.json(
-      { error: "invalid_client", error_description: "DCR client not yet claimed" },
-      { status: 400 },
-    );
   }
 
   // Tenant check
@@ -63,11 +55,11 @@ export async function POST(req: NextRequest) {
     }),
   );
   const userTenantId = userRecord?.tenantId;
-  if (!userTenantId || (client.tenantId && client.tenantId !== userTenantId)) {
+  if (!userTenantId || (foundClient.tenantId && foundClient.tenantId !== userTenantId)) {
     return NextResponse.json({ error: "access_denied" }, { status: 403 });
   }
 
-  // Handle deny action
+  // Handle deny action (before claiming — deny should not bind the client)
   if (action === "deny") {
     const { ip, userAgent } = extractRequestMeta(req);
     logAudit({
@@ -76,7 +68,7 @@ export async function POST(req: NextRequest) {
       userId: session.user.id,
       tenantId: userTenantId,
       targetType: "McpClient",
-      targetId: client.id,
+      targetId: foundClient.id,
       metadata: { clientId },
       ip: ip ?? undefined,
       userAgent: userAgent ?? undefined,
@@ -99,8 +91,79 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // Validate scopes
-  const allowedScopes = client.allowedScopes.split(",").filter(Boolean);
+  // The effective client for authorization — may be replaced by reuse during claiming
+  let effectiveClient = foundClient;
+
+  // DCR claiming: bind unclaimed client to user's tenant on Allow (not on page load)
+  if (foundClient.isDcr && !foundClient.tenantId) {
+    const clientIdDb = foundClient.id;
+    const clientName = foundClient.name;
+
+    const claimResult = await withBypassRls(prisma, async () =>
+      prisma.$transaction(async (tx) => {
+        const tenantClientCount = await tx.mcpClient.count({
+          where: { tenantId: userTenantId },
+        });
+        if (tenantClientCount >= MAX_MCP_CLIENTS_PER_TENANT) {
+          return { error: "tenant_cap" as const, reuse: null };
+        }
+        // If a same-name DCR client already exists in this tenant, reuse it.
+        // Claude Code registers a new client on each auth attempt — without
+        // reuse, deny → retry would always hit a name conflict.
+        const existing = await tx.mcpClient.findFirst({
+          where: { tenantId: userTenantId, name: clientName, isDcr: true },
+        });
+        if (existing) {
+          // Delete the new unclaimed duplicate, reuse the existing one
+          await tx.mcpClient.deleteMany({ where: { id: clientIdDb, tenantId: { equals: null } } });
+          return { error: null as null, reuse: existing };
+        }
+        // Atomic CAS: only claim if still unclaimed
+        const updated = await tx.mcpClient.updateMany({
+          where: { id: clientIdDb, tenantId: { equals: null } },
+          data: { tenantId: userTenantId, createdById: session.user.id, dcrExpiresAt: null },
+        });
+        if (updated.count === 0) {
+          return { error: "already_claimed" as const, reuse: null };
+        }
+        return { error: null as null, reuse: null };
+      }),
+    );
+
+    if (claimResult.error === "tenant_cap") {
+      return NextResponse.json(
+        { error: "invalid_client", error_description: "tenant_cap" },
+        { status: 400 },
+      );
+    }
+    if (claimResult.error === "already_claimed") {
+      const refetched = await withBypassRls(prisma, async () =>
+        prisma.mcpClient.findUnique({ where: { id: clientIdDb } }),
+      );
+      if (!refetched || refetched.tenantId !== userTenantId) {
+        return NextResponse.json({ error: "access_denied" }, { status: 403 });
+      }
+      effectiveClient = refetched;
+    } else if (claimResult.reuse) {
+      effectiveClient = claimResult.reuse;
+    } else {
+      // Freshly claimed
+      const { ip: claimIp } = extractRequestMeta(req);
+      logAudit({
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.MCP_CLIENT_DCR_CLAIM,
+        userId: session.user.id,
+        tenantId: userTenantId,
+        targetType: "McpClient",
+        targetId: clientIdDb,
+        metadata: { clientId: foundClient.clientId },
+        ip: claimIp ?? undefined,
+      });
+    }
+  }
+
+  // Validate scopes (use effectiveClient which may differ from foundClient after reuse)
+  const allowedScopes = effectiveClient.allowedScopes.split(",").filter(Boolean);
   const requestedScopes = scope.split(" ").filter(Boolean);
   const grantedScopes = requestedScopes.filter(
     (s) => allowedScopes.includes(s) && (MCP_SCOPES as readonly string[]).includes(s),
@@ -115,7 +178,7 @@ export async function POST(req: NextRequest) {
 
   // Create authorization code
   const { code } = await createAuthorizationCode({
-    clientId: client.id,
+    clientId: effectiveClient.id,
     tenantId: userTenantId,
     userId: session.user.id,
     redirectUri,
@@ -132,8 +195,8 @@ export async function POST(req: NextRequest) {
     userId: session.user.id,
     tenantId: userTenantId,
     targetType: "McpClient",
-    targetId: client.id,
-    metadata: { clientId: client.clientId, scopes: grantedScopes },
+    targetId: effectiveClient.id,
+    metadata: { clientId: effectiveClient.clientId, scopes: grantedScopes },
     ip: ip ?? undefined,
     userAgent: userAgent ?? undefined,
   });

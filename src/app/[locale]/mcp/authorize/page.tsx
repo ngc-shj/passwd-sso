@@ -2,9 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
-import { logAudit } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { getTranslations } from "next-intl/server";
 import { ConsentForm } from "./consent-form";
 
@@ -39,7 +37,7 @@ export default async function McpConsentPage({
     );
   }
 
-  // Look up client
+  // Look up client (bypass RLS — DCR clients may not have a tenant yet)
   const client = await withBypassRls(prisma, async () =>
     prisma.mcpClient.findFirst({ where: { clientId, isActive: true } }),
   );
@@ -61,98 +59,23 @@ export default async function McpConsentPage({
     );
   }
 
-  // Fetch user's tenant
-  const userRecord = await withBypassRls(prisma, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  const userTenantId = userRecord?.tenantId;
-  if (!userTenantId) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p>{t("errors.noTenant")}</p>
-      </div>
-    );
-  }
-
-  // DCR claiming: bind unclaimed DCR client to user's tenant (atomic CAS)
-  if (client.isDcr && !client.tenantId) {
-    const claimResult = await withBypassRls(prisma, async () =>
-      prisma.$transaction(async (tx) => {
-        // Check tenant client cap
-        const tenantClientCount = await tx.mcpClient.count({
-          where: { tenantId: userTenantId },
-        });
-        if (tenantClientCount >= MAX_MCP_CLIENTS_PER_TENANT) {
-          return { error: "tenant_cap" as const };
-        }
-        // Check name uniqueness in tenant
-        const nameConflict = await tx.mcpClient.findFirst({
-          where: { tenantId: userTenantId, name: client.name, id: { not: client.id } },
-        });
-        if (nameConflict) {
-          return { error: "name_conflict" as const };
-        }
-        // Atomic CAS: only claim if still unclaimed
-        const updated = await tx.mcpClient.updateMany({
-          where: { id: client.id, tenantId: null },
-          data: { tenantId: userTenantId, createdById: session.user.id, dcrExpiresAt: null },
-        });
-        if (updated.count === 0) {
-          return { error: "already_claimed" as const };
-        }
-        return { error: null as null };
+  // Tenant check for non-DCR (admin-created) clients
+  if (client.tenantId) {
+    const userRecord = await withBypassRls(prisma, async () =>
+      prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { tenantId: true },
       }),
     );
-
-    if (claimResult.error === "tenant_cap") {
+    if (client.tenantId !== userRecord?.tenantId) {
       return (
         <div className="flex items-center justify-center min-h-screen">
-          <p className="text-destructive">{t("errors.tenantClientLimit")}</p>
+          <p>{t("errors.tenantMismatch")}</p>
         </div>
       );
     }
-    if (claimResult.error === "name_conflict") {
-      return (
-        <div className="flex items-center justify-center min-h-screen">
-          <p className="text-destructive">{t("errors.nameConflict")}</p>
-        </div>
-      );
-    }
-    if (claimResult.error === "already_claimed") {
-      // Re-fetch client to check tenant
-      const refetched = await withBypassRls(prisma, async () =>
-        prisma.mcpClient.findUnique({ where: { id: client.id } }),
-      );
-      if (!refetched || refetched.tenantId !== userTenantId) {
-        return (
-          <div className="flex items-center justify-center min-h-screen">
-            <p className="text-destructive">{t("errors.alreadyClaimedOtherTenant")}</p>
-          </div>
-        );
-      }
-      // Already claimed by our tenant — proceed (no audit, we didn't claim it)
-    } else {
-      // We actually claimed it — audit
-      logAudit({
-        scope: AUDIT_SCOPE.TENANT,
-        action: AUDIT_ACTION.MCP_CLIENT_DCR_CLAIM,
-        userId: session.user.id,
-        tenantId: userTenantId,
-        targetType: "McpClient",
-        targetId: client.id,
-        metadata: { clientId: client.clientId },
-      });
-    }
-  } else if (client.tenantId !== userTenantId) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p>{t("errors.tenantMismatch")}</p>
-      </div>
-    );
   }
+  // DCR unclaimed clients: no tenant check needed here — claiming happens on Allow
 
   // Calculate granted scopes
   const allowedScopes = client.allowedScopes.split(",").filter(Boolean);

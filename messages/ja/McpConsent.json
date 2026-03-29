@@ -1,13 +1,13 @@
 {
   "title": "アプリケーションの認可",
-  "description": "がボールトへのアクセスを要求しています",
+  "description": "が保管庫へのアクセスを要求しています",
   "requestedScopes": "要求されている権限",
   "allow": "許可",
   "deny": "拒否",
   "scopeDescriptions": {
     "credentials:decrypt": "資格情報の読み取りと復号",
     "team:credentials:read": "チーム資格情報の読み取り",
-    "vault:status": "ボールトのステータス確認"
+    "vault:status": "保管庫のステータス確認"
   },
   "errors": {
     "missingParams": "必須パラメータが不足しています",

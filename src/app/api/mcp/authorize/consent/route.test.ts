@@ -9,6 +9,9 @@ const {
   mockCreateAuthorizationCode,
   mockLogAudit,
   mockExtractRequestMeta,
+  mockMcpClientCount,
+  mockMcpClientUpdateMany,
+  mockMcpClientFindUnique,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
@@ -17,6 +20,9 @@ const {
   mockCreateAuthorizationCode: vi.fn(),
   mockLogAudit: vi.fn(),
   mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
+  mockMcpClientCount: vi.fn().mockResolvedValue(0),
+  mockMcpClientUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
+  mockMcpClientFindUnique: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({
@@ -25,8 +31,24 @@ vi.mock("@/auth", () => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    mcpClient: { findFirst: mockFindFirst },
+    mcpClient: {
+      findFirst: mockFindFirst,
+      findUnique: mockMcpClientFindUnique,
+      count: mockMcpClientCount,
+      updateMany: mockMcpClientUpdateMany,
+      deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
     user: { findUnique: mockFindUnique },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        mcpClient: {
+          count: mockMcpClientCount,
+          findFirst: mockFindFirst,
+          updateMany: mockMcpClientUpdateMany,
+          deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+      }),
+    ),
   },
 }));
 
@@ -311,12 +333,15 @@ describe("POST /api/mcp/authorize/consent", () => {
     );
   });
 
-  it("returns 400 when DCR client has not been claimed (no tenantId)", async () => {
-    mockFindFirst.mockResolvedValue({
-      ...VALID_CLIENT,
-      isDcr: true,
-      tenantId: null,
-    });
+  it("claims DCR client on Allow and issues authorization code", async () => {
+    // Call order for mockFindFirst:
+    // 1. Client lookup (foundClient) → unclaimed DCR client
+    // 2. $transaction: existing same-name check → null (no conflict)
+    mockFindFirst
+      .mockResolvedValueOnce({ ...VALID_CLIENT, isDcr: true, tenantId: null })
+      .mockResolvedValueOnce(null);
+    mockMcpClientCount.mockResolvedValueOnce(0);
+    mockMcpClientUpdateMany.mockResolvedValueOnce({ count: 1 });
 
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
@@ -324,10 +349,9 @@ describe("POST /api/mcp/authorize/consent", () => {
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toBe("invalid_client");
-    expect(json.error_description).toBe("DCR client not yet claimed");
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location") ?? "";
+    expect(location).toContain("code=");
   });
 
   it("redirects with error=access_denied and calls logAudit on deny action", async () => {
