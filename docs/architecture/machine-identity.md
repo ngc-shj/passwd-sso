@@ -124,6 +124,9 @@ Claude Code and Claude Desktop connect with just a URL configuration:
 { "mcpServers": { "passwd-sso": { "url": "https://sso.example.com/api/mcp" } } }
 ```
 
+> **Base path**: If the app is served under a base path (e.g. `NEXT_PUBLIC_BASE_PATH=/passwd-sso`),
+> include it in the URL: `https://sso.example.com/passwd-sso/api/mcp`
+
 #### Flow
 
 1. Client discovers `/.well-known/oauth-authorization-server` → gets `registration_endpoint`

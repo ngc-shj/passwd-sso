@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ShieldCheck, ShieldX, Loader2 } from "lucide-react";
 import { useTranslations, useMessages } from "next-intl";
+import { withBasePath } from "@/lib/url-helpers";
 
 
 interface ConsentFormProps {
@@ -45,7 +46,7 @@ export function ConsentForm({
     setLoading(true);
     const form = document.createElement("form");
     form.method = "POST";
-    form.action = "/api/mcp/authorize/consent";
+    form.action = withBasePath("/api/mcp/authorize/consent");
     const fields: Record<string, string> = {
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -69,7 +70,7 @@ export function ConsentForm({
     setLoading(true);
     const form = document.createElement("form");
     form.method = "POST";
-    form.action = "/api/mcp/authorize/consent";
+    form.action = withBasePath("/api/mcp/authorize/consent");
     const fields = {
       action: "deny",
       client_id: clientId,

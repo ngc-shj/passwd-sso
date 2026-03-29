@@ -1,14 +1,13 @@
-import { type NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
+import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 
-export async function GET(req: NextRequest) {
-  const baseUrl = new URL("/", req.url).origin;
-
+export async function GET() {
   return NextResponse.json({
-    issuer: baseUrl,
-    authorization_endpoint: `${baseUrl}/api/mcp/authorize`,
-    token_endpoint: `${baseUrl}/api/mcp/token`,
-    registration_endpoint: `${baseUrl}/api/mcp/register`,
+    issuer: getAppOrigin() ?? "",
+    authorization_endpoint: serverAppUrl("/api/mcp/authorize"),
+    token_endpoint: serverAppUrl("/api/mcp/token"),
+    registration_endpoint: serverAppUrl("/api/mcp/register"),
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],

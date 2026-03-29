@@ -782,11 +782,7 @@ describe("Scenario 6: MCP Rate Limiting via POST /api/mcp route", () => {
 
 describe("Scenario 7: OAuth Discovery endpoint", () => {
   it("GET /api/mcp/.well-known/oauth-authorization-server returns correct metadata", async () => {
-    const req = createRequest(
-      "GET",
-      "http://localhost/api/mcp/.well-known/oauth-authorization-server",
-    );
-    const res = await getDiscovery(req);
+    const res = await getDiscovery();
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(200);
@@ -796,26 +792,26 @@ describe("Scenario 7: OAuth Discovery endpoint", () => {
     expect(json.code_challenge_methods_supported).toContain("S256");
   });
 
-  it("discovery issuer matches the request origin", async () => {
-    const req = createRequest(
-      "GET",
-      "https://sso.example.com/api/mcp/.well-known/oauth-authorization-server",
-    );
-    const res = await getDiscovery(req);
-    const { status, json } = await parseResponse(res);
+  it("discovery issuer matches APP_URL", async () => {
+    const prev = process.env.APP_URL;
+    process.env.APP_URL = "https://sso.example.com";
+    try {
+      const res = await getDiscovery();
+      const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(200);
-    expect(json.issuer).toBe("https://sso.example.com");
-    expect(json.authorization_endpoint).toBe("https://sso.example.com/api/mcp/authorize");
-    expect(json.token_endpoint).toBe("https://sso.example.com/api/mcp/token");
+      expect(status).toBe(200);
+      expect(json.issuer).toBe("https://sso.example.com");
+      expect(json.authorization_endpoint).toBe("https://sso.example.com/api/mcp/authorize");
+      expect(json.token_endpoint).toBe("https://sso.example.com/api/mcp/token");
+      expect(json.registration_endpoint).toBe("https://sso.example.com/api/mcp/register");
+    } finally {
+      if (prev === undefined) delete process.env.APP_URL;
+      else process.env.APP_URL = prev;
+    }
   });
 
   it("response_types_supported includes 'code' only", async () => {
-    const req = createRequest(
-      "GET",
-      "http://localhost/api/mcp/.well-known/oauth-authorization-server",
-    );
-    const res = await getDiscovery(req);
+    const res = await getDiscovery();
     const { json } = await parseResponse(res);
 
     expect(json.response_types_supported).toEqual(["code"]);
