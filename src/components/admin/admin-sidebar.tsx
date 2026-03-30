@@ -13,6 +13,7 @@ import {
   Settings2,
   Shield,
   Users,
+  UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -69,6 +70,11 @@ function useNavItems(
       href: "/admin/tenant/members",
       label: t("navMembers"),
       icon: <Users className="h-4 w-4 shrink-0" />,
+    },
+    {
+      href: "/admin/tenant/teams",
+      label: t("navTeams"),
+      icon: <UsersRound className="h-4 w-4 shrink-0" />,
     },
     {
       href: "/admin/tenant/security",

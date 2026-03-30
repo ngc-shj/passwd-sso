@@ -4,6 +4,7 @@
   "scopeTenant": "Tenant",
   "scopeLabel": "Management scope",
   "navMembers": "Members",
+  "navTeams": "Teams",
   "navSecurity": "Security",
   "navProvisioning": "Provisioning",
   "navMachineIdentity": "Machine Identity",

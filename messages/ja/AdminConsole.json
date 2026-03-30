@@ -4,6 +4,7 @@
   "scopeTenant": "テナント",
   "scopeLabel": "管理スコープ",
   "navMembers": "メンバー",
+  "navTeams": "チーム",
   "navSecurity": "セキュリティ",
   "navProvisioning": "プロビジョニング",
   "navMachineIdentity": "マシンID",
