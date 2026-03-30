@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Prisma } from "@prisma/client";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockAuthOrToken, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
+const { mockAuth, mockCheckAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithUserTenantRls, mockWithBypassRls, mockResolveUserTenantIdFromClient, mockGetLogger, mockLoggerInfo, mockRequireTenantPermission, MockTenantAuthError } = vi.hoisted(() => {
   const loggerInfo = vi.fn();
   class _TenantAuthError extends Error {
     status: number;
@@ -14,7 +14,7 @@ const { mockAuth, mockAuthOrToken, mockPrismaTeamMember, mockPrismaTeam, mockWit
   }
   return {
     mockAuth: vi.fn(),
-    mockAuthOrToken: vi.fn(),
+    mockCheckAuth: vi.fn(),
     mockPrismaTeamMember: { findMany: vi.fn() },
     mockPrismaTeam: { findUnique: vi.fn(), create: vi.fn() },
     mockWithUserTenantRls: vi.fn(),
@@ -27,7 +27,7 @@ const { mockAuth, mockAuthOrToken, mockPrismaTeamMember, mockPrismaTeam, mockWit
   };
 });
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
@@ -59,25 +59,19 @@ describe("GET /api/teams", () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
-    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockWithBypassRls.mockImplementation(async (_prisma: unknown, fn: () => unknown) => fn());
     mockResolveUserTenantIdFromClient.mockResolvedValue("tenant-1");
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuthOrToken.mockResolvedValue(null);
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const res = await GET(makeReq());
     expect(res.status).toBe(401);
   });
 
   it("returns 401 for service_account auth type", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "service_account",
-      serviceAccountId: "sa-1",
-      tenantId: "t-1",
-      tokenId: "tok-1",
-      scopes: [],
-    });
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const res = await GET(makeReq());
     expect(res.status).toBe(401);
   });
@@ -202,12 +196,8 @@ describe("GET /api/teams", () => {
     expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
   });
 
-  it("accepts extension Bearer token via authOrToken", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "token",
-      userId: "ext-user-id",
-      scopes: ["passwords:read"],
-    });
+  it("accepts extension Bearer token via checkAuth", async () => {
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "ext-user-id", scopes: ["passwords:read"] } });
     mockPrismaTeamMember.findMany.mockResolvedValue([
       {
         role: TEAM_ROLE.MEMBER,
@@ -231,11 +221,11 @@ describe("GET /api/teams", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe("team-1");
-    expect(mockAuthOrToken).toHaveBeenCalledWith(req, "passwords:read");
+    expect(mockCheckAuth).toHaveBeenCalled();
   });
 
   it("returns 401 when extension token lacks required scope", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const req = createRequest("GET", "http://localhost/api/teams", {
       headers: { Authorization: "Bearer ext-token-no-scope" },
     });

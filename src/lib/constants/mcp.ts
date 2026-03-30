@@ -8,6 +8,9 @@ export const MCP_SCOPE = {
   CREDENTIALS_DECRYPT: "credentials:decrypt", // Legacy alias — expands to list + use at consent time
   TEAM_CREDENTIALS_READ: "team:credentials:read",
   VAULT_STATUS: "vault:status",
+  VAULT_UNLOCK_DATA: "vault:unlock-data",
+  PASSWORDS_READ: "passwords:read",
+  PASSWORDS_WRITE: "passwords:write",
 } as const;
 
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];

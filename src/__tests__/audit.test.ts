@@ -381,6 +381,30 @@ describe("resolveActorType", () => {
     };
     expect(resolveActorType(auth)).toBe("HUMAN");
   });
+
+  it("returns MCP_AGENT for mcp_token auth", () => {
+    const auth = {
+      type: "mcp_token" as const,
+      userId: "u1",
+      tenantId: "t1",
+      tokenId: "tok-1",
+      mcpClientId: "mcpc_abc",
+      scopes: [] as never[],
+    };
+    expect(resolveActorType(auth)).toBe("MCP_AGENT");
+  });
+
+  it("returns MCP_AGENT for mcp_token auth with userId null", () => {
+    const auth = {
+      type: "mcp_token" as const,
+      userId: null,
+      tenantId: "t1",
+      tokenId: "tok-1",
+      mcpClientId: "mcpc_abc",
+      scopes: [] as never[],
+    };
+    expect(resolveActorType(auth)).toBe("MCP_AGENT");
+  });
 });
 
 describe("extractRequestMeta", () => {

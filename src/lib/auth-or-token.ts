@@ -9,31 +9,41 @@ import {
   validateServiceAccountToken,
   hasSaTokenScope,
 } from "@/lib/service-account-token";
+import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { API_KEY_PREFIX, type ApiKeyScope } from "@/lib/constants/api-key";
 import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/service-account";
+import { MCP_TOKEN_PREFIX, type McpScope } from "@/lib/constants/mcp";
 import type { ExtensionTokenScope } from "@/lib/constants";
 
 /** Known Bearer token prefixes — tokens with these prefixes never fall through to extension token validation. */
-const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, "scim_"] as const;
-
-/** Auth result types that carry a userId (human-initiated). */
-export type UserAuthResult = Extract<AuthResult, { userId: string }>;
-
-/** Type guard for auth results with userId. */
-export function hasUserId(auth: AuthResult): auth is UserAuthResult {
-  return "userId" in auth;
-}
+const KNOWN_PREFIXES = [API_KEY_PREFIX, SA_TOKEN_PREFIX, MCP_TOKEN_PREFIX, "scim_"] as const;
 
 export type AuthResult =
   | { type: "session"; userId: string }
   | { type: "token"; userId: string; scopes: ExtensionTokenScope[] }
   | { type: "api_key"; userId: string; tenantId: string; apiKeyId: string; scopes: ApiKeyScope[] }
-  | { type: "service_account"; serviceAccountId: string; tenantId: string; tokenId: string; scopes: SaTokenScope[] };
+  | { type: "service_account"; serviceAccountId: string; tenantId: string; tokenId: string; scopes: SaTokenScope[] }
+  | { type: "mcp_token"; userId: string | null; tenantId: string; tokenId: string; mcpClientId: string; scopes: McpScope[] };
 
 export type AuthOrTokenResult =
   | AuthResult
   | { type: "scope_insufficient" }
   | null;
+
+/** Auth result types that carry a non-null userId. */
+export type UserAuthResult =
+  | Extract<AuthResult, { userId: string }>
+  | (Extract<AuthResult, { type: "mcp_token" }> & { userId: string });
+
+/** Type guard for auth results with a non-null userId. */
+export function hasUserId(auth: AuthResult): auth is UserAuthResult {
+  return "userId" in auth && (auth as { userId: unknown }).userId !== null;
+}
+
+/** Check if an MCP token's scopes include a required scope. */
+export function hasMcpScope(scopes: McpScope[], required: McpScope): boolean {
+  return scopes.includes(required);
+}
 
 /**
  * Authenticate via Auth.js session OR extension token OR API key OR SA token (Bearer).
@@ -49,7 +59,7 @@ export type AuthOrTokenResult =
  */
 export async function authOrToken(
   req: NextRequest,
-  requiredScope?: ExtensionTokenScope | ApiKeyScope | SaTokenScope,
+  requiredScope?: ExtensionTokenScope | ApiKeyScope | SaTokenScope | McpScope,
 ): Promise<AuthOrTokenResult> {
   // Try session first
   const session = await auth();
@@ -95,6 +105,25 @@ export async function authOrToken(
       serviceAccountId: result.data.serviceAccountId,
       tenantId: result.data.tenantId,
       tokenId: result.data.tokenId,
+      scopes: result.data.scopes,
+    };
+  }
+
+  // MCP token path
+  if (bearer.startsWith(MCP_TOKEN_PREFIX)) {
+    const result = await validateMcpToken(bearer);
+    if (!result.ok) return null;
+
+    if (requiredScope && !hasMcpScope(result.data.scopes, requiredScope as McpScope)) {
+      return { type: "scope_insufficient" };
+    }
+
+    return {
+      type: "mcp_token",
+      userId: result.data.userId,
+      tenantId: result.data.tenantId,
+      tokenId: result.data.tokenId,
+      mcpClientId: result.data.mcpClientId,
       scopes: result.data.scopes,
     };
   }

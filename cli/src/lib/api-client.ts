@@ -2,13 +2,16 @@
  * API client for the CLI tool.
  *
  * Uses native Node.js fetch with Bearer token authentication.
- * Automatically refreshes expired tokens.
+ * Automatically refreshes expired tokens via OAuth 2.1 refresh_token grant.
  */
 
-import { loadToken, saveToken, loadConfig, saveConfig } from "./config.js";
+import { loadCredentials, saveCredentials, loadConfig } from "./config.js";
+import { refreshTokenGrant } from "./oauth.js";
 
 let cachedToken: string | null = null;
 let cachedExpiresAt: number | null = null;
+let cachedRefreshToken: string | null = null;
+let cachedClientId: string | null = null;
 
 export function setInsecure(enabled: boolean): void {
   if (enabled) {
@@ -19,22 +22,40 @@ export function setInsecure(enabled: boolean): void {
   }
 }
 
-export async function getToken(): Promise<string | null> {
+export function getToken(): string | null {
   if (cachedToken) return cachedToken;
-  cachedToken = await loadToken();
+  const creds = loadCredentials();
+  if (!creds) return null;
+  cachedToken = creds.accessToken;
+  cachedExpiresAt = new Date(creds.expiresAt).getTime();
+  cachedRefreshToken = creds.refreshToken || null;
+  cachedClientId = creds.clientId || null;
   return cachedToken;
 }
 
-export function setTokenCache(token: string, expiresAt?: string): void {
+export function setTokenCache(
+  token: string,
+  expiresAt?: string,
+  refreshToken?: string,
+  clientId?: string,
+): void {
   cachedToken = token;
   if (expiresAt) {
     cachedExpiresAt = new Date(expiresAt).getTime();
+  }
+  if (refreshToken !== undefined) {
+    cachedRefreshToken = refreshToken || null;
+  }
+  if (clientId !== undefined) {
+    cachedClientId = clientId || null;
   }
 }
 
 export function clearTokenCache(): void {
   cachedToken = null;
   cachedExpiresAt = null;
+  cachedRefreshToken = null;
+  cachedClientId = null;
 }
 
 function getBaseUrl(): string {
@@ -51,47 +72,30 @@ export interface ApiResponse<T = unknown> {
   data: T;
 }
 
-/** Refresh buffer: refresh 2 minutes before expiry */
 const REFRESH_BUFFER_MS = 2 * 60 * 1000;
 
 function isTokenExpiringSoon(): boolean {
-  if (!cachedExpiresAt) {
-    // Load from config if not cached
-    const config = loadConfig();
-    if (config.tokenExpiresAt) {
-      cachedExpiresAt = new Date(config.tokenExpiresAt).getTime();
-    }
-  }
   if (!cachedExpiresAt) return false;
   return Date.now() >= cachedExpiresAt - REFRESH_BUFFER_MS;
 }
 
 async function refreshToken(): Promise<boolean> {
-  const token = await getToken();
-  if (!token) return false;
+  if (!cachedRefreshToken || !cachedClientId) return false;
 
   const baseUrl = getBaseUrl();
   try {
-    const res = await fetch(`${baseUrl}/api/extension/token/refresh`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
+    const result = await refreshTokenGrant(baseUrl, cachedRefreshToken, cachedClientId);
+    if (!result || !result.refreshToken) return false;
+
+    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString();
+
+    saveCredentials({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      clientId: cachedClientId,
+      expiresAt,
     });
-    if (!res.ok) return false;
-
-    const data = (await res.json()) as { token: string; expiresAt: string };
-    if (typeof data.token !== "string" || !data.token) return false;
-    if (typeof data.expiresAt !== "string" || isNaN(new Date(data.expiresAt).getTime())) return false;
-
-    await saveToken(data.token);
-    setTokenCache(data.token, data.expiresAt);
-
-    // Persist expiresAt in config
-    const config = loadConfig();
-    config.tokenExpiresAt = data.expiresAt;
-    saveConfig(config);
+    setTokenCache(result.accessToken, expiresAt, result.refreshToken, cachedClientId);
 
     return true;
   } catch {
@@ -107,16 +111,15 @@ export async function apiRequest<T = unknown>(
     headers?: Record<string, string>;
   } = {},
 ): Promise<ApiResponse<T>> {
-  let token = await getToken();
+  let token = getToken();
   if (!token) {
     throw new Error("Not logged in. Run `passwd-sso login` first.");
   }
 
-  // Proactively refresh if token is expiring soon
   if (isTokenExpiringSoon()) {
     const refreshed = await refreshToken();
     if (refreshed) {
-      token = await getToken();
+      token = getToken();
     }
   }
 
@@ -138,11 +141,10 @@ export async function apiRequest<T = unknown>(
 
   let res = await fetch(url, fetchOpts);
 
-  // Auto-refresh on 401
   if (res.status === 401) {
     const refreshed = await refreshToken();
     if (refreshed) {
-      const newToken = await getToken();
+      const newToken = getToken();
       fetchOpts.headers = {
         ...fetchOpts.headers as Record<string, string>,
         Authorization: `Bearer ${newToken}`,
@@ -157,17 +159,17 @@ export async function apiRequest<T = unknown>(
 
 // ─── Background Token Refresh Timer ─────────────────────────
 
-/** Interval: refresh every 10 minutes (well within 15-min TTL) */
-const BG_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+const BG_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
 
 let bgRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startBackgroundRefresh(): void {
   stopBackgroundRefresh();
+  // Skip timer entirely for manual --token login (no refresh token)
+  if (!cachedRefreshToken) return;
   bgRefreshTimer = setInterval(() => {
     void refreshToken();
   }, BG_REFRESH_INTERVAL_MS);
-  // Don't keep the process alive just for the timer
   bgRefreshTimer.unref();
 }
 

@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { unauthorized, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { authOrToken } from "@/lib/auth-or-token";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { checkAuth } from "@/lib/check-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -24,23 +22,12 @@ const createLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
 // GET /api/passwords - List passwords (returns encrypted overviews)
 async function handleGET(req: NextRequest) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (authResult?.type === "scope_insufficient") {
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
-  }
-  if (!authResult || authResult.type === "service_account") {
-    return unauthorized();
-  }
-  const userId = authResult.userId;
+  const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
+  if (!authed.ok) return authed.response;
+  const { userId } = authed.auth;
 
   const rl = await listLimiter.check(`rl:passwords_list:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
-
-  // Access restriction for token-based auth
-  if (authResult.type !== "session") {
-    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
-    if (denied) return denied;
-  }
 
   const { searchParams } = new URL(req.url);
   const tagId = searchParams.get("tag");
@@ -140,23 +127,12 @@ async function handleGET(req: NextRequest) {
 
 // POST /api/passwords - Create new password entry (E2E encrypted)
 async function handlePOST(req: NextRequest) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE);
-  if (authResult?.type === "scope_insufficient") {
-    return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
-  }
-  if (!authResult || authResult.type === "service_account") {
-    return unauthorized();
-  }
-  const userId = authResult.userId;
+  const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
+  if (!authed.ok) return authed.response;
+  const { userId } = authed.auth;
 
   const rl = await createLimiter.check(`rl:passwords_create:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
-
-  // Access restriction for token-based auth
-  if (authResult.type !== "session") {
-    const denied = await enforceAccessRestriction(req, userId, authResult.type === "api_key" ? authResult.tenantId : undefined);
-    if (denied) return denied;
-  }
 
   const result = await parseBody(req, createE2EPasswordSchema);
   if (!result.ok) return result.response;

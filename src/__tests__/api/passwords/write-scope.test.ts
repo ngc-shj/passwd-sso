@@ -16,7 +16,10 @@ const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockT
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/auth-or-token", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth-or-token")>();
+  return { ...actual, authOrToken: mockAuthOrToken };
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: {

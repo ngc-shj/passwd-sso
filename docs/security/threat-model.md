@@ -21,6 +21,7 @@ Last updated: 2026-03-07
 | Auth hash | High | DB (SHA-256 of HKDF-derived auth key) |
 | Session tokens | High | DB + cookie |
 | Extension bearer token | High | DB + chrome.storage.session |
+| CLI OAuth refresh token | High | DB + `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600) |
 | WebAuthn credentials | High | DB (public key + credential ID) |
 | PRF-derived vault key | Critical | Ephemeral in client memory |
 | Audit logs | Medium | PostgreSQL |

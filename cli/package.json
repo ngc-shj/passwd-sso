@@ -44,9 +44,6 @@
     "otpauth": "^9.4.0",
     "zod": "^4.3.6"
   },
-  "optionalDependencies": {
-    "keytar": "^7.9.0"
-  },
   "devDependencies": {
     "@types/node": "^22.15.3",
     "tsx": "^4.19.4",

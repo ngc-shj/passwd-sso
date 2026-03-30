@@ -18,10 +18,10 @@ async function handleDELETE(
   const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
   if (!authed.ok) return authed.response;
   // Only session and extension token can manage API keys
-  if (authed.auth.type === "api_key" || authed.auth.type === "service_account") {
+  if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
     return unauthorized();
   }
-  const userId = authed.auth.userId;
+  const { userId } = authed.auth;
 
   const { id } = await params;
 

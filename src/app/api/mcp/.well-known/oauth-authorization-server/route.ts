@@ -8,6 +8,7 @@ export async function GET() {
     authorization_endpoint: serverAppUrl("/api/mcp/authorize"),
     token_endpoint: serverAppUrl("/api/mcp/token"),
     registration_endpoint: serverAppUrl("/api/mcp/register"),
+    revocation_endpoint: serverAppUrl("/api/mcp/revoke"),
     response_types_supported: ["code"],
     grant_types_supported: ["authorization_code", "refresh_token"],
     code_challenge_methods_supported: ["S256"],

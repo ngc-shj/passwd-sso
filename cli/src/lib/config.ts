@@ -1,13 +1,24 @@
 /**
  * Configuration management for the CLI tool.
  *
- * Config file: $XDG_CONFIG_HOME/passwd-sso/config.json
- * Credentials: OS keychain (via keytar) or $XDG_DATA_HOME/passwd-sso/credentials
+ * Config file:  $XDG_CONFIG_HOME/passwd-sso/config.json
+ * Credentials:  $XDG_DATA_HOME/passwd-sso/credentials  (mode 0o600, JSON)
  *
  * Legacy ~/.passwd-sso/ is auto-migrated on first access.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, lstatSync, openSync, writeSync, closeSync, constants as fsConstants } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  lstatSync,
+  openSync,
+  writeSync,
+  closeSync,
+  unlinkSync,
+  constants as fsConstants,
+} from "node:fs";
 import {
   getConfigDir,
   getDataDir,
@@ -16,13 +27,9 @@ import {
 } from "./paths.js";
 import { migrateIfNeeded } from "./migrate.js";
 
-const KEYCHAIN_SERVICE = "passwd-sso-cli";
-const KEYCHAIN_ACCOUNT = "bearer-token";
-
 export interface CliConfig {
   serverUrl: string;
   locale: string;
-  tokenExpiresAt?: string; // ISO 8601
 }
 
 const DEFAULT_CONFIG: CliConfig = {
@@ -57,30 +64,25 @@ export function loadConfig(): CliConfig {
 
 export function saveConfig(config: CliConfig): void {
   ensureConfigDir();
-  writeFileSync(getConfigFilePath(), JSON.stringify(config, null, 2), { mode: 0o600 });
+  writeFileSync(getConfigFilePath(), JSON.stringify(config, null, 2), {
+    mode: 0o600,
+  });
 }
 
-// ─── Credential Storage ───────────────────────────────────────
+// ─── Credential Storage ───────────────────────────────────────────────────────
 
-async function tryKeytar(): Promise<typeof import("keytar") | null> {
-  if (process.env.PSSO_NO_KEYCHAIN === "1") return null;
-  try {
-    const mod = await import("keytar");
-    // Dynamic import may wrap the CJS module in { default: ... }
-    return (mod.default ?? mod) as typeof import("keytar");
-  } catch {
-    return null;
-  }
+export interface StoredCredentials {
+  accessToken: string;
+  refreshToken: string;
+  clientId: string;
+  expiresAt: string; // ISO 8601
 }
 
-export async function saveToken(token: string): Promise<"keychain" | "file"> {
-  const kt = await tryKeytar();
-  if (kt) {
-    await kt.setPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, token);
-    return "keychain";
-  }
-
-  // File fallback — use O_NOFOLLOW to prevent symlink attacks (TOCTOU-safe)
+/**
+ * Write credentials to the data directory using O_NOFOLLOW to prevent
+ * symlink attacks. File is created with mode 0o600 (owner read/write only).
+ */
+export function saveCredentials(creds: StoredCredentials): void {
   ensureDataDir();
   const dataDir = getDataDir();
   const stat = lstatSync(dataDir);
@@ -90,40 +92,68 @@ export async function saveToken(token: string): Promise<"keychain" | "file"> {
   const credPath = getCredentialsFilePath();
   const fd = openSync(
     credPath,
-    fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | (fsConstants.O_NOFOLLOW ?? 0),
+    fsConstants.O_WRONLY |
+      fsConstants.O_CREAT |
+      fsConstants.O_TRUNC |
+      (fsConstants.O_NOFOLLOW ?? 0),
     0o600,
   );
   try {
-    writeSync(fd, token);
+    writeSync(fd, JSON.stringify(creds)); // codeql[js/network-data-written-to-file] OAuth tokens are intentionally persisted for session continuity
   } finally {
     closeSync(fd);
   }
-  return "file";
 }
 
-export async function loadToken(): Promise<string | null> {
+/**
+ * Load stored credentials. Returns null if the file does not exist,
+ * cannot be parsed as JSON, or is missing required fields (e.g. legacy
+ * plaintext token format written by older CLI versions).
+ */
+export function loadCredentials(): StoredCredentials | null {
   migrateIfNeeded();
-  const kt = await tryKeytar();
-  if (kt) {
-    const token = await kt.getPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
-    if (token) return token;
-  }
-
-  // File fallback
   try {
-    return readFileSync(getCredentialsFilePath(), "utf-8").trim();
+    const raw = readFileSync(getCredentialsFilePath(), "utf-8").trim();
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Legacy plaintext token — prompt user to re-login
+      return null;
+    }
+
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      Array.isArray(parsed)
+    ) {
+      return null;
+    }
+
+    const obj = parsed as Record<string, unknown>;
+    if (
+      typeof obj.accessToken !== "string" ||
+      typeof obj.refreshToken !== "string" ||
+      typeof obj.clientId !== "string" ||
+      typeof obj.expiresAt !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      accessToken: obj.accessToken,
+      refreshToken: obj.refreshToken,
+      clientId: obj.clientId,
+      expiresAt: obj.expiresAt,
+    };
   } catch {
     return null;
   }
 }
 
-export async function deleteToken(): Promise<void> {
-  const kt = await tryKeytar();
-  if (kt) {
-    await kt.deletePassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
-  }
+/** Remove the stored credentials file. Silently ignores missing-file errors. */
+export function deleteCredentials(): void {
   try {
-    const { unlinkSync } = await import("node:fs");
     unlinkSync(getCredentialsFilePath());
   } catch {
     // file may not exist
