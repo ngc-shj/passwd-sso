@@ -12,7 +12,7 @@ import { formatDate } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { useTenantRole } from "@/hooks/use-tenant-role";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 interface TeamListItem {
   id: string;
@@ -55,7 +55,7 @@ export default function AdminTenantTeamsPage() {
   }, []);
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={Users}
       title={t("teams")}
       description={t("manage")}
@@ -123,6 +123,6 @@ export default function AdminTenantTeamsPage() {
           ))}
         </div>
       )}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

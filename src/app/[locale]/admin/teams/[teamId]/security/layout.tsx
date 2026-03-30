@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { Shield, KeyRound, Webhook } from "lucide-react";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TeamSecurityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
@@ -19,13 +19,13 @@ export default function TeamSecurityLayout({ children }: { children: React.React
   ];
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={Shield}
       title={tTeam("securityPolicy")}
       description={tTeam("tabPolicyDesc")}
       navItems={navItems}
     >
       {children}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

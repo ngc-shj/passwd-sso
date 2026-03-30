@@ -10,7 +10,7 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-interface AdminSectionLayoutProps {
+interface SectionLayoutProps {
   icon: LucideIcon;
   title: string;
   description: string;
@@ -19,14 +19,22 @@ interface AdminSectionLayoutProps {
   headerExtra?: React.ReactNode;
 }
 
-export function AdminSectionLayout({
+/**
+ * Shared base layout for settings/admin section pages.
+ * Used by personal settings, tenant admin, and team admin pages.
+ *
+ * - Header card: icon + title + description (+ optional headerExtra)
+ * - Optional SectionNav: left nav on desktop, horizontal pills on mobile
+ * - Content area below or beside SectionNav
+ */
+export function SectionLayout({
   icon: Icon,
   title,
   description,
   navItems,
   children,
   headerExtra,
-}: AdminSectionLayoutProps) {
+}: SectionLayoutProps) {
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">

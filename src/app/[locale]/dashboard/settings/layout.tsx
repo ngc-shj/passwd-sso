@@ -1,7 +1,7 @@
 "use client";
 
 import { UserRound, Monitor, Shield, Code } from "lucide-react";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 import { useTranslations } from "next-intl";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -14,13 +14,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   ];
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={UserRound}
       title={t("settingsTitle")}
       description={t("settingsDescription")}
       navItems={navItems}
     >
       {children}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

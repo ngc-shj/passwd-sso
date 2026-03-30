@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Shield, Clock, ShieldBan, Webhook } from "lucide-react";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TenantSecurityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
@@ -15,13 +15,13 @@ export default function TenantSecurityLayout({ children }: { children: React.Rea
   ];
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={Shield}
       title={tDash("tenantTabSecurity")}
       description={tDash("tenantTabSecurityDesc")}
       navItems={navItems}
     >
       {children}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

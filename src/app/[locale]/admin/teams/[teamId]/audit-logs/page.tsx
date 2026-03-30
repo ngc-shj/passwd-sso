@@ -42,7 +42,7 @@ import { AuditDateFilter } from "@/components/audit/audit-date-filter";
 import { AuditDownloadButton } from "@/components/audit/audit-download-button";
 import { AuditLogList } from "@/components/audit/audit-log-list";
 import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
@@ -235,7 +235,7 @@ export default function TeamAdminAuditLogsPage({
   );
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={ScrollText}
       title={t("title")}
       description={t("description")}
@@ -284,6 +284,6 @@ export default function TeamAdminAuditLogsPage({
         onLoadMore={audit.handleLoadMore}
         renderItem={renderItem}
       />
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

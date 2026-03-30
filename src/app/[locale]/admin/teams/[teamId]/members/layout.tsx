@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { Users, UserPlus, Crown } from "lucide-react";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TeamMembersLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
@@ -19,13 +19,13 @@ export default function TeamMembersLayout({ children }: { children: React.ReactN
   ];
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={Users}
       title={tTeam("members")}
       description={tTeam("tabMembersDesc")}
       navItems={navItems}
     >
       {children}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

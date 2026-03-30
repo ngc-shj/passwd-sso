@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Link2, Database, GitMerge } from "lucide-react";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TenantProvisioningLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
@@ -14,13 +14,13 @@ export default function TenantProvisioningLayout({ children }: { children: React
   ];
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={Link2}
       title={tDash("tenantTabProvisioning")}
       description={tDash("tenantTabProvisioningDesc")}
       navItems={navItems}
     >
       {children}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }

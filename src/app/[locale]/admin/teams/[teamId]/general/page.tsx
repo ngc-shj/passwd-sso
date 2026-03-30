@@ -27,7 +27,7 @@ import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
-import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 interface TeamInfo {
   id: string;
@@ -122,7 +122,7 @@ export default function TeamGeneralPage({
   if (!team) {
     if (loadError) {
       return (
-        <AdminSectionLayout
+        <SectionLayout
           icon={Settings2}
           title={t("generalSettings")}
           description={t("tabGeneralDesc")}
@@ -140,7 +140,7 @@ export default function TeamGeneralPage({
               </Button>
             </div>
           </Card>
-        </AdminSectionLayout>
+        </SectionLayout>
       );
     }
     return (
@@ -151,7 +151,7 @@ export default function TeamGeneralPage({
   }
 
   return (
-    <AdminSectionLayout
+    <SectionLayout
       icon={Settings2}
       title={t("generalSettings")}
       description={t("tabGeneralDesc")}
@@ -245,6 +245,6 @@ export default function TeamGeneralPage({
           </section>
         </Card>
       )}
-    </AdminSectionLayout>
+    </SectionLayout>
   );
 }
