@@ -154,8 +154,10 @@ describe("exchangeRefreshToken", () => {
         create: mockRefreshCreate,
         update: mockRefreshUpdate,
       };
+      const mockAccessUpdate = vi.fn().mockResolvedValue({});
       (prisma as Record<string, unknown>).mcpAccessToken = {
         create: mockAccessCreate,
+        update: mockAccessUpdate,
         updateMany: mockAccessUpdateMany,
       };
 

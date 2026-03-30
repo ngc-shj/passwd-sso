@@ -371,10 +371,14 @@ export async function exchangeRefreshToken(params: {
         },
       });
 
-      // Mark old as rotated
+      // Mark old as rotated and revoke old access token
       await tx.mcpRefreshToken.update({
         where: { id: rt.id },
         data: { rotatedAt: new Date(), replacedByHash: newRefreshTokenHash },
+      });
+      await tx.mcpAccessToken.update({
+        where: { id: rt.accessTokenId },
+        data: { revokedAt: new Date() },
       });
 
       return {
