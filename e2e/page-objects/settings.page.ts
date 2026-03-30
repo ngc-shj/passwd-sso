@@ -44,10 +44,8 @@ export class SettingsPage {
 
   /** Sessions list card rendered on the Account page. */
   get sessionsCard(): Locator {
-    // Skip the SectionLayout header card — sessions card has divide-y rows
-    return this.page.locator("[data-slot='card']").filter({
-      has: this.page.locator(".divide-y"),
-    });
+    // Skip the SectionLayout header card (first card) — sessions card is second
+    return this.page.locator("[data-slot='card']").nth(1);
   }
 
   /** CLI token card rendered on the Developer > CLI Token page. */

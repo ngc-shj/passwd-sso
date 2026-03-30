@@ -73,7 +73,9 @@ test.describe.serial("Teams", () => {
     // Member can see their team in the vault selector on the dashboard
     await memberPage.goto("/ja/dashboard");
     await memberPage.waitForLoadState("networkidle");
-    // The vault selector should list the pre-seeded team
+    // Open the vault selector dropdown to reveal team options
+    const selectTrigger = memberPage.locator("[data-slot='select-trigger']").first();
+    await selectTrigger.click();
     await expect(
       memberPage.getByText(PRE_SEEDED_TEAM_NAME)
     ).toBeVisible({ timeout: 10_000 });
