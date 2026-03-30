@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.5](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.4...passwd-sso-v0.4.5) (2026-03-30)
+
+
+### Bug Fixes
+
+* CLI OAuth 2.1 PKCE login, remove keytar, add token revocation ([#280](https://github.com/ngc-shj/passwd-sso/issues/280)) ([429fd41](https://github.com/ngc-shj/passwd-sso/commit/429fd41a5008c5364670ae5c32ac435121d8b8df))
+
 ## [0.4.4](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.3...passwd-sso-v0.4.4) (2026-03-29)
 
 
