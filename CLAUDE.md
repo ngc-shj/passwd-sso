@@ -66,10 +66,13 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
 - OAuth 2.1 Authorization Code + PKCE for MCP client authentication
 - Dynamic Client Registration (DCR, RFC 7591) at `/api/mcp/register` — clients register without pre-configuration; unclaimed clients expire after 24h
-- Refresh token rotation: each exchange issues a new token pair grouped by `familyId`; replay detection revokes the entire family
+- Refresh token rotation: each exchange issues a new token pair grouped by `familyId`; old access token revoked atomically; replay detection revokes the entire family
+- Token revocation: `POST /api/mcp/revoke` (RFC 7009) — revokes access or refresh tokens; revoking a refresh token revokes the entire rotation family
 - Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
 - Zero-Knowledge CLI Decrypt (Phase 7): browser delegates entry metadata only (no passwords); CLI agent daemon holds vault key in memory, decrypts locally after server authorization check; credentials consumed in Unix pipe — never reach server or AI context
-- Scopes: `credentials:list` (metadata), `credentials:use` (authorize agent decrypt), `credentials:decrypt` (legacy alias → expanded to list+use at consent)
+- CLI OAuth login: `passwd-sso login` uses OAuth 2.1 PKCE via DCR (public client `passwd-sso-cli`); `--token` flag for manual token paste fallback; credentials stored in `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600)
+- `checkAuth` rejects auth types without `userId` (service_account, mcp_token with null userId) via `hasUserId()` type guard — callers get `userId: string` guaranteed
+- Scopes: `credentials:list` (metadata), `credentials:use` (authorize agent decrypt), `credentials:decrypt` (legacy alias → expanded to list+use at consent), `vault:unlock-data`, `passwords:read`, `passwords:write`
 - Delegation session management: `POST/GET/DELETE /api/vault/delegation`, per-session revoke via `DELETE /api/vault/delegation/[id]`, authorization check via `GET /api/vault/delegation/check`
 
 ### E2E Encryption Architecture
@@ -339,6 +342,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/mcp/authorize/consent` | POST | Process OAuth consent form |
 | `/api/mcp/token` | POST | OAuth 2.1 token exchange |
 | `/api/mcp/register` | POST | Dynamic Client Registration (RFC 7591) |
+| `/api/mcp/revoke` | POST | OAuth 2.1 token revocation (RFC 7009) |
 | `/api/mcp/.well-known/oauth-authorization-server` | GET | OAuth discovery metadata |
 
 #### Health & Infrastructure
