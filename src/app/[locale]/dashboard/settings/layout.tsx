@@ -1,6 +1,17 @@
 "use client";
 
-import { UserRound, Monitor, Shield, Code } from "lucide-react";
+import {
+  UserRound,
+  Monitor,
+  Shield,
+  Code,
+  Fingerprint,
+  Plane,
+  KeyRound,
+  Terminal,
+  Key,
+  Handshake,
+} from "lucide-react";
 import { SectionLayout } from "@/components/settings/section-layout";
 import { useTranslations } from "next-intl";
 
@@ -9,8 +20,26 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
   const navItems = [
     { href: "/dashboard/settings/account", label: t("tabAccount"), icon: Monitor },
-    { href: "/dashboard/settings/security", label: t("tabSecurity"), icon: Shield },
-    { href: "/dashboard/settings/developer", label: t("tabDeveloper"), icon: Code },
+    {
+      href: "/dashboard/settings/security",
+      label: t("tabSecurity"),
+      icon: Shield,
+      children: [
+        { href: "/dashboard/settings/security/passkey", label: t("subTabPasskey"), icon: Fingerprint },
+        { href: "/dashboard/settings/security/travel-mode", label: t("subTabTravelMode"), icon: Plane },
+        { href: "/dashboard/settings/security/key-rotation", label: t("subTabKeyRotation"), icon: KeyRound },
+      ],
+    },
+    {
+      href: "/dashboard/settings/developer",
+      label: t("tabDeveloper"),
+      icon: Code,
+      children: [
+        { href: "/dashboard/settings/developer/cli-token", label: t("subTabCli"), icon: Terminal },
+        { href: "/dashboard/settings/developer/api-keys", label: t("subTabApi"), icon: Key },
+        { href: "/dashboard/settings/developer/delegation", label: t("subTabDelegation"), icon: Handshake },
+      ],
+    },
   ];
 
   return (

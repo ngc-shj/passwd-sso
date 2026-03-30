@@ -5,7 +5,6 @@ import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const { mockUsePathname } = vi.hoisted(() => ({
-  // usePathname returns locale-prefixed paths in production; tests mirror that
   mockUsePathname: vi.fn(() => "/ja/admin/tenant/members"),
 }));
 
@@ -42,6 +41,16 @@ vi.mock("radix-ui", () => ({
   VisuallyHidden: {
     Root: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   },
+  Slot: {
+    Root: ({ children, ...props }: React.ComponentProps<"span">) => <span {...props}>{children}</span>,
+  },
+}));
+
+vi.mock("@/components/ui/button", () => ({
+  Button: ({ children, asChild, variant, ...rest }: React.ComponentProps<"button"> & { asChild?: boolean; variant?: string }) =>
+    asChild
+      ? <span data-variant={variant}>{children}</span>
+      : <button data-variant={variant} {...rest}>{children}</button>,
 }));
 
 import { AdminSidebar } from "./admin-sidebar";
@@ -52,7 +61,7 @@ const adminTeams = [
 ];
 
 describe("AdminSidebar — tenant scope", () => {
-  it("renders 6 tenant nav items when pathname is /admin/tenant/members", () => {
+  it("renders tenant leaf and child nav links", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -64,11 +73,12 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const links = screen.getAllByRole("link");
-    // Desktop + mobile (Sheet) render 2 sidebars: 6 × 2 = 12
-    expect(links.length).toBe(12);
+    // Leaf items (members, teams) + children under groups (security×3, provisioning×2, machine-identity×3, audit-logs×2)
+    // = 2 leaf + 10 children = 12 per sidebar × 2 sidebars = 24
+    expect(links.length).toBe(24);
   });
 
-  it("renders correct tenant nav hrefs", () => {
+  it("renders correct tenant nav hrefs including children", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -82,10 +92,16 @@ describe("AdminSidebar — tenant scope", () => {
     const expectedHrefs = [
       "/admin/tenant/members",
       "/admin/tenant/teams",
-      "/admin/tenant/security",
-      "/admin/tenant/provisioning",
-      "/admin/tenant/machine-identity",
-      "/admin/tenant/audit-logs",
+      "/admin/tenant/security/session-policy",
+      "/admin/tenant/security/access-restriction",
+      "/admin/tenant/security/webhooks",
+      "/admin/tenant/provisioning/scim",
+      "/admin/tenant/provisioning/directory-sync",
+      "/admin/tenant/machine-identity/service-accounts",
+      "/admin/tenant/machine-identity/mcp-clients",
+      "/admin/tenant/machine-identity/access-requests",
+      "/admin/tenant/audit-logs/logs",
+      "/admin/tenant/audit-logs/breakglass",
     ];
 
     expectedHrefs.forEach((href) => {
@@ -96,7 +112,7 @@ describe("AdminSidebar — tenant scope", () => {
     });
   });
 
-  it("active link has bg-accent class when pathname matches", () => {
+  it("active leaf link has secondary variant", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -112,12 +128,12 @@ describe("AdminSidebar — tenant scope", () => {
     );
     expect(activeLinks.length).toBeGreaterThan(0);
     activeLinks.forEach((link) => {
-      // Active items use "bg-accent text-accent-foreground" (no /50 suffix)
-      expect(link.className).toMatch(/\bbg-accent\b(?!\/)/);
+      // Button wraps the link — check parent for variant
+      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
     });
   });
 
-  it("non-active link does not have bg-accent (exact) class", () => {
+  it("non-active leaf link has ghost variant", () => {
     mockUsePathname.mockReturnValue("/ja/admin/tenant/members");
     render(
       <AdminSidebar
@@ -133,14 +149,13 @@ describe("AdminSidebar — tenant scope", () => {
     );
     expect(inactiveLinks.length).toBeGreaterThan(0);
     inactiveLinks.forEach((link) => {
-      // Inactive items have hover:bg-accent/50 but NOT the standalone bg-accent class
-      expect(link.className).not.toMatch(/\bbg-accent\b(?!\/)/);
+      expect(link.parentElement?.getAttribute("data-variant")).toBe("ghost");
     });
   });
 });
 
 describe("AdminSidebar — team scope", () => {
-  it("renders 4 team nav items when pathname is /admin/teams/team-1/general", () => {
+  it("renders team leaf and child nav links", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(
       <AdminSidebar
@@ -151,12 +166,13 @@ describe("AdminSidebar — team scope", () => {
       />
     );
 
-    // 4 items × 2 sidebars = 8 links
     const links = screen.getAllByRole("link");
-    expect(links.length).toBe(8);
+    // Leaf items (general, audit-logs) + children under groups (members×3, security×3)
+    // = 2 leaf + 6 children = 8 per sidebar × 2 sidebars = 16
+    expect(links.length).toBe(16);
   });
 
-  it("renders correct team nav hrefs for team-1", () => {
+  it("renders correct team nav hrefs for team-1 including children", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(
       <AdminSidebar
@@ -169,8 +185,12 @@ describe("AdminSidebar — team scope", () => {
 
     const expectedHrefs = [
       "/admin/teams/team-1/general",
-      "/admin/teams/team-1/members",
-      "/admin/teams/team-1/security",
+      "/admin/teams/team-1/members/list",
+      "/admin/teams/team-1/members/add",
+      "/admin/teams/team-1/members/transfer",
+      "/admin/teams/team-1/security/policy",
+      "/admin/teams/team-1/security/key-rotation",
+      "/admin/teams/team-1/security/webhooks",
       "/admin/teams/team-1/audit-logs",
     ];
 
@@ -182,7 +202,7 @@ describe("AdminSidebar — team scope", () => {
     });
   });
 
-  it("active link for team scope has bg-accent class", () => {
+  it("active leaf link for team scope has secondary variant", () => {
     mockUsePathname.mockReturnValue("/ja/admin/teams/team-1/general");
     render(
       <AdminSidebar
@@ -198,7 +218,7 @@ describe("AdminSidebar — team scope", () => {
     );
     expect(activeLinks.length).toBeGreaterThan(0);
     activeLinks.forEach((link) => {
-      expect(link.className).toMatch(/\bbg-accent\b(?!\/)/);
+      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
     });
   });
 });

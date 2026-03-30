@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { ScrollText, ShieldAlert } from "lucide-react";
+import { ScrollText } from "lucide-react";
 import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TenantAuditLogsLayout({
@@ -16,18 +16,6 @@ export default function TenantAuditLogsLayout({
       icon={ScrollText}
       title={t("sectionAuditLogs")}
       description={t("sectionAuditLogsDesc")}
-      navItems={[
-        {
-          href: "/admin/tenant/audit-logs/logs",
-          label: t("navAuditLogsLogs"),
-          icon: ScrollText,
-        },
-        {
-          href: "/admin/tenant/audit-logs/breakglass",
-          label: t("navAuditLogsBreakglass"),
-          icon: ShieldAlert,
-        },
-      ]}
     >
       {children}
     </SectionLayout>

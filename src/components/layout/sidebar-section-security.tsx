@@ -51,7 +51,7 @@ export function SecuritySection({
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("security")}</CollapsibleSectionHeader>
       <CollapsibleContent>
-        <div className="space-y-1">
+        <div className="ml-3 border-l pl-3 space-y-0.5">
           {canAccessWatchtower && (
             <Button
               variant={isWatchtower ? "secondary" : "ghost"}
@@ -109,7 +109,7 @@ export function SettingsNavSection({
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("settingsNav")}</CollapsibleSectionHeader>
       <CollapsibleContent>
-        <div className="space-y-1">
+        <div className="ml-3 border-l pl-3 space-y-0.5">
           {!scopedTeam && (
             <>
               <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
@@ -165,7 +165,7 @@ export function ToolsSection({
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("tools")}</CollapsibleSectionHeader>
       <CollapsibleContent>
-        <div className="space-y-1">
+        <div className="ml-3 border-l pl-3 space-y-0.5">
           <Button variant={isExportActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
             <Link href={exportHref} onClick={onNavigate}>
               <Download className="h-4 w-4" />
