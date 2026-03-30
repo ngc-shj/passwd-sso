@@ -128,7 +128,7 @@ describe("SettingsNavSection", () => {
 
     expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
       "href",
-      "/admin/tenant/members"
+      "/admin"
     );
   });
 
@@ -176,7 +176,7 @@ describe("SettingsNavSection", () => {
 
     expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
       "href",
-      "/admin/tenant/members"
+      "/admin"
     );
   });
 });

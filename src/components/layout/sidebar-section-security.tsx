@@ -120,7 +120,7 @@ export function SettingsNavSection({
               </Button>
               {isAdmin && (
                 <Button variant={isAdminActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                  <Link href="/admin/tenant/members" onClick={onNavigate}>
+                  <Link href="/admin" onClick={onNavigate}>
                     <LayoutDashboard className="h-4 w-4" />
                     {t("adminConsole")}
                   </Link>
