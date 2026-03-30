@@ -26,8 +26,8 @@ async function handleGET(req: NextRequest) {
   // IP restriction is not enforced here (matches pre-checkAuth behavior).
   const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
   if (!authed.ok) return authed.response;
-  // API keys cannot manage API keys (only session or extension token)
-  if (authed.auth.type === "api_key") {
+  // Only session and extension token can manage API keys
+  if (authed.auth.type === "api_key" || authed.auth.type === "service_account") {
     return unauthorized();
   }
   const userId = authed.auth.userId;
@@ -69,8 +69,8 @@ async function handlePOST(req: NextRequest) {
   // IP restriction is not enforced here (matches pre-checkAuth behavior).
   const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
   if (!authed.ok) return authed.response;
-  // API keys cannot create API keys
-  if (authed.auth.type === "api_key") {
+  // Only session and extension token can create API keys
+  if (authed.auth.type === "api_key" || authed.auth.type === "service_account") {
     return unauthorized();
   }
   const userId = authed.auth.userId;

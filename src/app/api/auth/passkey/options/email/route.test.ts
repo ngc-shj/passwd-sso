@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { NIL_UUID } from "@/lib/constants/app";
 
 // ── Hoisted mocks ────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ describe("POST /api/auth/passkey/options/email", () => {
     // Timing mitigation: dummy DB query with non-existent UUID
     expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: "00000000-0000-0000-0000-000000000000" },
+        where: { userId: NIL_UUID },
       }),
     );
     // generateAuthenticationOpts was still called (with dummy creds)
@@ -164,7 +165,7 @@ describe("POST /api/auth/passkey/options/email", () => {
     // Timing mitigation: dummy DB query for SSO tenant user too
     expect(mockPrismaWebAuthnFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { userId: "00000000-0000-0000-0000-000000000000" },
+        where: { userId: NIL_UUID },
       }),
     );
   });

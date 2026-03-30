@@ -8,16 +8,6 @@ function setupForm(html: string) {
   document.body.innerHTML = html;
 }
 
-function mockHost(hostname: string) {
-  Object.defineProperty(window, "location", {
-    value: {
-      ...window.location,
-      hostname,
-    },
-    configurable: true,
-  });
-}
-
 describe("performAutofill", () => {
   it("fills inputs with autocomplete attributes", () => {
     setupForm(`

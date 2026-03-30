@@ -11,6 +11,11 @@ export type SettingsTab = "account" | "security" | "developer";
  */
 export type SecuritySubTab = "passkey" | "travel" | "rotate";
 
+/**
+ * Sub-tab values under the "Developer" tab.
+ */
+export type DeveloperSubTab = "cli" | "api" | "delegation";
+
 export class SettingsPage {
   constructor(private page: Page) {}
 
@@ -64,6 +69,23 @@ export class SettingsPage {
    */
   get keyRotationSubTab() {
     return this.page.getByRole("tab", { name: /Key Rotation|鍵のローテーション/i });
+  }
+
+  // --- Developer sub-tabs ---
+
+  /** "CLI" sub-tab trigger inside the Developer tab. */
+  get cliSubTab() {
+    return this.page.getByRole("tab", { name: /^CLI$/i });
+  }
+
+  /** "API" sub-tab trigger inside the Developer tab. */
+  get apiSubTab() {
+    return this.page.getByRole("tab", { name: /^API$/i });
+  }
+
+  /** "Delegation" sub-tab trigger inside the Developer tab. */
+  get delegationSubTab() {
+    return this.page.getByRole("tab", { name: /^Delegation$|^委任$/i });
   }
 
   // --- Content accessors ---
@@ -130,6 +152,23 @@ export class SettingsPage {
     };
     await subTabMap[subTab].click();
     // Use first() to avoid strict mode violation when multiple panels are active
+    await this.page
+      .locator(`[role='tabpanel'][data-state='active']`)
+      .first()
+      .waitFor({ timeout: 5_000 });
+  }
+
+  /**
+   * Click a sub-tab inside the Developer tab.
+   * Assumes the Developer top-level tab is already active.
+   */
+  async switchDeveloperSubTab(subTab: DeveloperSubTab): Promise<void> {
+    const subTabMap: Record<DeveloperSubTab, Locator> = {
+      cli: this.cliSubTab,
+      api: this.apiSubTab,
+      delegation: this.delegationSubTab,
+    };
+    await subTabMap[subTab].click();
     await this.page
       .locator(`[role='tabpanel'][data-state='active']`)
       .first()

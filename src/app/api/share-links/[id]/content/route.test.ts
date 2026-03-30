@@ -39,6 +39,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
+  rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockContentLimiterCheck }),

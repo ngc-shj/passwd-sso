@@ -56,6 +56,21 @@ These are non-negotiable. A passing test suite alone is insufficient — the bui
 - Route-handler auth (not middleware): `/api/vault/*`, `/api/folders/*`, `/api/admin/*`, `/api/maintenance/*`, `/api/scim/*`
 - API key auth (no session): `/api/v1/*`
 - Session cookie: `authjs.session-token` (dev) or `__Secure-authjs.session-token` (prod)
+- Service Account tokens: `sa_` prefix Bearer tokens, validated in `authOrToken()` alongside existing `api_`/extension tokens
+- MCP tokens: `mcp_` prefix, validated by dedicated `validateMcpToken()` in MCP route handlers
+- JIT Access: SA self-service via `access-request:create` scope → admin approval → short-lived token
+
+### Machine Identity (AI Agent Identity)
+
+- Service accounts as first-class non-human identities with `sa_` prefix tokens
+- MCP Gateway at `/api/mcp` — Streamable HTTP transport for AI tool integration
+- OAuth 2.1 Authorization Code + PKCE for MCP client authentication
+- Dynamic Client Registration (DCR, RFC 7591) at `/api/mcp/register` — clients register without pre-configuration; unclaimed clients expire after 24h
+- Refresh token rotation: each exchange issues a new token pair grouped by `familyId`; replay detection revokes the entire family
+- Cross-actor audit: `actorType` enum (HUMAN/SERVICE_ACCOUNT/MCP_AGENT/SYSTEM) on all audit log entries
+- Zero-Knowledge CLI Decrypt (Phase 7): browser delegates entry metadata only (no passwords); CLI agent daemon holds vault key in memory, decrypts locally after server authorization check; credentials consumed in Unix pipe — never reach server or AI context
+- Scopes: `credentials:list` (metadata), `credentials:use` (authorize agent decrypt), `credentials:decrypt` (legacy alias → expanded to list+use at consent)
+- Delegation session management: `POST/GET/DELETE /api/vault/delegation`, per-session revoke via `DELETE /api/vault/delegation/[id]`, authorization check via `GET /api/vault/delegation/check`
 
 ### E2E Encryption Architecture
 
@@ -96,6 +111,9 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/vault/recovery-key/generate` | POST | Save recovery key encrypted data |
 | `/api/vault/recovery-key/recover` | POST | Recover vault with recovery key (2-step: verify/reset) |
 | `/api/vault/reset` | POST | Full vault deletion (last resort) |
+| `/api/vault/delegation` | GET, POST, DELETE | Delegation session CRUD (list/create/revoke-all) |
+| `/api/vault/delegation/[id]` | DELETE | Revoke single delegation session |
+| `/api/vault/delegation/check` | GET | Authorization check for CLI agent decrypt |
 
 #### Passwords & Entries
 
@@ -113,6 +131,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/passwords/bulk-archive` | POST | Bulk archive entries |
 | `/api/passwords/bulk-restore` | POST | Bulk restore entries |
 | `/api/passwords/bulk-trash` | POST | Bulk soft-delete entries |
+| `/api/passwords/bulk-import` | POST | Bulk import entries |
 | `/api/passwords/empty-trash` | POST | Permanently delete all trashed entries |
 
 #### Tags & Folders
@@ -182,6 +201,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/passwords/bulk-archive` | POST | Bulk archive team entries |
 | `/api/teams/[teamId]/passwords/bulk-restore` | POST | Bulk restore team entries |
 | `/api/teams/[teamId]/passwords/bulk-trash` | POST | Bulk soft-delete team entries |
+| `/api/teams/[teamId]/passwords/bulk-import` | POST | Bulk import team entries |
 | `/api/teams/[teamId]/passwords/empty-trash` | POST | Empty team trash |
 | `/api/teams/[teamId]/tags` | GET, POST | Team tags |
 | `/api/teams/[teamId]/tags/[id]` | PUT, DELETE | Update/delete team tag |
@@ -300,6 +320,27 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/v1/vault/status` | GET | REST API v1 vault status |
 | `/api/v1/openapi.json` | GET | OpenAPI 3.1 spec |
 
+#### Service Accounts & Machine Identity
+
+| Endpoint | Methods | Purpose |
+|----------|---------|---------|
+| `/api/tenant/service-accounts` | GET, POST | List/create service accounts |
+| `/api/tenant/service-accounts/[id]` | GET, PUT, DELETE | CRUD single SA (DELETE = hard delete) |
+| `/api/tenant/service-accounts/[id]/tokens` | GET, POST | List/create SA tokens |
+| `/api/tenant/service-accounts/[id]/tokens/[tokenId]` | DELETE | Revoke SA token |
+| `/api/tenant/access-requests` | GET, POST | List/create JIT access requests (SA self-service via `sa_` token or admin via session) |
+| `/api/tenant/access-requests/[id]` | GET | Access request detail |
+| `/api/tenant/access-requests/[id]/approve` | POST | Approve + issue JIT token |
+| `/api/tenant/access-requests/[id]/deny` | POST | Deny request |
+| `/api/tenant/mcp-clients` | GET, POST | List/create MCP clients |
+| `/api/tenant/mcp-clients/[id]` | GET, PUT, DELETE | CRUD single MCP client |
+| `/api/mcp` | POST, GET | MCP Streamable HTTP (JSON-RPC) + SSE |
+| `/api/mcp/authorize` | GET | OAuth 2.1 authorization (PKCE) |
+| `/api/mcp/authorize/consent` | POST | Process OAuth consent form |
+| `/api/mcp/token` | POST | OAuth 2.1 token exchange |
+| `/api/mcp/register` | POST | Dynamic Client Registration (RFC 7591) |
+| `/api/mcp/.well-known/oauth-authorization-server` | GET | OAuth discovery metadata |
+
 #### Health & Infrastructure
 
 | Endpoint | Methods | Purpose |
@@ -310,6 +351,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/user/locale` | PUT | Update user locale preference |
 | `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
 | `/api/maintenance/purge-history` | POST | System-wide history purge (admin-only, bearer token) |
+| `/api/maintenance/dcr-cleanup` | POST | Clean up expired DCR clients (admin-only) |
 
 ### i18n
 
@@ -347,9 +389,11 @@ All password data is encrypted **client-side** before reaching the server. The s
 
 ### Docker Services
 
-Five containers: `app` (Next.js), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration)
+Five containers: `app` (Next.js, connects as `passwd_app` — NOSUPERUSER), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration, connects as `passwd_user` — SUPERUSER)
 
 Dev override adds: `mailpit` (local email testing on port 8025)
+
+**Database role separation**: The `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) so RLS is enforced in dev. The `migrate` service connects as `passwd_user` (SUPERUSER, table owner) for DDL. For local `npm run db:migrate`, set `MIGRATION_DATABASE_URL` in `.env.local` pointing to `passwd_user`.
 
 ## Versioning
 
@@ -411,7 +455,7 @@ npm run version:bump -- 0.3.0  # Explicit version
 | `package.json` | Single source of truth (SSOT) |
 | `cli/package.json` | Synced by `bump-version.sh` |
 | `extension/package.json` | Synced by `bump-version.sh` |
-| `cli/src/index.ts` | Reads root `package.json` at runtime via `createRequire` |
+| `cli/src/index.ts` | Reads `cli/package.json` at runtime via `createRequire` |
 | `extension/manifest.config.ts` | Imports root `package.json` at build time |
 | `src/lib/openapi-spec.ts` | Independent API version (`1.0.0`) — not synced |
 

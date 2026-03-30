@@ -32,7 +32,7 @@ vi.mock("@/lib/audit-logger", () => ({
   ]),
 }));
 
-import { logAudit, sanitizeMetadata, extractRequestMeta } from "@/lib/audit";
+import { logAudit, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit";
 
 async function flushAsyncWork() {
   await Promise.resolve();
@@ -87,6 +87,8 @@ describe("logAudit", () => {
         scope: AUDIT_SCOPE.TEAM,
         action: AUDIT_ACTION.ENTRY_CREATE,
         userId: "user-1",
+        actorType: "HUMAN",
+        serviceAccountId: null,
         tenantId: "tenant-1",
         teamId: "team-1",
         targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
@@ -186,6 +188,8 @@ describe("logAudit", () => {
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.ENTRY_CREATE,
           userId: "user-1",
+          actorType: "HUMAN",
+          serviceAccountId: null,
           teamId: "team-1",
           targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
           targetId: "entry-1",
@@ -211,6 +215,37 @@ describe("logAudit", () => {
         userId: "user-1",
       })
     ).not.toThrow();
+  });
+
+  it("passes actorType SERVICE_ACCOUNT and serviceAccountId to DB and logger", async () => {
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockCreate.mockResolvedValue({});
+    mockAuditInfo.mockReturnValue(undefined);
+
+    logAudit({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.ENTRY_CREATE,
+      userId: "user-1",
+      actorType: "SERVICE_ACCOUNT",
+      serviceAccountId: "sa-1",
+    });
+    await flushAsyncWork();
+
+    expect(mockCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorType: "SERVICE_ACCOUNT",
+        serviceAccountId: "sa-1",
+      }),
+    });
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          actorType: "SERVICE_ACCOUNT",
+          serviceAccountId: "sa-1",
+        }),
+      }),
+      expect.any(String),
+    );
   });
 });
 
@@ -311,6 +346,40 @@ describe("sanitizeMetadata", () => {
       token: "xyz",
     };
     expect(sanitizeMetadata(input)).toBeUndefined();
+  });
+});
+
+describe("resolveActorType", () => {
+  it("returns SERVICE_ACCOUNT for service_account auth", () => {
+    const auth = {
+      type: "service_account" as const,
+      serviceAccountId: "sa-1",
+      tenantId: "t1",
+      tokenId: "tok-1",
+      scopes: [] as never[],
+    };
+    expect(resolveActorType(auth)).toBe("SERVICE_ACCOUNT");
+  });
+
+  it("returns HUMAN for session auth", () => {
+    const auth = { type: "session" as const, userId: "u1" };
+    expect(resolveActorType(auth)).toBe("HUMAN");
+  });
+
+  it("returns HUMAN for token auth", () => {
+    const auth = { type: "token" as const, userId: "u1", scopes: [] as never[] };
+    expect(resolveActorType(auth)).toBe("HUMAN");
+  });
+
+  it("returns HUMAN for api_key auth", () => {
+    const auth = {
+      type: "api_key" as const,
+      userId: "u1",
+      tenantId: "t1",
+      apiKeyId: "ak1",
+      scopes: [] as never[],
+    };
+    expect(resolveActorType(auth)).toBe("HUMAN");
   });
 });
 

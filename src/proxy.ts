@@ -102,6 +102,8 @@ async function handleApiAuth(request: NextRequest) {
     API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
     API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
     API_PATH.API_KEYS,  // API key management — validated by route handler via authOrToken
+    API_PATH.TENANT_ACCESS_REQUESTS, // SA self-service JIT — validated by route handler via authOrToken
+    API_PATH.VAULT_DELEGATION,       // Delegation check — CLI agent uses Bearer for /check
   ];
   const isBearerBypassRoute = (route: string) => {
     // Extension token endpoints should be exact only.
@@ -172,6 +174,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.API_KEYS) ||
     pathname.startsWith(API_PATH.TRAVEL_MODE) ||
     pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
+    pathname.startsWith(API_PATH.VAULT_DELEGATION) ||
     pathname.startsWith(API_PATH.WEBAUTHN)
   ) {
     const session = await getSessionInfo(request);

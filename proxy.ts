@@ -17,7 +17,9 @@ const _staticDirectives = [
   `connect-src 'self'${process.env.NEXT_PUBLIC_SENTRY_DSN ? " https://*.ingest.us.sentry.io https://*.ingest.sentry.io" : ""}`,
   "object-src 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  // localhost/127.0.0.1 required in all environments: OAuth consent form redirects
+  // to native app callback (RFC 8252 — Claude Code, Claude Desktop use localhost)
+  "form-action 'self' http://localhost:* http://127.0.0.1:*",
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",
   "block-all-mixed-content",

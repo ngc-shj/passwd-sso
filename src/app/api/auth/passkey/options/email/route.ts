@@ -8,7 +8,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
-import { extractClientIp } from "@/lib/ip-access";
+import { NIL_UUID } from "@/lib/constants/app";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/webauthn-server";
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";
@@ -58,7 +59,7 @@ async function handlePOST(req: NextRequest) {
   if (originError) return originError;
 
   const ip = extractClientIp(req) ?? "unknown";
-  const rl = await rateLimiter.check(`rl:webauthn_email_signin_opts:${ip}`);
+  const rl = await rateLimiter.check(`rl:webauthn_email_signin_opts:${rateLimitKeyFromIp(ip)}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -130,7 +131,7 @@ async function handlePOST(req: NextRequest) {
     // via timing oracle).
     await withBypassRls(prisma, async () =>
       prisma.webAuthnCredential.findMany({
-        where: { userId: "00000000-0000-0000-0000-000000000000" },
+        where: { userId: NIL_UUID },
         select: { credentialId: true, transports: true },
         take: PASSKEY_DUMMY_CREDENTIALS_MAX,
       }),

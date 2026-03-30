@@ -11,7 +11,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 <details>
 <summary>More screenshots</summary>
 
-### Entry Detail (AWS 3-field example)
+### Entry Detail (custom field autofill example)
 
 ![passwd-sso entry detail](docs/assets/passwd-sso-entry-detail.png)
 
@@ -19,7 +19,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 ![passwd-sso password generator](docs/assets/passwd-sso-password-generator.png)
 
-### Browser Extension (AWS IAM 3-field fill)
+### Browser Extension (custom field autofill)
 
 ![passwd-sso extension aws fill 1](docs/assets/passwd-sso-extension-aws-fill-1.png)
 ![passwd-sso extension aws fill 2](docs/assets/passwd-sso-extension-aws-fill-2.png)
@@ -72,7 +72,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 - **Team Vault** — E2E encrypted sharing (ECDH-P256) with RBAC (Owner/Admin/Member/Viewer)
 - **Team Security Policies** — Sharing/export controls, reprompt requirements, password-policy guidance
-- **Multi-Tenant Isolation** — PostgreSQL FORCE RLS on 33 tables with IdP claim-based tenant resolution
+- **Multi-Tenant Isolation** — PostgreSQL FORCE RLS on 39 tables with IdP claim-based tenant resolution
 - **SCIM 2.0 Provisioning** — Tenant-scoped user/group sync (RFC 7644)
 - **Directory Sync** — Azure AD, Google Workspace, Okta member sync
 - **Tenant Admin** — Member management, SCIM tokens, admin vault reset, tenant settings
@@ -87,9 +87,19 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **CLI** — `passwd-sso` with 13 commands; OS keychain integration, XDG-compliant config
 - **SSH Agent** — `passwd-sso agent` proxies vault SSH keys via SSH agent protocol
 - **CI/CD Secrets** — `env` and `run` commands inject vault secrets into environment/subprocess
-- **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, AWS 3-field, CC/address fill, new-login detect & save
+- **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, custom field autofill, multi-URL matching, CC/address fill, new-login detect & save
 - **REST API v1** — `/api/v1/*` with OpenAPI 3.1 spec
 - **API Keys** — Scoped keys with SHA-256 hashed tokens and configurable expiration
+
+### AI & Automation (Machine Identity)
+
+- **Service Accounts** — Non-human identity management with scoped `sa_` tokens, tenant admin CRUD
+- **MCP Gateway** — [Model Context Protocol](https://modelcontextprotocol.io/) server for AI agent credential access (Claude Desktop, Cursor)
+- **OAuth 2.1 + PKCE** — Authorization Code flow for MCP client authentication
+- **Just-in-Time Access** — SA self-service scope requests with admin approval workflow
+- **Cross-Actor Audit** — All actions tracked with `actorType` (Human/Service Account/MCP Agent) across personal, team, and tenant logs
+- **Delegated Decryption** — Human unlocks vault in browser, selectively delegates plaintext entries to MCP sessions with per-entry consent and short TTLs
+- **Zero-Knowledge Preserved** — Server never sees plaintext; MCP agents access delegated entries only through envelope-encrypted Redis cache
 
 ### UI & Localization
 
@@ -121,6 +131,8 @@ Browser (Web Crypto API)
 Next.js App (SSR / API Routes)
   │  ← Auth.js sessions, route protection, RBAC
   │  ← Share links / sends: server-side AES-256-GCM encryption
+  │  ← MCP Gateway: /api/mcp (Streamable HTTP, OAuth 2.1 PKCE)
+  │  ← Service Account tokens: sa_ prefix, JIT access workflow
   ▼
 PostgreSQL ← Prisma 7          Redis ← rate limiting
   │
@@ -175,7 +187,8 @@ Edit `.env.local` — key variables:
 | `NEXT_PUBLIC_APP_NAME` | (Optional) Display name shown in the UI |
 | `NEXT_PUBLIC_BASE_PATH` | (Optional) Sub-path for reverse proxy (e.g., `/passwd-sso`). Set before build |
 | `APP_URL` | (Optional) External URL when behind reverse proxy/CDN (origin only) |
-| `DATABASE_URL` | PostgreSQL connection string |
+| `DATABASE_URL` | PostgreSQL connection string (app role, e.g. `passwd_app`) |
+| `MIGRATION_DATABASE_URL` | PostgreSQL connection for migrations (superuser role, e.g. `passwd_user`). Required for `npm run db:migrate` |
 | `AUTH_URL` | Application origin (e.g., `http://localhost:3000`) |
 | `AUTH_SECRET` | `openssl rand -base64 32` |
 | `AUTH_GOOGLE_ID` | Google OAuth client ID |
@@ -340,6 +353,7 @@ docs/                     # Documentation (architecture, security, operations, s
 - [Deployment Operations](docs/operations/deployment.md)
 - [Backup & Recovery](docs/operations/backup-recovery/en.md) / [日本語](docs/operations/backup-recovery/ja.md)
 - [Redis HA](docs/operations/redis-ha.md) — Redis Sentinel/Cluster configuration
+- [Machine Identity & MCP Gateway](docs/architecture/machine-identity.md) — service accounts, OAuth 2.1 PKCE, DCR, delegated decryption
 - [Audit Log Reference](docs/operations/audit-log-reference.md)
 - [Incident Runbook](docs/operations/incident-runbook.md)
 - [All docs](docs/README.md)

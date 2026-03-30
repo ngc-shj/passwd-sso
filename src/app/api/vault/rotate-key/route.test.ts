@@ -57,6 +57,9 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/delegation", () => ({
+  revokeAllDelegationSessions: vi.fn(async () => 0),
+}));
 vi.mock("@/lib/audit", () => ({
   logAudit: vi.fn(),
   extractRequestMeta: vi.fn(() => ({})),
@@ -207,6 +210,9 @@ describe("POST /api/vault/rotate-key", () => {
         version: 2,
       }),
     });
+    // Verify delegation sessions are revoked after key rotation
+    const { revokeAllDelegationSessions } = await import("@/lib/delegation");
+    expect(revokeAllDelegationSessions).toHaveBeenCalledWith("user-1", "tenant-1", "KEY_ROTATION");
   });
 
   it("rotates key with entries and history (UUID v4 IDs — legacy label kept for context)", async () => {

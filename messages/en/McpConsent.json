@@ -1,0 +1,24 @@
+{
+  "title": "Authorize Application",
+  "description": "wants to access your vault",
+  "requestedScopes": "Requested permissions",
+  "allow": "Allow",
+  "deny": "Deny",
+  "scopeDescriptions": {
+    "credentials:list": "View entry names and usernames",
+    "credentials:use": "Use credentials via local agent",
+    "credentials:decrypt": "List and use credentials (legacy)",
+    "team:credentials:read": "Read team credentials",
+    "vault:status": "Check vault status"
+  },
+  "errors": {
+    "missingParams": "Missing required parameters",
+    "unknownClient": "Unknown client",
+    "invalidRedirectUri": "Invalid redirect URI",
+    "noTenant": "No tenant associated with your account",
+    "tenantClientLimit": "Client limit reached for your tenant",
+    "nameConflict": "A client with this name already exists in your tenant",
+    "alreadyClaimedOtherTenant": "This client belongs to another tenant",
+    "tenantMismatch": "Tenant mismatch"
+  }
+}

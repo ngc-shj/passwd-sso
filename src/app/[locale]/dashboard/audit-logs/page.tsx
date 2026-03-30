@@ -1,25 +1,17 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useSession } from "next-auth/react";
-import { useLocale, useTranslations } from "next-intl";
-import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
+import { useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   LogIn,
   LogOut,
@@ -35,9 +27,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   ShieldOff,
-  ChevronDown,
   ScrollText,
-  Loader2,
   Link as LinkIcon,
   Link2Off,
   HeartPulse,
@@ -56,23 +46,17 @@ import {
   AUDIT_TARGET_TYPE,
   type AuditActionValue,
 } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format-datetime";
-import { normalizeAuditActionKey } from "@/lib/audit-action-key";
-import { fetchApi } from "@/lib/url-helpers";
 import { formatUserName } from "@/lib/format-user";
-import { downloadBlob } from "@/lib/download-blob";
-
-interface AuditLogItem {
-  id: string;
-  action: string;
-  targetType: string | null;
-  targetId: string | null;
-  metadata: Record<string, unknown> | null;
-  ip: string | null;
-  userAgent: string | null;
-  createdAt: string;
-  user?: { id: string; name: string | null; email: string | null; image: string | null } | null;
-}
+import { useAuditDelegationLabel } from "@/components/audit/audit-delegation-detail";
+import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
+import { getActionLabel } from "@/lib/audit-action-label";
+import { getCommonTargetLabel } from "@/lib/audit-target-label";
+import { AuditActionFilter } from "@/components/audit/audit-action-filter";
+import { AuditDateFilter } from "@/components/audit/audit-date-filter";
+import { AuditDownloadButton } from "@/components/audit/audit-download-button";
+import { AuditLogList } from "@/components/audit/audit-log-list";
+import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
+import { AuditActorTypeBadge } from "@/components/audit/audit-actor-type-badge";
 
 type EntryOverviewMap = Record<
   string,
@@ -118,54 +102,32 @@ const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
 
 const ACTION_GROUPS = [
   { label: "groupAuth", value: AUDIT_ACTION_GROUP.AUTH, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.AUTH] },
-  {
-    label: "groupEntry",
-    value: AUDIT_ACTION_GROUP.ENTRY,
-    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY],
-  },
-  {
-    label: "groupBulk",
-    value: AUDIT_ACTION_GROUP.BULK,
-    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.BULK],
-  },
-  {
-    label: "groupTransfer",
-    value: AUDIT_ACTION_GROUP.TRANSFER,
-    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER],
-  },
+  { label: "groupEntry", value: AUDIT_ACTION_GROUP.ENTRY, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ENTRY] },
+  { label: "groupBulk", value: AUDIT_ACTION_GROUP.BULK, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.BULK] },
+  { label: "groupTransfer", value: AUDIT_ACTION_GROUP.TRANSFER, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TRANSFER] },
   { label: "groupAttachment", value: AUDIT_ACTION_GROUP.ATTACHMENT, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.ATTACHMENT] },
   { label: "groupTeam", value: AUDIT_ACTION_GROUP.TEAM, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.TEAM] },
   { label: "groupShare", value: AUDIT_ACTION_GROUP.SHARE, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SHARE] },
   { label: "groupSend", value: AUDIT_ACTION_GROUP.SEND, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.SEND] },
-  {
-    label: "groupEmergency",
-    value: AUDIT_ACTION_GROUP.EMERGENCY,
-    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.EMERGENCY],
-  },
+  { label: "groupEmergency", value: AUDIT_ACTION_GROUP.EMERGENCY, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.EMERGENCY] },
+  ...(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.DELEGATION] ? [{
+    label: "groupDelegation" as const,
+    value: AUDIT_ACTION_GROUP.DELEGATION,
+    actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.DELEGATION],
+  }] : []),
 ] as const;
 
 export default function AuditLogsPage() {
   const t = useTranslations("AuditLog");
-  const locale = useLocale();
   const { data: session } = useSession();
   const { encryptionKey } = useVault();
-  const [logs, setLogs] = useState<AuditLogItem[]>([]);
-  const [entryNames, setEntryNames] = useState<Map<string, string>>(new Map());
   const [relatedUsers, setRelatedUsers] = useState<UserMap>({});
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
-  const [selectedActions, setSelectedActions] = useState<Set<AuditActionValue>>(new Set());
-  const [actionSearch, setActionSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [downloading, setDownloading] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
-  const td = useTranslations("AuditDownload");
+  const getDelegationLabel = useAuditDelegationLabel();
 
   const resolveEntryNames = useCallback(
-    async (overviews: EntryOverviewMap) => {
-      if (!encryptionKey || !session?.user?.id) return new Map<string, string>();
+    async (data: unknown) => {
+      const overviews = (data as { entryOverviews?: EntryOverviewMap })?.entryOverviews;
+      if (!overviews || !encryptionKey || !session?.user?.id) return new Map<string, string>();
       const userId = session.user.id;
       const names = new Map<string, string>();
       for (const [id, ov] of Object.entries(overviews)) {
@@ -184,72 +146,28 @@ export default function AuditLogsPage() {
     [encryptionKey, session]
   );
 
-  const fetchLogs = useCallback(
-    async (cursor?: string) => {
-      const params = new URLSearchParams();
-      if (selectedActions.size > 0) {
-        params.set("actions", Array.from(selectedActions).join(","));
-      }
-      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-      if (dateTo) {
-        const endOfDay = new Date(dateTo);
-        endOfDay.setHours(23, 59, 59, 999);
-        params.set("to", endOfDay.toISOString());
-      }
-      if (cursor) params.set("cursor", cursor);
+  const onDataReceived = useCallback((data: unknown) => {
+    const users = (data as { relatedUsers?: UserMap })?.relatedUsers;
+    if (users) {
+      setRelatedUsers((prev) => ({ ...prev, ...users }));
+    }
+  }, []);
 
-      const res = await fetchApi(`${API_PATH.AUDIT_LOGS}?${params.toString()}`);
-      if (!res.ok) return null;
-      return res.json();
-    },
-    [selectedActions, dateFrom, dateTo]
-  );
-
-  useEffect(() => {
-    let stale = false;
-    setLoading(true);
-    fetchLogs().then(async (data) => {
-      if (stale) return;
-      if (data) {
-        setLogs(data.items);
-        setNextCursor(data.nextCursor);
-        if (data.entryOverviews) {
-          const names = await resolveEntryNames(data.entryOverviews);
-          if (!stale) setEntryNames(names);
-        }
-        if (data.relatedUsers) {
-          setRelatedUsers(data.relatedUsers);
-        }
-      }
-      setLoading(false);
-    });
-    return () => { stale = true; };
-  }, [fetchLogs, resolveEntryNames]);
-
-  const handleLoadMore = async () => {
-    if (!nextCursor) return;
-    setLoadingMore(true);
-    const data = await fetchLogs(nextCursor);
-      if (data) {
-        setLogs((prev) => [...prev, ...data.items]);
-        setNextCursor(data.nextCursor);
-        if (data.entryOverviews) {
-          const names = await resolveEntryNames(data.entryOverviews);
-          setEntryNames((prev) => new Map([...prev, ...names]));
-        }
-        if (data.relatedUsers) {
-          setRelatedUsers((prev) => ({ ...prev, ...data.relatedUsers }));
-        }
-      }
-    setLoadingMore(false);
-  };
-
-  const formatDate = (iso: string) => formatDateTime(iso, locale);
-
-  const formatViewer = (log: AuditLogItem) => {
-    if (!log.user) return null;
-    return formatUserName(log.user, "") || null;
-  };
+  const {
+    logs, loading, loadingMore, nextCursor, entryNames, downloading,
+    selectedActions, actionSearch, dateFrom, dateTo, filterOpen, actorTypeFilter,
+    setActionSearch, setDateFrom, setDateTo, setFilterOpen, setActorTypeFilter,
+    toggleAction, setGroupSelection, clearActions,
+    actionSummary, filteredActions, actionLabel, isActionSelected, formatDate,
+    handleLoadMore, handleDownload,
+  } = useAuditLogs({
+    fetchEndpoint: API_PATH.AUDIT_LOGS,
+    downloadEndpoint: "/api/audit-logs/download",
+    downloadFilename: "audit-logs",
+    actionGroups: ACTION_GROUPS,
+    resolveEntryNames,
+    onDataReceived,
+  });
 
   const resolveUser = (id?: string, fallbackEmail?: string | null) => {
     if (id && relatedUsers[id]) {
@@ -263,7 +181,7 @@ export default function AuditLogsPage() {
     const meta = log.metadata as { ownerId?: string; granteeId?: string; granteeEmail?: string; permanent?: boolean; entryCount?: number } | null;
     const owner = resolveUser(meta?.ownerId) ?? t("unknownUser");
     const grantee = resolveUser(meta?.granteeId, meta?.granteeEmail ?? null) ?? t("unknownUser");
-    const viewer = formatViewer(log) ?? t("unknownUser");
+    const viewer = (log.user ? formatUserName(log.user, "") || null : null) ?? t("unknownUser");
 
     switch (log.action) {
       case AUDIT_ACTION.EMERGENCY_GRANT_CREATE:
@@ -293,131 +211,12 @@ export default function AuditLogsPage() {
   };
 
   const getTargetLabel = (log: AuditLogItem): string | null => {
-    const meta =
-      log.metadata && typeof log.metadata === "object"
-        ? (log.metadata as Record<string, unknown>)
-        : null;
+    const common = getCommonTargetLabel(t as never, log, entryNames, AUDIT_TARGET_TYPE.PASSWORD_ENTRY, "exportMeta");
+    if (common !== null) return common;
 
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_TRASH && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const movedCount =
-        typeof meta.movedCount === "number" ? meta.movedCount : 0;
-      const notMovedCount = Math.max(0, requestedCount - movedCount);
-      return t("bulkTrashMeta", {
-        requestedCount,
-        movedCount,
-        notMovedCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH && meta) {
-      const deletedCount =
-        typeof meta.deletedCount === "number" ? meta.deletedCount : 0;
-      return t("emptyTrashMeta", { deletedCount });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const archivedCount =
-        typeof meta.archivedCount === "number" ? meta.archivedCount : 0;
-      const notArchivedCount = Math.max(0, requestedCount - archivedCount);
-      return t("bulkArchiveMeta", {
-        requestedCount,
-        archivedCount,
-        notArchivedCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const unarchivedCount =
-        typeof meta.unarchivedCount === "number" ? meta.unarchivedCount : 0;
-      const alreadyActiveCount = Math.max(0, requestedCount - unarchivedCount);
-      return t("bulkUnarchiveMeta", {
-        requestedCount,
-        unarchivedCount,
-        alreadyActiveCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE && meta) {
-      const requestedCount =
-        typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const restoredCount =
-        typeof meta.restoredCount === "number" ? meta.restoredCount : 0;
-      const notRestoredCount = Math.max(0, requestedCount - restoredCount);
-      return t("bulkRestoreMeta", {
-        requestedCount,
-        restoredCount,
-        notRestoredCount,
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_IMPORT && meta) {
-      const requestedCount = typeof meta.requestedCount === "number" ? meta.requestedCount : 0;
-      const successCount = typeof meta.successCount === "number" ? meta.successCount : 0;
-      const failedCount = typeof meta.failedCount === "number" ? meta.failedCount : 0;
-      const filename = typeof meta.filename === "string" ? meta.filename : "-";
-      const format = typeof meta.format === "string" ? meta.format : "-";
-      const encrypted = meta.encrypted === true;
-      return t("importMeta", {
-        requestedCount,
-        successCount,
-        failedCount,
-        filename,
-        format,
-        encrypted: encrypted ? t("yes") : t("no"),
-      });
-    }
-
-    if (log.action === AUDIT_ACTION.ENTRY_EXPORT && meta) {
-      const filename = typeof meta.filename === "string" ? meta.filename : null;
-      const encrypted = meta.encrypted === true;
-      const includeTeams = meta.includeTeams === true;
-      const format = typeof meta.format === "string" ? meta.format : "-";
-      const entryCount = typeof meta.entryCount === "number" ? meta.entryCount : 0;
-      return t("exportMeta", {
-        filename: filename ?? "-",
-        format,
-        entryCount,
-        encrypted: encrypted ? t("yes") : t("no"),
-        teams: includeTeams ? t("included") : t("notIncluded"),
-      });
-    }
-
-    // Entry operations: show resolved entry name
-    if (
-      log.targetType === AUDIT_TARGET_TYPE.PASSWORD_ENTRY &&
-      log.targetId
-    ) {
-      const name = entryNames.get(log.targetId);
-      if (name) {
-        if (
-          log.action === AUDIT_ACTION.ENTRY_PERMANENT_DELETE ||
-          (log.action === AUDIT_ACTION.ENTRY_DELETE && meta?.permanent === true)
-        ) {
-          return `${name}（${t("permanentDelete")}）`;
-        }
-        return name;
-      }
-      return t("deletedEntry");
-    }
-
-    // Attachment operations: show filename
-    if (meta?.filename) {
-      return String(meta.filename);
-    }
-
-    // Role updates: show role change
-    if (log.action === AUDIT_ACTION.TEAM_ROLE_UPDATE && meta?.previousRole && meta?.newRole) {
-      return t("roleChange", {
-        from: String(meta.previousRole),
-        to: String(meta.newRole),
-      });
-    }
+    const meta = log.metadata && typeof log.metadata === "object"
+      ? (log.metadata as Record<string, unknown>)
+      : null;
 
     // Auth login: show provider
     if (log.action === AUDIT_ACTION.AUTH_LOGIN && meta?.provider) {
@@ -436,6 +235,10 @@ export default function AuditLogsPage() {
       return t("lockoutMeta", { attempts, lockMinutes });
     }
 
+    // Delegation: show tool-specific detail
+    const delegationLabel = getDelegationLabel(log.action, meta);
+    if (delegationLabel) return delegationLabel;
+
     // Session revoke all: show revoked count
     if (log.action === AUDIT_ACTION.SESSION_REVOKE_ALL && typeof meta?.revokedCount === "number") {
       return t("revokedSessionsMeta", { revokedCount: meta.revokedCount });
@@ -451,272 +254,101 @@ export default function AuditLogsPage() {
     return null;
   };
 
-  const actionLabel = (action: AuditActionValue | string) => {
-    const key = normalizeAuditActionKey(String(action));
-    return t.has(key as never) ? t(key as never) : String(action);
+  const renderItem = (log: AuditLogItem) => {
+    const targetLabel = getTargetLabel(log);
+    const emergencyDetail = log.action.startsWith(AUDIT_ACTION_EMERGENCY_PREFIX)
+      ? getEmergencyDetail(log)
+      : null;
+
+    return (
+      <AuditLogItemRow
+        key={log.id}
+        id={log.id}
+        icon={ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
+        actionLabel={getActionLabel(t as never, log.action, actionLabel)}
+        badges={<AuditActorTypeBadge actorType={log.actorType} />}
+        detail={
+          <>
+            {targetLabel && (
+              <p className="text-xs text-muted-foreground truncate">{targetLabel}</p>
+            )}
+            {emergencyDetail && (
+              <p className="text-xs text-muted-foreground">{emergencyDetail}</p>
+            )}
+          </>
+        }
+        timestamp={formatDate(log.createdAt)}
+        ip={log.ip}
+      />
+    );
   };
-  const getActionLabel = (log: AuditLogItem) =>
-    log.action === AUDIT_ACTION.ENTRY_BULK_TRASH
-      ? t("ENTRY_BULK_TRASH")
-      : log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH
-        ? t("ENTRY_EMPTY_TRASH")
-      : log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE
-        ? t("ENTRY_BULK_ARCHIVE")
-        : log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE
-          ? t("ENTRY_BULK_UNARCHIVE")
-          : log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE
-            ? t("ENTRY_BULK_RESTORE")
-            : log.action === AUDIT_ACTION.ENTRY_TRASH
-              ? t("ENTRY_TRASH")
-              : log.action === AUDIT_ACTION.ENTRY_PERMANENT_DELETE
-                ? t("ENTRY_PERMANENT_DELETE")
-        : actionLabel(log.action);
-
-  const filteredActions = (actions: readonly AuditActionValue[]) => {
-    if (!actionSearch) return actions;
-    const q = actionSearch.toLowerCase();
-    return actions.filter((a) => {
-      const label = actionLabel(a).toLowerCase();
-      return label.includes(q) || a.toLowerCase().includes(q);
-    });
-  };
-
-  const isActionSelected = (action: AuditActionValue) => selectedActions.has(action);
-
-  const toggleAction = (action: AuditActionValue, checked: boolean) => {
-    setSelectedActions((prev) => {
-      const next = new Set(prev);
-      if (checked) next.add(action);
-      else next.delete(action);
-      return next;
-    });
-  };
-
-  const setGroupSelection = (actions: readonly AuditActionValue[], checked: boolean) => {
-    setSelectedActions((prev) => {
-      const next = new Set(prev);
-      for (const action of actions) {
-        if (checked) next.add(action);
-        else next.delete(action);
-      }
-      return next;
-    });
-  };
-
-  const clearActions = () => setSelectedActions(new Set());
-
-  const handleDownload = async (format: "jsonl" | "csv") => {
-    setDownloading(true);
-    try {
-      const params = new URLSearchParams();
-      params.set("format", format);
-      if (selectedActions.size > 0) {
-        params.set("actions", Array.from(selectedActions).join(","));
-      }
-      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
-      if (dateTo) {
-        const endOfDay = new Date(dateTo);
-        endOfDay.setHours(23, 59, 59, 999);
-        params.set("to", endOfDay.toISOString());
-      }
-      const res = await fetchApi(`/api/audit-logs/download?${params.toString()}`);
-      if (!res.ok) {
-        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
-        return;
-      }
-      await downloadBlob(res, `audit-logs.${format === "csv" ? "csv" : "jsonl"}`);
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  const selectedCount = selectedActions.size;
-  const actionSummary =
-    selectedCount === 0
-      ? t("allActions")
-      : selectedCount === 1
-        ? actionLabel(Array.from(selectedActions)[0])
-        : t("actionsSelected", { count: selectedCount });
 
   return (
     <div className="flex-1 overflow-auto p-4 md:p-6">
       <div className="mx-auto max-w-4xl space-y-6">
-      <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-        <div className="flex items-center gap-3">
-          <ScrollText className="h-6 w-6" />
-          <div>
-            <h1 className="text-2xl font-bold">{t("title")}</h1>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="rounded-xl border bg-card/80 p-4">
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="space-y-1">
-              <Label className="text-xs">{t("dateFrom")}</Label>
-              <Input
-                type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                className="w-[160px]"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">{t("dateTo")}</Label>
-              <Input
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                className="w-[160px]"
-              />
+        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+          <div className="flex items-center gap-3">
+            <ScrollText className="h-6 w-6" />
+            <div>
+              <h1 className="text-2xl font-bold">{t("title")}</h1>
             </div>
           </div>
+        </Card>
 
-          <Collapsible open={filterOpen} onOpenChange={setFilterOpen}>
-            <div className="flex items-center gap-2">
-              <CollapsibleTrigger asChild>
-                <Button variant="outline" size="sm" className="justify-between gap-2">
-                  <span className="text-xs">{t("action")}: {actionSummary}</span>
-                  <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${filterOpen ? "rotate-180" : ""}`} />
-                </Button>
-              </CollapsibleTrigger>
-              {selectedActions.size > 0 && (
-                <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={clearActions}>
-                  {t("allActions")}
-                </Button>
-              )}
-            </div>
-            <CollapsibleContent>
-              <div className="mt-2 space-y-2">
-                <Input
-                  placeholder={t("actionSearch")}
-                  value={actionSearch}
-                  onChange={(e) => setActionSearch(e.target.value)}
-                />
-                <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
-                  {ACTION_GROUPS.map((group) => {
-                    const actions = filteredActions(group.actions);
-                    if (actions.length === 0) return null;
-                    const allSelected = group.actions.every((a) => selectedActions.has(a));
-                    return (
-                      <Collapsible key={group.value}>
-                        <div className="flex items-center gap-2 py-1">
-                          <Checkbox
-                            checked={allSelected}
-                            onCheckedChange={(checked) => setGroupSelection(group.actions, !!checked)}
-                          />
-                          <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
-                            {t(group.label as never)}
-                            <ChevronDown className="h-3.5 w-3.5" />
-                          </CollapsibleTrigger>
-                        </div>
-                        <CollapsibleContent className="pl-6 space-y-1">
-                          {actions.map((action) => (
-                            <label key={action} className="flex items-center gap-2 text-sm py-0.5">
-                              <Checkbox
-                                checked={isActionSelected(action)}
-                                onCheckedChange={(checked) => toggleAction(action, !!checked)}
-                              />
-                              {actionLabel(action)}
-                            </label>
-                          ))}
-                        </CollapsibleContent>
-                      </Collapsible>
-                    );
-                  })}
-                </div>
+        <Card className="rounded-xl border bg-card/80 p-4">
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-3 items-end">
+              <div className="space-y-1">
+                <Label className="text-xs">{t("actorTypeLabel")}</Label>
+                <Select value={actorTypeFilter} onValueChange={setActorTypeFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                    <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                    <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-            </CollapsibleContent>
-          </Collapsible>
-        </div>
-      </Card>
+              <AuditDateFilter
+                dateFrom={dateFrom}
+                dateTo={dateTo}
+                setDateFrom={setDateFrom}
+                setDateTo={setDateTo}
+              />
+            </div>
 
-      {/* Download */}
-      <div className="flex justify-end">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" disabled={downloading}>
-              {downloading ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Download className="h-4 w-4 mr-2" />
-              )}
-              {downloading ? td("downloading") : td("download")}
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => handleDownload("csv")}>
-              {td("formatCsv")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleDownload("jsonl")}>
-              {td("formatJsonl")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      {loading ? (
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <div className="flex justify-center">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <AuditActionFilter
+              actionGroups={ACTION_GROUPS}
+              selectedActions={selectedActions}
+              actionSearch={actionSearch}
+              filterOpen={filterOpen}
+              actionSummary={actionSummary}
+              actionLabel={actionLabel}
+              filteredActions={filteredActions}
+              isActionSelected={isActionSelected}
+              toggleAction={toggleAction}
+              setGroupSelection={setGroupSelection}
+              clearActions={clearActions}
+              setActionSearch={setActionSearch}
+              setFilterOpen={setFilterOpen}
+            />
           </div>
         </Card>
-      ) : logs.length === 0 ? (
-        <Card className="rounded-xl border bg-card/80 p-10">
-          <p className="text-center text-muted-foreground">{t("noLogs")}</p>
-        </Card>
-      ) : (
-        <>
-          <Card className="rounded-xl border bg-card/80 divide-y">
-            {logs.map((log) => {
-              const targetLabel = getTargetLabel(log);
-              return (
-                <div key={log.id} className="px-4 py-3 flex items-start gap-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50">
-                  <div className="shrink-0 text-muted-foreground mt-0.5">
-                    {ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{getActionLabel(log)}</p>
-                    {targetLabel && (
-                      <p className="text-xs text-muted-foreground truncate">
-                        {targetLabel}
-                      </p>
-                    )}
-                    {log.action.startsWith(AUDIT_ACTION_EMERGENCY_PREFIX) && (() => {
-                      const detail = getEmergencyDetail(log);
-                      return detail ? (
-                        <p className="text-xs text-muted-foreground">{detail}</p>
-                      ) : null;
-                    })()}
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-xs text-muted-foreground whitespace-nowrap">
-                      {formatDate(log.createdAt)}
-                    </p>
-                    {log.ip && (
-                      <p className="text-xs text-muted-foreground">{log.ip}</p>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </Card>
 
-          {nextCursor && (
-            <div className="flex justify-center pt-4">
-              <Button
-                variant="outline"
-                onClick={handleLoadMore}
-                disabled={loadingMore}
-              >
-                {loadingMore && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {t("loadMore")}
-              </Button>
-            </div>
-          )}
-        </>
-      )}
+        <div className="flex justify-end">
+          <AuditDownloadButton downloading={downloading} onDownload={handleDownload} />
+        </div>
+
+        <AuditLogList
+          logs={logs}
+          loading={loading}
+          loadingMore={loadingMore}
+          nextCursor={nextCursor}
+          onLoadMore={handleLoadMore}
+          renderItem={renderItem}
+        />
       </div>
     </div>
   );

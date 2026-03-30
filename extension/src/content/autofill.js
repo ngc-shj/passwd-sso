@@ -268,70 +268,56 @@ function performAutofill(payload) {
       ? hintedInput
       : null;
 
+  // Build label→input map for custom fields and identify reserved inputs
+  var customFieldMap = {};
+  var customFieldTargetSet = [];
+  if (payload.customFields) {
+    for (var cfIdx = 0; cfIdx < payload.customFields.length; cfIdx++) {
+      var cfLabel = payload.customFields[cfIdx].label;
+      var lower = cfLabel.toLowerCase();
+      var target = inputs.find(function (i) {
+        return (
+          isUsableInput(i) &&
+          i.type !== "password" &&
+          (i.id.toLowerCase() === lower || i.name.toLowerCase() === lower)
+        );
+      });
+      if (target) {
+        customFieldMap[lower] = target;
+        if (customFieldTargetSet.indexOf(target) === -1) {
+          customFieldTargetSet.push(target);
+        }
+      }
+    }
+  }
+
+  var isCustomFieldTarget = function (input) {
+    return customFieldTargetSet.indexOf(input) !== -1;
+  };
+
   var focusedUsername = findFocusedTextInput();
-  var scopeForm = (focusedUsername || hintedUsernameInput)
-    ? (focusedUsername || hintedUsernameInput).form
+  // If focused input is reserved for a custom field, don't use it as username target
+  var effectiveFocusedUsername =
+    focusedUsername && !isCustomFieldTarget(focusedUsername) ? focusedUsername : null;
+  var effectiveHintedUsername =
+    hintedUsernameInput && !isCustomFieldTarget(hintedUsernameInput) ? hintedUsernameInput : null;
+
+  var scopeForm = (effectiveFocusedUsername || effectiveHintedUsername || focusedUsername || hintedUsernameInput)
+    ? (effectiveFocusedUsername || effectiveHintedUsername || focusedUsername || hintedUsernameInput).form
     : null;
   var passwordInput =
     (scopeForm
       ? findPasswordInput(Array.from(scopeForm.querySelectorAll("input")))
       : null) || findPasswordInput(inputs);
   var usernameInput =
-    focusedUsername ||
-    hintedUsernameInput ||
-    findUsernameInput(inputs, passwordInput);
-
-  var host = window.location.hostname.toLowerCase();
-  var isAwsSignInPage =
-    host === "signin.aws.amazon.com" ||
-    host.endsWith(".signin.aws.amazon.com") ||
-    host === "sign-in.aws.amazon.com" ||
-    host.endsWith(".sign-in.aws.amazon.com");
-
-  var findAwsAccountInput = function () {
-    return (
-      inputs.find(function (i) {
-        if (
-          !isUsableInput(i) ||
-          ["text", "email", "tel"].indexOf(i.type) === -1
-        )
-          return false;
-        return /(account|alias|アカウント|エイリアス)/.test(getHints(i));
-      }) || null
+    effectiveFocusedUsername ||
+    effectiveHintedUsername ||
+    findUsernameInput(
+      inputs.filter(function (i) { return !isCustomFieldTarget(i); }),
+      passwordInput
     );
-  };
 
-  var findAwsIamInput = function () {
-    return (
-      inputs.find(function (i) {
-        if (
-          !isUsableInput(i) ||
-          ["text", "email", "tel"].indexOf(i.type) === -1
-        )
-          return false;
-        return /(iam|username|user.?name|ユーザー名|ユーザ名)/.test(
-          getHints(i)
-        );
-      }) || null
-    );
-  };
-
-  if (isAwsSignInPage) {
-    var awsAccountInput = findAwsAccountInput();
-    var awsIamInput = findAwsIamInput();
-    if (awsAccountInput && payload.awsAccountIdOrAlias) {
-      setInputValue(awsAccountInput, payload.awsAccountIdOrAlias);
-    }
-    if (awsIamInput && (payload.awsIamUsername || payload.username)) {
-      setInputValue(awsIamInput, payload.awsIamUsername || payload.username);
-    }
-  }
-
-  var hasAwsSpecificValues =
-    isAwsSignInPage &&
-    Boolean(payload.awsAccountIdOrAlias || payload.awsIamUsername);
-
-  if (!hasAwsSpecificValues && usernameInput && payload.username) {
+  if (usernameInput && payload.username) {
     setInputValue(usernameInput, payload.username);
   }
   if (passwordInput && payload.password) {
@@ -363,6 +349,17 @@ function performAutofill(payload) {
       }
     }
   }
+
+  // Generic custom field autofill using pre-built label→input map
+  if (payload.customFields) {
+    for (var cfFillIdx = 0; cfFillIdx < payload.customFields.length; cfFillIdx++) {
+      var cf = payload.customFields[cfFillIdx];
+      var cfTarget = customFieldMap[cf.label.toLowerCase()];
+      if (cfTarget) {
+        setInputValue(cfTarget, cf.value);
+      }
+    }
+  }
 }
 
 // Guard against double-registration when injected multiple times.
@@ -374,8 +371,9 @@ if (
   !window[AUTOFILL_GUARD]
 ) {
   window[AUTOFILL_GUARD] = true;
-  chrome.runtime.onMessage.addListener(function (message) {
-    if (message && message.type === "AUTOFILL_FILL") {
+  chrome.runtime.onMessage.addListener(function (message, sender) {
+    // Only accept messages from our own extension — reject external senders
+    if (message && message.type === "AUTOFILL_FILL" && sender.id === chrome.runtime.id) {
       performAutofill(message);
     }
   });

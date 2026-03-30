@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.4.4](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.3...passwd-sso-v0.4.4) (2026-03-29)
+
+
+### Bug Fixes
+
+* Phase 7 — zero-knowledge MCP with CLI decrypt agent ([3b901df](https://github.com/ngc-shj/passwd-sso/commit/3b901df7dddcaec4afdc3161add024dd5b151455))
+* add missing delegation_sessions migration and fix RLS gaps ([#278](https://github.com/ngc-shj/passwd-sso/issues/278)) ([e544228](https://github.com/ngc-shj/passwd-sso/commit/e5442281a135fa94f4afa4ef07a3f31c8c53f72e))
+* make CLI publishable to npm ([#276](https://github.com/ngc-shj/passwd-sso/issues/276)) ([d996bd0](https://github.com/ngc-shj/passwd-sso/commit/d996bd0d80d5bdb1f31df5fc8b5702ff128c1e9c))
+
+## [0.4.3](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.2...passwd-sso-v0.4.3) (2026-03-29)
+
+
+### Bug Fixes
+
+* Phase 6 — DCR + Native OAuth for MCP clients ([#272](https://github.com/ngc-shj/passwd-sso/issues/272)) ([a676507](https://github.com/ngc-shj/passwd-sso/commit/a676507c4f0d1415261bff59fa34fa090a9ebb51))
+
+## [0.4.2](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.1...passwd-sso-v0.4.2) (2026-03-29)
+
+
+### Bug Fixes
+
+* Delegated Decryption review fixes — tests, audit display, IP extraction, docs ([37ba683](https://github.com/ngc-shj/passwd-sso/commit/37ba683e463be95f461634665c64424f4d5e01ac))
+
+## [0.4.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.0...passwd-sso-v0.4.1) (2026-03-28)
+
+
+### Bug Fixes
+
+* enforce RLS in dev by separating DB roles (passwd_app / passwd_user) ([#267](https://github.com/ngc-shj/passwd-sso/issues/267)) ([05cb302](https://github.com/ngc-shj/passwd-sso/commit/05cb3028aac3d4d62e4f022c828589111c95b163))
+
+## [0.4.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.12...passwd-sso-v0.4.0) (2026-03-28)
+
+
+### Features
+
+* add Machine Identity — service accounts, MCP Gateway & JIT access ([#264](https://github.com/ngc-shj/passwd-sso/issues/264)) ([4acb958](https://github.com/ngc-shj/passwd-sso/commit/4acb9586acc4dded248838dc2a868e144f16422f))
+
+## [0.3.12](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.11...passwd-sso-v0.3.12) (2026-03-27)
+
+
+### Bug Fixes
+
+* update sample data, remove unused code, and harden extension message listeners ([#262](https://github.com/ngc-shj/passwd-sso/issues/262)) ([cb894be](https://github.com/ngc-shj/passwd-sso/commit/cb894be5cafd82a0f72b9fc22b0fcf60e84bf939))
+
 ## [0.3.11](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.3.10...passwd-sso-v0.3.11) (2026-03-27)
 
 

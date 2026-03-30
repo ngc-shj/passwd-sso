@@ -22,7 +22,10 @@ app_image     = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-de
 jackson_image = "<ACCOUNT_ID>.dkr.ecr.ap-northeast-1.amazonaws.com/passwd-sso-dev-jackson:latest"
 
 app_secrets = {
-  DATABASE_URL        = "postgresql://USER:PASSWORD@HOST:5432/passwd_sso"
+  # Use a non-SUPERUSER app role for DATABASE_URL (RLS enforced)
+  DATABASE_URL        = "postgresql://passwd_app:PASSWORD@HOST:5432/passwd_sso"
+  # SUPERUSER role for migrations only (prisma migrate deploy)
+  MIGRATION_DATABASE_URL = "postgresql://passwd_user:PASSWORD@HOST:5432/passwd_sso"
   AUTH_URL            = "https://app.example.com"
   AUTH_SECRET         = "<REPLACE>"
   AUTH_GOOGLE_ID      = "<REPLACE>"
@@ -41,8 +44,8 @@ jackson_secrets = {
   NEXTAUTH_SECRET  = "<REPLACE>"
 }
 
-db_username = "passwd_user"
-db_password = "<REPLACE>"  # Use a strong, random password
+db_username = "passwd_user"  # SUPERUSER — table owner, used for migrations
+db_password = "<REPLACE>"   # Use a strong, random password
 
 # RDS safety (prod推奨)
 db_apply_immediately    = false

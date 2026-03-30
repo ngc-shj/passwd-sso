@@ -64,6 +64,7 @@ export const NS_DASHBOARD_CORE: readonly Namespace[] = [
   "WebAuthn",
   "DirectorySync",
   "Breakglass",
+  "MachineIdentity",
 ];
 
 /** Union of all dashboard namespaces (must be a superset of NS_GLOBAL). */
@@ -101,3 +102,6 @@ export const NS_PRIVACY_POLICY: readonly Namespace[] = [
   ...NS_GLOBAL,
   "PrivacyPolicy",
 ];
+
+/** MCP OAuth consent page namespaces. */
+export const NS_MCP_CONSENT: readonly Namespace[] = ["McpConsent"];

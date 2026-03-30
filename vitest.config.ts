@@ -44,6 +44,7 @@ export default defineConfig({
         "src/lib/key-provider/**/*.ts",
         "src/lib/prisma-error.ts",
         "src/lib/sentry-sanitize.ts",
+        "src/lib/mcp/**/*.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",

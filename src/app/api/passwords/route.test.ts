@@ -4,6 +4,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 
 const {
   mockAuth,
+  mockValidateSaToken,
   mockPrismaPasswordEntry,
   mockPrismaFolder,
   mockPrismaTag,
@@ -16,6 +17,7 @@ const {
   mockRateLimiterCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
+  mockValidateSaToken: vi.fn(),
   mockPrismaPasswordEntry: {
     findMany: vi.fn(),
     create: vi.fn(),
@@ -32,6 +34,7 @@ const {
   mockRateLimiterCheck: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+vi.mock("@/lib/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -108,6 +111,18 @@ describe("GET /api/passwords", () => {
     mockAuth.mockResolvedValue(null);
     mockExtTokenFindUnique.mockResolvedValue(null);
     const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords"));
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for service_account auth type", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockValidateSaToken.mockResolvedValue({
+      ok: true,
+      data: { tokenId: "tok-1", serviceAccountId: "sa-1", tenantId: "t-1", scopes: [] },
+    });
+    const res = await GET(createRequest("GET", "http://localhost:3000/api/passwords", {
+      headers: { Authorization: "Bearer sa_testtoken" },
+    }));
     expect(res.status).toBe(401);
   });
 

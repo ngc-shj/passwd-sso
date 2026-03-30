@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { Prisma, PrismaClient } from "@prisma/client";
+import { NIL_UUID } from "@/lib/constants/app";
 
 type TenantRlsContext = {
   tx: Prisma.TransactionClient;
@@ -24,12 +25,15 @@ export async function withTenantRls<T>(
   });
 }
 
+
 export async function withBypassRls<T>(
   prisma: PrismaClient,
   fn: () => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+    // Set a valid UUID to prevent cast errors when PG evaluates both OR branches
+    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
     return tenantRlsStorage.run({ tx, tenantId: null, bypass: true }, fn);
   });
 }

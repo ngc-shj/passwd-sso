@@ -29,5 +29,8 @@
   "subTabPasskey": "Passkey",
   "subTabTravelMode": "Travel Mode",
   "subTabKeyRotation": "Key Rotation",
-  "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access."
+  "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access.",
+  "subTabCli": "CLI",
+  "subTabApi": "API",
+  "subTabDelegation": "Delegation"
 }

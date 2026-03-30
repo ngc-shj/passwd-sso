@@ -5,7 +5,7 @@ import { hashToken, decryptShareBinary } from "@/lib/crypto-server";
 import { verifyShareAccessToken } from "@/lib/share-access-token";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest, { params }: Params) {
 
   // Rate limit by IP
   const ip = extractClientIp(req) ?? "unknown";
-  if (!(await downloadLimiter.check(`rl:send_download:${ip}`)).allowed) {
+  if (!(await downloadLimiter.check(`rl:send_download:${rateLimitKeyFromIp(ip)}`)).allowed) {
     return NextResponse.json({ error: API_ERROR.RATE_LIMIT_EXCEEDED }, { status: 429 });
   }
 

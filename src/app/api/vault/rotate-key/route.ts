@@ -6,6 +6,7 @@ import { hmacVerifier } from "@/lib/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
+import { revokeAllDelegationSessions } from "@/lib/delegation";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -293,6 +294,9 @@ async function handlePOST(request: NextRequest) {
   await withUserTenantRls(userId, async () =>
     markGrantsStaleForOwner(userId, newKeyVersion).catch(() => {}),
   );
+
+  // Revoke all delegation sessions (key rotation invalidates delegated plaintext)
+  await revokeAllDelegationSessions(userId, user.tenantId, "KEY_ROTATION").catch(() => {});
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

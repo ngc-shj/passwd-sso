@@ -1,6 +1,6 @@
 {
   "name": "passwd-sso",
-  "version": "0.3.11",
+  "version": "0.4.4",
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --experimental-https",
@@ -10,6 +10,8 @@
     "check:team-auth-rls": "node scripts/check-team-auth-rls.mjs",
     "check:bypass-rls": "node scripts/check-bypass-rls.mjs",
     "check:crypto-domains": "node scripts/check-crypto-domains.mjs",
+    "check:migration-drift": "node scripts/check-migration-drift.mjs",
+    "pre-pr": "bash scripts/pre-pr.sh",
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",

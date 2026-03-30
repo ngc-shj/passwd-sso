@@ -8,6 +8,7 @@ import {
   isTailscaleIp,
   isValidIpAddress,
   extractClientIp,
+  rateLimitKeyFromIp,
   _resetTrustedProxyCache,
 } from "@/lib/ip-access";
 
@@ -228,5 +229,34 @@ describe("extractClientIp", () => {
       "x-forwarded-for": "172.16.0.5",
     });
     expect(extractClientIp(req)).toBe("172.16.0.5");
+  });
+});
+
+describe("rateLimitKeyFromIp", () => {
+  it("IPv4 passthrough: returns full address unchanged", () => {
+    expect(rateLimitKeyFromIp("192.168.1.1")).toBe("192.168.1.1");
+  });
+
+  it("IPv4 normalizes IPv4-mapped IPv6 to plain IPv4 first", () => {
+    // ::ffff:192.168.1.1 normalizes to 192.168.1.1 (no colon → passthrough)
+    expect(rateLimitKeyFromIp("::ffff:192.168.1.1")).toBe("192.168.1.1");
+  });
+
+  it("IPv6 full address: returns /64 prefix (first 4 groups)", () => {
+    expect(rateLimitKeyFromIp("2001:db8:0:1:abc:def:0:1")).toBe(
+      "2001:db8:0:1::/64",
+    );
+  });
+
+  it("IPv6 abbreviated with :: expansion: returns correct /64 prefix", () => {
+    // 2001:db8::1 expands to 2001:db8:0000:0000:0000:0000:0000:0001
+    // First 4 groups (zero-padded as returned by the implementation): 2001:db8:0000:0000
+    expect(rateLimitKeyFromIp("2001:db8::1")).toBe("2001:db8:0000:0000::/64");
+  });
+
+  it("IPv6 loopback ::1: returns correct /64 prefix", () => {
+    // ::1 expands to 0000:0000:0000:0000:0000:0000:0000:0001
+    // First 4 groups (zero-padded as returned by the implementation): 0000:0000:0000:0000
+    expect(rateLimitKeyFromIp("::1")).toBe("0000:0000:0000:0000::/64");
   });
 });

@@ -41,7 +41,7 @@ test.describe("Audit Logs", () => {
 
       // Either the log card (with rows) or the empty-state card is rendered.
       // t("noLogs") = "No audit logs yet." (EN) / "監査ログはまだありません。" (JA)
-      const logCard = page.locator("[data-slot='card'].divide-y, .rounded-xl.border.bg-card\\/80.divide-y").last();
+      const logCard = page.locator("[data-testid='audit-log-list']");
       const emptyCard = page.getByText(/No audit logs yet|監査ログはまだありません/i);
 
       const hasLogs = await logCard.isVisible({ timeout: 5_000 }).catch(() => false);
@@ -99,9 +99,7 @@ test.describe("Audit Logs", () => {
       // If no auth logs exist we accept an empty state gracefully
       // t("noLogs") = "No audit logs yet." (EN) / "監査ログはまだありません。" (JA)
       const noLogsMessage = page.getByText(/No audit logs yet|監査ログはまだありません/i);
-      const logRows = page.locator(
-        "[data-slot='card'].divide-y .px-4.py-3, .rounded-xl.border.bg-card\\/80.divide-y .px-4.py-3"
-      );
+      const logRows = page.locator("[data-testid='audit-log-row']");
 
       const hasRows = await logRows.first().isVisible({ timeout: 5_000 }).catch(() => false);
       const hasEmpty = await noLogsMessage.isVisible({ timeout: 2_000 }).catch(() => false);

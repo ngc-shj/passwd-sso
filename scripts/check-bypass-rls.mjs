@@ -29,10 +29,11 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/extension-token.ts", ["extensionToken"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
   ["src/app/api/maintenance/purge-history/route.ts", ["tenantMember", "passwordEntryHistory"]],
-  ["src/app/api/teams/route.ts", ["teamMember", "team"]],
+  ["src/app/api/teams/route.ts", ["teamMember"]],
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   ["src/app/api/teams/[teamId]/members/route.ts", ["tenantMember"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
+  ["src/lib/account-lockout.ts", ["user"]],
   ["src/lib/lockout-admin-notify.ts", ["user", "tenantMember"]],
   ["src/lib/new-device-detection.ts", ["session", "user"]],
   ["src/lib/notification.ts", ["user", "notification"]],
@@ -42,7 +43,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/api-key.ts", ["apiKey"]],
   ["src/lib/webauthn-authorize.ts", ["webAuthnCredential"]],
-  ["src/app/api/auth/passkey/verify/route.ts", ["user"]],
+  ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
   ["src/lib/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant"]],
@@ -56,17 +57,34 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/accept/route.ts", ["emergencyAccessGrant", "emergencyAccessKeyPair", "user"]],
   ["src/app/api/emergency-access/reject/route.ts", ["emergencyAccessGrant", "user"]],
   ["src/app/api/emergency-access/[id]/accept/route.ts", ["emergencyAccessGrant", "emergencyAccessKeyPair", "user"]],
-  ["src/app/api/emergency-access/[id]/approve/route.ts", ["emergencyAccessGrant", "user"]],
+  ["src/app/api/emergency-access/[id]/approve/route.ts", ["user"]],
   ["src/app/api/emergency-access/[id]/decline/route.ts", ["emergencyAccessGrant", "user"]],
   ["src/app/api/emergency-access/[id]/request/route.ts", ["emergencyAccessGrant", "user"]],
   ["src/app/api/emergency-access/[id]/revoke/route.ts", ["user"]],
   ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
+  // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
+  ["src/lib/service-account-token.ts", ["serviceAccountToken"]],
+  ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
+  ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
+  ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
+  ["src/app/api/mcp/authorize/consent/route.ts", ["mcpClient", "user"]],
+  ["src/app/[locale]/mcp/authorize/page.tsx", ["mcpClient", "user"]],
+  ["src/app/api/maintenance/dcr-cleanup/route.ts", ["mcpClient", "tenantMember"]],
+  // JIT access requests: SA self-service path uses bypass for SA lookup; approve reads tenant policy
+  ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
+  ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
+  // Delegated Decryption: cross-tenant session lookup + delegation CRUD
+  ["src/lib/delegation.ts", ["delegationSession"]],
+  ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
+  ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
 ]);
 
-// Regex to match prisma model access: prisma.modelName.method(...)
-// Captures the model name (e.g., "tenant" from "prisma.tenant.findUnique").
-const PRISMA_MODEL_RE = /prisma\.(\w+)\./g;
+// Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)
+// Captures the model name (e.g., "tenant" from "prisma.tenant.findUnique" or "tx.session.create").
+// tx is the transaction client inside prisma.$transaction(async (tx) => { ... }) — when nested
+// inside withBypassRls, tx inherits the bypass context via the Proxy.
+const PRISMA_MODEL_RE = /(?:prisma|tx)\.(\w+)\./g;
 
 // Regex to find withBypassRls call sites (not imports).
 const BYPASS_CALL_RE = /withBypassRls\s*\(/;

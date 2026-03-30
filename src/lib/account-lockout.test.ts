@@ -31,6 +31,9 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
+}));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,

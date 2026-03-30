@@ -91,7 +91,7 @@ Because competitor capabilities vary by plan and deployment model, always verify
 
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
-| Tenant isolation | Done | Yes | Yes | FORCE ROW LEVEL SECURITY on 28 tables |
+| Tenant isolation | Done | Yes | Yes | FORCE ROW LEVEL SECURITY on 39 tables |
 | Bootstrap tenant migration | Done | N/A | N/A | Auto-migrate from personal to IdP tenant |
 | CI RLS guard scripts | Done | N/A | N/A | Prevent accidental RLS bypass |
 

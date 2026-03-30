@@ -3,50 +3,33 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("audit log target labels", () => {
-  it("uses parentAction and bulk trash/archive/unarchive/restore meta in personal/team pages", () => {
-    const personalPage = readFileSync(
-      join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
-      "utf8"
-    );
-    const teamPage = readFileSync(
-      join(
-        process.cwd(),
-        "src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx"
-      ),
+  it("uses parentAction and bulk trash/archive/unarchive/restore meta in shared target label helper", () => {
+    // Personal and team pages delegate bulk/trash actions to getCommonTargetLabel
+    const sharedHelper = readFileSync(
+      join(process.cwd(), "src/lib/audit-target-label.ts"),
       "utf8"
     );
 
-    for (const page of [personalPage, teamPage]) {
-      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_TRASH");
-      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH");
-      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE");
-      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE");
-      expect(page).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE");
-      expect(page).toContain('t("bulkTrashMeta"');
-      expect(page).toContain('t("emptyTrashMeta"');
-      expect(page).toContain('t("bulkArchiveMeta"');
-      expect(page).toContain('t("bulkUnarchiveMeta"');
-      expect(page).toContain('t("bulkRestoreMeta"');
-      // import source/parentAction are export-only (not shown in UI)
-    }
+    expect(sharedHelper).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_TRASH");
+    expect(sharedHelper).toContain("log.action === AUDIT_ACTION.ENTRY_EMPTY_TRASH");
+    expect(sharedHelper).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_ARCHIVE");
+    expect(sharedHelper).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_UNARCHIVE");
+    expect(sharedHelper).toContain("log.action === AUDIT_ACTION.ENTRY_BULK_RESTORE");
+    expect(sharedHelper).toContain('t("bulkTrashMeta"');
+    expect(sharedHelper).toContain('t("emptyTrashMeta"');
+    expect(sharedHelper).toContain('t("bulkArchiveMeta"');
+    expect(sharedHelper).toContain('t("bulkUnarchiveMeta"');
+    expect(sharedHelper).toContain('t("bulkRestoreMeta"');
   });
 
   it("has i18n fallback when action key translation is missing", () => {
-    const personalPage = readFileSync(
-      join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
-      "utf8"
-    );
-    const teamPage = readFileSync(
-      join(
-        process.cwd(),
-        "src/app/[locale]/dashboard/teams/[teamId]/audit-logs/page.tsx"
-      ),
+    // The canonical actionLabel fallback implementation lives in use-audit-logs.ts
+    const hook = readFileSync(
+      join(process.cwd(), "src/hooks/use-audit-logs.ts"),
       "utf8"
     );
 
-    for (const page of [personalPage, teamPage]) {
-      expect(page).toContain("const key = normalizeAuditActionKey(String(action));");
-      expect(page).toContain("return t.has(key as never) ? t(key as never) : String(action);");
-    }
+    expect(hook).toContain("const key = normalizeAuditActionKey(String(action));");
+    expect(hook).toContain("return t.has(key as never) ? t(key as never) : String(action);");
   });
 });

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { validateApiKeyOnly } from "@/lib/api-key";
+import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -12,9 +12,9 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
-// GET /api/v1/tags — List tags (API key only)
+// GET /api/v1/tags — List tags (API key or SA token)
 async function handleGET(req: NextRequest) {
-  const authResult = await validateApiKeyOnly(req, API_KEY_SCOPE.TAGS_READ);
+  const authResult = await validateV1Auth(req, API_KEY_SCOPE.TAGS_READ);
   if (!authResult.ok) {
     if (authResult.error === "SCOPE_INSUFFICIENT") {
       return NextResponse.json(
@@ -25,12 +25,19 @@ async function handleGET(req: NextRequest) {
     return unauthorized();
   }
 
-  const { userId, tenantId, apiKeyId } = authResult.data;
+  const { userId, tenantId, rateLimitKey } = authResult.data;
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
+      { status: 403 },
+    );
+  }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${apiKeyId}`);
+  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

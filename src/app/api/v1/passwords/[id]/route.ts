@@ -4,7 +4,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { validateApiKeyOnly } from "@/lib/api-key";
+import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -14,25 +14,27 @@ import { enforceAccessRestriction } from "@/lib/access-restriction";
 
 const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
-import type { ValidatedApiKey } from "@/lib/api-key";
 import { notFound, rateLimited, validationError } from "@/lib/api-response";
+import type { V1AuthResult } from "@/lib/v1-auth";
+
+type V1AuthData = Extract<V1AuthResult, { ok: true }>["data"];
 
 type AuthCheckResult =
   | { ok: false; error: NextResponse }
-  | { ok: true; data: ValidatedApiKey };
+  | { ok: true; data: V1AuthData };
 
 async function checkAuth(
   req: NextRequest,
   scope: (typeof API_KEY_SCOPE)[keyof typeof API_KEY_SCOPE],
 ): Promise<AuthCheckResult> {
-  const authResult = await validateApiKeyOnly(req, scope);
+  const authResult = await validateV1Auth(req, scope);
   if (!authResult.ok) {
     const status = authResult.error === "SCOPE_INSUFFICIENT" ? 403 : 401;
     const error = status === 403 ? API_ERROR.API_KEY_SCOPE_INSUFFICIENT : API_ERROR.UNAUTHORIZED;
     return { ok: false, error: NextResponse.json({ error }, { status }) };
   }
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${authResult.data.apiKeyId}`);
+  const rl = await apiKeyLimiter.check(`rl:api_key:${authResult.data.rateLimitKey}`);
   if (!rl.allowed) {
     return { ok: false, error: rateLimited(rl.retryAfterMs) };
   }
@@ -48,6 +50,13 @@ async function handleGET(
   const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_READ);
   if (!auth.ok) return auth.error;
   const { userId, tenantId } = auth.data;
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
+      { status: 403 },
+    );
+  }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
@@ -99,6 +108,13 @@ async function handlePUT(
   const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!auth.ok) return auth.error;
   const { userId, tenantId } = auth.data;
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
+      { status: 403 },
+    );
+  }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
@@ -243,6 +259,13 @@ async function handleDELETE(
   const auth = await checkAuth(req, API_KEY_SCOPE.PASSWORDS_WRITE);
   if (!auth.ok) return auth.error;
   const { userId, tenantId } = auth.data;
+
+  if (!userId) {
+    return NextResponse.json(
+      { error: API_ERROR.UNAUTHORIZED, message: "Service account tokens cannot access personal data via v1 API. Use MCP Gateway." },
+      { status: 403 },
+    );
+  }
 
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;

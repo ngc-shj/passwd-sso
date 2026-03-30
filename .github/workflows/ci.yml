@@ -124,6 +124,7 @@ jobs:
       - run: npm run check:team-auth-rls
       - run: npm run check:bypass-rls
       - run: npm run check:crypto-domains
+      - run: npm run check:migration-drift
       - run: npm test
       - run: npm run test:coverage
       - run: npm run build
@@ -201,6 +202,13 @@ jobs:
       - run: npm run build
       - run: npm test
 
+      - name: Verify package contents
+        run: |
+          FILES=$(npm pack --dry-run 2>&1)
+          echo "$FILES"
+          echo "$FILES" | grep -qP ' dist/index\.js$' || { echo "::error::dist/index.js missing from package"; exit 1; }
+          echo "$FILES" | grep -q '\.js\.map' && { echo "::error::source maps should not be in package"; exit 1; } || true
+
   # ─── E2E Tests (Playwright) ────────────────────────────────
   e2e:
     name: "E2E: Playwright"
@@ -273,6 +281,70 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
           retention-days: 7
+
+  # ─── RLS Role Enforcement Smoke Test ────────────────────────
+  rls-smoke:
+    name: "RLS: Role separation smoke test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: passwd_user
+          POSTGRES_PASSWORD: passwd_pass
+          POSTGRES_DB: passwd_sso
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U passwd_user -d passwd_sso"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Create app role and grant privileges
+        run: |
+          psql postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS
+              NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+            REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+            GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
+            GRANT USAGE ON SCHEMA public TO passwd_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+              GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+              GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
+          SQL
+
+      - name: Run migrations as SUPERUSER
+        run: npx prisma migrate deploy
+        env:
+          MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+
+      - name: Re-grant and seed test data
+        run: psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-seed.sql
+
+      - name: Verify RLS enforcement
+        run: |
+          psql -v ON_ERROR_STOP=1 postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-verify.sql
+          echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
 
   # ─── Container Scan (Trivy) ─────────────────────────────────
   container-scan:
