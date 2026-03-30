@@ -9,7 +9,10 @@
     "credentials:use": "Use credentials via local agent",
     "credentials:decrypt": "List and use credentials (legacy)",
     "team:credentials:read": "Read team credentials",
-    "vault:status": "Check vault status"
+    "vault:status": "Check vault status",
+    "vault:unlock-data": "Retrieve encrypted vault key",
+    "passwords:read": "Read password entries",
+    "passwords:write": "Create, update, and delete password entries"
   },
   "errors": {
     "missingParams": "Missing required parameters",

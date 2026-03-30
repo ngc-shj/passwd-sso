@@ -16,6 +16,20 @@ export const MCP_SCOPE = {
 export type McpScope = (typeof MCP_SCOPE)[keyof typeof MCP_SCOPE];
 export const MCP_SCOPES = Object.values(MCP_SCOPE) as McpScope[];
 
+// Risk levels for consent UI badge coloring
+export type ScopeRiskLevel = "read" | "use" | "write";
+
+export const MCP_SCOPE_RISK: Record<McpScope, ScopeRiskLevel> = {
+  [MCP_SCOPE.CREDENTIALS_LIST]: "read",
+  [MCP_SCOPE.VAULT_STATUS]: "read",
+  [MCP_SCOPE.CREDENTIALS_USE]: "use",
+  [MCP_SCOPE.PASSWORDS_READ]: "use",
+  [MCP_SCOPE.VAULT_UNLOCK_DATA]: "use",
+  [MCP_SCOPE.TEAM_CREDENTIALS_READ]: "use",
+  [MCP_SCOPE.CREDENTIALS_DECRYPT]: "write", // Legacy — expands to list + use but label warns
+  [MCP_SCOPE.PASSWORDS_WRITE]: "write",
+};
+
 // OAuth 2.1 constants
 export const MCP_CODE_EXPIRY_SEC = 300; // 5 minutes
 export const MCP_TOKEN_EXPIRY_SEC = 3600; // 1 hour
