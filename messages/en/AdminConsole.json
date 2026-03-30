@@ -1,0 +1,13 @@
+{
+  "title": "Admin Console",
+  "backToVault": "Back to vault",
+  "scopeTenant": "Tenant",
+  "scopeLabel": "Management scope",
+  "navMembers": "Members",
+  "navSecurity": "Security",
+  "navProvisioning": "Provisioning",
+  "navMachineIdentity": "Machine Identity",
+  "navAuditLogs": "Audit Logs",
+  "navGeneral": "General",
+  "noAccess": "You don't have admin access"
+}

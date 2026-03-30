@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import type { TeamRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -122,6 +123,28 @@ export async function requireTeamPermission(
     throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
   }
   return membership;
+}
+
+/**
+ * Get all team memberships where the user holds an ADMIN or OWNER role.
+ * Uses withBypassRls to query across tenants since this is called from a
+ * layout that does not yet know the tenant context.
+ */
+export async function getAdminTeamMemberships(userId: string) {
+  return withBypassRls(prisma, async () =>
+    prisma.teamMember.findMany({
+      where: {
+        userId,
+        role: { in: ["ADMIN", "OWNER"] },
+        deactivatedAt: null,
+      },
+      include: {
+        team: {
+          select: { id: true, name: true, slug: true },
+        },
+      },
+    }),
+  );
 }
 
 // ─── Error Class ────────────────────────────────────────────────

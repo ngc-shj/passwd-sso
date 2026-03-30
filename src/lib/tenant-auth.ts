@@ -87,6 +87,18 @@ export async function getTenantMembership(userId: string) {
 }
 
 /**
+ * Get the tenant role for a user.
+ * Returns null if the user has no active tenant membership.
+ *
+ * Uses withBypassRls since this is called from layouts that do not
+ * yet know the tenantId.
+ */
+export async function getTenantRole(userId: string): Promise<TenantRole | null> {
+  const membership = await getTenantMembership(userId);
+  return membership?.role ?? null;
+}
+
+/**
  * Require that the user has an active tenant membership.
  * Returns the membership record, or throws a structured error.
  */

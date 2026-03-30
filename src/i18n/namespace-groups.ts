@@ -74,6 +74,24 @@ export const NS_DASHBOARD_ALL: readonly Namespace[] = [
   ...NS_DASHBOARD_CORE,
 ];
 
+/** Namespaces needed by admin console pages. */
+export const NS_ADMIN_ALL: readonly Namespace[] = [
+  ...NS_GLOBAL,
+  "AdminConsole",
+  "TenantAdmin",
+  "TenantWebhook",
+  "MachineIdentity",
+  "DirectorySync",
+  "AuditLog",
+  "AuditDownload",
+  "Team",
+  "Teams",
+  "TeamPolicy",
+  "TeamWebhook",
+  "Sessions",
+  "Breakglass",
+];
+
 /**
  * Whitelist for the unauthenticated share page (/s/).
  * Keep minimal to avoid leaking internal feature names.

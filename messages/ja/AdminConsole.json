@@ -1,0 +1,13 @@
+{
+  "title": "管理コンソール",
+  "backToVault": "保管庫に戻る",
+  "scopeTenant": "テナント",
+  "scopeLabel": "管理スコープ",
+  "navMembers": "メンバー",
+  "navSecurity": "セキュリティ",
+  "navProvisioning": "プロビジョニング",
+  "navMachineIdentity": "マシンID",
+  "navAuditLogs": "監査ログ",
+  "navGeneral": "全般",
+  "noAccess": "管理者権限がありません"
+}
