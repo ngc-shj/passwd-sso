@@ -49,8 +49,6 @@ test.describe.serial("Teams", () => {
     const memberLock = new VaultLockPage(memberPage);
     await expect(memberLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await memberLock.unlockAndWait(teamMember.passphrase!);
-    await memberPage.goto("/ja/admin/tenant/teams");
-    await memberPage.waitForLoadState("networkidle");
   });
 
   test.afterAll(async () => {
