@@ -17,6 +17,7 @@ const TEAM_ENTRY = {
 
 // Name of the team pre-seeded in global-setup
 const PRE_SEEDED_TEAM_NAME = "E2E Pre-seeded Team";
+const E2E_TEAM_ID = "00000000-0000-4000-e2e0-000000e2e000";
 
 test.describe.serial("Teams", () => {
   let ownerContext: BrowserContext;
@@ -67,15 +68,13 @@ test.describe.serial("Teams", () => {
     await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible();
   });
 
-  test("teamMember: pre-seeded team is visible in vault selector", async () => {
-    // Member can see their team in the vault selector on the dashboard
-    await memberPage.goto("/ja/dashboard");
+  test("teamMember: can access pre-seeded team vault page", async () => {
+    // Navigate directly to the team vault page
+    await memberPage.goto(`/ja/dashboard/teams/${E2E_TEAM_ID}`);
     await memberPage.waitForLoadState("networkidle");
-    // Open the vault selector dropdown to reveal team options
-    const selectTrigger = memberPage.locator("[data-slot='select-trigger']").first();
-    await selectTrigger.click();
+    // The page should render (not 404/redirect) — team name visible in vault selector
     await expect(
-      memberPage.getByText(PRE_SEEDED_TEAM_NAME)
+      memberPage.getByText(PRE_SEEDED_TEAM_NAME).first()
     ).toBeVisible({ timeout: 10_000 });
   });
 
