@@ -97,7 +97,7 @@ export default function TeamsPage() {
             {teams.map((team) => (
               <Link
                 key={team.id}
-                href={`/dashboard/teams/${team.id}/settings`}
+                href={`/admin/teams/${team.id}/general`}
                 className="block rounded-xl border bg-card/80 p-4 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
               >
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_auto_auto] md:items-center">
