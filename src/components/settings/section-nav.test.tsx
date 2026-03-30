@@ -28,7 +28,7 @@ vi.mock("@/components/ui/button", () => ({
     children,
     asChild,
     variant,
-    size,
+    size: _size,
     className,
     ...rest
   }: React.ComponentProps<"button"> & { asChild?: boolean; variant?: string; size?: string }) => {

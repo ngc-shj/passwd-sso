@@ -7,7 +7,6 @@ import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
 import type { VaultContext } from "@/hooks/use-vault-context";
 import {
-  Building2,
   Download,
   HeartPulse,
   LayoutDashboard,

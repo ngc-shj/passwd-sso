@@ -58,7 +58,7 @@ export interface SidebarContentProps {
 
 export function SidebarContent({
   t,
-  tTeam,
+  tTeam: _tTeam,
   vaultContext,
   teams,
   selectedTeam,

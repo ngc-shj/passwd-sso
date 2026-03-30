@@ -39,6 +39,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/notification.ts", ["user", "notification"]],
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
   ["src/lib/tenant-auth.ts", ["tenantMember"]],
+  // Admin console: cross-tenant team membership query for scope selector
+  ["src/lib/team-auth.ts", ["teamMember"]],
   ["src/lib/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/api-key.ts", ["apiKey"]],

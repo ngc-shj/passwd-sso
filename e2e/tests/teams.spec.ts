@@ -78,7 +78,6 @@ test.describe.serial("Teams", () => {
 
   test("teamOwner: navigate to /teams and create a new team", async () => {
     // Navigate back to teams list via sidebar click (client-side, vault stays unlocked).
-    const sidebar = new SidebarNavPage(ownerPage);
     await ownerPage.goto("/ja/admin/tenant/teams");
     await ownerPage.waitForLoadState("networkidle");
 
@@ -95,7 +94,6 @@ test.describe.serial("Teams", () => {
 
   test("teamOwner: team appears in teams list", async () => {
     // Navigate back to teams list via sidebar click.
-    const sidebar = new SidebarNavPage(ownerPage);
     await ownerPage.goto("/ja/admin/tenant/teams");
     await ownerPage.waitForLoadState("networkidle");
 
@@ -108,7 +106,6 @@ test.describe.serial("Teams", () => {
 
   test("teamOwner: create a password entry in team vault", async () => {
     // Navigate back to teams list via sidebar click.
-    const sidebar = new SidebarNavPage(ownerPage);
     await ownerPage.goto("/ja/admin/tenant/teams");
     await ownerPage.waitForLoadState("networkidle");
 

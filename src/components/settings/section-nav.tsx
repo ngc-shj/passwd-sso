@@ -2,7 +2,6 @@
 
 import { usePathname } from "next/navigation";
 import { Link } from "@/i18n/navigation";
-import { cn } from "@/lib/utils";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";

@@ -101,7 +101,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   const {
     activeAuditTeamId,
     isAdminActive,
-    isTeamsManage,
+    isTeamsManage: _isTeamsManage,
     isSettings,
     isExport,
     isImport,
