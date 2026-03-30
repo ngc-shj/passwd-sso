@@ -13,9 +13,9 @@ test.describe("Tenant Admin", () => {
     context = await browser.newContext();
     await injectSession(context, tenantAdmin.sessionToken);
     page = await context.newPage();
-    // Navigate directly to the tenant settings page so the vault unlock and the
+    // Navigate directly to the tenant admin page so the vault unlock and the
     // target page share the same React tree — no full reload needed after unlock.
-    await page.goto("/ja/dashboard/tenant");
+    await page.goto("/ja/admin/tenant/members");
     const lockPage = new VaultLockPage(page);
     await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
     await lockPage.unlockAndWait(tenantAdmin.passphrase!);
@@ -36,7 +36,7 @@ test.describe("Tenant Admin", () => {
     const { tenantAdmin } = getAuthState();
     // Navigate back via sidebar click to preserve vault state.
     const sidebar = new SidebarNavPage(page);
-    await sidebar.navigateTo("tenantSettings");
+    await sidebar.navigateTo("adminConsole");
 
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
@@ -56,7 +56,7 @@ test.describe("Tenant Admin", () => {
   test("current user appears in the members list", async () => {
     const { tenantAdmin } = getAuthState();
     const sidebar = new SidebarNavPage(page);
-    await sidebar.navigateTo("tenantSettings");
+    await sidebar.navigateTo("adminConsole");
 
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
@@ -70,7 +70,7 @@ test.describe("Tenant Admin", () => {
 
   test("navigate to security policy tab and verify controls are displayed", async () => {
     const sidebar = new SidebarNavPage(page);
-    await sidebar.navigateTo("tenantSettings");
+    await sidebar.navigateTo("adminConsole");
 
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),
@@ -92,7 +92,7 @@ test.describe("Tenant Admin", () => {
 
   test("provisioning tab renders SCIM section", async () => {
     const sidebar = new SidebarNavPage(page);
-    await sidebar.navigateTo("tenantSettings");
+    await sidebar.navigateTo("adminConsole");
 
     await expect(
       page.locator("h1").filter({ hasText: /Tenant Settings|テナント設定/i }),

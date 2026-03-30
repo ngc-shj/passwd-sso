@@ -5,7 +5,6 @@ import { VaultLockPage } from "../page-objects/vault-lock.page";
 import { TeamsPage } from "../page-objects/teams.page";
 import { TeamDashboardPage } from "../page-objects/team-dashboard.page";
 import { PasswordEntryPage } from "../page-objects/password-entry.page";
-import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
 
 // Name for a newly created team during the test run
 const TEAM_NAME = `E2E Team ${Date.now()}`;
@@ -35,7 +34,7 @@ test.describe.serial("Teams", () => {
     ownerPage = await ownerContext.newPage();
     // Navigate directly to the teams page so the vault unlock and the target
     // page share the same React tree — no full reload needed after unlock.
-    await ownerPage.goto("/ja/dashboard/teams");
+    await ownerPage.goto("/ja/admin/tenant/teams");
     const ownerLock = new VaultLockPage(ownerPage);
     await expect(ownerLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await ownerLock.unlockAndWait(teamOwner.passphrase!);
@@ -43,7 +42,7 @@ test.describe.serial("Teams", () => {
     memberContext = await browser.newContext();
     await injectSession(memberContext, teamMember.sessionToken);
     memberPage = await memberContext.newPage();
-    await memberPage.goto("/ja/dashboard/teams");
+    await memberPage.goto("/ja/admin/tenant/teams");
     const memberLock = new VaultLockPage(memberPage);
     await expect(memberLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await memberLock.unlockAndWait(teamMember.passphrase!);
@@ -80,7 +79,8 @@ test.describe.serial("Teams", () => {
   test("teamOwner: navigate to /teams and create a new team", async () => {
     // Navigate back to teams list via sidebar click (client-side, vault stays unlocked).
     const sidebar = new SidebarNavPage(ownerPage);
-    await sidebar.navigateTo("teams");
+    await ownerPage.goto("/ja/admin/tenant/teams");
+    await ownerPage.waitForLoadState("networkidle");
 
     const teamsPage = new TeamsPage(ownerPage);
     await expect(teamsPage.createTeamButton).toBeVisible({ timeout: 10_000 });
@@ -96,7 +96,8 @@ test.describe.serial("Teams", () => {
   test("teamOwner: team appears in teams list", async () => {
     // Navigate back to teams list via sidebar click.
     const sidebar = new SidebarNavPage(ownerPage);
-    await sidebar.navigateTo("teams");
+    await ownerPage.goto("/ja/admin/tenant/teams");
+    await ownerPage.waitForLoadState("networkidle");
 
     const teamsPage = new TeamsPage(ownerPage);
     await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
@@ -108,7 +109,8 @@ test.describe.serial("Teams", () => {
   test("teamOwner: create a password entry in team vault", async () => {
     // Navigate back to teams list via sidebar click.
     const sidebar = new SidebarNavPage(ownerPage);
-    await sidebar.navigateTo("teams");
+    await ownerPage.goto("/ja/admin/tenant/teams");
+    await ownerPage.waitForLoadState("networkidle");
 
     const teamsPage = new TeamsPage(ownerPage);
     await expect(teamsPage.teamByName(TEAM_NAME)).toBeVisible({
@@ -136,13 +138,13 @@ test.describe.serial("Teams", () => {
     const { teamMember } = getAuthState();
 
     // After test 5 we are on the team vault page (/teams/{id}).
-    // The sidebar "Team Settings" link (in team context) goes to /teams/{id}/settings
+    // The sidebar "Team Settings" link (in team context) goes to /admin/teams/{id}/general
     // — navigate there via client-side click to preserve vault state.
     const teamSettingsLink = ownerPage.getByRole("link", {
       name: /Team Settings|チーム設定/i,
     });
     await teamSettingsLink.click();
-    await ownerPage.waitForURL(/\/teams\/[^/]+\/settings/, { timeout: 10_000 });
+    await ownerPage.waitForURL(/\/admin\/teams\/[^/]+\/general/, { timeout: 10_000 });
 
     const teamDashboard = new TeamDashboardPage(ownerPage);
     await teamDashboard.inviteMember(teamMember.email);
@@ -156,9 +158,9 @@ test.describe.serial("Teams", () => {
   });
 
   test("teamMember: teams page renders without errors", async () => {
-    // Navigate to the teams list via sidebar click to stay in the React tree.
-    const sidebar = new SidebarNavPage(memberPage);
-    await sidebar.navigateTo("teams");
+    // Navigate to the teams list to stay in the React tree.
+    await memberPage.goto("/ja/admin/tenant/teams");
+    await memberPage.waitForLoadState("networkidle");
 
     await expect(
       memberPage.locator("h1").filter({ hasText: /Teams|チーム/i }),
