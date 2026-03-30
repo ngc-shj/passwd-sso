@@ -2,8 +2,10 @@
 
 ## Background
 
-The settings UI reorganization (branch `refactor/settings-ui-reorganization`) moved
-all settings/admin pages to a new page-per-route structure with consistent `SectionLayout`.
+The settings UI reorganization (branch `refactor/settings-ui-reorganization`) established
+a "1 page = 1 card" layout across personal settings and admin console. Every page now
+renders a single card component inside a `SectionLayout` wrapper.
+
 However, the card components themselves have inconsistent internal structures inherited
 from the original tabbed pages.
 
@@ -17,7 +19,7 @@ have 6 different internal structure patterns:
 | Card > CardHeader(Title+Desc) > CardContent | 8 | **Target pattern** — this is correct |
 | Card > manual h2/h3 + p + content | 5 | Missing CardHeader/CardTitle/CardDescription |
 | div > multiple Cards (create + list) | 2 | No single wrapping Card, no unified header |
-| Tabs inside Card | 1 | Already split into sub-routes in the reorganization |
+| Tabs inside Card | 1 | Tabs should be removed (sub-routes handle navigation now) |
 | Button only (no Card) | 1 | Needs Card wrapper |
 | Card > divide-y (no header) | 1 | Missing title/description |
 
@@ -26,6 +28,47 @@ Specific issues:
 2. **Manual h2/h3 instead of CardTitle**: service-account, mcp-client, access-request, cli-token, api-key-manager, team-policy-settings
 3. **Multiple cards where one is expected**: tenant-webhook-card, team-webhook-card (have separate "create form" Card and "registered list" Card with no wrapping Card)
 4. **Sub-card structure varies**: Some use Separator between sections, some use multiple Cards, some use nothing
+
+## Current Page Locations
+
+### Personal Settings (Vault context: `/dashboard/settings/`)
+```
+/dashboard/settings/account                          ← SessionsCard
+/dashboard/settings/security/passkey                 ← PasskeyCredentialsCard
+/dashboard/settings/security/travel-mode             ← TravelModeCard
+/dashboard/settings/security/key-rotation            ← RotateKeyCard
+/dashboard/settings/developer/cli-token              ← CliTokenCard
+/dashboard/settings/developer/api-keys               ← ApiKeyManager
+/dashboard/settings/developer/delegation             ← DelegationManager
+```
+
+### Admin > Tenant (`/admin/tenant/`)
+```
+/admin/tenant/members                                ← TenantMembersCard
+/admin/tenant/teams                                  ← Teams list page (custom)
+/admin/tenant/security/session-policy                ← TenantSessionPolicyCard
+/admin/tenant/security/access-restriction            ← TenantAccessRestrictionCard
+/admin/tenant/security/webhooks                      ← TenantWebhookCard
+/admin/tenant/provisioning/scim                      ← ScimProvisioningCard
+/admin/tenant/provisioning/directory-sync            ← DirectorySyncCard
+/admin/tenant/machine-identity/service-accounts      ← ServiceAccountCard
+/admin/tenant/machine-identity/mcp-clients           ← McpClientCard
+/admin/tenant/machine-identity/access-requests       ← AccessRequestCard
+/admin/tenant/audit-logs/logs                        ← TenantAuditLogCard (variant="logs")
+/admin/tenant/audit-logs/breakglass                  ← TenantAuditLogCard (variant="breakglass")
+```
+
+### Admin > Team (`/admin/teams/[teamId]/`)
+```
+/admin/teams/[id]/general                            ← Custom (name/desc/delete)
+/admin/teams/[id]/members/list                       ← Custom (member list)
+/admin/teams/[id]/members/add                        ← Custom (add/invite)
+/admin/teams/[id]/members/transfer                   ← Custom (ownership transfer)
+/admin/teams/[id]/security/policy                    ← TeamPolicySettings
+/admin/teams/[id]/security/key-rotation              ← TeamRotateKeyButton
+/admin/teams/[id]/security/webhooks                  ← TeamWebhookCard
+/admin/teams/[id]/audit-logs                         ← Team audit log page
+```
 
 ## Target Structure
 
@@ -104,6 +147,24 @@ For cards with "create form" + "list" sections (webhooks, API keys, etc.):
 |-----------|------|---------|---------------|
 | TenantAuditLogCard | `src/components/settings/tenant-audit-log-card.tsx` | Tabs with variant prop | The `variant="logs"` and `variant="breakglass"` paths should each render a single Card with proper CardHeader. Remove internal Tabs structure entirely (sub-routes handle navigation now). |
 
+## Additional Task: MCP Connections Page (Personal Settings)
+
+Add a read-only "My MCP Connections" page to personal settings developer section:
+
+```
+/dashboard/settings/developer/connections            ← NEW: McpConnectionsCard
+```
+
+This page shows the current user's active MCP client connections (OAuth consents).
+Users can see which MCP clients have been authorized and revoke individual connections.
+
+### Implementation:
+1. Create `src/components/settings/mcp-connections-card.tsx` — fetches user's active MCP access tokens, shows client name, scopes, last used, expiration
+2. Create page at `src/app/[locale]/dashboard/settings/developer/connections/page.tsx`
+3. Add nav item to the developer section tree nav in `src/app/[locale]/dashboard/settings/layout.tsx`
+4. Add i18n keys for the card (Sessions namespace or new McpConnections namespace)
+5. API: use existing `/api/vault/delegation` or create a new read-only endpoint for user's MCP token list
+
 ## i18n Keys to Add
 
 Each card that gains a new title/description needs translation keys. Add to the
@@ -129,7 +190,8 @@ Check existing translation files before adding — some may already have unused 
 
 ## Verification
 
-After all changes, every card in the admin console should visually follow this pattern:
+After all changes, every card in the admin console and personal settings should
+visually follow this pattern:
 ```
 ┌─────────────────────────────────┐
 │ 🔧 Card Title                   │
