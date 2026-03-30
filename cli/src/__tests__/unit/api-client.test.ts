@@ -105,6 +105,7 @@ describe("apiRequest", () => {
     expect(refreshCall[1].method).toBe("POST");
     expect(refreshCall[1].headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
     expect(refreshCall[1].body).toContain("grant_type=refresh_token");
+    expect(refreshCall[1].body).toContain("refresh_token=mcpr_refresh123");
     expect(refreshCall[1].body).toContain("client_id=mcpc_client123");
 
     // Verify the retry used the new access token
@@ -171,6 +172,10 @@ describe("apiRequest", () => {
 
     const res = await apiRequest("/api/test");
     expect(res.ok).toBe(true);
+    // Verify the refresh call sent the correct refresh_token
+    const proactiveRefreshCall = mockFetch.mock.calls[0];
+    expect(proactiveRefreshCall[0]).toContain("/api/mcp/token");
+    expect(proactiveRefreshCall[1].body).toContain("refresh_token=mcpr_refresh_old");
     // Verify the actual request used the refreshed token
     const actualCall = mockFetch.mock.calls[1];
     expect(actualCall[1].headers.Authorization).toBe("Bearer mcp_refreshed");

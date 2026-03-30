@@ -5,11 +5,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mockLoadConfig = vi.fn();
 const mockSaveConfig = vi.fn();
 const mockSaveCredentials = vi.fn();
+const mockLoadCredentials = vi.fn();
 
 vi.mock("../../lib/config.js", () => ({
   loadConfig: () => mockLoadConfig(),
   saveConfig: (...args: unknown[]) => mockSaveConfig(...args),
   saveCredentials: (...args: unknown[]) => mockSaveCredentials(...args),
+  loadCredentials: () => mockLoadCredentials(),
 }));
 
 const mockSetTokenCache = vi.fn();
@@ -19,12 +21,14 @@ vi.mock("../../lib/api-client.js", () => ({
 }));
 
 const mockRunOAuthFlow = vi.fn();
+const mockRevokeTokenRequest = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("../../lib/oauth.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/oauth.js")>();
   return {
     ...actual,
     runOAuthFlow: (...args: unknown[]) => mockRunOAuthFlow(...args),
+    revokeTokenRequest: (...args: unknown[]) => mockRevokeTokenRequest(...args),
     // keep real validateServerUrl from actual module
   };
 });
@@ -61,6 +65,9 @@ describe("loginCommand", () => {
     promptAnswer = "";
     // Default config: no serverUrl saved
     mockLoadConfig.mockReturnValue({ serverUrl: "", locale: "en" });
+    // Default: no existing credentials
+    mockLoadCredentials.mockReturnValue(null);
+    mockRevokeTokenRequest.mockResolvedValue(undefined);
   });
 
   describe("Happy path — OAuth login (default)", () => {
@@ -253,6 +260,87 @@ describe("loginCommand", () => {
       await loginCommand({ server: "https://example.com" });
 
       expect(mockOutputError).toHaveBeenCalledWith("OAuth login failed");
+    });
+  });
+
+  describe("revokeExistingSession", () => {
+    it("calls revokeTokenRequest with refresh_token when existing OAuth credentials exist", async () => {
+      mockLoadCredentials.mockReturnValue({
+        accessToken: "mcp_old_access",
+        refreshToken: "mcpr_old_refresh",
+        clientId: "mcpc_oldclient",
+        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      });
+      mockRunOAuthFlow.mockResolvedValueOnce({
+        accessToken: "mcp_new_access",
+        refreshToken: "mcpr_new_refresh",
+        expiresIn: 3600,
+        scope: "credentials:list",
+        clientId: "mcpc_newclient",
+      });
+
+      await loginCommand({ server: "https://example.com" });
+
+      expect(mockRevokeTokenRequest).toHaveBeenCalledWith(
+        "https://example.com",
+        "mcpr_old_refresh",
+        "mcpc_oldclient",
+        "refresh_token",
+      );
+    });
+
+    it("does not call revokeTokenRequest when no credentials exist", async () => {
+      mockLoadCredentials.mockReturnValue(null);
+      mockRunOAuthFlow.mockResolvedValueOnce({
+        accessToken: "mcp_access",
+        refreshToken: "mcpr_refresh",
+        expiresIn: 3600,
+        scope: "",
+        clientId: "mcpc_client",
+      });
+
+      await loginCommand({ server: "https://example.com" });
+
+      expect(mockRevokeTokenRequest).not.toHaveBeenCalled();
+    });
+
+    it("does not call revokeTokenRequest when refreshToken is empty (--token login)", async () => {
+      mockLoadCredentials.mockReturnValue({
+        accessToken: "manual_token",
+        refreshToken: "",
+        clientId: "",
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      });
+      promptAnswer = "mynewtoken";
+
+      await loginCommand({ server: "https://example.com", useToken: true });
+
+      expect(mockRevokeTokenRequest).not.toHaveBeenCalled();
+    });
+
+    it("continues login when revokeTokenRequest throws (best-effort)", async () => {
+      mockLoadCredentials.mockReturnValue({
+        accessToken: "mcp_old_access",
+        refreshToken: "mcpr_old_refresh",
+        clientId: "mcpc_oldclient",
+        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      });
+      mockRevokeTokenRequest.mockRejectedValueOnce(new Error("Network error"));
+      mockRunOAuthFlow.mockResolvedValueOnce({
+        accessToken: "mcp_new_access",
+        refreshToken: "mcpr_new_refresh",
+        expiresIn: 3600,
+        scope: "credentials:list",
+        clientId: "mcpc_newclient",
+      });
+
+      await loginCommand({ server: "https://example.com" });
+
+      // Login should still succeed despite revocation failure
+      expect(mockOutputSuccess).toHaveBeenCalledWith(
+        "Logged in to https://example.com",
+      );
+      expect(mockSaveCredentials).toHaveBeenCalled();
     });
   });
 });

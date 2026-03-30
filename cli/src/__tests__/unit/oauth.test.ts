@@ -211,6 +211,130 @@ describe("registerClient", () => {
   });
 });
 
+describe("refreshTokenGrant", () => {
+  const mockFetch = vi.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    global.fetch = mockFetch;
+  });
+
+  it("sends POST /api/mcp/token with grant_type=refresh_token, refresh_token, client_id", async () => {
+    const { refreshTokenGrant } = await import("../../lib/oauth.js");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        access_token: "mcp_new_access",
+        refresh_token: "mcpr_new_refresh",
+        expires_in: 3600,
+        scope: "credentials:list vault:status",
+      }),
+    });
+
+    await refreshTokenGrant("https://vault.example.com", "mcpr_old_refresh", "mcpc_client123");
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://vault.example.com/api/mcp/token");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(opts.body).toContain("grant_type=refresh_token");
+    expect(opts.body).toContain("refresh_token=mcpr_old_refresh");
+    expect(opts.body).toContain("client_id=mcpc_client123");
+  });
+
+  it("parses successful response into TokenResponse", async () => {
+    const { refreshTokenGrant } = await import("../../lib/oauth.js");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        access_token: "mcp_new_access",
+        refresh_token: "mcpr_new_refresh",
+        expires_in: 7200,
+        scope: "credentials:list",
+      }),
+    });
+
+    const result = await refreshTokenGrant("https://vault.example.com", "mcpr_old", "mcpc_client");
+
+    expect(result).not.toBeNull();
+    expect(result!.accessToken).toBe("mcp_new_access");
+    expect(result!.refreshToken).toBe("mcpr_new_refresh");
+    expect(result!.expiresIn).toBe(7200);
+    expect(result!.scope).toBe("credentials:list");
+  });
+
+  it("returns null on non-ok response (does NOT throw)", async () => {
+    const { refreshTokenGrant } = await import("../../lib/oauth.js");
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 400,
+      text: async () => "invalid_grant",
+    });
+
+    const result = await refreshTokenGrant("https://vault.example.com", "mcpr_expired", "mcpc_client");
+    expect(result).toBeNull();
+  });
+
+  it("throws on JSON parse error when response.ok but body is invalid", async () => {
+    const { refreshTokenGrant } = await import("../../lib/oauth.js");
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
+    });
+
+    await expect(
+      refreshTokenGrant("https://vault.example.com", "mcpr_valid", "mcpc_client"),
+    ).rejects.toThrow();
+  });
+});
+
+describe("revokeTokenRequest", () => {
+  const mockFetch = vi.fn();
+  beforeEach(() => {
+    mockFetch.mockReset();
+    global.fetch = mockFetch;
+  });
+
+  it("sends POST /api/mcp/revoke with token, client_id, token_type_hint", async () => {
+    const { revokeTokenRequest } = await import("../../lib/oauth.js");
+    mockFetch.mockResolvedValueOnce({ ok: true });
+
+    await revokeTokenRequest(
+      "https://vault.example.com",
+      "mcp_access_token",
+      "mcpc_client123",
+      "refresh_token",
+    );
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://vault.example.com/api/mcp/revoke");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(opts.body).toContain("token=mcp_access_token");
+    expect(opts.body).toContain("client_id=mcpc_client123");
+    expect(opts.body).toContain("token_type_hint=refresh_token");
+  });
+
+  it("does not throw on network error (try-catch inside)", async () => {
+    const { revokeTokenRequest } = await import("../../lib/oauth.js");
+    mockFetch.mockRejectedValueOnce(new Error("Network failure"));
+
+    await expect(
+      revokeTokenRequest("https://vault.example.com", "mcp_token", "mcpc_client"),
+    ).resolves.toBeUndefined();
+  });
+
+  it("does not throw on non-ok response", async () => {
+    const { revokeTokenRequest } = await import("../../lib/oauth.js");
+    mockFetch.mockResolvedValueOnce({ ok: false, status: 503 });
+
+    await expect(
+      revokeTokenRequest("https://vault.example.com", "mcp_token", "mcpc_client"),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("exchangeCode", () => {
   const mockFetch = vi.fn();
   beforeEach(() => {
