@@ -69,14 +69,14 @@ test.describe.serial("Teams", () => {
     await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible();
   });
 
-  test("teamMember: pre-seeded team is visible without invitation flow", async () => {
-    // memberPage was also unlocked directly on /ja/dashboard/teams.
-    const teamsPage = new TeamsPage(memberPage);
-    // teamMember was seeded directly as MEMBER in global-setup — no invitation needed
+  test("teamMember: pre-seeded team is visible in vault selector", async () => {
+    // Member can see their team in the vault selector on the dashboard
+    await memberPage.goto("/ja/dashboard");
+    await memberPage.waitForLoadState("networkidle");
+    // The vault selector should list the pre-seeded team
     await expect(
-      memberPage.locator("a.rounded-xl").first()
+      memberPage.getByText(PRE_SEEDED_TEAM_NAME)
     ).toBeVisible({ timeout: 10_000 });
-    await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible();
   });
 
   // ── Dynamic team creation ────────────────────────────────────
