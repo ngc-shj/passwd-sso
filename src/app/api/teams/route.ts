@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { authOrToken } from "@/lib/auth-or-token";
+import { checkAuth } from "@/lib/check-auth";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, forbidden } from "@/lib/api-response";
@@ -17,11 +17,9 @@ import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/teams — List teams the user belongs to
 async function handleGET(req: NextRequest) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (!authResult || authResult.type === "scope_insufficient" || authResult.type === "service_account") {
-    return unauthorized();
-  }
-  const userId = authResult.userId;
+  const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
+  if (!authed.ok) return authed.response;
+  const { userId } = authed.auth;
 
   const { userTenantId, memberships } = await withBypassRls(prisma, async () => {
     const uid = await resolveUserTenantIdFromClient(prisma, userId);

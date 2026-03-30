@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 const {
-  mockAuth, mockAuthOrToken, mockRequireTeamMember, mockPrismaTeamMember,
+  mockCheckAuth, mockRequireTeamMember, mockPrismaTeamMember,
   mockPrismaTeamMemberKey, TeamAuthError, mockWithTeamTenantRls,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
@@ -13,8 +13,7 @@ const {
     }
   }
   return {
-    mockAuth: vi.fn(),
-    mockAuthOrToken: vi.fn(),
+    mockCheckAuth: vi.fn(),
     mockRequireTeamMember: vi.fn(),
     mockPrismaTeamMember: { findUnique: vi.fn(), findFirst: vi.fn() },
     mockPrismaTeamMemberKey: { findUnique: vi.fn(), findFirst: vi.fn() },
@@ -23,8 +22,7 @@ const {
   };
 });
 
-vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError,
@@ -46,12 +44,12 @@ const URL = "http://localhost/api/teams/team-1/member-key";
 describe("GET /api/teams/[teamId]/member-key", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "user-1" });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "user-1" } });
     mockRequireTeamMember.mockResolvedValue({ role: "MEMBER" });
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuthOrToken.mockResolvedValue(null);
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const res = await GET(
       createRequest("GET", URL),
       { params: Promise.resolve({ teamId: "team-1" }) },
@@ -183,12 +181,8 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(json.error).toBe("MEMBER_KEY_NOT_FOUND");
   });
 
-  it("accepts extension Bearer token via authOrToken", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "token",
-      userId: "ext-user-id",
-      scopes: ["passwords:read"],
-    });
+  it("accepts extension Bearer token via checkAuth", async () => {
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "ext-user-id", scopes: ["passwords:read"] } });
     mockPrismaTeamMember.findFirst.mockResolvedValue({ keyDistributed: true });
     mockPrismaTeamMemberKey.findFirst.mockResolvedValue({
       encryptedTeamKey: "enc-key",
@@ -208,11 +202,11 @@ describe("GET /api/teams/[teamId]/member-key", () => {
     expect(res.status).toBe(200);
     expect(json.encryptedTeamKey).toBe("enc-key");
     expect(json.keyVersion).toBe(1);
-    expect(mockAuthOrToken).toHaveBeenCalledWith(req, "passwords:read");
+    expect(mockCheckAuth).toHaveBeenCalled();
   });
 
   it("returns 401 when extension token lacks required scope", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const req = createRequest("GET", URL, {
       headers: { Authorization: "Bearer ext-token-no-scope" },
     });

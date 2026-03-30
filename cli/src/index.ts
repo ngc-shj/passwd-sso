@@ -46,8 +46,10 @@ program
 
 program
   .command("login")
-  .description("Configure server URL and authentication token")
-  .action(loginCommand);
+  .description("Authenticate via browser (OAuth 2.1 PKCE) or paste a token")
+  .option("--token", "Use manual token paste instead of browser OAuth")
+  .option("-s, --server <url>", "Server URL")
+  .action((opts) => loginCommand({ useToken: opts.token, server: opts.server }));
 
 program
   .command("status")

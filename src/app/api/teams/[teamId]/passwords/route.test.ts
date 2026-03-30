@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
+const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFolder, mockPrismaTeam, mockAuditLogCreate, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockWithBypassRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -12,7 +12,7 @@ const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFo
   }
   return {
     mockAuth: vi.fn(),
-    mockAuthOrToken: vi.fn(),
+    mockCheckAuth: vi.fn(),
     mockPrismaTeamPasswordEntry: {
       findMany: vi.fn(),
       create: vi.fn(),
@@ -30,7 +30,7 @@ const { mockAuth, mockAuthOrToken, mockPrismaTeamPasswordEntry, mockPrismaTeamFo
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth-or-token", () => ({ authOrToken: mockAuthOrToken }));
+vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
@@ -63,14 +63,14 @@ const now = new Date("2025-01-01T00:00:00Z");
 describe("GET /api/teams/[teamId]/passwords", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    mockAuthOrToken.mockResolvedValue({ type: "session", userId: "test-user-id" });
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "session", userId: "test-user-id" } });
     mockRequireTeamPermission.mockResolvedValue({ role: TEAM_ROLE.MEMBER });
     mockAuditLogCreate.mockResolvedValue({});
     mockPrismaTeamPasswordEntry.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   it("returns 401 when unauthenticated", async () => {
-    mockAuthOrToken.mockResolvedValue(null);
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`),
       createParams({ teamId: TEAM_ID }),
@@ -361,12 +361,8 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     expect(call.where).not.toHaveProperty("teamFolderId");
   });
 
-  it("accepts extension Bearer token via authOrToken", async () => {
-    mockAuthOrToken.mockResolvedValue({
-      type: "token",
-      userId: "ext-user-id",
-      scopes: ["passwords:read"],
-    });
+  it("accepts extension Bearer token via checkAuth", async () => {
+    mockCheckAuth.mockResolvedValue({ ok: true, auth: { type: "token", userId: "ext-user-id", scopes: ["passwords:read"] } });
     mockPrismaTeamPasswordEntry.findMany.mockResolvedValue([
       {
         id: "pw-ext",
@@ -398,11 +394,11 @@ describe("GET /api/teams/[teamId]/passwords", () => {
     expect(res.status).toBe(200);
     expect(json).toHaveLength(1);
     expect(json[0].id).toBe("pw-ext");
-    expect(mockAuthOrToken).toHaveBeenCalledWith(req, "passwords:read");
+    expect(mockCheckAuth).toHaveBeenCalled();
   });
 
   it("returns 401 when extension token lacks required scope", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "scope_insufficient" });
+    mockCheckAuth.mockResolvedValue({ ok: false, response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }) });
     const req = createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/passwords`, {
       headers: { Authorization: "Bearer ext-token-no-scope" },
     });

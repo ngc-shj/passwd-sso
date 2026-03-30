@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { authOrToken } from "@/lib/auth-or-token";
+import { checkAuth } from "@/lib/check-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
@@ -23,11 +23,9 @@ type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // GET /api/teams/[teamId]/passwords/[id] — Get password detail (encrypted blob, client decrypts)
 async function handleGET(req: NextRequest, { params }: Params) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (!authResult || authResult.type === "scope_insufficient" || authResult.type === "service_account") {
-    return unauthorized();
-  }
-  const userId = authResult.userId;
+  const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
+  if (!authed.ok) return authed.response;
+  const { userId } = authed.auth;
 
   const { teamId, id } = await params;
 

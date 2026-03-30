@@ -52,6 +52,16 @@ describe("parseScope", () => {
   it("returns null for invalid team UUID", () => {
     expect(parseScope("team:not-a-uuid:passwords:read")).toBeNull();
   });
+
+  it("parses vault:unlock-data MCP scope", () => {
+    const result = parseScope("vault:unlock-data");
+    expect(result).toEqual({
+      resource: "vault",
+      action: "unlock-data",
+      qualifier: undefined,
+      raw: "vault:unlock-data",
+    });
+  });
 });
 
 describe("parseScopes", () => {

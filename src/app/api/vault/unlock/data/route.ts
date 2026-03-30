@@ -24,8 +24,7 @@ const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 12
 async function handleGET(req: NextRequest) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const rl = await vaultUnlockDataLimiter.check(`rl:vault_unlock_data:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);

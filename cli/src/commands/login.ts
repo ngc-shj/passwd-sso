@@ -1,10 +1,11 @@
 /**
- * `passwd-sso login` — Configure server URL and Bearer token.
+ * `passwd-sso login` — Authenticate via OAuth 2.1 PKCE or manual token paste.
  */
 
 import { createInterface } from "node:readline";
-import { loadConfig, saveConfig, saveToken } from "../lib/config.js";
+import { loadConfig, saveConfig, saveCredentials } from "../lib/config.js";
 import { setTokenCache } from "../lib/api-client.js";
+import { runOAuthFlow, validateServerUrl } from "../lib/oauth.js";
 import * as output from "../lib/output.js";
 
 async function prompt(question: string): Promise<string> {
@@ -17,24 +18,68 @@ async function prompt(question: string): Promise<string> {
   });
 }
 
-export async function loginCommand(): Promise<void> {
+export interface LoginOptions {
+  useToken?: boolean;
+  server?: string;
+}
+
+export async function loginCommand(opts: LoginOptions = {}): Promise<void> {
   const config = loadConfig();
 
-  const serverUrl = await prompt(
+  // Resolve server URL
+  const serverInput = opts.server ?? await prompt(
     `Server URL${config.serverUrl ? ` [${config.serverUrl}]` : ""}: `,
   );
-  if (serverUrl) {
-    config.serverUrl = serverUrl.replace(/\/$/, "");
+  if (serverInput) {
+    config.serverUrl = serverInput.replace(/\/$/, "");
   }
   if (!config.serverUrl) {
     output.error("Server URL is required.");
     return;
   }
 
+  try {
+    validateServerUrl(config.serverUrl);
+  } catch (err) {
+    output.error(err instanceof Error ? err.message : "Invalid server URL");
+    return;
+  }
+
+  saveConfig(config);
+
+  if (opts.useToken) {
+    // Manual token paste fallback (CI / headless without callback)
+    await manualTokenLogin(config.serverUrl);
+  } else {
+    // OAuth 2.1 Authorization Code + PKCE (default)
+    await oauthLogin(config.serverUrl);
+  }
+}
+
+async function oauthLogin(serverUrl: string): Promise<void> {
+  try {
+    const result = await runOAuthFlow(serverUrl);
+
+    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString();
+    saveCredentials({
+      accessToken: result.accessToken,
+      refreshToken: result.refreshToken,
+      clientId: result.clientId,
+      expiresAt,
+    });
+    setTokenCache(result.accessToken, expiresAt, result.refreshToken, result.clientId);
+
+    output.success(`Logged in to ${serverUrl}`);
+  } catch (err) {
+    output.error(err instanceof Error ? err.message : "OAuth login failed");
+  }
+}
+
+async function manualTokenLogin(serverUrl: string): Promise<void> {
   output.info(
     "Open your browser and go to the token page to generate a CLI token.",
   );
-  output.info(`  ${config.serverUrl}/dashboard/settings`);
+  output.info(`  ${serverUrl}/dashboard/settings`);
   console.log();
 
   const token = await prompt("Paste your token: ");
@@ -43,15 +88,15 @@ export async function loginCommand(): Promise<void> {
     return;
   }
 
-  // Approximate token expiry (15 min from now)
-  config.tokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
-  saveConfig(config);
-  const storage = await saveToken(token);
-  setTokenCache(token, config.tokenExpiresAt);
+  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  saveCredentials({
+    accessToken: token,
+    refreshToken: "",
+    clientId: "",
+    expiresAt,
+  });
+  setTokenCache(token, expiresAt);
 
-  if (storage === "file") {
-    output.warn("Token saved to file (plaintext). Consider installing keytar for OS keychain storage.");
-  }
-
-  output.success(`Logged in to ${config.serverUrl}`);
+  output.warn("Manual token will not auto-refresh. Use `passwd-sso login` for persistent sessions.");
+  output.success(`Logged in to ${serverUrl}`);
 }

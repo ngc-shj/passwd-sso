@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -22,7 +22,8 @@ vi.mock("node:os", async () => {
 });
 
 // Must import AFTER mock is set up
-const { loadConfig, saveConfig } = await import("../../lib/config.js");
+const { loadConfig, saveConfig, saveCredentials, loadCredentials, deleteCredentials } = await import("../../lib/config.js");
+const { getCredentialsFilePath } = await import("../../lib/paths.js");
 const { _resetMigrationState } = await import("../../lib/migrate.js");
 
 describe("config", () => {
@@ -63,5 +64,81 @@ describe("config", () => {
     expect(JSON.parse(content).serverUrl).toBe("https://test.com");
     const stat = statSync(configPath);
     expect(stat.mode & 0o777).toBe(0o600);
+  });
+});
+
+describe("credentials", () => {
+  afterEach(() => {
+    _resetMigrationState();
+    try {
+      rmSync(testXdgData, { recursive: true, force: true });
+      rmSync(join(testDir, ".passwd-sso"), { recursive: true, force: true });
+    } catch {
+      // ok
+    }
+  });
+
+  const validCreds = {
+    accessToken: "mcp_test_access",
+    refreshToken: "mcpr_test_refresh",
+    clientId: "mcpc_test_client",
+    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+  };
+
+  it("saves and loads credentials with all 4 fields", () => {
+    saveCredentials(validCreds);
+    _resetMigrationState();
+    const loaded = loadCredentials();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.accessToken).toBe(validCreds.accessToken);
+    expect(loaded!.refreshToken).toBe(validCreds.refreshToken);
+    expect(loaded!.clientId).toBe(validCreds.clientId);
+    expect(loaded!.expiresAt).toBe(validCreds.expiresAt);
+  });
+
+  it("creates credentials file with 0o600 permissions", () => {
+    saveCredentials(validCreds);
+    const credPath = getCredentialsFilePath();
+    const stat = statSync(credPath);
+    expect(stat.mode & 0o777).toBe(0o600);
+  });
+
+  it("returns null for legacy plaintext token format", () => {
+    // Simulate legacy format: write a plain string instead of JSON
+    const credPath = getCredentialsFilePath();
+    const dir = join(credPath, "..");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(credPath, "some-old-plaintext-token", { mode: 0o600 });
+    _resetMigrationState();
+    const loaded = loadCredentials();
+    expect(loaded).toBeNull();
+  });
+
+  it("returns null for JSON missing required fields", () => {
+    const credPath = getCredentialsFilePath();
+    const dir = join(credPath, "..");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    writeFileSync(credPath, JSON.stringify({ accessToken: "tok" }), { mode: 0o600 });
+    _resetMigrationState();
+    const loaded = loadCredentials();
+    expect(loaded).toBeNull();
+  });
+
+  it("returns null when credentials file does not exist", () => {
+    _resetMigrationState();
+    const loaded = loadCredentials();
+    expect(loaded).toBeNull();
+  });
+
+  it("deleteCredentials removes the file", () => {
+    saveCredentials(validCreds);
+    deleteCredentials();
+    _resetMigrationState();
+    const loaded = loadCredentials();
+    expect(loaded).toBeNull();
+  });
+
+  it("deleteCredentials does not throw when file does not exist", () => {
+    expect(() => deleteCredentials()).not.toThrow();
   });
 });

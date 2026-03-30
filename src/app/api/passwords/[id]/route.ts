@@ -21,8 +21,7 @@ async function handleGET(
 ) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const rl = await getLimiter.check(`rl:passwords_get:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
@@ -77,8 +76,7 @@ async function handlePUT(
 ) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const rl = await updateLimiter.check(`rl:passwords_update:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
@@ -228,8 +226,7 @@ async function handleDELETE(
 ) {
   const authResult = await checkAuth(req);
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const { id } = await params;
   const { searchParams } = new URL(req.url);
