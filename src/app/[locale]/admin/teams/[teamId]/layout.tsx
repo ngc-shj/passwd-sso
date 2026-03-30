@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
-import { getTeamMembership } from "@/lib/team-auth";
-import { TEAM_ROLE } from "@/lib/constants";
+import { getTeamMembership, isTeamAdminRole } from "@/lib/team-auth";
 
 export default async function TeamAdminLayout({
   children,
@@ -16,7 +15,7 @@ export default async function TeamAdminLayout({
 
   // Only ADMIN and OWNER can access team admin pages
   const membership = await getTeamMembership(session.user.id, teamId);
-  if (!membership || (membership.role !== TEAM_ROLE.ADMIN && membership.role !== TEAM_ROLE.OWNER)) {
+  if (!membership || !isTeamAdminRole(membership.role)) {
     notFound();
   }
 

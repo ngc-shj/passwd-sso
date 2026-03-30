@@ -16,13 +16,14 @@ export {
   TEAM_ROLE_VALUES,
   TEAM_INVITE_ROLE_VALUES,
   INVITE_ROLE_VALUES,
+  isTeamAdminRole,
 } from "./team-role";
 export type { TeamRoleValue } from "./team-role";
 export { TEAM_PERMISSION } from "./team-permission";
 export type { TeamPermissionValue } from "./team-permission";
 export { TENANT_PERMISSION } from "./tenant-permission";
 export type { TenantPermissionValue } from "./tenant-permission";
-export { TENANT_ROLE, TENANT_ROLE_VALUES } from "./tenant-role";
+export { TENANT_ROLE, TENANT_ROLE_VALUES, isTenantAdminRole } from "./tenant-role";
 export type { TenantRoleValue } from "./tenant-role";
 
 export { EA_STATUS } from "./emergency-access";

@@ -1,7 +1,7 @@
 import { redirect } from "@/i18n/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { auth } from "@/auth";
-import { getTenantRole } from "@/lib/tenant-auth";
+import { getTenantRole, isTenantAdminRole } from "@/lib/tenant-auth";
 import { getAdminTeamMemberships } from "@/lib/team-auth";
 
 export default async function AdminPage({
@@ -18,7 +18,7 @@ export default async function AdminPage({
   }
 
   const tenantRole = await getTenantRole(session.user.id);
-  if (tenantRole) {
+  if (isTenantAdminRole(tenantRole)) {
     return redirect({ href: "/admin/tenant/members", locale });
   }
 

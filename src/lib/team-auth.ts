@@ -71,6 +71,9 @@ const ROLE_LEVEL: Record<TeamRole, number> = {
   [TEAM_ROLE.VIEWER]: 1,
 };
 
+// Re-export isTeamAdminRole from constants for backward compatibility
+export { isTeamAdminRole } from "@/lib/constants";
+
 /** Check if actorRole is strictly higher than targetRole. */
 export function isRoleAbove(actorRole: TeamRole, targetRole: TeamRole): boolean {
   return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];

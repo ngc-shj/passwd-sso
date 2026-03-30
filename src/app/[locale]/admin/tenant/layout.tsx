@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
-import { getTenantRole } from "@/lib/tenant-auth";
+import { getTenantRole, isTenantAdminRole } from "@/lib/tenant-auth";
 
 export default async function TenantAdminLayout({
   children,
@@ -11,7 +11,9 @@ export default async function TenantAdminLayout({
   if (!session?.user?.id) notFound();
 
   const tenantRole = await getTenantRole(session.user.id);
-  if (!tenantRole) notFound();
+  if (!isTenantAdminRole(tenantRole)) {
+    notFound();
+  }
 
   return <>{children}</>;
 }

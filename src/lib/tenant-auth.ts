@@ -71,6 +71,9 @@ export function isTenantRoleAbove(
   return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
 }
 
+// Re-export isTenantAdminRole from constants for backward compatibility
+export { isTenantAdminRole } from "@/lib/constants";
+
 /**
  * Get the membership record for a user in their tenant.
  * Returns null if the user has no active tenant membership.

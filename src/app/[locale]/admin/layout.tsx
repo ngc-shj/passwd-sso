@@ -2,7 +2,7 @@ import { redirect } from "@/i18n/navigation";
 import { NextIntlClientProvider } from "next-intl";
 import { getMessages, setRequestLocale } from "next-intl/server";
 import { auth } from "@/auth";
-import { getTenantRole } from "@/lib/tenant-auth";
+import { getTenantRole, isTenantAdminRole } from "@/lib/tenant-auth";
 import { getAdminTeamMemberships } from "@/lib/team-auth";
 import { AdminShell } from "@/components/admin/admin-shell";
 import { pickMessages } from "@/i18n/pick-messages";
@@ -37,7 +37,12 @@ export default async function AdminLayout({
 
   return (
     <NextIntlClientProvider messages={pickMessages(messages, NS_ADMIN_ALL)}>
-      <AdminShell adminTeams={adminTeams} hasTenantRole={!!tenantRole}>{children}</AdminShell>
+      <AdminShell
+        adminTeams={adminTeams}
+        hasTenantRole={isTenantAdminRole(tenantRole)}
+      >
+        {children}
+      </AdminShell>
     </NextIntlClientProvider>
   );
 }
