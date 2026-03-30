@@ -439,3 +439,69 @@ export async function validateMcpToken(
     },
   };
 }
+
+// ─── Token revocation (RFC 7009) ─────────────────────────────
+
+/**
+ * Revoke an access token or refresh token.
+ * If a refresh token is revoked, all tokens in its rotation family
+ * and their associated access tokens are also revoked.
+ *
+ * Per RFC 7009 §2.2, always succeeds (even if the token is unknown
+ * or already revoked) — the caller should return 200 regardless.
+ */
+export async function revokeToken(params: {
+  token: string;
+  tokenTypeHint?: "access_token" | "refresh_token";
+  clientId: string;
+}): Promise<void> {
+  const tokenHash = hashToken(params.token);
+
+  await withBypassRls(prisma, async () =>
+    prisma.$transaction(async (tx) => {
+      // Try refresh token first (if hint says so or no hint)
+      if (params.tokenTypeHint !== "access_token") {
+        const rt = await tx.mcpRefreshToken.findUnique({
+          where: { tokenHash },
+          include: { mcpClient: { select: { clientId: true } } },
+        });
+
+        if (rt && rt.mcpClient.clientId === params.clientId) {
+          // Revoke entire rotation family
+          await tx.mcpRefreshToken.updateMany({
+            where: { familyId: rt.familyId, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+          // Revoke all associated access tokens in the family
+          const familyTokens = await tx.mcpRefreshToken.findMany({
+            where: { familyId: rt.familyId },
+            select: { accessTokenId: true },
+          });
+          const accessTokenIds = [...new Set(familyTokens.map((t) => t.accessTokenId))];
+          if (accessTokenIds.length > 0) {
+            await tx.mcpAccessToken.updateMany({
+              where: { id: { in: accessTokenIds }, revokedAt: null },
+              data: { revokedAt: new Date() },
+            });
+          }
+          return;
+        }
+      }
+
+      // Try access token
+      const at = await tx.mcpAccessToken.findUnique({
+        where: { tokenHash },
+        include: { mcpClient: { select: { clientId: true } } },
+      });
+
+      if (at && at.mcpClient.clientId === params.clientId) {
+        await tx.mcpAccessToken.update({
+          where: { id: at.id },
+          data: { revokedAt: new Date() },
+        });
+      }
+
+      // Unknown/already revoked token → silent success per RFC 7009
+    }),
+  );
+}

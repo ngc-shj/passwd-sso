@@ -301,6 +301,25 @@ export async function refreshTokenGrant(
   return parseTokenResponse(data);
 }
 
+// ─── Token revocation (RFC 7009) ─────────────────────────────────────────────
+
+/** Revoke a token via the server's revocation endpoint. Best-effort — does not throw. */
+export async function revokeTokenRequest(
+  serverUrl: string,
+  token: string,
+  clientId: string,
+  tokenTypeHint?: "access_token" | "refresh_token",
+): Promise<void> {
+  const params: Record<string, string> = { token, client_id: clientId };
+  if (tokenTypeHint) params.token_type_hint = tokenTypeHint;
+
+  await fetch(`${serverUrl}/api/mcp/revoke`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(params).toString(),
+  });
+}
+
 // ─── Browser launcher ─────────────────────────────────────────────────────────
 
 /**

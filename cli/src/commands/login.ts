@@ -3,9 +3,9 @@
  */
 
 import { createInterface } from "node:readline";
-import { loadConfig, saveConfig, saveCredentials } from "../lib/config.js";
+import { loadConfig, saveConfig, loadCredentials, saveCredentials } from "../lib/config.js";
 import { setTokenCache } from "../lib/api-client.js";
-import { runOAuthFlow, validateServerUrl } from "../lib/oauth.js";
+import { runOAuthFlow, revokeTokenRequest, validateServerUrl } from "../lib/oauth.js";
 import * as output from "../lib/output.js";
 
 async function prompt(question: string): Promise<string> {
@@ -47,12 +47,28 @@ export async function loginCommand(opts: LoginOptions = {}): Promise<void> {
 
   saveConfig(config);
 
+  // Revoke previous session before starting new login
+  await revokeExistingSession(config.serverUrl);
+
   if (opts.useToken) {
     // Manual token paste fallback (CI / headless without callback)
     await manualTokenLogin(config.serverUrl);
   } else {
     // OAuth 2.1 Authorization Code + PKCE (default)
     await oauthLogin(config.serverUrl);
+  }
+}
+
+/** Best-effort revocation of the previous session's tokens. */
+async function revokeExistingSession(serverUrl: string): Promise<void> {
+  const creds = loadCredentials();
+  if (!creds || !creds.refreshToken || !creds.clientId) return;
+
+  try {
+    // Revoking the refresh token also revokes all access tokens in the family
+    await revokeTokenRequest(serverUrl, creds.refreshToken, creds.clientId, "refresh_token");
+  } catch {
+    // Best-effort — failure here should not block login
   }
 }
 
