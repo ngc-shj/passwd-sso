@@ -6,6 +6,7 @@
  */
 
 import { loadCredentials, saveCredentials, loadConfig } from "./config.js";
+import { refreshTokenGrant } from "./oauth.js";
 
 let cachedToken: string | null = null;
 let cachedExpiresAt: number | null = null;
@@ -71,65 +72,31 @@ export interface ApiResponse<T = unknown> {
   data: T;
 }
 
-/** Refresh buffer: refresh 2 minutes before expiry */
 const REFRESH_BUFFER_MS = 2 * 60 * 1000;
 
 function isTokenExpiringSoon(): boolean {
-  if (!cachedExpiresAt) {
-    const creds = loadCredentials();
-    if (creds) {
-      cachedExpiresAt = new Date(creds.expiresAt).getTime();
-    }
-  }
   if (!cachedExpiresAt) return false;
   return Date.now() >= cachedExpiresAt - REFRESH_BUFFER_MS;
 }
 
 async function refreshToken(): Promise<boolean> {
-  // Ensure cache is populated
-  if (!cachedToken) getToken();
-
-  // No refresh token means manual --token login; skip refresh
   if (!cachedRefreshToken || !cachedClientId) return false;
 
   const baseUrl = getBaseUrl();
   try {
-    const body = new URLSearchParams({
-      grant_type: "refresh_token",
-      refresh_token: cachedRefreshToken,
-      client_id: cachedClientId,
-    });
+    const result = await refreshTokenGrant(baseUrl, cachedRefreshToken, cachedClientId);
+    if (!result.accessToken) return false;
 
-    const res = await fetch(`${baseUrl}/api/mcp/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: body.toString(),
-    });
-    if (!res.ok) return false;
-
-    const data = (await res.json()) as Record<string, unknown>;
-    const accessToken = data.access_token;
-    const newRefreshToken = data.refresh_token;
-    const expiresIn = data.expires_in;
-
-    if (typeof accessToken !== "string" || !accessToken) return false;
-
-    const expiresAt = new Date(
-      Date.now() + (typeof expiresIn === "number" ? expiresIn : 3600) * 1000,
-    ).toISOString();
+    const nextRefreshToken = result.refreshToken || cachedRefreshToken;
+    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString();
 
     saveCredentials({
-      accessToken,
-      refreshToken: typeof newRefreshToken === "string" ? newRefreshToken : cachedRefreshToken,
+      accessToken: result.accessToken,
+      refreshToken: nextRefreshToken,
       clientId: cachedClientId,
       expiresAt,
     });
-    setTokenCache(
-      accessToken,
-      expiresAt,
-      typeof newRefreshToken === "string" ? newRefreshToken : cachedRefreshToken,
-      cachedClientId,
-    );
+    setTokenCache(result.accessToken, expiresAt, nextRefreshToken, cachedClientId);
 
     return true;
   } catch {
@@ -150,7 +117,6 @@ export async function apiRequest<T = unknown>(
     throw new Error("Not logged in. Run `passwd-sso login` first.");
   }
 
-  // Proactively refresh if token is expiring soon
   if (isTokenExpiringSoon()) {
     const refreshed = await refreshToken();
     if (refreshed) {
@@ -176,7 +142,6 @@ export async function apiRequest<T = unknown>(
 
   let res = await fetch(url, fetchOpts);
 
-  // Auto-refresh on 401
   if (res.status === 401) {
     const refreshed = await refreshToken();
     if (refreshed) {
@@ -195,17 +160,17 @@ export async function apiRequest<T = unknown>(
 
 // ─── Background Token Refresh Timer ─────────────────────────
 
-/** Interval: refresh every 50 minutes (5 min buffer for 1-hour MCP tokens) */
 const BG_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
 
 let bgRefreshTimer: ReturnType<typeof setInterval> | null = null;
 
 export function startBackgroundRefresh(): void {
   stopBackgroundRefresh();
+  // Skip timer entirely for manual --token login (no refresh token)
+  if (!cachedRefreshToken) return;
   bgRefreshTimer = setInterval(() => {
     void refreshToken();
   }, BG_REFRESH_INTERVAL_MS);
-  // Don't keep the process alive just for the timer
   bgRefreshTimer.unref();
 }
 

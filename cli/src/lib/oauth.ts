@@ -13,12 +13,13 @@ import {
 } from "node:http";
 import { spawn } from "node:child_process";
 
-// How long to wait for the browser callback before giving up
 const CALLBACK_TIMEOUT_MS = 120_000; // 2 minutes
 
 const CLI_CLIENT_NAME = "passwd-sso-cli";
 const CLI_SCOPES =
   "credentials:list credentials:use vault:status vault:unlock-data passwords:read passwords:write";
+
+const MCP_TOKEN_ENDPOINT = "/api/mcp/token";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,13 @@ export interface OAuthResult {
   expiresIn: number;
   scope: string;
   clientId: string;
+}
+
+export interface TokenResponse {
+  accessToken: string;
+  refreshToken: string;
+  expiresIn: number;
+  scope: string;
 }
 
 interface CallbackResult {
@@ -41,30 +49,15 @@ export function generateCodeVerifier(): string {
   return randomBytes(32).toString("base64url");
 }
 
-export function computeCodeChallenge(verifier: string): string {
+export function computeS256Challenge(verifier: string): string {
   return createHash("sha256").update(verifier).digest("base64url");
 }
 
-// ─── Port discovery ───────────────────────────────────────────────────────────
+// ─── HTML templates ──────────────────────────────────────────────────────────
 
-/** Bind to port 0 so the OS assigns a free ephemeral port, then return it. */
-export async function findFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.listen(0, "127.0.0.1", () => {
-      const addr = server.address();
-      if (addr && typeof addr !== "string") {
-        const port = addr.port;
-        server.close(() => resolve(port));
-      } else {
-        server.close(() => reject(new Error("Failed to determine free port")));
-      }
-    });
-    server.on("error", reject);
-  });
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
-
-// ─── Loopback callback server ─────────────────────────────────────────────────
 
 const SUCCESS_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -76,50 +69,46 @@ const SUCCESS_HTML = `<!DOCTYPE html>
 <p>You can close this tab and return to the terminal.</p>
 </div></body></html>`;
 
-const ERROR_HTML = (msg: string) => `<!DOCTYPE html>
+function errorHtml(msg: string): string {
+  return `<!DOCTYPE html>
 <html lang="en">
 <head><meta charset="utf-8"><title>Login failed</title>
 <style>body{font-family:sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0}
 .box{text-align:center;max-width:400px}</style></head>
 <body><div class="box">
 <h2>Login failed</h2>
-<p>${msg}</p>
+<p>${escapeHtml(msg)}</p>
 <p>Please return to the terminal.</p>
 </div></body></html>`;
+}
+
+// ─── Loopback callback server ─────────────────────────────────────────────────
 
 /**
- * Start a local HTTP server that waits for the OAuth redirect callback.
+ * Start a local HTTP server on port 0 (OS-assigned) that waits for the
+ * OAuth redirect callback. Returns the assigned port and a promise that
+ * resolves with the authorization code.
+ *
  * Verifies the state parameter using constant-time comparison (RFC 9700 §2.1.2).
  */
-export function startCallbackServer(
-  port: number,
-  expectedState: string,
-): {
-  server: ReturnType<typeof createServer>;
+export async function startCallbackServer(expectedState: string): Promise<{
+  port: number;
   waitForCallback: () => Promise<CallbackResult>;
-} {
-  let resolveCallback: (result: CallbackResult) => void;
-  let rejectCallback: (err: Error) => void;
-
-  // Two independent promises: one for internal tracking (silenced), one for the caller
-  let resolveWait: (result: CallbackResult) => void;
-  let rejectWait: (err: Error) => void;
-  const waitPromise = new Promise<CallbackResult>((res, rej) => {
-    resolveWait = res;
-    rejectWait = rej;
+}> {
+  let resolve: (result: CallbackResult) => void;
+  let reject: (err: Error) => void;
+  const callbackPromise = new Promise<CallbackResult>((res, rej) => {
+    resolve = res;
+    reject = rej;
   });
-
-  const promise = new Promise<CallbackResult>((res, rej) => {
-    resolveCallback = (r) => { res(r); resolveWait(r); };
-    rejectCallback = (e) => { rej(e); rejectWait(e); };
-  });
-  // Silence unhandled rejections — errors are forwarded via waitForCallback()
-  promise.catch(() => {});
-  waitPromise.catch(() => {});
+  // Prevent unhandled rejection — errors are consumed via waitForCallback()
+  callbackPromise.catch(() => {});
 
   const server = createServer(
     (req: IncomingMessage, res: ServerResponse) => {
-      const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+      const addr = server.address();
+      const p = typeof addr === "object" && addr ? addr.port : 0;
+      const url = new URL(req.url ?? "/", `http://127.0.0.1:${p}`);
 
       if (url.pathname !== "/callback") {
         res.writeHead(404);
@@ -134,19 +123,18 @@ export function startCallbackServer(
       if (error) {
         const desc = url.searchParams.get("error_description") ?? error;
         res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(ERROR_HTML(`Authorization error: ${desc}`));
-        rejectCallback(new Error(`OAuth error: ${desc}`));
+        res.end(errorHtml(`Authorization error: ${desc}`));
+        reject(new Error(`OAuth error: ${desc}`));
         return;
       }
 
       if (!code || !state) {
         res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(ERROR_HTML("Missing code or state parameter."));
-        rejectCallback(new Error("Callback missing code or state parameter"));
+        res.end(errorHtml("Missing code or state parameter."));
+        reject(new Error("Callback missing code or state parameter"));
         return;
       }
 
-      // Constant-time state comparison to prevent timing oracle on CSRF token
       const expectedBuf = Buffer.from(expectedState, "utf-8");
       const receivedBuf = Buffer.from(state, "utf-8");
       const stateValid =
@@ -155,37 +143,45 @@ export function startCallbackServer(
 
       if (!stateValid) {
         res.writeHead(400, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(ERROR_HTML("State mismatch — possible CSRF attack."));
-        rejectCallback(new Error("OAuth state mismatch"));
+        res.end(errorHtml("State mismatch — possible CSRF attack."));
+        reject(new Error("OAuth state mismatch"));
         return;
       }
 
       res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
       res.end(SUCCESS_HTML);
-      resolveCallback({ code, state });
+      resolve({ code, state });
     },
   );
 
-  server.listen(port, "127.0.0.1");
+  // Bind to port 0 so the OS assigns a free ephemeral port — no TOCTOU race
+  const port = await new Promise<number>((res, rej) => {
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (addr && typeof addr !== "string") {
+        res(addr.port);
+      } else {
+        server.close();
+        rej(new Error("Failed to determine callback server port"));
+      }
+    });
+    server.on("error", rej);
+  });
 
   const waitForCallback = (): Promise<CallbackResult> => {
-    return new Promise<CallbackResult>((resolve, reject) => {
+    return new Promise<CallbackResult>((res, rej) => {
       const timer = setTimeout(() => {
         server.close();
-        reject(
-          new Error(
-            `Timed out waiting for OAuth callback after ${CALLBACK_TIMEOUT_MS / 1000}s`,
-          ),
-        );
+        rej(new Error(`Timed out waiting for OAuth callback after ${CALLBACK_TIMEOUT_MS / 1000}s`));
       }, CALLBACK_TIMEOUT_MS);
 
-      waitPromise
-        .then((result) => { clearTimeout(timer); server.close(); resolve(result); })
-        .catch((err) => { clearTimeout(timer); server.close(); reject(err); });
+      callbackPromise
+        .then((result) => { clearTimeout(timer); server.close(); res(result); })
+        .catch((err) => { clearTimeout(timer); server.close(); rej(err); });
     });
   };
 
-  return { server, waitForCallback };
+  return { port, waitForCallback };
 }
 
 // ─── DCR client registration ──────────────────────────────────────────────────
@@ -195,28 +191,22 @@ export async function registerClient(
   serverUrl: string,
   redirectUri: string,
 ): Promise<{ clientId: string }> {
-  const endpoint = `${serverUrl}/api/mcp/register`;
-
-  const body = JSON.stringify({
-    client_name: CLI_CLIENT_NAME,
-    redirect_uris: [redirectUri],
-    grant_types: ["authorization_code", "refresh_token"],
-    response_types: ["code"],
-    token_endpoint_auth_method: "none",
-    scope: CLI_SCOPES,
-  });
-
-  const response = await fetch(endpoint, {
+  const response = await fetch(`${serverUrl}/api/mcp/register`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body,
+    body: JSON.stringify({
+      client_name: CLI_CLIENT_NAME,
+      redirect_uris: [redirectUri],
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+      scope: CLI_SCOPES,
+    }),
   });
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
-    throw new Error(
-      `DCR registration failed (${response.status}): ${text}`,
-    );
+    throw new Error(`DCR registration failed (${response.status}): ${text}`);
   }
 
   const data = (await response.json()) as Record<string, unknown>;
@@ -225,7 +215,6 @@ export async function registerClient(
     throw new Error("DCR response missing client_id");
   }
 
-  // Verify server registered the expected redirect URI (defense against MITM)
   const registeredUris = data.redirect_uris;
   if (Array.isArray(registeredUris) && !registeredUris.includes(redirectUri)) {
     throw new Error("DCR: server registered unexpected redirect_uri");
@@ -234,41 +223,10 @@ export async function registerClient(
   return { clientId };
 }
 
-// ─── Authorization code exchange ──────────────────────────────────────────────
+// ─── Token endpoint helpers ──────────────────────────────────────────────────
 
-/** Exchange an authorization code for access + refresh tokens. */
-export async function exchangeCode(
-  serverUrl: string,
-  params: {
-    code: string;
-    redirectUri: string;
-    clientId: string;
-    codeVerifier: string;
-  },
-): Promise<OAuthResult> {
-  const endpoint = `${serverUrl}/api/mcp/token`;
-
-  const body = new URLSearchParams({
-    grant_type: "authorization_code",
-    code: params.code,
-    redirect_uri: params.redirectUri,
-    client_id: params.clientId,
-    code_verifier: params.codeVerifier,
-  });
-
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: body.toString(),
-  });
-
-  if (!response.ok) {
-    const text = await response.text().catch(() => "");
-    throw new Error(`Token exchange failed (${response.status}): ${text}`);
-  }
-
-  const data = (await response.json()) as Record<string, unknown>;
-
+/** Parse an OAuth token endpoint response into a structured result. */
+function parseTokenResponse(data: Record<string, unknown>): TokenResponse {
   const accessToken = data.access_token;
   const refreshToken = data.refresh_token;
   const expiresIn = data.expires_in;
@@ -286,8 +244,61 @@ export async function exchangeCode(
     refreshToken,
     expiresIn: typeof expiresIn === "number" ? expiresIn : 3600,
     scope: typeof scope === "string" ? scope : CLI_SCOPES,
-    clientId: params.clientId,
   };
+}
+
+/** Exchange an authorization code for access + refresh tokens. */
+export async function exchangeCode(
+  serverUrl: string,
+  params: {
+    code: string;
+    redirectUri: string;
+    clientId: string;
+    codeVerifier: string;
+  },
+): Promise<OAuthResult> {
+  const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code: params.code,
+      redirect_uri: params.redirectUri,
+      client_id: params.clientId,
+      code_verifier: params.codeVerifier,
+    }).toString(),
+  });
+
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Token exchange failed (${response.status}): ${text}`);
+  }
+
+  const data = (await response.json()) as Record<string, unknown>;
+  const token = parseTokenResponse(data);
+  return { ...token, clientId: params.clientId };
+}
+
+/** Exchange a refresh token for a new access + refresh token pair. */
+export async function refreshTokenGrant(
+  serverUrl: string,
+  refreshToken: string,
+  clientId: string,
+): Promise<TokenResponse> {
+  const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken,
+      client_id: clientId,
+    }).toString(),
+  });
+
+  if (!response.ok) return { accessToken: "", refreshToken: "", expiresIn: 0, scope: "" };
+
+  const data = (await response.json()) as Record<string, unknown>;
+  return parseTokenResponse(data);
 }
 
 // ─── Browser launcher ─────────────────────────────────────────────────────────
@@ -299,15 +310,12 @@ export async function exchangeCode(
 export function openBrowser(url: string): boolean {
   const platform = process.platform;
 
-  // Detect headless Linux: no DISPLAY, no WAYLAND_DISPLAY, no TERM_PROGRAM
   if (platform === "linux") {
     const hasDisplay =
       process.env.DISPLAY ||
       process.env.WAYLAND_DISPLAY ||
       process.env.TERM_PROGRAM;
-    if (!hasDisplay) {
-      return false;
-    }
+    if (!hasDisplay) return false;
   }
 
   let cmd: string;
@@ -320,7 +328,6 @@ export function openBrowser(url: string): boolean {
     cmd = "cmd";
     args = ["/c", "start", "", url];
   } else {
-    // Linux / other Unix
     cmd = "xdg-open";
     args = [url];
   }
@@ -335,7 +342,7 @@ export function openBrowser(url: string): boolean {
 
 // ─── URL validation ───────────────────────────────────────────────────────────
 
-/** Reject non-HTTPS URLs except for localhost development. */
+/** Reject non-HTTPS URLs except for loopback development. */
 export function validateServerUrl(url: string): void {
   let parsed: URL;
   try {
@@ -345,7 +352,6 @@ export function validateServerUrl(url: string): void {
   }
 
   if (parsed.protocol !== "https:") {
-    // Allow loopback for local development (consistent with MCP DCR server-side validation)
     const isLoopback =
       parsed.hostname === "localhost" ||
       parsed.hostname === "127.0.0.1" ||
@@ -360,37 +366,19 @@ export function validateServerUrl(url: string): void {
 
 // ─── Main OAuth flow ──────────────────────────────────────────────────────────
 
-/**
- * Run the full OAuth 2.1 Authorization Code + PKCE flow:
- *   1. Find a free loopback port
- *   2. Register public client via DCR
- *   3. Generate PKCE verifier + challenge and state nonce
- *   4. Start loopback callback server
- *   5. Build authorization URL and open browser (or print URL)
- *   6. Wait for callback
- *   7. Exchange code for tokens
- */
 export async function runOAuthFlow(serverUrl: string): Promise<OAuthResult> {
   validateServerUrl(serverUrl);
 
-  // 1. Ephemeral loopback port
-  const port = await findFreePort();
-  const redirectUri = `http://127.0.0.1:${port}/callback`;
-
-  // 2. DCR client registration
-  const { clientId } = await registerClient(serverUrl, redirectUri);
-
-  // 3. PKCE
   const codeVerifier = generateCodeVerifier();
-  const codeChallenge = computeCodeChallenge(codeVerifier);
-
-  // 4. State nonce (CSRF protection)
+  const codeChallenge = computeS256Challenge(codeVerifier);
   const state = randomBytes(16).toString("hex");
 
-  // 5. Callback server
-  const { waitForCallback } = startCallbackServer(port, state);
+  // Start callback server on OS-assigned port (no TOCTOU)
+  const { port, waitForCallback } = await startCallbackServer(state);
+  const redirectUri = `http://127.0.0.1:${port}/callback`;
 
-  // 6. Authorization URL
+  const { clientId } = await registerClient(serverUrl, redirectUri);
+
   const authUrl = new URL(`${serverUrl}/api/mcp/authorize`);
   authUrl.searchParams.set("response_type", "code");
   authUrl.searchParams.set("client_id", clientId);
@@ -414,14 +402,7 @@ export async function runOAuthFlow(serverUrl: string): Promise<OAuthResult> {
     );
   }
 
-  // 7. Wait for callback
   const { code } = await waitForCallback();
 
-  // 8. Exchange code for tokens
-  return exchangeCode(serverUrl, {
-    code,
-    redirectUri,
-    clientId,
-    codeVerifier,
-  });
+  return exchangeCode(serverUrl, { code, redirectUri, clientId, codeVerifier });
 }

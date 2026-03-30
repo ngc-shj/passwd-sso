@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterAll } from "vitest";
 import {
   generateCodeVerifier,
-  computeCodeChallenge,
-  findFreePort,
+  computeS256Challenge,
   startCallbackServer,
   validateServerUrl,
 } from "../../lib/oauth.js";
@@ -15,24 +14,26 @@ describe("PKCE", () => {
     expect(verifier.length).toBe(43);
   });
 
-  it("computeCodeChallenge produces correct S256 for RFC 7636 Appendix B vector", () => {
+  it("computeS256Challenge produces correct S256 for RFC 7636 Appendix B vector", () => {
     // RFC 7636 Appendix B test vector
     const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
     const expectedChallenge = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-    expect(computeCodeChallenge(verifier)).toBe(expectedChallenge);
+    expect(computeS256Challenge(verifier)).toBe(expectedChallenge);
   });
 
-  it("computeCodeChallenge is deterministic", () => {
+  it("computeS256Challenge is deterministic", () => {
     const verifier = generateCodeVerifier();
-    expect(computeCodeChallenge(verifier)).toBe(computeCodeChallenge(verifier));
+    expect(computeS256Challenge(verifier)).toBe(computeS256Challenge(verifier));
   });
 });
 
-describe("findFreePort", () => {
-  it("returns a valid port number", async () => {
-    const port = await findFreePort();
+describe("startCallbackServer port assignment", () => {
+  it("returns a valid OS-assigned port", async () => {
+    const { port, waitForCallback } = await startCallbackServer("test-state");
     expect(port).toBeGreaterThan(0);
     expect(port).toBeLessThan(65536);
+    // Clean up — trigger timeout rejection and ignore it
+    waitForCallback().catch(() => {});
   });
 });
 
@@ -43,92 +44,65 @@ describe("startCallbackServer", () => {
   beforeAll(() => { process.on("unhandledRejection", noop); });
   afterAll(() => { process.off("unhandledRejection", noop); });
   it("resolves with code and state on valid callback", async () => {
-    const port = await findFreePort();
     const expectedState = "test-state-abc";
-    const { server, waitForCallback } = startCallbackServer(port, expectedState);
+    const { port, waitForCallback } = await startCallbackServer(expectedState);
 
-    try {
-      // Simulate browser callback
-      const callbackUrl = `http://127.0.0.1:${port}/callback?code=auth_code_123&state=${expectedState}`;
-      const res = await fetch(callbackUrl);
-      expect(res.status).toBe(200);
+    const callbackUrl = `http://127.0.0.1:${port}/callback?code=auth_code_123&state=${expectedState}`;
+    const res = await fetch(callbackUrl);
+    expect(res.status).toBe(200);
 
-      const result = await waitForCallback();
-      expect(result.code).toBe("auth_code_123");
-      expect(result.state).toBe(expectedState);
-    } finally {
-      server.close();
-    }
+    const result = await waitForCallback();
+    expect(result.code).toBe("auth_code_123");
+    expect(result.state).toBe(expectedState);
   });
 
   it("rejects on state mismatch", async () => {
-    const port = await findFreePort();
-    const { server, waitForCallback } = startCallbackServer(port, "expected-state");
+    const { port, waitForCallback } = await startCallbackServer("expected-state");
 
-    try {
-      const callbackPromise = waitForCallback();
-      const callbackUrl = `http://127.0.0.1:${port}/callback?code=code&state=wrong-state`;
-      const res = await fetch(callbackUrl);
-      expect(res.status).toBe(400);
+    const callbackPromise = waitForCallback();
+    const callbackUrl = `http://127.0.0.1:${port}/callback?code=code&state=wrong-state`;
+    const res = await fetch(callbackUrl);
+    expect(res.status).toBe(400);
 
-      await expect(callbackPromise).rejects.toThrow("state mismatch");
-    } finally {
-      server.close();
-    }
+    await expect(callbackPromise).rejects.toThrow("state mismatch");
   });
 
   it("rejects on missing state parameter", async () => {
-    const port = await findFreePort();
-    const { server, waitForCallback } = startCallbackServer(port, "expected-state");
+    const { port, waitForCallback } = await startCallbackServer("expected-state");
 
-    try {
-      const callbackPromise = waitForCallback();
-      const callbackUrl = `http://127.0.0.1:${port}/callback?code=code`;
-      const res = await fetch(callbackUrl);
-      expect(res.status).toBe(400);
+    const callbackPromise = waitForCallback();
+    const callbackUrl = `http://127.0.0.1:${port}/callback?code=code`;
+    const res = await fetch(callbackUrl);
+    expect(res.status).toBe(400);
 
-      await expect(callbackPromise).rejects.toThrow("missing code or state");
-    } finally {
-      server.close();
-    }
+    await expect(callbackPromise).rejects.toThrow("missing code or state");
   });
 
   it("rejects on missing code parameter", async () => {
-    const port = await findFreePort();
-    const { server, waitForCallback } = startCallbackServer(port, "expected-state");
+    const { port, waitForCallback } = await startCallbackServer("expected-state");
 
-    try {
-      const callbackPromise = waitForCallback();
-      const callbackUrl = `http://127.0.0.1:${port}/callback?state=expected-state`;
-      const res = await fetch(callbackUrl);
-      expect(res.status).toBe(400);
+    const callbackPromise = waitForCallback();
+    const callbackUrl = `http://127.0.0.1:${port}/callback?state=expected-state`;
+    const res = await fetch(callbackUrl);
+    expect(res.status).toBe(400);
 
-      await expect(callbackPromise).rejects.toThrow("missing code or state");
-    } finally {
-      server.close();
-    }
+    await expect(callbackPromise).rejects.toThrow("missing code or state");
   });
 
   it("rejects on OAuth error parameter", async () => {
-    const port = await findFreePort();
-    const { server, waitForCallback } = startCallbackServer(port, "state");
+    const { port, waitForCallback } = await startCallbackServer("state");
 
-    try {
-      const callbackPromise = waitForCallback();
-      const callbackUrl = `http://127.0.0.1:${port}/callback?error=access_denied&error_description=User+denied`;
-      const res = await fetch(callbackUrl);
-      expect(res.status).toBe(400);
+    const callbackPromise = waitForCallback();
+    const callbackUrl = `http://127.0.0.1:${port}/callback?error=access_denied&error_description=User+denied`;
+    const res = await fetch(callbackUrl);
+    expect(res.status).toBe(400);
 
-      await expect(callbackPromise).rejects.toThrow("User denied");
-    } finally {
-      server.close();
-    }
+    await expect(callbackPromise).rejects.toThrow("User denied");
   });
 
   it("times out when no callback arrives", async () => {
     vi.useFakeTimers();
-    const port = await findFreePort();
-    const { server, waitForCallback } = startCallbackServer(port, "state");
+    const { port, waitForCallback } = await startCallbackServer("state");
 
     const promise = waitForCallback();
 
@@ -136,7 +110,6 @@ describe("startCallbackServer", () => {
     await vi.advanceTimersByTimeAsync(121_000);
 
     await expect(promise).rejects.toThrow("Timed out");
-    server.close();
     vi.useRealTimers();
   });
 });
