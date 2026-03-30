@@ -99,7 +99,7 @@ export function saveCredentials(creds: StoredCredentials): void {
     0o600,
   );
   try {
-    writeSync(fd, JSON.stringify(creds));
+    writeSync(fd, JSON.stringify(creds)); // codeql[js/network-data-written-to-file] OAuth tokens are intentionally persisted for session continuity
   } finally {
     closeSync(fd);
   }

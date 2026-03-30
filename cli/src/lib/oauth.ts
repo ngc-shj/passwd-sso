@@ -191,7 +191,7 @@ export async function registerClient(
   serverUrl: string,
   redirectUri: string,
 ): Promise<{ clientId: string }> {
-  const response = await fetch(`${serverUrl}/api/mcp/register`, {
+  const response = await fetch(`${serverUrl}/api/mcp/register`, { // codeql[js/file-system-data-in-network-request] serverUrl is user-provided config, not untrusted file data
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -257,7 +257,7 @@ export async function exchangeCode(
     codeVerifier: string;
   },
 ): Promise<OAuthResult> {
-  const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, {
+  const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] OAuth code exchange sends authorization code to the token endpoint
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -285,7 +285,7 @@ export async function refreshTokenGrant(
   refreshToken: string,
   clientId: string,
 ): Promise<TokenResponse | null> {
-  const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, {
+  const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, { // codeql[js/file-system-data-in-network-request] OAuth refresh grant sends stored refresh token to the token endpoint
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -314,7 +314,7 @@ export async function revokeTokenRequest(
   if (tokenTypeHint) params.token_type_hint = tokenTypeHint;
 
   try {
-    await fetch(`${serverUrl}/api/mcp/revoke`, {
+    await fetch(`${serverUrl}/api/mcp/revoke`, { // codeql[js/file-system-data-in-network-request] OAuth token revocation sends stored token to the revocation endpoint
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams(params).toString(),
