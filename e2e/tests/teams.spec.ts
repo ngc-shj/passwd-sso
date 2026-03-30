@@ -34,18 +34,23 @@ test.describe.serial("Teams", () => {
     ownerPage = await ownerContext.newPage();
     // Navigate directly to the teams page so the vault unlock and the target
     // page share the same React tree — no full reload needed after unlock.
-    await ownerPage.goto("/ja/admin/tenant/teams");
+    // Unlock vault on dashboard first (admin pages don't have VaultGate)
+    await ownerPage.goto("/ja/dashboard");
     const ownerLock = new VaultLockPage(ownerPage);
     await expect(ownerLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await ownerLock.unlockAndWait(teamOwner.passphrase!);
+    await ownerPage.goto("/ja/admin/tenant/teams");
+    await ownerPage.waitForLoadState("networkidle");
 
     memberContext = await browser.newContext();
     await injectSession(memberContext, teamMember.sessionToken);
     memberPage = await memberContext.newPage();
-    await memberPage.goto("/ja/admin/tenant/teams");
+    await memberPage.goto("/ja/dashboard");
     const memberLock = new VaultLockPage(memberPage);
     await expect(memberLock.passphraseInput).toBeVisible({ timeout: 10_000 });
     await memberLock.unlockAndWait(teamMember.passphrase!);
+    await memberPage.goto("/ja/admin/tenant/teams");
+    await memberPage.waitForLoadState("networkidle");
   });
 
   test.afterAll(async () => {

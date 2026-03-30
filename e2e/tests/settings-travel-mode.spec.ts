@@ -28,7 +28,7 @@ test.describe("Settings - Travel Mode", () => {
     const lockPage = new VaultLockPage(page);
 
     await test.step("navigate to Security settings page", async () => {
-      await settingsPage.gotoSecurity();
+      await settingsPage.gotoTravelMode();
       // Navigating to a new page resets React state; re-unlock the vault
       await lockPage.unlockAndWait(vaultReady.passphrase!);
     });

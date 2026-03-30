@@ -30,7 +30,7 @@ test.describe("Settings - API Keys", () => {
     const lockPage = new VaultLockPage(page);
 
     await test.step("navigate to Developer settings page", async () => {
-      await settingsPage.gotoDeveloper();
+      await settingsPage.gotoApiKeys();
       // Navigating to a new page resets React state; re-unlock the vault
       await lockPage.unlockAndWait(vaultReady.passphrase!);
     });
