@@ -83,14 +83,8 @@ describe("useSidebarSectionsState", () => {
       }),
     );
 
-    // If no sections were auto-opened, mockSetCollapsed should not have been called
-    // or settingsNav should not be in the opened sections
-    if (mockSetCollapsed.mock.calls.length > 0) {
-      const updater = mockSetCollapsed.mock.calls[0][0] as (prev: typeof mockCollapsed) => typeof mockCollapsed;
-      const next = updater(mockCollapsed);
-      expect(next.settingsNav).toBe(true);
-    } else {
-      expect(mockSetCollapsed).not.toHaveBeenCalled();
-    }
+    // isAdminActive prevents settings section from auto-opening,
+    // so setCollapsed should not be called at all (toOpen is empty)
+    expect(mockSetCollapsed).not.toHaveBeenCalled();
   });
 });

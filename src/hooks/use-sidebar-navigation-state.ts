@@ -45,7 +45,8 @@ export function useSidebarNavigationState({
     const isVaultArchive = cleanPath === "/dashboard/archive";
     const isVaultTrash = cleanPath === "/dashboard/trash";
     const isAdminActive = cleanPath.startsWith("/admin");
-    const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
+    // Scope to /dashboard/ only — don't match /admin/teams/[id]/audit-logs
+    const isAuditLog = cleanPath === "/dashboard/audit-logs" || (cleanPath.startsWith("/dashboard/") && cleanPath.endsWith("/audit-logs"));
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
     const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
     const activeAuditTeamId = auditTeamMatch ? auditTeamMatch[1] : null;

@@ -135,7 +135,7 @@ export async function getAdminTeamMemberships(userId: string) {
     prisma.teamMember.findMany({
       where: {
         userId,
-        role: { in: ["ADMIN", "OWNER"] },
+        role: { in: [TEAM_ROLE.ADMIN, TEAM_ROLE.OWNER] },
         deactivatedAt: null,
       },
       include: {

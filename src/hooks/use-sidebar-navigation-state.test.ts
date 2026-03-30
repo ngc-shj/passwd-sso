@@ -114,6 +114,7 @@ describe("useSidebarNavigationState", () => {
     );
 
     expect(result.current.activeAuditTeamId).toBeNull();
+    expect(result.current.isAuditLog).toBe(false);
   });
 
   it("sets isAdminActive for admin paths", () => {

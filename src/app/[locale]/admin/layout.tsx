@@ -37,7 +37,7 @@ export default async function AdminLayout({
 
   return (
     <NextIntlClientProvider messages={pickMessages(messages, NS_ADMIN_ALL)}>
-      <AdminShell adminTeams={adminTeams}>{children}</AdminShell>
+      <AdminShell adminTeams={adminTeams} hasTenantRole={!!tenantRole}>{children}</AdminShell>
     </NextIntlClientProvider>
   );
 }

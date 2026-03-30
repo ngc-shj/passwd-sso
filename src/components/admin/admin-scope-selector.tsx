@@ -4,6 +4,7 @@ import { Building2, Users } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { useRouter } from "@/i18n/navigation";
+import { stripLocalePrefix } from "@/i18n/locale-utils";
 import {
   Select,
   SelectContent,
@@ -18,17 +19,18 @@ interface AdminTeam {
 
 interface AdminScopeSelectorProps {
   adminTeams: AdminTeam[];
+  hasTenantRole: boolean;
 }
 
 function currentScope(pathname: string): string {
-  const match = pathname.match(/\/admin\/teams\/([^/]+)/);
+  const match = pathname.match(/^\/admin\/teams\/([^/]+)/);
   if (match) return match[1];
   return "tenant";
 }
 
-export function AdminScopeSelector({ adminTeams }: AdminScopeSelectorProps) {
+export function AdminScopeSelector({ adminTeams, hasTenantRole }: AdminScopeSelectorProps) {
   const t = useTranslations("AdminConsole");
-  const pathname = usePathname();
+  const pathname = stripLocalePrefix(usePathname());
   const router = useRouter();
 
   const value = currentScope(pathname);
@@ -51,12 +53,14 @@ export function AdminScopeSelector({ adminTeams }: AdminScopeSelectorProps) {
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="tenant">
-            <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 shrink-0" />
-              <span>{t("scopeTenant")}</span>
-            </div>
-          </SelectItem>
+          {hasTenantRole && (
+            <SelectItem value="tenant">
+              <div className="flex items-center gap-2">
+                <Building2 className="h-4 w-4 shrink-0" />
+                <span>{t("scopeTenant")}</span>
+              </div>
+            </SelectItem>
+          )}
           {adminTeams.map(({ team }) => (
             <SelectItem key={team.id} value={team.id}>
               <div className="flex items-center gap-2">

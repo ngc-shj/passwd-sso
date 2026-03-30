@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { Link } from "@/i18n/navigation";
 import { cn } from "@/lib/utils";
+import { stripLocalePrefix } from "@/i18n/locale-utils";
 import type { LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -17,14 +18,14 @@ interface SectionNavProps {
 }
 
 export function SectionNav({ items }: SectionNavProps) {
-  const pathname = usePathname();
+  const cleanPath = stripLocalePrefix(usePathname());
 
   return (
     <>
       {/* Desktop: vertical nav */}
       <nav className="hidden md:flex w-48 shrink-0 flex-col gap-1">
         {items.map((item) => {
-          const isActive = pathname.endsWith(item.href) || pathname.includes(item.href);
+          const isActive = cleanPath.startsWith(item.href);
           return (
             <Button
               key={item.href}
@@ -43,7 +44,7 @@ export function SectionNav({ items }: SectionNavProps) {
       {/* Mobile: horizontal scroll pills */}
       <nav className="flex md:hidden gap-2 overflow-x-auto pb-2 -mx-1 px-1">
         {items.map((item) => {
-          const isActive = pathname.endsWith(item.href) || pathname.includes(item.href);
+          const isActive = cleanPath.startsWith(item.href);
           return (
             <Button
               key={item.href}

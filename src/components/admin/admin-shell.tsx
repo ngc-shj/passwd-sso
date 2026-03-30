@@ -10,10 +10,11 @@ interface AdminTeam {
 
 interface AdminShellProps {
   adminTeams: AdminTeam[];
+  hasTenantRole: boolean;
   children: React.ReactNode;
 }
 
-export function AdminShell({ adminTeams, children }: AdminShellProps) {
+export function AdminShell({ adminTeams, hasTenantRole, children }: AdminShellProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -24,6 +25,7 @@ export function AdminShell({ adminTeams, children }: AdminShellProps) {
           open={sidebarOpen}
           onOpenChange={setSidebarOpen}
           adminTeams={adminTeams}
+          hasTenantRole={hasTenantRole}
         />
         <main className="min-h-0 flex-1 overflow-auto">{children}</main>
       </div>

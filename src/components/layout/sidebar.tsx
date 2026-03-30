@@ -28,6 +28,7 @@ import {
 import { useTeamVaultContext } from "@/hooks/use-vault-context";
 import { useSetActiveVault } from "@/lib/active-vault-context";
 import { useTenantRole } from "@/hooks/use-tenant-role";
+import { TEAM_ROLE } from "@/lib/constants";
 
 interface SidebarProps {
   open: boolean;
@@ -88,7 +89,11 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   });
 
   const vaultContext = useTeamVaultContext(teams);
-  const { isAdmin } = useTenantRole();
+  const { isAdmin: isTenantAdmin } = useTenantRole();
+  // Show admin console link for tenant admins AND team admins
+  const isAdmin = isTenantAdmin || teams.some(
+    (t) => t.role === TEAM_ROLE.ADMIN || t.role === TEAM_ROLE.OWNER
+  );
   const setActiveVault = useSetActiveVault();
   useEffect(() => {
     setActiveVault(vaultContext);

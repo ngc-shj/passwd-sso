@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
+import { stripLocalePrefix } from "@/i18n/locale-utils";
 import { VisuallyHidden } from "radix-ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { AdminScopeSelector } from "./admin-scope-selector";
@@ -25,6 +26,7 @@ interface AdminSidebarProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   adminTeams: AdminTeam[];
+  hasTenantRole: boolean;
 }
 
 interface NavItem {
@@ -135,18 +137,21 @@ function SidebarNav({
 
 function AdminSidebarContent({
   adminTeams,
+  hasTenantRole,
   onNavigate,
 }: {
   adminTeams: AdminTeam[];
+  hasTenantRole: boolean;
   onNavigate?: () => void;
 }) {
   const t = useTranslations("AdminConsole");
-  const pathname = usePathname();
+  const rawPathname = usePathname();
+  const pathname = stripLocalePrefix(rawPathname);
   const items = useNavItems(pathname, t);
 
   return (
     <div className="flex flex-col h-full">
-      <AdminScopeSelector adminTeams={adminTeams} />
+      <AdminScopeSelector adminTeams={adminTeams} hasTenantRole={hasTenantRole} />
       <SidebarNav items={items} pathname={pathname} onNavigate={onNavigate} />
     </div>
   );
@@ -156,6 +161,7 @@ export function AdminSidebar({
   open,
   onOpenChange,
   adminTeams,
+  hasTenantRole,
 }: AdminSidebarProps) {
   const t = useTranslations("AdminConsole");
 
@@ -163,7 +169,7 @@ export function AdminSidebar({
     <>
       {/* Desktop sidebar */}
       <aside className="hidden md:flex flex-col w-52 border-r bg-background shrink-0 overflow-auto">
-        <AdminSidebarContent adminTeams={adminTeams} />
+        <AdminSidebarContent adminTeams={adminTeams} hasTenantRole={hasTenantRole} />
       </aside>
 
       {/* Mobile sidebar (sheet) */}
@@ -174,6 +180,7 @@ export function AdminSidebar({
           </VisuallyHidden.Root>
           <AdminSidebarContent
             adminTeams={adminTeams}
+            hasTenantRole={hasTenantRole}
             onNavigate={() => onOpenChange(false)}
           />
         </SheetContent>

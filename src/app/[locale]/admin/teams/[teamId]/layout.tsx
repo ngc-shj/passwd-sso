@@ -14,8 +14,9 @@ export default async function TeamAdminLayout({
   const session = await auth();
   if (!session?.user?.id) notFound();
 
+  // Only ADMIN and OWNER can access team admin pages
   const membership = await getTeamMembership(session.user.id, teamId);
-  if (!membership || membership.role === TEAM_ROLE.VIEWER) {
+  if (!membership || (membership.role !== TEAM_ROLE.ADMIN && membership.role !== TEAM_ROLE.OWNER)) {
     notFound();
   }
 
