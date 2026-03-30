@@ -1,16 +1,20 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { TabDescription } from "@/components/settings/tab-description";
+import { Users } from "lucide-react";
+import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
 import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 
 export default function TenantMembersPage() {
   const t = useTranslations("Dashboard");
 
   return (
-    <div className="space-y-4">
-      <TabDescription>{t("tenantTabMembersDesc")}</TabDescription>
+    <AdminSectionLayout
+      icon={Users}
+      title={t("tenantTabMembers")}
+      description={t("tenantTabMembersDesc")}
+    >
       <TenantMembersCard />
-    </div>
+    </AdminSectionLayout>
   );
 }

@@ -1,11 +1,12 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Database, GitMerge } from "lucide-react";
-import { SectionNav } from "@/components/settings/section-nav";
+import { Link2, Database, GitMerge } from "lucide-react";
+import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
 
 export default function TenantProvisioningLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
+  const tDash = useTranslations("Dashboard");
 
   const navItems = [
     { href: "/admin/tenant/provisioning/scim", label: t("navScim"), icon: Database },
@@ -13,9 +14,13 @@ export default function TenantProvisioningLayout({ children }: { children: React
   ];
 
   return (
-    <div className="space-y-4">
-      <SectionNav items={navItems} />
+    <AdminSectionLayout
+      icon={Link2}
+      title={tDash("tenantTabProvisioning")}
+      description={tDash("tenantTabProvisioningDesc")}
+      navItems={navItems}
+    >
       {children}
-    </div>
+    </AdminSectionLayout>
   );
 }

@@ -2,10 +2,11 @@
 
 import { useTranslations } from "next-intl";
 import { Bot, Cpu, KeyRound, Share2 } from "lucide-react";
-import { SectionNav } from "@/components/settings/section-nav";
+import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
 
 export default function TenantMachineIdentityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
+  const tDash = useTranslations("Dashboard");
 
   const navItems = [
     { href: "/admin/tenant/machine-identity/service-accounts", label: t("navServiceAccounts"), icon: Bot },
@@ -15,9 +16,13 @@ export default function TenantMachineIdentityLayout({ children }: { children: Re
   ];
 
   return (
-    <div className="space-y-4">
-      <SectionNav items={navItems} />
+    <AdminSectionLayout
+      icon={Bot}
+      title={tDash("tenantTabMachineIdentity")}
+      description={tDash("tenantTabMachineIdentityDesc")}
+      navItems={navItems}
+    >
       {children}
-    </div>
+    </AdminSectionLayout>
   );
 }

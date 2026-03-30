@@ -3,10 +3,11 @@
 import { useTranslations } from "next-intl";
 import { usePathname } from "next/navigation";
 import { Shield, KeyRound, Webhook } from "lucide-react";
-import { SectionNav } from "@/components/settings/section-nav";
+import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
 
 export default function TeamSecurityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
+  const tTeam = useTranslations("Team");
   const pathname = usePathname();
   const teamIdMatch = pathname.match(/\/admin\/teams\/([^/]+)\//);
   const teamId = teamIdMatch?.[1] ?? "";
@@ -18,9 +19,13 @@ export default function TeamSecurityLayout({ children }: { children: React.React
   ];
 
   return (
-    <div className="space-y-4">
-      <SectionNav items={navItems} />
+    <AdminSectionLayout
+      icon={Shield}
+      title={tTeam("securityPolicy")}
+      description={tTeam("tabPolicyDesc")}
+      navItems={navItems}
+    >
       {children}
-    </div>
+    </AdminSectionLayout>
   );
 }

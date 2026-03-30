@@ -1,16 +1,20 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { TabDescription } from "@/components/settings/tab-description";
+import { ScrollText } from "lucide-react";
+import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
 import { TenantAuditLogCard } from "@/components/settings/tenant-audit-log-card";
 
 export default function TenantAuditLogsPage() {
   const t = useTranslations("Dashboard");
 
   return (
-    <div className="space-y-4">
-      <TabDescription>{t("tenantTabAuditLogDesc")}</TabDescription>
+    <AdminSectionLayout
+      icon={ScrollText}
+      title={t("tenantTabAuditLog")}
+      description={t("tenantTabAuditLogDesc")}
+    >
       <TenantAuditLogCard />
-    </div>
+    </AdminSectionLayout>
   );
 }

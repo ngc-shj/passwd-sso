@@ -1,11 +1,12 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Clock, ShieldBan, Webhook } from "lucide-react";
-import { SectionNav } from "@/components/settings/section-nav";
+import { Shield, Clock, ShieldBan, Webhook } from "lucide-react";
+import { AdminSectionLayout } from "@/components/admin/admin-section-layout";
 
 export default function TenantSecurityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
+  const tDash = useTranslations("Dashboard");
 
   const navItems = [
     { href: "/admin/tenant/security/session-policy", label: t("navSessionPolicy"), icon: Clock },
@@ -14,9 +15,13 @@ export default function TenantSecurityLayout({ children }: { children: React.Rea
   ];
 
   return (
-    <div className="space-y-4">
-      <SectionNav items={navItems} />
+    <AdminSectionLayout
+      icon={Shield}
+      title={tDash("tenantTabSecurity")}
+      description={tDash("tenantTabSecurityDesc")}
+      navItems={navItems}
+    >
       {children}
-    </div>
+    </AdminSectionLayout>
   );
 }
