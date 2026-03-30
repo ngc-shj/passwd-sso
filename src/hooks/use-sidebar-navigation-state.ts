@@ -63,9 +63,8 @@ export function useSidebarNavigationState({
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/watchtower`
       : cleanPath === "/dashboard/watchtower";
     const isTeamsManage = cleanPath === "/dashboard/teams";
-    const isTeamSettings = teamMatch
-      ? cleanPath === `/dashboard/teams/${teamMatch[1]}/settings`
-      : false;
+    // Team settings moved to /admin/teams/[id]/* — keep exclusion for vault-all detection
+    const isTeamSettings = false;
     const isSettings = cleanPath.startsWith("/dashboard/settings");
     const isExport = teamMatch
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/export`
