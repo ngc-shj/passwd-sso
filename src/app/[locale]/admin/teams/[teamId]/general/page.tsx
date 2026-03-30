@@ -45,6 +45,7 @@ export default function TeamGeneralPage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("Team");
+  const tAdmin = useTranslations("AdminConsole");
   const router = useRouter();
 
   const [team, setTeam] = useState<TeamInfo | null>(null);
@@ -124,8 +125,8 @@ export default function TeamGeneralPage({
       return (
         <SectionLayout
           icon={Settings2}
-          title={t("generalSettings")}
-          description={t("tabGeneralDesc")}
+          title={tAdmin("teamSectionGeneral")}
+          description={tAdmin("teamSectionGeneralDesc")}
         >
           <Card className="rounded-xl border bg-card/80 p-6">
             <div className="flex flex-col items-start gap-3">

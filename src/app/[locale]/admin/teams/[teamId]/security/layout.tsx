@@ -7,7 +7,6 @@ import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TeamSecurityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
-  const tTeam = useTranslations("Team");
   const pathname = usePathname();
   const teamIdMatch = pathname.match(/\/admin\/teams\/([^/]+)\//);
   const teamId = teamIdMatch?.[1] ?? "";
@@ -21,8 +20,8 @@ export default function TeamSecurityLayout({ children }: { children: React.React
   return (
     <SectionLayout
       icon={Shield}
-      title={tTeam("securityPolicy")}
-      description={tTeam("tabPolicyDesc")}
+      title={t("teamSectionSecurity")}
+      description={t("teamSectionSecurityDesc")}
       navItems={navItems}
     >
       {children}

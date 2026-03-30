@@ -6,7 +6,7 @@ import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
-import { Plus, Users, CalendarClock, Globe } from "lucide-react";
+import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
@@ -28,6 +28,7 @@ interface TeamListItem {
 
 export default function AdminTenantTeamsPage() {
   const t = useTranslations("Team");
+  const tAdmin = useTranslations("AdminConsole");
   const locale = useLocale();
   const { isAdmin } = useTenantRole();
   const [teams, setTeams] = useState<TeamListItem[]>([]);
@@ -56,9 +57,9 @@ export default function AdminTenantTeamsPage() {
 
   return (
     <SectionLayout
-      icon={Users}
-      title={t("teams")}
-      description={t("manage")}
+      icon={UsersRound}
+      title={tAdmin("sectionTeams")}
+      description={tAdmin("sectionTeamsDesc")}
       headerExtra={
         isAdmin ? (
           <TeamCreateDialog
@@ -79,7 +80,7 @@ export default function AdminTenantTeamsPage() {
         </div>
       ) : teams.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
-          <Users className="mb-4 h-12 w-12 text-muted-foreground" />
+          <UsersRound className="mb-4 h-12 w-12 text-muted-foreground" />
           <p className="text-muted-foreground">{t("noTeams")}</p>
           <p className="mt-1 text-sm text-muted-foreground">
             {t("noTeamsDesc")}

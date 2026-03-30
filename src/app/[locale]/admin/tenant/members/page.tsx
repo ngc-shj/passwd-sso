@@ -6,13 +6,13 @@ import { SectionLayout } from "@/components/settings/section-layout";
 import { TenantMembersCard } from "@/components/settings/tenant-members-card";
 
 export default function TenantMembersPage() {
-  const t = useTranslations("Dashboard");
+  const t = useTranslations("AdminConsole");
 
   return (
     <SectionLayout
       icon={Users}
-      title={t("tenantTabMembers")}
-      description={t("tenantTabMembersDesc")}
+      title={t("sectionMembers")}
+      description={t("sectionMembersDesc")}
     >
       <TenantMembersCard />
     </SectionLayout>

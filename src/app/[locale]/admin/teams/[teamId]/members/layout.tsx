@@ -7,7 +7,6 @@ import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TeamMembersLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
-  const tTeam = useTranslations("Team");
   const pathname = usePathname();
   const teamIdMatch = pathname.match(/\/admin\/teams\/([^/]+)\//);
   const teamId = teamIdMatch?.[1] ?? "";
@@ -21,8 +20,8 @@ export default function TeamMembersLayout({ children }: { children: React.ReactN
   return (
     <SectionLayout
       icon={Users}
-      title={tTeam("members")}
-      description={tTeam("tabMembersDesc")}
+      title={t("teamSectionMembers")}
+      description={t("teamSectionMembersDesc")}
       navItems={navItems}
     >
       {children}

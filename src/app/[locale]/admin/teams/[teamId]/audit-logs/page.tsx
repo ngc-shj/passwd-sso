@@ -98,6 +98,7 @@ export default function TeamAdminAuditLogsPage({
 }) {
   const { teamId } = use(params);
   const t = useTranslations("AuditLog");
+  const tAdmin = useTranslations("AdminConsole");
   const teamVault = useTeamVaultOptional();
   const [exportAllowed, setExportAllowed] = useState(true);
 
@@ -237,8 +238,8 @@ export default function TeamAdminAuditLogsPage({
   return (
     <SectionLayout
       icon={ScrollText}
-      title={t("title")}
-      description={t("description")}
+      title={tAdmin("teamSectionAuditLogs")}
+      description={tAdmin("teamSectionAuditLogsDesc")}
     >
       <Card className="rounded-xl border bg-card/80 p-4">
         <div className="space-y-3">

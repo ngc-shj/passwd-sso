@@ -6,7 +6,6 @@ import { SectionLayout } from "@/components/settings/section-layout";
 
 export default function TenantMachineIdentityLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");
-  const tDash = useTranslations("Dashboard");
 
   const navItems = [
     { href: "/admin/tenant/machine-identity/service-accounts", label: t("navServiceAccounts"), icon: Bot },
@@ -18,8 +17,8 @@ export default function TenantMachineIdentityLayout({ children }: { children: Re
   return (
     <SectionLayout
       icon={Bot}
-      title={tDash("tenantTabMachineIdentity")}
-      description={tDash("tenantTabMachineIdentityDesc")}
+      title={t("sectionMachineIdentity")}
+      description={t("sectionMachineIdentityDesc")}
       navItems={navItems}
     >
       {children}
