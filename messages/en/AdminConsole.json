@@ -9,5 +9,19 @@
   "navMachineIdentity": "Machine Identity",
   "navAuditLogs": "Audit Logs",
   "navGeneral": "General",
-  "noAccess": "You don't have admin access"
+  "noAccess": "You don't have admin access",
+  "navSessionPolicy": "Session Policy",
+  "navAccessRestriction": "Access Restriction",
+  "navWebhooks": "Webhooks",
+  "navServiceAccounts": "Service Accounts",
+  "navMcpClients": "MCP Clients",
+  "navAccessRequests": "Access Requests",
+  "navDelegation": "Delegation",
+  "navScim": "SCIM",
+  "navDirectorySync": "Directory Sync",
+  "navPolicy": "Policy",
+  "navKeyRotation": "Key Rotation",
+  "navMemberList": "List",
+  "navAddMember": "Add",
+  "navTransferOwnership": "Transfer"
 }

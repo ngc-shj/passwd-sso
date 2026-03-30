@@ -9,5 +9,19 @@
   "navMachineIdentity": "マシンID",
   "navAuditLogs": "監査ログ",
   "navGeneral": "全般",
-  "noAccess": "管理者権限がありません"
+  "noAccess": "管理者権限がありません",
+  "navSessionPolicy": "セッションポリシー",
+  "navAccessRestriction": "アクセス制限",
+  "navWebhooks": "Webhook",
+  "navServiceAccounts": "サービスアカウント",
+  "navMcpClients": "MCPクライアント",
+  "navAccessRequests": "アクセスリクエスト",
+  "navDelegation": "デリゲーション",
+  "navScim": "SCIM",
+  "navDirectorySync": "ディレクトリ同期",
+  "navPolicy": "ポリシー",
+  "navKeyRotation": "キーローテーション",
+  "navMemberList": "一覧",
+  "navAddMember": "追加",
+  "navTransferOwnership": "移譲"
 }

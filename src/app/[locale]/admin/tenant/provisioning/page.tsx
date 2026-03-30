@@ -1,18 +1,10 @@
 "use client";
 
-import { useTranslations } from "next-intl";
-import { TabDescription } from "@/components/settings/tab-description";
-import { ScimProvisioningCard } from "@/components/settings/scim-provisioning-card";
-import { DirectorySyncCard } from "@/components/settings/directory-sync-card";
+import { useRouter } from "@/i18n/navigation";
+import { useEffect } from "react";
 
 export default function TenantProvisioningPage() {
-  const t = useTranslations("Dashboard");
-
-  return (
-    <div className="space-y-4">
-      <TabDescription>{t("tenantTabProvisioningDesc")}</TabDescription>
-      <ScimProvisioningCard />
-      <DirectorySyncCard />
-    </div>
-  );
+  const router = useRouter();
+  useEffect(() => { router.replace("/admin/tenant/provisioning/scim"); }, [router]);
+  return null;
 }
