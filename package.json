@@ -106,6 +106,7 @@
     "lodash": "4.17.23",
     "cross-spawn": "7.0.6",
     "undici": ">=7.24.0",
-    "nodemailer": "^8.0.4"
+    "nodemailer": "^8.0.4",
+    "effect": ">=3.20.0"
   }
 }
