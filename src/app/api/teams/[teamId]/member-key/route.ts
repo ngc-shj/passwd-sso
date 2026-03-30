@@ -1,23 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { authOrToken } from "@/lib/auth-or-token";
+import { checkAuth } from "@/lib/check-auth";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 // GET /api/teams/[teamId]/member-key — Get own TeamMemberKey
 // Query: ?keyVersion=N (optional, defaults to latest)
 async function handleGET(req: NextRequest, { params }: Params) {
-  const authResult = await authOrToken(req, EXTENSION_TOKEN_SCOPE.PASSWORDS_READ);
-  if (!authResult || authResult.type === "scope_insufficient" || authResult.type === "service_account") {
-    return unauthorized();
-  }
-  const userId = authResult.userId;
+  const authed = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
+  if (!authed.ok) return authed.response;
+  const { userId } = authed.auth;
 
   const { teamId } = await params;
 

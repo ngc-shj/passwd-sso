@@ -6,7 +6,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/check-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { rateLimited } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -24,8 +24,7 @@ const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 12
 async function handleGET(req: NextRequest) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const rl = await vaultUnlockDataLimiter.check(`rl:vault_unlock_data:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);

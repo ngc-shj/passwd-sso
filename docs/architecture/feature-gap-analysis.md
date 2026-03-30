@@ -269,7 +269,7 @@ Form submit capture (capture phase) + click-based detection for SPAs. Registrati
 
 #### ~~P-2 CLI tool~~ — Implemented (2026-03-04)
 
-Node.js CLI package (`cli/`) with `commander`. Crypto adapter ported from Web Crypto API (PBKDF2/HKDF/AES-256-GCM). OS keychain integration (keytar) with file fallback. XDG Base Directory compliance. Commands: `login`, `unlock`, `list`, `get`, `generate`, `totp`, `export`. Interactive REPL mode after vault unlock. Bearer token auth with auto-refresh. Clipboard with 30s auto-clear. Settings card in Web UI for CLI token management.
+Node.js CLI package (`cli/`) with `commander`. Crypto adapter ported from Web Crypto API (PBKDF2/HKDF/AES-256-GCM). OAuth 2.1 PKCE login via MCP DCR (`--token` fallback for manual paste). Credentials stored in `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600). XDG Base Directory compliance. Commands: `login`, `unlock`, `list`, `get`, `generate`, `totp`, `export`. Interactive REPL mode after vault unlock. OAuth refresh token rotation with auto-refresh. Clipboard with 30s auto-clear.
 
 ---
 

@@ -3,16 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Mock config
 vi.mock("../../lib/config.js", () => ({
   loadConfig: () => ({ serverUrl: "https://test.example.com", locale: "en" }),
-  loadToken: vi.fn(),
-  saveToken: vi.fn(),
-  saveConfig: vi.fn(),
+  loadCredentials: vi.fn(),
+  saveCredentials: vi.fn(),
 }));
 
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
 const { apiRequest, setTokenCache, clearTokenCache } = await import("../../lib/api-client.js");
-const { loadToken, saveToken, saveConfig } = await import("../../lib/config.js");
+const { loadCredentials, saveCredentials } = await import("../../lib/config.js");
 
 describe("apiRequest", () => {
   beforeEach(() => {
@@ -62,23 +61,32 @@ describe("apiRequest", () => {
 
   it("throws when not logged in", async () => {
     clearTokenCache();
-    (loadToken as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+    (loadCredentials as ReturnType<typeof vi.fn>).mockReturnValue(null);
 
     await expect(apiRequest("/api/test")).rejects.toThrow("Not logged in");
   });
 
-  it("attempts token refresh on 401", async () => {
+  it("attempts token refresh on 401 via OAuth refresh_token grant", async () => {
+    // Set up OAuth credentials with refresh token
+    clearTokenCache();
+    setTokenCache("old-token", new Date(Date.now() + 60 * 60 * 1000).toISOString(), "mcpr_refresh123", "mcpc_client123");
+
     // First call returns 401
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 401,
       json: async () => ({ error: "UNAUTHORIZED" }),
     });
-    // Refresh call
+    // OAuth refresh call: POST /api/mcp/token with grant_type=refresh_token
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ token: "new-token", expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString() }),
+      json: async () => ({
+        access_token: "mcp_new_access",
+        refresh_token: "mcpr_new_refresh",
+        expires_in: 3600,
+        scope: "credentials:list credentials:use",
+      }),
     });
     // Retry call after refresh
     mockFetch.mockResolvedValueOnce({
@@ -90,18 +98,35 @@ describe("apiRequest", () => {
     const res = await apiRequest("/api/test");
     expect(res.ok).toBe(true);
     expect(mockFetch).toHaveBeenCalledTimes(3);
-    // Verify the retry used the new token
-    const retryCall = mockFetch.mock.calls[2];
-    expect(retryCall[1].headers.Authorization).toBe("Bearer new-token");
 
-    // Verify token and config were persisted
-    expect(saveToken).toHaveBeenCalledWith("new-token");
-    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({
-      tokenExpiresAt: expect.any(String),
-    }));
+    // Verify the refresh call hit OAuth token endpoint with correct params
+    const refreshCall = mockFetch.mock.calls[1];
+    expect(refreshCall[0]).toContain("/api/mcp/token");
+    expect(refreshCall[1].method).toBe("POST");
+    expect(refreshCall[1].headers["Content-Type"]).toBe("application/x-www-form-urlencoded");
+    expect(refreshCall[1].body).toContain("grant_type=refresh_token");
+    expect(refreshCall[1].body).toContain("refresh_token=mcpr_refresh123");
+    expect(refreshCall[1].body).toContain("client_id=mcpc_client123");
+
+    // Verify the retry used the new access token
+    const retryCall = mockFetch.mock.calls[2];
+    expect(retryCall[1].headers.Authorization).toBe("Bearer mcp_new_access");
+
+    // Verify credentials were persisted with all 4 fields
+    expect(saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "mcp_new_access",
+        refreshToken: "mcpr_new_refresh",
+        clientId: "mcpc_client123",
+        expiresAt: expect.any(String),
+      }),
+    );
   });
 
   it("returns 401 response when refresh also fails", async () => {
+    clearTokenCache();
+    setTokenCache("old-token", new Date(Date.now() + 60 * 60 * 1000).toISOString(), "mcpr_refresh", "mcpc_client");
+
     // First call: 401
     mockFetch.mockResolvedValueOnce({
       ok: false,
@@ -125,14 +150,18 @@ describe("apiRequest", () => {
     clearTokenCache();
     // Set token with expiresAt within the 2-min refresh buffer
     const soonExpiry = new Date(Date.now() + 60 * 1000).toISOString();
-    setTokenCache("old-token", soonExpiry);
+    setTokenCache("old-token", soonExpiry, "mcpr_refresh_old", "mcpc_client123");
 
-    // Refresh call
-    const newExpiry = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    // Refresh call: OAuth token endpoint
     mockFetch.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ token: "refreshed-token", expiresAt: newExpiry }),
+      json: async () => ({
+        access_token: "mcp_refreshed",
+        refresh_token: "mcpr_refreshed",
+        expires_in: 3600,
+        scope: "credentials:list",
+      }),
     });
     // Actual API call with refreshed token
     mockFetch.mockResolvedValueOnce({
@@ -143,14 +172,41 @@ describe("apiRequest", () => {
 
     const res = await apiRequest("/api/test");
     expect(res.ok).toBe(true);
+    // Verify the refresh call sent the correct refresh_token
+    const proactiveRefreshCall = mockFetch.mock.calls[0];
+    expect(proactiveRefreshCall[0]).toContain("/api/mcp/token");
+    expect(proactiveRefreshCall[1].body).toContain("refresh_token=mcpr_refresh_old");
     // Verify the actual request used the refreshed token
     const actualCall = mockFetch.mock.calls[1];
-    expect(actualCall[1].headers.Authorization).toBe("Bearer refreshed-token");
+    expect(actualCall[1].headers.Authorization).toBe("Bearer mcp_refreshed");
 
-    // Verify token and config were persisted
-    expect(saveToken).toHaveBeenCalledWith("refreshed-token");
-    expect(saveConfig).toHaveBeenCalledWith(expect.objectContaining({
-      tokenExpiresAt: expect.any(String),
-    }));
+    // Verify credentials were persisted with all 4 fields
+    expect(saveCredentials).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: "mcp_refreshed",
+        refreshToken: "mcpr_refreshed",
+        clientId: "mcpc_client123",
+        expiresAt: expect.any(String),
+      }),
+    );
+  });
+
+  it("skips refresh when no refresh token cached (--token login)", async () => {
+    clearTokenCache();
+    // Manual token login: no refresh token
+    setTokenCache("manual-token", new Date(Date.now() + 60 * 1000).toISOString());
+
+    // API call returns 401
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "UNAUTHORIZED" }),
+    });
+
+    const res = await apiRequest("/api/test");
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(401);
+    // No refresh attempt — only the original call
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 });

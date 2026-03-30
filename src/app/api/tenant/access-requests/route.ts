@@ -99,7 +99,8 @@ async function handleGET(req: NextRequest) {
 // 2. Session (admin) — admin creates on behalf of SA, serviceAccountId in body
 async function handlePOST(req: NextRequest) {
   const authResult = await authOrToken(req);
-  if (!authResult || authResult.type === "scope_insufficient") {
+  if (!authResult || authResult.type === "scope_insufficient" ||
+      authResult.type === "mcp_token") {
     return unauthorized();
   }
 

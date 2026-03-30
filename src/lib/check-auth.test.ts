@@ -11,9 +11,10 @@ const { mockAuth, mockAuthOrToken, mockEnforceAccessRestriction } = vi.hoisted(
 );
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth-or-token", () => ({
-  authOrToken: mockAuthOrToken,
-}));
+vi.mock("@/lib/auth-or-token", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth-or-token")>();
+  return { ...actual, authOrToken: mockAuthOrToken };
+});
 vi.mock("@/lib/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));

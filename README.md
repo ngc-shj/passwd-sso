@@ -84,7 +84,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 
 ### Developer Tools
 
-- **CLI** — `passwd-sso` with 13 commands; OS keychain integration, XDG-compliant config
+- **CLI** — [`passwd-sso-cli`](https://www.npmjs.com/package/passwd-sso-cli) (`npm install -g passwd-sso-cli`); OAuth 2.1 PKCE login, XDG-compliant config
 - **SSH Agent** — `passwd-sso agent` proxies vault SSH keys via SSH agent protocol
 - **CI/CD Secrets** — `env` and `run` commands inject vault secrets into environment/subprocess
 - **Browser Extension** — Chrome/Edge MV3; autofill, inline suggestions, custom field autofill, multi-URL matching, CC/address fill, new-login detect & save

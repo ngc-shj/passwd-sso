@@ -54,6 +54,7 @@ const VALID_RESOURCE_ACTIONS = new Set([
   "credentials:list",
   "credentials:use",
   "credentials:decrypt", // Legacy — kept for backward compatibility
+  "vault:unlock-data",
 ]);
 
 /**

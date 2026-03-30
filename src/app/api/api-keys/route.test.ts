@@ -98,9 +98,10 @@ describe("GET /api/api-keys", () => {
   });
 
   it("returns 401 for service_account auth type", async () => {
+    // checkAuth rejects service_account internally (no userId)
     mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "service_account", serviceAccountId: "sa-1", tenantId: "t-1", tokenId: "tok-1", scopes: [] },
+      ok: false,
+      response: new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
     });
 
     const res = await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));

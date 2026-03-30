@@ -27,10 +27,10 @@ async function handleGET(req: NextRequest) {
   const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
   if (!authed.ok) return authed.response;
   // Only session and extension token can manage API keys
-  if (authed.auth.type === "api_key" || authed.auth.type === "service_account") {
+  if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
     return unauthorized();
   }
-  const userId = authed.auth.userId;
+  const { userId } = authed.auth;
 
   const keys = await withUserTenantRls(userId, async () =>
     prisma.apiKey.findMany({
@@ -70,10 +70,10 @@ async function handlePOST(req: NextRequest) {
   const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
   if (!authed.ok) return authed.response;
   // Only session and extension token can create API keys
-  if (authed.auth.type === "api_key" || authed.auth.type === "service_account") {
+  if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
     return unauthorized();
   }
-  const userId = authed.auth.userId;
+  const { userId } = authed.auth;
 
   const rl = await apiKeyCreateLimiter.check(`rl:api_key_create:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);

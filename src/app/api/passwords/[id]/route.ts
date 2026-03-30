@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { notFound, forbidden, validationError, unauthorized } from "@/lib/api-response";
+import { notFound, forbidden, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/check-auth";
 import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -21,8 +21,7 @@ async function handleGET(
 ) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_READ });
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const rl = await getLimiter.check(`rl:passwords_get:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
@@ -77,8 +76,7 @@ async function handlePUT(
 ) {
   const authResult = await checkAuth(req, { scope: EXTENSION_TOKEN_SCOPE.PASSWORDS_WRITE });
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const rl = await updateLimiter.check(`rl:passwords_update:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
@@ -228,8 +226,7 @@ async function handleDELETE(
 ) {
   const authResult = await checkAuth(req);
   if (!authResult.ok) return authResult.response;
-  if (authResult.auth.type === "service_account") return unauthorized();
-  const userId = authResult.auth.userId;
+  const { userId } = authResult.auth;
 
   const { id } = await params;
   const { searchParams } = new URL(req.url);

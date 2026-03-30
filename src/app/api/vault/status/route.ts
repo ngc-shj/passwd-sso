@@ -17,14 +17,11 @@ export const runtime = "nodejs";
 async function handleGET(request: NextRequest) {
   const result = await checkAuth(request, { scope: EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA });
   if (!result.ok) return result.response;
-  const authData = result.auth;
-  if (authData.type === "service_account") {
-    return NextResponse.json({ error: "UNAUTHORIZED" }, { status: 401 });
-  }
+  const { userId } = result.auth;
 
-  const user = await withUserTenantRls(authData.userId, async () =>
+  const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
-      where: { id: authData.userId },
+      where: { id: userId },
       select: {
         vaultSetupAt: true,
         accountSalt: true,

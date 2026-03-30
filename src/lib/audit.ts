@@ -39,8 +39,8 @@ export function resolveActorType(auth: AuthResult): ActorType {
       return "HUMAN";
     case "service_account":
       return "SERVICE_ACCOUNT";
-    default:
-      return "HUMAN";
+    case "mcp_token":
+      return "MCP_AGENT";
   }
 }
 
