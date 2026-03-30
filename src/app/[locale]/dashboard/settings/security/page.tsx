@@ -1,19 +1,12 @@
-"use client";
+import { redirect } from "@/i18n/navigation";
+import { setRequestLocale } from "next-intl/server";
 
-import { useTranslations } from "next-intl";
-import { TabDescription } from "@/components/settings/tab-description";
-import { PasskeyCredentialsCard } from "@/components/settings/passkey-credentials-card";
-import { TravelModeCard } from "@/components/settings/travel-mode-card";
-import { RotateKeyCard } from "@/components/settings/rotate-key-card";
-
-export default function SettingsSecurityPage() {
-  const t = useTranslations("Sessions");
-  return (
-    <>
-      <TabDescription>{t("tabSecurityDesc")}</TabDescription>
-      <PasskeyCredentialsCard />
-      <TravelModeCard />
-      <RotateKeyCard />
-    </>
-  );
+export default async function SecurityRedirectPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
+  return redirect({ href: "/dashboard/settings/security/passkey", locale });
 }

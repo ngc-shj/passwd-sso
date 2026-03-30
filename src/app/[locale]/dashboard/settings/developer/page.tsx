@@ -1,17 +1,12 @@
-"use client";
+import { redirect } from "@/i18n/navigation";
+import { setRequestLocale } from "next-intl/server";
 
-import { useTranslations } from "next-intl";
-import { TabDescription } from "@/components/settings/tab-description";
-import { CliTokenCard } from "@/components/settings/cli-token-card";
-import { ApiKeyManager } from "@/components/settings/api-key-manager";
-
-export default function SettingsDeveloperPage() {
-  const t = useTranslations("Sessions");
-  return (
-    <>
-      <TabDescription>{t("tabDeveloperDesc")}</TabDescription>
-      <CliTokenCard />
-      <ApiKeyManager />
-    </>
-  );
+export default async function DeveloperRedirectPage({
+  params,
+}: {
+  params: Promise<{ locale: string }>;
+}) {
+  const { locale } = await params;
+  setRequestLocale(locale);
+  return redirect({ href: "/dashboard/settings/developer/cli-token", locale });
 }

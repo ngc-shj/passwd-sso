@@ -95,7 +95,7 @@ async function manualTokenLogin(serverUrl: string): Promise<void> {
   output.info(
     "Open your browser and go to the token page to generate a CLI token.",
   );
-  output.info(`  ${serverUrl}/dashboard/settings`);
+  output.info(`  ${serverUrl}/dashboard/settings/developer`);
   console.log();
 
   const token = await prompt("Paste your token: ");
