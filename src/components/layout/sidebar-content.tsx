@@ -32,8 +32,7 @@ export interface SidebarContentProps {
   isSelectedVaultFavorites: boolean;
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
-  isTeamSettingsActive: boolean;
-  isTenantSettingsActive: boolean;
+  isAdminActive?: boolean;
   isSettingsActive: boolean;
   isExportActive: boolean;
   isImportActive: boolean;
@@ -72,8 +71,7 @@ export function SidebarContent({
   isSelectedVaultFavorites,
   isSelectedVaultArchive,
   isSelectedVaultTrash,
-  isTeamSettingsActive,
-  isTenantSettingsActive,
+  isAdminActive,
   isSettingsActive,
   isExportActive,
   isImportActive,
@@ -212,10 +210,8 @@ export function SidebarContent({
         isOpen={isOpen("settingsNav")}
         onOpenChange={toggleSection("settingsNav")}
         t={t}
-        tTeam={tTeam}
         selectedTeam={selectedTeam}
-        isTeamSettingsActive={isTeamSettingsActive}
-        isTenantSettingsActive={isTenantSettingsActive}
+        isAdminActive={isAdminActive}
         isSettingsActive={isSettingsActive}
         isAdmin={isAdmin}
         onNavigate={onNavigate}

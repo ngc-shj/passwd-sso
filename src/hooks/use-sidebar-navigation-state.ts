@@ -44,6 +44,7 @@ export function useSidebarNavigationState({
     const isVaultFavorites = cleanPath === "/dashboard/favorites";
     const isVaultArchive = cleanPath === "/dashboard/archive";
     const isVaultTrash = cleanPath === "/dashboard/trash";
+    const isAdminActive = cleanPath.startsWith("/admin");
     const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
     const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
@@ -65,8 +66,7 @@ export function useSidebarNavigationState({
     const isTeamSettings = teamMatch
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/settings`
       : false;
-    const isSettings = cleanPath === "/dashboard/settings";
-    const isTenantSettings = cleanPath === "/dashboard/tenant";
+    const isSettings = cleanPath.startsWith("/dashboard/settings");
     const isExport = teamMatch
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/export`
       : cleanPath === "/dashboard/export";
@@ -158,9 +158,8 @@ export function useSidebarNavigationState({
     return {
       activeTeamId,
       activeAuditTeamId,
+      isAdminActive,
       isTeamsManage,
-      isTeamSettings,
-      isTenantSettings,
       isSettings,
       isExport,
       isImport,

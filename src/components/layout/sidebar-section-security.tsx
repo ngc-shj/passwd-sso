@@ -10,10 +10,10 @@ import {
   Building2,
   Download,
   HeartPulse,
+  LayoutDashboard,
   Shield,
   Upload,
   UserRound,
-  Users,
 } from "lucide-react";
 
 interface SecurityTeam {
@@ -87,10 +87,8 @@ interface SettingsNavSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
-  tTeam: (key: string) => string;
   selectedTeam?: SecurityTeam | null;
-  isTeamSettingsActive?: boolean;
-  isTenantSettingsActive?: boolean;
+  isAdminActive?: boolean;
   isSettingsActive?: boolean;
   isAdmin?: boolean;
   onNavigate: () => void;
@@ -100,10 +98,8 @@ export function SettingsNavSection({
   isOpen,
   onOpenChange,
   t,
-  tTeam,
   selectedTeam,
-  isTeamSettingsActive,
-  isTenantSettingsActive,
+  isAdminActive,
   isSettingsActive,
   isAdmin,
   onNavigate,
@@ -115,36 +111,22 @@ export function SettingsNavSection({
       <CollapsibleSectionHeader isOpen={isOpen}>{t("settingsNav")}</CollapsibleSectionHeader>
       <CollapsibleContent>
         <div className="space-y-1">
-          {scopedTeam &&
-            (scopedTeam.role === TEAM_ROLE.OWNER || scopedTeam.role === TEAM_ROLE.ADMIN) ? (
-            <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-              <Link href={`/dashboard/teams/${scopedTeam.id}/settings`} onClick={onNavigate}>
-                <Users className="h-4 w-4" />
-                {tTeam("teamSettings")}
-              </Link>
-            </Button>
-          ) : !scopedTeam && (
+          {!scopedTeam && (
             <>
               <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/settings" onClick={onNavigate}>
+                <Link href="/dashboard/settings/account" onClick={onNavigate}>
                   <UserRound className="h-4 w-4" />
                   {t("settings")}
                 </Link>
               </Button>
               {isAdmin && (
-                <Button variant={isTenantSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                  <Link href="/dashboard/tenant" onClick={onNavigate}>
-                    <Building2 className="h-4 w-4" />
-                    {t("tenantSettings")}
+                <Button variant={isAdminActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+                  <Link href="/admin/tenant/members" onClick={onNavigate}>
+                    <LayoutDashboard className="h-4 w-4" />
+                    {t("adminConsole")}
                   </Link>
                 </Button>
               )}
-              <Button variant={isTeamSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/teams" onClick={onNavigate}>
-                  <Users className="h-4 w-4" />
-                  {tTeam("teamSettings")}
-                </Link>
-              </Button>
             </>
           )}
         </div>

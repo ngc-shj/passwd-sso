@@ -95,9 +95,8 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   }, [vaultContext, setActiveVault]);
   const {
     activeAuditTeamId,
+    isAdminActive,
     isTeamsManage,
-    isTeamSettings,
-    isTenantSettings,
     isSettings,
     isExport,
     isImport,
@@ -138,9 +137,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isShareLinks,
     isEmergencyAccess,
     isAuditLog,
-    isSettingsActive: isSettings || isTenantSettings || isTeamSettings || isTeamsManage,
+    isSettingsActive: isSettings,
     isExportActive: isExport,
     isImportActive: isImport,
+    isAdminActive,
   });
 
   const sidebarContentProps = useSidebarViewModel({
@@ -160,8 +160,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isSelectedVaultFavorites,
     isSelectedVaultArchive,
     isSelectedVaultTrash,
-    isTeamSettingsActive: isTeamSettings || isTeamsManage,
-    isTenantSettingsActive: isTenantSettings,
+    isAdminActive,
     isSettingsActive: isSettings,
     isExportActive: isExport,
     isImportActive: isImport,
