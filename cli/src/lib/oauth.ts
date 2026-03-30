@@ -284,7 +284,7 @@ export async function refreshTokenGrant(
   serverUrl: string,
   refreshToken: string,
   clientId: string,
-): Promise<TokenResponse> {
+): Promise<TokenResponse | null> {
   const response = await fetch(`${serverUrl}${MCP_TOKEN_ENDPOINT}`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -295,7 +295,7 @@ export async function refreshTokenGrant(
     }).toString(),
   });
 
-  if (!response.ok) return { accessToken: "", refreshToken: "", expiresIn: 0, scope: "" };
+  if (!response.ok) return null;
 
   const data = (await response.json()) as Record<string, unknown>;
   return parseTokenResponse(data);
@@ -313,11 +313,15 @@ export async function revokeTokenRequest(
   const params: Record<string, string> = { token, client_id: clientId };
   if (tokenTypeHint) params.token_type_hint = tokenTypeHint;
 
-  await fetch(`${serverUrl}/api/mcp/revoke`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(params).toString(),
-  });
+  try {
+    await fetch(`${serverUrl}/api/mcp/revoke`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(params).toString(),
+    });
+  } catch {
+    // Best-effort — network errors are silently ignored
+  }
 }
 
 // ─── Browser launcher ─────────────────────────────────────────────────────────
@@ -370,7 +374,11 @@ export function validateServerUrl(url: string): void {
     throw new Error(`Invalid server URL: ${url}`);
   }
 
-  if (parsed.protocol !== "https:") {
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`Unsupported protocol: ${parsed.protocol} (only https and http are allowed)`);
+  }
+
+  if (parsed.protocol === "http:") {
     const isLoopback =
       parsed.hostname === "localhost" ||
       parsed.hostname === "127.0.0.1" ||

@@ -85,18 +85,17 @@ async function refreshToken(): Promise<boolean> {
   const baseUrl = getBaseUrl();
   try {
     const result = await refreshTokenGrant(baseUrl, cachedRefreshToken, cachedClientId);
-    if (!result.accessToken) return false;
+    if (!result || !result.refreshToken) return false;
 
-    const nextRefreshToken = result.refreshToken || cachedRefreshToken;
     const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString();
 
     saveCredentials({
       accessToken: result.accessToken,
-      refreshToken: nextRefreshToken,
+      refreshToken: result.refreshToken,
       clientId: cachedClientId,
       expiresAt,
     });
-    setTokenCache(result.accessToken, expiresAt, nextRefreshToken, cachedClientId);
+    setTokenCache(result.accessToken, expiresAt, result.refreshToken, cachedClientId);
 
     return true;
   } catch {
