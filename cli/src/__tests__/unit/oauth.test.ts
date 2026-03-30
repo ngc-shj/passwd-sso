@@ -102,7 +102,7 @@ describe("startCallbackServer", () => {
 
   it("times out when no callback arrives", async () => {
     vi.useFakeTimers();
-    const { port, waitForCallback } = await startCallbackServer("state");
+    const { waitForCallback } = await startCallbackServer("state");
 
     const promise = waitForCallback();
 

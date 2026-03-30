@@ -6,7 +6,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/check-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { rateLimited } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 

@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
