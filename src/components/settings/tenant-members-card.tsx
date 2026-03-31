@@ -133,11 +133,9 @@ export function TenantMembersCard() {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Users className="h-5 w-5" />
-          <div>
-            <CardTitle>{t("membersTitle")}</CardTitle>
-            <CardDescription>{t("membersDescription")}</CardDescription>
-          </div>
+          <CardTitle>{t("membersTitle")}</CardTitle>
         </div>
+        <CardDescription>{t("membersDescription")}</CardDescription>
       </CardHeader>
       <CardContent>
         {members.length === 0 ? (

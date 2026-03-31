@@ -1,7 +1,7 @@
 {
   "settingsTitle": "Personal Settings",
   "settingsDescription": "Manage your personal settings.",
-  "tabAccount": "Account",
+  "tabAccount": "Sessions",
   "tabSecurity": "Security",
   "tabDeveloper": "Developer",
   "title": "Sessions",

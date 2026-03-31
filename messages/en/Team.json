@@ -162,6 +162,6 @@
   "subTabKeyRotation": "Key Rotation",
   "tabWebhookDesc": "Configure webhook endpoints to receive team event notifications.",
   "dangerZone": "Danger Zone",
-  "rotateKeyTitle": "Rotate Team Encryption Key",
+  "rotateKeyTitle": "Key Rotation",
   "rotateKeyDesc": "Generate a new team encryption key and re-encrypt all team data. All members must be online to receive the new key."
 }

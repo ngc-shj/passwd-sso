@@ -311,11 +311,9 @@ export function PasskeyCredentialsCard() {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Fingerprint className="h-5 w-5" />
-          <div>
-            <CardTitle>{t("title")}</CardTitle>
-            <CardDescription>{t("description")}</CardDescription>
-          </div>
+          <CardTitle>{t("title")}</CardTitle>
         </div>
+        <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Register section */}

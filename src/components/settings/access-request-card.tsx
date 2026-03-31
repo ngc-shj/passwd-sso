@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,7 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, CheckCircle, XCircle, Plus } from "lucide-react";
+import { Loader2, CheckCircle, XCircle, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
@@ -246,30 +246,35 @@ export function AccessRequestCard() {
   };
 
   return (
-    <Card className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{t("accessRequests")}</h3>
+    <Card>
+      <CardHeader>
         <div className="flex items-center gap-2">
-          <Select
-            value={statusFilter}
-            onValueChange={(v) => setStatusFilter(v as "ALL" | AccessRequestStatus)}
-          >
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
-              <SelectItem value="PENDING">{t("arStatusPending")}</SelectItem>
-              <SelectItem value="APPROVED">{t("arStatusApproved")}</SelectItem>
-              <SelectItem value="DENIED">{t("arStatusDenied")}</SelectItem>
-              <SelectItem value="EXPIRED">{t("arStatusExpired")}</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button variant="outline" size="sm" onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-1" />
-            {t("arCreate")}
-          </Button>
+          <ShieldCheck className="h-5 w-5" />
+          <CardTitle>{t("accessRequestCardTitle")}</CardTitle>
         </div>
+        <CardDescription>{t("accessRequestCardDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+      <div className="flex items-center justify-between">
+        <Select
+          value={statusFilter}
+          onValueChange={(v) => setStatusFilter(v as "ALL" | AccessRequestStatus)}
+        >
+          <SelectTrigger className="w-[140px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="ALL">{t("arStatusAll")}</SelectItem>
+            <SelectItem value="PENDING">{t("arStatusPending")}</SelectItem>
+            <SelectItem value="APPROVED">{t("arStatusApproved")}</SelectItem>
+            <SelectItem value="DENIED">{t("arStatusDenied")}</SelectItem>
+            <SelectItem value="EXPIRED">{t("arStatusExpired")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" onClick={openCreate}>
+          <Plus className="h-4 w-4 mr-1" />
+          {t("arCreate")}
+        </Button>
       </div>
 
       {loading ? (
@@ -349,6 +354,8 @@ export function AccessRequestCard() {
           ))}
         </div>
       )}
+
+      </CardContent>
 
       {/* Create access request dialog */}
       <Dialog open={createOpen} onOpenChange={(open) => {

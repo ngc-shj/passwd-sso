@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +34,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { ChevronDown, Loader2, Plus, Trash2, Pencil, KeyRound } from "lucide-react";
+import { Bot, ChevronDown, Loader2, Plus, Trash2, Pencil, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
@@ -366,14 +366,21 @@ export function ServiceAccountCard() {
   const inactiveAccounts = accounts.filter((a) => !a.isActive);
 
   return (
-    <Card className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium">{t("serviceAccounts")}</h3>
-        <Button size="sm" onClick={() => setCreateOpen(true)}>
-          <Plus className="h-4 w-4" />
-          {t("createServiceAccount")}
-        </Button>
-      </div>
+    <Card>
+      <CardHeader>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Bot className="h-5 w-5 shrink-0" />
+            <CardTitle>{t("saCardTitle")}</CardTitle>
+          </div>
+          <Button size="sm" onClick={() => setCreateOpen(true)}>
+            <Plus className="h-4 w-4" />
+            {t("createServiceAccount")}
+          </Button>
+        </div>
+        <CardDescription>{t("saCardDescription")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
 
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -724,6 +731,8 @@ export function ServiceAccountCard() {
           )}
         </div>
       )}
+
+      </CardContent>
 
       {/* Create SA dialog */}
       <Dialog

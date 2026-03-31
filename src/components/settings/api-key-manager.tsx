@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -166,19 +167,18 @@ export function ApiKeyManager() {
   };
 
   return (
-    <Card className="p-6 space-y-6">
-      <section>
+    <Card>
+      <CardHeader>
         <div className="flex items-center gap-2">
           <Key className="h-5 w-5" />
-          <h2 className="text-lg font-semibold">{t("title")}</h2>
+          <CardTitle>{t("title")}</CardTitle>
         </div>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("description")}
-        </p>
-      </section>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
 
       {/* Create Key Form */}
-      <section className="space-y-3 border-t pt-4">
+      <section className="space-y-3">
         <h3 className="text-sm font-medium">{t("createKey")}</h3>
         <div className="space-y-2">
           <Label>{t("name")}</Label>
@@ -265,6 +265,8 @@ export function ApiKeyManager() {
         getStatus={getStatus}
         onRevoke={handleRevoke}
       />
+
+      </CardContent>
     </Card>
   );
 }
@@ -294,7 +296,9 @@ function KeyList({
   const inactiveKeys = keys.filter((k) => getStatus(k) !== "active");
 
   return (
-    <section className="space-y-3 border-t pt-4">
+    <>
+      <Separator />
+      <section className="space-y-3">
       <h3 className="text-sm font-medium">{t("title")}</h3>
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
@@ -345,7 +349,8 @@ function KeyList({
           )}
         </div>
       )}
-    </section>
+      </section>
+    </>
   );
 }
 

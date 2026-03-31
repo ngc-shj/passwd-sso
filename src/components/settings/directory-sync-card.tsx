@@ -464,18 +464,16 @@ export function DirectorySyncCard() {
       <Card>
         <CardHeader>
           <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-2 min-w-0">
-              <FolderSync className="h-5 w-5 shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <CardTitle>{t("title")}</CardTitle>
-                <CardDescription>{t("description")}</CardDescription>
-              </div>
+            <div className="flex items-center gap-2">
+              <FolderSync className="h-5 w-5 shrink-0" />
+              <CardTitle>{t("title")}</CardTitle>
             </div>
             <Button size="sm" className="shrink-0" onClick={openCreateDialog}>
               <Plus className="h-4 w-4 mr-1" />
               {t("addConfig")}
             </Button>
           </div>
+          <CardDescription>{t("description")}</CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (

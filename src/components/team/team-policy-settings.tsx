@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ListChecks, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -129,23 +129,26 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
 
   if (loading) {
     return (
-      <Card className="rounded-xl border bg-card/80 p-4">
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+        </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card className="rounded-xl border bg-card/80 p-4">
-      <section className="space-y-4">
-        <h2 className="flex items-center gap-2 text-lg font-semibold">
-          <ListChecks className="h-5 w-5 text-muted-foreground" />
-          {t("title")}
-        </h2>
-        <p className="text-sm text-muted-foreground">{t("description")}</p>
-
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <ListChecks className="h-5 w-5" />
+          <CardTitle>{t("title")}</CardTitle>
+        </div>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
         {/* Password Requirements */}
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("passwordRequirements")}</h3>
@@ -288,7 +291,7 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             {saving ? t("saving") : t("save")}
           </Button>
         </div>
-      </section>
+      </CardContent>
     </Card>
   );
 }

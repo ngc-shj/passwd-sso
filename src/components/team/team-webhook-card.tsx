@@ -3,8 +3,15 @@
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -25,7 +32,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ChevronDown, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Loader2, Plus, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import {
@@ -277,140 +284,151 @@ export function TeamWebhookCard({ teamId, locale }: Props) {
   );
 
   return (
-    <div className="space-y-4">
-      {/* Create webhook form (fixed) */}
-      <Card className="p-6 space-y-4">
-        <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Webhook className="h-5 w-5" />
+          <CardTitle>{t("title")}</CardTitle>
+        </div>
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* Create webhook form (fixed) */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
 
-        {limitReached ? (
-          <p className="text-sm text-muted-foreground">{t("limitReached")}</p>
-        ) : (
-          <>
-            <div className="space-y-2">
-              <Label>{t("url")}</Label>
-              <Input
-                type="url"
-                value={url}
-                onChange={(e) => {
-                  setUrl(e.target.value);
-                  setUrlError("");
-                }}
-                placeholder={t("urlPlaceholder")}
-              />
-              {urlError && (
-                <p className="text-sm text-destructive">{urlError}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <Label>{t("events")}</Label>
-              <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
-                {EVENT_GROUPS.map(({ key, actions }) => (
-                  <Collapsible key={key}>
-                    <div className="flex items-center gap-2 py-1">
-                      <Checkbox
-                        checked={actions.every((a) => selectedEvents.has(a))}
-                        onCheckedChange={(checked) =>
-                          toggleGroup(actions, !!checked)
-                        }
-                      />
-                      <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
-                        {groupLabel(key)}
-                        <ChevronDown className="h-3.5 w-3.5" />
-                      </CollapsibleTrigger>
-                    </div>
-                    <CollapsibleContent className="pl-6 space-y-1">
-                      {actions.map((action) => (
-                        <label
-                          key={action}
-                          className="flex items-center gap-2 text-sm py-0.5"
-                        >
-                          <Checkbox
-                            checked={selectedEvents.has(action)}
-                            onCheckedChange={(checked) =>
-                              toggleEvent(action, !!checked)
-                            }
-                          />
-                          {tAudit(action)}
-                        </label>
-                      ))}
-                    </CollapsibleContent>
-                  </Collapsible>
-                ))}
-              </div>
-            </div>
-
-            <Button
-              onClick={handleCreate}
-              disabled={creating || !url.trim() || selectedEvents.size === 0}
-              size="sm"
-            >
-              {creating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Plus className="h-4 w-4" />
-              )}
-              {t("addWebhook")}
-            </Button>
-          </>
-        )}
-
-        {/* Secret display (shown once after creation) */}
-        {newSecret && (
-          <div className="border rounded-md p-4 bg-muted/50 space-y-2">
-            <p className="text-sm font-medium">{t("secret")}</p>
-            <div className="flex items-center gap-2">
-              <Input
-                value={newSecret}
-                readOnly
-                autoComplete="off"
-                className="font-mono text-xs"
-              />
-              <CopyButton getValue={() => newSecret} />
-            </div>
-            <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
-            <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
-              OK
-            </Button>
-          </div>
-        )}
-      </Card>
-
-      {/* Webhook list (dynamic) */}
-      <Card className="p-6 space-y-3">
-        <h3 className="text-sm font-medium">{t("registeredWebhooks")}</h3>
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : webhooks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
-        ) : (
-          <div className="max-h-80 space-y-3 overflow-y-auto">
-            {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
-              <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
-            )}
-            {activeWebhooks.map(renderWebhookItem)}
-            {inactiveWebhooks.length > 0 && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowInactive((v) => !v)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ChevronDown
-                    className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
-                  />
-                  {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
-                </button>
-                {showInactive && (
-                  <div className="mt-2 space-y-3">
-                    {inactiveWebhooks.map(renderWebhookItem)}
-                  </div>
+          {limitReached ? (
+            <p className="text-sm text-muted-foreground">{t("limitReached")}</p>
+          ) : (
+            <>
+              <div className="space-y-2">
+                <Label>{t("url")}</Label>
+                <Input
+                  type="url"
+                  value={url}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setUrlError("");
+                  }}
+                  placeholder={t("urlPlaceholder")}
+                />
+                {urlError && (
+                  <p className="text-sm text-destructive">{urlError}</p>
                 )}
               </div>
-            )}
-          </div>
-        )}
-      </Card>
-    </div>
+
+              <div className="space-y-2">
+                <Label>{t("events")}</Label>
+                <div className="max-h-64 overflow-y-auto border rounded-md p-3 space-y-1">
+                  {EVENT_GROUPS.map(({ key, actions }) => (
+                    <Collapsible key={key}>
+                      <div className="flex items-center gap-2 py-1">
+                        <Checkbox
+                          checked={actions.every((a) => selectedEvents.has(a))}
+                          onCheckedChange={(checked) =>
+                            toggleGroup(actions, !!checked)
+                          }
+                        />
+                        <CollapsibleTrigger className="flex items-center gap-1 text-sm font-medium hover:underline">
+                          {groupLabel(key)}
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        </CollapsibleTrigger>
+                      </div>
+                      <CollapsibleContent className="pl-6 space-y-1">
+                        {actions.map((action) => (
+                          <label
+                            key={action}
+                            className="flex items-center gap-2 text-sm py-0.5"
+                          >
+                            <Checkbox
+                              checked={selectedEvents.has(action)}
+                              onCheckedChange={(checked) =>
+                                toggleEvent(action, !!checked)
+                              }
+                            />
+                            {tAudit(action)}
+                          </label>
+                        ))}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  ))}
+                </div>
+              </div>
+
+              <Button
+                onClick={handleCreate}
+                disabled={creating || !url.trim() || selectedEvents.size === 0}
+                size="sm"
+              >
+                {creating ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4" />
+                )}
+                {t("addWebhook")}
+              </Button>
+            </>
+          )}
+
+          {/* Secret display (shown once after creation) */}
+          {newSecret && (
+            <div className="border rounded-md p-4 bg-muted/50 space-y-2">
+              <p className="text-sm font-medium">{t("secret")}</p>
+              <div className="flex items-center gap-2">
+                <Input
+                  value={newSecret}
+                  readOnly
+                  autoComplete="off"
+                  className="font-mono text-xs"
+                />
+                <CopyButton getValue={() => newSecret} />
+              </div>
+              <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
+              <Button variant="ghost" size="sm" onClick={() => setNewSecret(null)}>
+                OK
+              </Button>
+            </div>
+          )}
+        </section>
+
+        <Separator />
+
+        {/* Webhook list (dynamic) */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-medium">{t("registeredWebhooks")}</h3>
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : webhooks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
+          ) : (
+            <div className="max-h-80 space-y-3 overflow-y-auto">
+              {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
+                <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
+              )}
+              {activeWebhooks.map(renderWebhookItem)}
+              {inactiveWebhooks.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowInactive((v) => !v)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronDown
+                      className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
+                    />
+                    {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
+                  </button>
+                  {showInactive && (
+                    <div className="mt-2 space-y-3">
+                      {inactiveWebhooks.map(renderWebhookItem)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </CardContent>
+    </Card>
   );
 }

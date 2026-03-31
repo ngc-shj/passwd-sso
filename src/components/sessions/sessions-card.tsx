@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Monitor, Smartphone, Tablet, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -124,123 +124,134 @@ export function SessionsCard() {
 
   if (loading) {
     return (
-      <Card className="rounded-xl border bg-card/80 p-10">
-        <div className="flex justify-center">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
+      <Card>
+        <CardContent className="p-10">
+          <div className="flex justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        </CardContent>
       </Card>
     );
   }
 
   return (
-    <>
-      <Card className="rounded-xl border bg-card/80 divide-y">
-        {sessions.map((session) => {
-          const device = parseDevice(session.userAgent);
-          return (
-            <div
-              key={session.id}
-              className="px-4 py-3 flex items-center gap-3"
-            >
-              <div className="shrink-0 text-muted-foreground">
-                <DeviceIcon type={device.deviceType} />
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <p className="text-sm font-medium truncate">
-                    {device.browser ?? t("unknownBrowser")}
-                    {device.os ? ` — ${device.os}` : ""}
-                  </p>
-                  {session.isCurrent && (
-                    <Badge variant="secondary" className="shrink-0 text-xs">
-                      {t("current")}
-                    </Badge>
-                  )}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {t("lastActive")}: {formatDateTime(session.lastActiveAt, locale)}
-                  {session.ipAddress ? ` · ${session.ipAddress}` : ""}
-                </p>
-              </div>
-              {!session.isCurrent && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="shrink-0"
-                  onClick={() => setRevokeTarget(session.id)}
-                >
-                  <X className="h-4 w-4" />
-                  <span className="sr-only">{t("revoke")}</span>
-                </Button>
-              )}
-            </div>
-          );
-        })}
-      </Card>
-
-      {otherSessions.length === 0 ? (
-        <p className="text-sm text-muted-foreground text-center py-2">
-          {t("noOtherSessions")}
-        </p>
-      ) : (
-        <div className="flex justify-end">
-          <Button
-            variant="destructive"
-            size="sm"
-            onClick={() => setRevokeAllOpen(true)}
-          >
-            {t("revokeAll")}
-          </Button>
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Monitor className="h-5 w-5" />
+          <CardTitle>{t("title")}</CardTitle>
         </div>
-      )}
+        <CardDescription>{t("description")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="divide-y">
+          {sessions.map((session) => {
+            const device = parseDevice(session.userAgent);
+            return (
+              <div
+                key={session.id}
+                className="px-4 py-3 flex items-center gap-3"
+              >
+                <div className="shrink-0 text-muted-foreground">
+                  <DeviceIcon type={device.deviceType} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium truncate">
+                      {device.browser ?? t("unknownBrowser")}
+                      {device.os ? ` — ${device.os}` : ""}
+                    </p>
+                    {session.isCurrent && (
+                      <Badge variant="secondary" className="shrink-0 text-xs">
+                        {t("current")}
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {t("lastActive")}: {formatDateTime(session.lastActiveAt, locale)}
+                    {session.ipAddress ? ` · ${session.ipAddress}` : ""}
+                  </p>
+                </div>
+                {!session.isCurrent && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0"
+                    onClick={() => setRevokeTarget(session.id)}
+                  >
+                    <X className="h-4 w-4" />
+                    <span className="sr-only">{t("revoke")}</span>
+                  </Button>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
-      {/* Single session revoke dialog */}
-      <AlertDialog
-        open={!!revokeTarget}
-        onOpenChange={(open) => !open && setRevokeTarget(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("revokeConfirmTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("revokeConfirm")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoking}>
-              {t("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={revoking}
-              onClick={() => revokeTarget && handleRevoke(revokeTarget)}
+        {otherSessions.length === 0 ? (
+          <p className="text-sm text-muted-foreground text-center py-2">
+            {t("noOtherSessions")}
+          </p>
+        ) : (
+          <div className="flex justify-end">
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setRevokeAllOpen(true)}
             >
-              {revoking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {t("confirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              {t("revokeAll")}
+            </Button>
+          </div>
+        )}
 
-      {/* Revoke all dialog */}
-      <AlertDialog open={revokeAllOpen} onOpenChange={setRevokeAllOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("revokeAllConfirmTitle")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("revokeAllConfirm")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoking}>
-              {t("cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction disabled={revoking} onClick={handleRevokeAll}>
-              {revoking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {t("confirm")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+        {/* Single session revoke dialog */}
+        <AlertDialog
+          open={!!revokeTarget}
+          onOpenChange={(open) => !open && setRevokeTarget(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("revokeConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("revokeConfirm")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={revoking}>
+                {t("cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                disabled={revoking}
+                onClick={() => revokeTarget && handleRevoke(revokeTarget)}
+              >
+                {revoking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {t("confirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Revoke all dialog */}
+        <AlertDialog open={revokeAllOpen} onOpenChange={setRevokeAllOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("revokeAllConfirmTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>
+                {t("revokeAllConfirm")}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={revoking}>
+                {t("cancel")}
+              </AlertDialogCancel>
+              <AlertDialogAction disabled={revoking} onClick={handleRevokeAll}>
+                {revoking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {t("confirm")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </CardContent>
+    </Card>
   );
 }

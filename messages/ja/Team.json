@@ -162,6 +162,6 @@
   "subTabKeyRotation": "鍵のローテーション",
   "tabWebhookDesc": "Webhookエンドポイントを設定して、チームイベントの通知を受信します。",
   "dangerZone": "危険な操作",
-  "rotateKeyTitle": "チーム暗号化キーのローテーション",
+  "rotateKeyTitle": "キーローテーション",
   "rotateKeyDesc": "新しいチーム暗号化キーを生成し、すべてのチームデータを再暗号化します。メンバーが新しいキーを受け取るには、オンラインである必要があります。"
 }

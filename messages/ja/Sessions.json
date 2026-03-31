@@ -1,7 +1,7 @@
 {
   "settingsTitle": "個人の設定",
   "settingsDescription": "個人設定を管理できます。",
-  "tabAccount": "アカウント",
+  "tabAccount": "セッション",
   "tabSecurity": "セキュリティ",
   "tabDeveloper": "開発者",
   "title": "セッション",

@@ -28,11 +28,9 @@ export function RotateKeyCard() {
         <CardHeader>
           <div className="flex items-center gap-2">
             <KeyRound className="h-5 w-5" />
-            <div>
-              <CardTitle>{t("rotateKey")}</CardTitle>
-              <CardDescription>{t("rotateKeyDescription")}</CardDescription>
-            </div>
+            <CardTitle>{t("rotateKey")}</CardTitle>
           </div>
+          <CardDescription>{t("rotateKeyDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Button
