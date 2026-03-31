@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Shield, Loader2 } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -134,7 +134,7 @@ export function TenantSessionPolicyCard() {
 
   return (
     <Card>
-      <SectionCardHeader icon={Shield} title={t("sessionPolicyTitle")} description={t("sessionPolicyDescription")} />
+      <SectionCardHeader icon={Clock} title={t("sessionPolicyTitle")} description={t("sessionPolicyDescription")} />
       <CardContent className="space-y-4">
         {/* Concurrent session limit */}
         <div className="flex items-center justify-between">

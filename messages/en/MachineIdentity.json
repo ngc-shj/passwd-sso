@@ -1,6 +1,6 @@
 {
   "serviceAccounts": "Service Accounts",
-  "saCardTitle": "Service Accounts",
+  "saCardTitle": "Accounts",
   "saCardDescription": "Create and manage service accounts for automated API access. Service accounts use token-based authentication.",
   "mcpCardTitle": "MCP Clients",
   "mcpCardDescription": "Register and manage MCP (Model Context Protocol) clients for AI agent integration.",

@@ -32,7 +32,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { Link2, Loader2, Plus, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
+import { Database, Loader2, Plus, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -226,7 +226,7 @@ export function ScimTokenManager({ locale }: Props) {
 
   return (
     <Card>
-      <SectionCardHeader icon={Link2} title={t("scimTitle")} description={t("scimDescription")} />
+      <SectionCardHeader icon={Database} title={t("scimTitle")} description={t("scimDescription")} />
       <CardContent className="space-y-6">
       <p className="text-xs text-muted-foreground">
         {t("scimTenantScopeNote")}

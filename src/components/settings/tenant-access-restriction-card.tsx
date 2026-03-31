@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Globe, Loader2 } from "lucide-react";
+import { ShieldBan, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -144,7 +144,7 @@ export function TenantAccessRestrictionCard() {
   return (
     <>
       <Card>
-        <SectionCardHeader icon={Globe} title={t("accessRestrictionTitle")} description={t("accessRestrictionDescription")} />
+        <SectionCardHeader icon={ShieldBan} title={t("accessRestrictionTitle")} description={t("accessRestrictionDescription")} />
         <CardContent className="space-y-4">
           {/* CIDR allowlist */}
           <div className="space-y-2">
