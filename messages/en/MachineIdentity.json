@@ -20,7 +20,6 @@
   "saCreatedAt": "Created: {date}",
   "saInactiveError": "Service account is inactive. Reactivate it first.",
   "saDeactivateWarning": "Deactivating will immediately reject all existing tokens for this service account.",
-  "saCreatedAt": "Created",
   "saCreated": "Service account created",
   "saUpdated": "Service account updated",
   "saDeleted": "Service account deleted",

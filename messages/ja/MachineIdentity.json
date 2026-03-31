@@ -20,7 +20,6 @@
   "saCreatedAt": "登録日: {date}",
   "saInactiveError": "サービスアカウントが無効です。先に有効化してください。",
   "saDeactivateWarning": "無効化すると、このサービスアカウントの既存トークンはすべて即座に拒否されます。",
-  "saCreatedAt": "作成日時",
   "saCreated": "サービスアカウントを作成しました",
   "saUpdated": "サービスアカウントを更新しました",
   "saDeleted": "サービスアカウントを削除しました",
