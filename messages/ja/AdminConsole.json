@@ -30,7 +30,7 @@
   "sectionMembers": "メンバー",
   "sectionMembersDesc": "メンバーとロールを管理します。",
   "sectionTeams": "チーム",
-  "sectionTeamsDesc": "組織内のチームを作成・管理します。",
+  "sectionTeamsDesc": "組織のチームを管理します。",
   "sectionSecurity": "セキュリティ",
   "sectionSecurityDesc": "セッションポリシーとアクセス制限。",
   "sectionProvisioning": "プロビジョニング",

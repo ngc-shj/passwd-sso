@@ -154,6 +154,7 @@
   "addMemberFailed": "Failed to add member",
   "scimManagedCannotAdd": "SCIM-managed members must be reactivated through your IdP",
   "noTenantMembersFound": "No matching members found",
+  "teamsDescription": "Create and manage teams within the organization.",
   "teamSettingsDescription": "Manage your team configuration, members, and integrations.",
   "tabGeneralDesc": "Update team name and description.",
   "tabMembersDesc": "Manage team members, transfer ownership, or invite new members.",

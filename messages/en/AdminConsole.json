@@ -30,7 +30,7 @@
   "sectionMembers": "Members",
   "sectionMembersDesc": "Manage members and roles.",
   "sectionTeams": "Teams",
-  "sectionTeamsDesc": "Create and manage teams within the organization.",
+  "sectionTeamsDesc": "Manage organization teams.",
   "sectionSecurity": "Security",
   "sectionSecurityDesc": "Session policies and access restrictions.",
   "sectionProvisioning": "Provisioning",
