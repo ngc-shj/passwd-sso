@@ -13,6 +13,7 @@ import {
   Clock,
   Cpu,
   Database,
+  Monitor,
   FolderSync,
   Key,
   KeyRound,
@@ -134,7 +135,7 @@ function useNavItems(
       label: t("navMcp"),
       icon: <Cpu className="h-4 w-4 shrink-0" />,
       children: [
-        { href: "/admin/tenant/mcp/clients", label: t("navMcpClients"), icon: <Cpu className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/mcp/clients", label: t("navMcpClients"), icon: <Monitor className="h-3.5 w-3.5 shrink-0" /> },
       ],
     },
     {
