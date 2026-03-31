@@ -17,10 +17,11 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Building2, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
-import { API_PATH } from "@/lib/constants";
+import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { preventIMESubmit } from "@/lib/ime-guard";
+import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
 import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH, NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
@@ -46,7 +47,9 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
   const [unlocking, setUnlocking] = useState(false);
   const [unlockError, setUnlockError] = useState("");
 
-  const vaultReady = status === "unlocked" && !!userId;
+  const isLoading = status === VAULT_STATUS.LOADING;
+  const needsSetup = status === VAULT_STATUS.SETUP_REQUIRED;
+  const vaultReady = status === VAULT_STATUS.UNLOCKED && !!userId;
 
   const reset = () => {
     setName("");
@@ -73,11 +76,18 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
     } catch (err) {
       if (err instanceof VaultUnlockError) {
         switch (err.code) {
+          case API_ERROR.UNAUTHORIZED:
+            setOpen(false);
+            toast.error(tVault("sessionExpired"));
+            break;
           case API_ERROR.ACCOUNT_LOCKED:
-            setUnlockError(tVault("accountLocked"));
+            setUnlockError(formatLockedUntil(err.lockedUntil, tVault));
             break;
           case API_ERROR.RATE_LIMIT_EXCEEDED:
             setUnlockError(tVault("rateLimited"));
+            break;
+          case API_ERROR.SERVICE_UNAVAILABLE:
+            setUnlockError(tVault("retryLater"));
             break;
           default:
             setUnlockError(tVault("unlockError"));
@@ -214,7 +224,20 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
           <DialogDescription>{t("createTeamDescription")}</DialogDescription>
         </DialogHeader>
 
-        {!vaultReady ? (
+        {isLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : needsSetup ? (
+          <div className="space-y-4 rounded-lg border bg-muted/20 p-6">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                <Lock className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <p className="text-sm text-muted-foreground">{tVault("setupDescription")}</p>
+            </div>
+          </div>
+        ) : !vaultReady ? (
           <div className="space-y-4 rounded-lg border bg-muted/20 p-6">
             <div className="flex flex-col items-center gap-2 text-center">
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">

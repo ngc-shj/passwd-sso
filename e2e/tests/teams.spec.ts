@@ -59,37 +59,13 @@ test.describe.serial("Teams", () => {
 
   // ── Dynamic team creation ────────────────────────────────────
 
-  test("teamOwner: create a new team", async () => {
+  test("teamOwner: create a new team", async ({}, testInfo) => {
+    testInfo.setTimeout(60_000);
     const { teamOwner } = getAuthState();
     const teamsPage = new TeamsPage(ownerPage);
     await expect(teamsPage.createTeamButton).toBeVisible({ timeout: 10_000 });
 
-    // Open dialog — vault is locked, so inline unlock form appears
-    await teamsPage.createTeamButton.click();
-    await ownerPage.locator("[role='dialog']").waitFor({ timeout: 5_000 });
-
-    // Unlock vault within the dialog
-    const passphraseInput = ownerPage.locator("#unlock-passphrase");
-    await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
-    await passphraseInput.fill(teamOwner.passphrase!);
-    await ownerPage
-      .locator("[role='dialog']")
-      .getByRole("button", { name: /^Unlock$|^解錠$|^アンロック$/i })
-      .click();
-
-    // Wait for unlock to complete and create form to appear
-    await expect(ownerPage.locator("#team-name")).toBeVisible({
-      timeout: 20_000,
-    });
-
-    // Fill in team details and submit
-    await teamsPage.teamNameInput.fill(TEAM_NAME);
-    await teamsPage.teamSlugInput.fill(TEAM_SLUG);
-    await teamsPage.createButton.click();
-    await ownerPage.locator("[role='dialog']").waitFor({
-      state: "hidden",
-      timeout: 10_000,
-    });
+    await teamsPage.createTeam(TEAM_NAME, TEAM_SLUG, undefined, teamOwner.passphrase!);
 
     await expect(teamsPage.teamByName(TEAM_NAME)).toBeVisible({
       timeout: 15_000,
