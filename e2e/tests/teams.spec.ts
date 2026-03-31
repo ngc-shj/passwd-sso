@@ -8,6 +8,8 @@ import { TeamsPage } from "../page-objects/teams.page";
 const PRE_SEEDED_TEAM_NAME = "E2E Pre-seeded Team";
 
 test.describe.serial("Teams", () => {
+  // Admin teams page requires vault unlock on each navigation, which adds time
+  test.setTimeout(60_000);
   let ownerContext: BrowserContext;
   let ownerPage: Page;
   let memberContext: BrowserContext;
