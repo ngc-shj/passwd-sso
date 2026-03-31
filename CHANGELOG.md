@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.9](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.8...passwd-sso-v0.4.9) (2026-03-31)
+
+
+### Bug Fixes
+
+* bypass RLS in all Auth.js adapter methods to prevent OAuth login failure ([#289](https://github.com/ngc-shj/passwd-sso/issues/289)) ([2e980d7](https://github.com/ngc-shj/passwd-sso/commit/2e980d7af55428ae06bfbd619b835576dae1f56b))
+
 ## [0.4.8](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.7...passwd-sso-v0.4.8) (2026-03-31)
 
 
