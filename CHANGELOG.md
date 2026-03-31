@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.7](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.6...passwd-sso-v0.4.7) (2026-03-31)
+
+
+### Bug Fixes
+
+* unify card structure and extract SectionCardHeader ([#285](https://github.com/ngc-shj/passwd-sso/issues/285)) ([64c3211](https://github.com/ngc-shj/passwd-sso/commit/64c3211015d2e7632ceab0dda523ca46f7c37f6f))
+
 ## [0.4.6](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.5...passwd-sso-v0.4.6) (2026-03-31)
 
 
