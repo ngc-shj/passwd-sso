@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { VaultProvider } from "@/lib/vault-context";
-import { VaultGate } from "@/components/vault/vault-gate";
 import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format-datetime";
@@ -58,23 +57,23 @@ export default function AdminTenantTeamsPage() {
   }, []);
 
   return (
-    <VaultProvider>
-    <VaultGate>
     <SectionLayout
       icon={UsersRound}
       title={tAdmin("sectionTeams")}
       description={tAdmin("sectionTeamsDesc")}
       headerExtra={
         isAdmin ? (
-          <TeamCreateDialog
-            trigger={
-              <Button>
-                <Plus className="mr-2 h-4 w-4" />
-                {t("createTeam")}
-              </Button>
-            }
-            onCreated={handleCreated}
-          />
+          <VaultProvider>
+            <TeamCreateDialog
+              trigger={
+                <Button>
+                  <Plus className="mr-2 h-4 w-4" />
+                  {t("createTeam")}
+                </Button>
+              }
+              onCreated={handleCreated}
+            />
+          </VaultProvider>
         ) : undefined
       }
     >
@@ -129,7 +128,5 @@ export default function AdminTenantTeamsPage() {
         </div>
       )}
     </SectionLayout>
-    </VaultGate>
-    </VaultProvider>
   );
 }
