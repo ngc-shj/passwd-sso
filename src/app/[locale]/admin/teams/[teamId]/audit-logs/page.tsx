@@ -2,7 +2,13 @@
 
 import { use, useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   LogIn,
@@ -42,7 +48,6 @@ import { AuditDateFilter } from "@/components/audit/audit-date-filter";
 import { AuditDownloadButton } from "@/components/audit/audit-download-button";
 import { AuditLogList } from "@/components/audit/audit-log-list";
 import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
-import { SectionLayout } from "@/components/settings/section-layout";
 
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
@@ -236,12 +241,15 @@ export default function TeamAdminAuditLogsPage({
   );
 
   return (
-    <SectionLayout
-      icon={ScrollText}
-      title={tAdmin("teamSectionAuditLogs")}
-      description={tAdmin("teamSectionAuditLogsDesc")}
-    >
-      <Card className="rounded-xl border bg-card/80 p-4">
+    <Card>
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <ScrollText className="h-5 w-5" />
+          <CardTitle>{tAdmin("navAuditLogs")}</CardTitle>
+        </div>
+        <CardDescription>{tAdmin("teamSectionAuditLogsDesc")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-3">
             <AuditDateFilter
@@ -267,24 +275,24 @@ export default function TeamAdminAuditLogsPage({
             setFilterOpen={audit.setFilterOpen}
           />
         </div>
-      </Card>
 
-      <div className="flex justify-end">
-        <AuditDownloadButton
-          downloading={audit.downloading}
-          onDownload={audit.handleDownload}
-          exportAllowed={exportAllowed}
+        <div className="flex justify-end">
+          <AuditDownloadButton
+            downloading={audit.downloading}
+            onDownload={audit.handleDownload}
+            exportAllowed={exportAllowed}
+          />
+        </div>
+
+        <AuditLogList
+          logs={audit.logs}
+          loading={audit.loading}
+          loadingMore={audit.loadingMore}
+          nextCursor={audit.nextCursor}
+          onLoadMore={audit.handleLoadMore}
+          renderItem={renderItem}
         />
-      </div>
-
-      <AuditLogList
-        logs={audit.logs}
-        loading={audit.loading}
-        loadingMore={audit.loadingMore}
-        nextCursor={audit.nextCursor}
-        onLoadMore={audit.handleLoadMore}
-        renderItem={renderItem}
-      />
-    </SectionLayout>
+      </CardContent>
+    </Card>
   );
 }

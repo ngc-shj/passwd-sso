@@ -6,7 +6,13 @@ import { useSession } from "next-auth/react";
 import { HeartPulse, Users, Shield, ChevronDown } from "lucide-react";
 import { CreateGrantDialog } from "@/components/emergency-access/create-grant-dialog";
 import { GrantCard } from "@/components/emergency-access/grant-card";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import type { EaStatusValue } from "@/lib/constants";
 import { API_PATH, EA_STATUS } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -76,17 +82,18 @@ export default function EmergencyAccessPage() {
           </div>
         </Card>
 
-        <Card className="rounded-xl border bg-card/80 p-4">
-          <section className="space-y-4">
+        <Card>
+          <CardHeader>
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <Users className="h-5 w-5" />
-                <h2 className="text-lg font-semibold">{t("trustedContacts")}</h2>
+                <CardTitle>{t("trustedContacts")}</CardTitle>
               </div>
               <CreateGrantDialog onCreated={fetchGrants} />
             </div>
-            <p className="text-sm text-muted-foreground">{t("trustedContactsDesc")}</p>
-
+            <CardDescription>{t("trustedContactsDesc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             {loading ? (
               <div className="py-8 text-center text-muted-foreground">...</div>
             ) : ownerGrants.length === 0 ? (
@@ -138,17 +145,18 @@ export default function EmergencyAccessPage() {
                 )}
               </div>
             )}
-          </section>
+          </CardContent>
         </Card>
 
-        <Card className="rounded-xl border bg-card/80 p-4">
-          <section className="space-y-4">
+        <Card>
+          <CardHeader>
             <div className="flex items-center gap-2">
               <Shield className="h-5 w-5" />
-              <h2 className="text-lg font-semibold">{t("trustedByOthers")}</h2>
+              <CardTitle>{t("trustedByOthers")}</CardTitle>
             </div>
-            <p className="text-sm text-muted-foreground">{t("trustedByOthersDesc")}</p>
-
+            <CardDescription>{t("trustedByOthersDesc")}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
             {loading ? (
               <div className="py-8 text-center text-muted-foreground">...</div>
             ) : granteeGrants.length === 0 ? (
@@ -198,7 +206,7 @@ export default function EmergencyAccessPage() {
                 )}
               </div>
             )}
-          </section>
+          </CardContent>
         </Card>
       </div>
     </div>

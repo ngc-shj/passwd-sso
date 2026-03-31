@@ -4,7 +4,14 @@ import { useEffect, useState, use } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -128,18 +135,20 @@ export default function TeamGeneralPage({
           title={tAdmin("teamSectionGeneral")}
           description={tAdmin("teamSectionGeneralDesc")}
         >
-          <Card className="rounded-xl border bg-card/80 p-6">
-            <div className="flex flex-col items-start gap-3">
-              <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
-              <p className="text-sm text-muted-foreground">
-                {t("noTeamsDesc")}
-              </p>
-              <Button variant="ghost" asChild>
-                <Link href="/dashboard/teams">
-                  {t("manage")}
-                </Link>
-              </Button>
-            </div>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex flex-col items-start gap-3">
+                <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
+                <p className="text-sm text-muted-foreground">
+                  {t("noTeamsDesc")}
+                </p>
+                <Button variant="ghost" asChild>
+                  <Link href="/dashboard/teams">
+                    {t("manage")}
+                  </Link>
+                </Button>
+              </div>
+            </CardContent>
           </Card>
         </SectionLayout>
       );
@@ -157,95 +166,103 @@ export default function TeamGeneralPage({
       title={t("generalSettings")}
       description={t("tabGeneralDesc")}
     >
-      {isAdmin ? (
-        <Card className="rounded-xl border bg-card/80 p-4">
-          <section className="space-y-4">
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t("teamName")}</Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={NAME_MAX_LENGTH} />
-              </div>
-              <div className="space-y-2">
-                <Label>{t("slug")}</Label>
-                <div className="flex items-center gap-2">
-                  <Input value={team.slug} readOnly className="bg-muted text-muted-foreground cursor-default" />
-                  <CopyButton getValue={() => team.slug} />
-                </div>
-                <p className="text-xs text-muted-foreground">{t("slugReadOnly")}</p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label>{t("description")}</Label>
-              <Textarea
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={DESCRIPTION_MAX_LENGTH}
-                rows={3}
-              />
-            </div>
-            <div className="flex justify-end pt-1">
-              <Button onClick={handleUpdateTeam} disabled={saving || !name.trim()}>
-                {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {t("updateTeam")}
-              </Button>
-            </div>
-          </section>
-        </Card>
-      ) : (
-        <Card className="rounded-xl border bg-card/80 p-4">
-          <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
-        </Card>
-      )}
-
-      {isOwner && (
-        <Card className="rounded-xl border border-destructive/30 p-4">
-          <section className="space-y-4">
-            <h2 className="flex items-center gap-2 text-lg font-semibold text-destructive">
-              <ShieldAlert className="h-5 w-5" />
-              {t("deleteTeam")}
-            </h2>
-            <AlertDialog
-              open={deleteDialogOpen}
-              onOpenChange={(open) => {
-                setDeleteDialogOpen(open);
-                if (!open) setDeleteConfirmText("");
-              }}
-            >
-              <AlertDialogTrigger asChild>
-                <Button variant="destructive">{t("deleteTeam")}</Button>
-              </AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader>
-                  <AlertDialogTitle>{t("deleteTeam")}</AlertDialogTitle>
-                  <AlertDialogDescription>
-                    {t("deleteTeamConfirm", { name: team.name })}
-                  </AlertDialogDescription>
-                </AlertDialogHeader>
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Settings2 className="h-5 w-5" />
+            <CardTitle>{tAdmin("navGeneral")}</CardTitle>
+          </div>
+          <CardDescription>{t("tabGeneralDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {isAdmin ? (
+            <section className="space-y-4">
+              <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>{t("deleteTeamTypeLabel")}</Label>
-                  <Input
-                    value={deleteConfirmText}
-                    onChange={(e) => setDeleteConfirmText(e.target.value)}
-                    placeholder={t("deleteTeamTypePlaceholder", { name: team.name })}
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    {t("deleteTeamTypeHint", { name: team.name })}
-                  </p>
+                  <Label>{t("teamName")}</Label>
+                  <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={NAME_MAX_LENGTH} />
                 </div>
-                <AlertDialogFooter>
-                  <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
-                  <AlertDialogAction
-                    onClick={handleDeleteTeam}
-                    disabled={deleteConfirmText !== team.name}
-                  >
-                    {t("deleteTeam")}
-                  </AlertDialogAction>
-                </AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </section>
-        </Card>
-      )}
+                <div className="space-y-2">
+                  <Label>{t("slug")}</Label>
+                  <div className="flex items-center gap-2">
+                    <Input value={team.slug} readOnly className="bg-muted text-muted-foreground cursor-default" />
+                    <CopyButton getValue={() => team.slug} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">{t("slugReadOnly")}</p>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>{t("description")}</Label>
+                <Textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  maxLength={DESCRIPTION_MAX_LENGTH}
+                  rows={3}
+                />
+              </div>
+              <div className="flex justify-end pt-1">
+                <Button onClick={handleUpdateTeam} disabled={saving || !name.trim()}>
+                  {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                  {t("updateTeam")}
+                </Button>
+              </div>
+            </section>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
+          )}
+
+          {isOwner && (
+            <>
+              <Separator />
+              <section className="space-y-4">
+                <h3 className="flex items-center gap-2 text-sm font-medium text-destructive">
+                  <ShieldAlert className="h-4 w-4" />
+                  {t("deleteTeam")}
+                </h3>
+                <AlertDialog
+                  open={deleteDialogOpen}
+                  onOpenChange={(open) => {
+                    setDeleteDialogOpen(open);
+                    if (!open) setDeleteConfirmText("");
+                  }}
+                >
+                  <AlertDialogTrigger asChild>
+                    <Button variant="destructive">{t("deleteTeam")}</Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>{t("deleteTeam")}</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        {t("deleteTeamConfirm", { name: team.name })}
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <div className="space-y-2">
+                      <Label>{t("deleteTeamTypeLabel")}</Label>
+                      <Input
+                        value={deleteConfirmText}
+                        onChange={(e) => setDeleteConfirmText(e.target.value)}
+                        placeholder={t("deleteTeamTypePlaceholder", { name: team.name })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {t("deleteTeamTypeHint", { name: team.name })}
+                      </p>
+                    </div>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>{t("cancelInvitation")}</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={handleDeleteTeam}
+                        disabled={deleteConfirmText !== team.name}
+                      >
+                        {t("deleteTeam")}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              </section>
+            </>
+          )}
+        </CardContent>
+      </Card>
     </SectionLayout>
   );
 }
