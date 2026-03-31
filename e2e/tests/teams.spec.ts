@@ -16,38 +16,34 @@ test.describe.serial("Teams", () => {
   const TEAM_NAME = `E2E-Team-${Date.now()}`;
   const TEAM_SLUG = `e2e-team-${Date.now()}`;
 
-  test.beforeAll(async ({ browser }, testInfo) => {
-    testInfo.setTimeout(60_000);
+  test.beforeAll(async ({ browser }) => {
     const { teamOwner, teamMember } = getAuthState();
 
+    // Owner: navigate to admin teams page (no vault unlock needed for list view)
     ownerContext = await browser.newContext();
     await ownerContext.grantPermissions(["clipboard-read", "clipboard-write"]);
     await injectSession(ownerContext, teamOwner.sessionToken);
     ownerPage = await ownerContext.newPage();
-    // Navigate to admin teams page — VaultGate will show lock screen
     await ownerPage.goto("/ja/admin/tenant/teams");
-    const ownerLock = new VaultLockPage(ownerPage);
-    await expect(ownerLock.passphraseInput).toBeVisible({ timeout: 15_000 });
-    await ownerLock.unlockAndWait(teamOwner.passphrase!);
 
+    // Member: navigate to dashboard and unlock vault
     memberContext = await browser.newContext();
     await injectSession(memberContext, teamMember.sessionToken);
     memberPage = await memberContext.newPage();
     await memberPage.goto("/ja/dashboard");
     const memberLock = new VaultLockPage(memberPage);
-    await expect(memberLock.passphraseInput).toBeVisible({ timeout: 10_000 });
+    await expect(memberLock.passphraseInput).toBeVisible({ timeout: 15_000 });
     await memberLock.unlockAndWait(teamMember.passphrase!);
   });
 
   test.afterAll(async () => {
-    await ownerContext.close();
-    await memberContext.close();
+    await ownerContext?.close();
+    await memberContext?.close();
   });
 
   // ── Pre-seeded team assertions ───────────────────────────────
 
   test("teamOwner: pre-seeded team is visible in teams list", async () => {
-    // ownerPage is on admin/tenant/teams after beforeAll unlock
     const teamsPage = new TeamsPage(ownerPage);
     await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
       timeout: 10_000,
@@ -64,11 +60,36 @@ test.describe.serial("Teams", () => {
   // ── Dynamic team creation ────────────────────────────────────
 
   test("teamOwner: create a new team", async () => {
-    // ownerPage is still on admin/tenant/teams — no navigation needed
+    const { teamOwner } = getAuthState();
     const teamsPage = new TeamsPage(ownerPage);
     await expect(teamsPage.createTeamButton).toBeVisible({ timeout: 10_000 });
 
-    await teamsPage.createTeam(TEAM_NAME, TEAM_SLUG);
+    // Open dialog — vault is locked, so inline unlock form appears
+    await teamsPage.createTeamButton.click();
+    await ownerPage.locator("[role='dialog']").waitFor({ timeout: 5_000 });
+
+    // Unlock vault within the dialog
+    const passphraseInput = ownerPage.locator("#unlock-passphrase");
+    await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
+    await passphraseInput.fill(teamOwner.passphrase!);
+    await ownerPage
+      .locator("[role='dialog']")
+      .getByRole("button", { name: /^Unlock$|^解錠$|^アンロック$/i })
+      .click();
+
+    // Wait for unlock to complete and create form to appear
+    await expect(ownerPage.locator("#team-name")).toBeVisible({
+      timeout: 20_000,
+    });
+
+    // Fill in team details and submit
+    await teamsPage.teamNameInput.fill(TEAM_NAME);
+    await teamsPage.teamSlugInput.fill(TEAM_SLUG);
+    await teamsPage.createButton.click();
+    await ownerPage.locator("[role='dialog']").waitFor({
+      state: "hidden",
+      timeout: 10_000,
+    });
 
     await expect(teamsPage.teamByName(TEAM_NAME)).toBeVisible({
       timeout: 15_000,
