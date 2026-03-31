@@ -19,14 +19,10 @@ test.describe.serial("Teams", () => {
   /** Navigate to admin teams page, handling vault unlock if needed */
   async function gotoAdminTeams(page: Page, passphrase: string) {
     await page.goto("/ja/admin/tenant/teams");
-    await page.waitForLoadState("networkidle");
-    // Admin pages may show vault lock screen (VaultProvider on TeamCreateDialog)
-    // Check if we need to unlock
-    const lockInput = page.locator("#unlock-passphrase");
-    if (await lockInput.isVisible({ timeout: 2_000 }).catch(() => false)) {
-      const lockPage = new VaultLockPage(page);
-      await lockPage.unlockAndWait(passphrase);
-    }
+    // Admin teams page has VaultProvider + VaultGate — wait for vault lock screen
+    const lockPage = new VaultLockPage(page);
+    await expect(lockPage.passphraseInput).toBeVisible({ timeout: 10_000 });
+    await lockPage.unlockAndWait(passphrase);
   }
 
   test.beforeAll(async ({ browser }) => {
