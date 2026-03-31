@@ -127,13 +127,10 @@ export function DelegationManager() {
     <>
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Handshake className="h-5 w-5" />
-              {t("title")}
-            </CardTitle>
-            <CardDescription>{t("description")}</CardDescription>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <Handshake className="h-5 w-5" />
+            <CardTitle>{t("title")}</CardTitle>
           </div>
           <div className="flex gap-2">
             {sessions.length > 0 && (
@@ -147,6 +144,7 @@ export function DelegationManager() {
             </Button>
           </div>
         </div>
+        <CardDescription>{t("description")}</CardDescription>
       </CardHeader>
       <CardContent>
         {sessions.length === 0 ? (

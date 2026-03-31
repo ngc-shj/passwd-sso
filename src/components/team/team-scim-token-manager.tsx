@@ -228,11 +228,9 @@ export function ScimTokenManager({ locale }: Props) {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Link2 className="h-5 w-5" />
-          <div>
-            <CardTitle>{t("scimTitle")}</CardTitle>
-            <CardDescription>{t("scimDescription")}</CardDescription>
-          </div>
+          <CardTitle>{t("scimTitle")}</CardTitle>
         </div>
+        <CardDescription>{t("scimDescription")}</CardDescription>
         <p className="text-xs text-muted-foreground">
           {t("scimTenantScopeNote")}
         </p>
