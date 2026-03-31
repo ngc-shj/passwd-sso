@@ -35,6 +35,69 @@ export function createCustomAdapter(): Adapter {
   return {
     ...base,
 
+    // All auth tables have RLS tenant_isolation policies. During auth flows
+    // (OAuth callback, session checks, sign-out) no tenant context is set,
+    // so current_setting('app.tenant_id')::uuid casts '' → error.
+    // Override every base method that touches RLS-protected tables.
+
+    async getUser(id: string): Promise<AdapterUser | null> {
+      const user = await withBypassRls(prisma, async () =>
+        prisma.user.findUnique({
+          where: { id },
+          select: { id: true, name: true, email: true, image: true, emailVerified: true },
+        }),
+      );
+      if (!user?.email) return null;
+      return { id: user.id, name: user.name, email: user.email, image: user.image, emailVerified: user.emailVerified };
+    },
+
+    async getUserByEmail(email: string): Promise<AdapterUser | null> {
+      const user = await withBypassRls(prisma, async () =>
+        prisma.user.findUnique({
+          where: { email },
+          select: { id: true, name: true, email: true, image: true, emailVerified: true },
+        }),
+      );
+      if (!user?.email) return null;
+      return { id: user.id, name: user.name, email: user.email, image: user.image, emailVerified: user.emailVerified };
+    },
+
+    async getUserByAccount(
+      providerAccountId: Pick<AdapterAccount, "provider" | "providerAccountId">,
+    ) {
+      // RLS requires tenant_id context; during OAuth callback no user is
+      // identified yet, so bypass RLS to avoid "invalid uuid: ''" cast error.
+      const account = await withBypassRls(prisma, async () =>
+        prisma.account.findUnique({
+          where: {
+            provider_providerAccountId: {
+              provider: providerAccountId.provider,
+              providerAccountId: providerAccountId.providerAccountId,
+            },
+          },
+          select: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                image: true,
+                emailVerified: true,
+              },
+            },
+          },
+        }),
+      );
+      if (!account?.user?.email) return null;
+      return {
+        id: account.user.id,
+        name: account.user.name,
+        email: account.user.email,
+        image: account.user.image,
+        emailVerified: account.user.emailVerified,
+      };
+    },
+
     async getSessionAndUser(
       sessionToken: string,
     ): Promise<{ session: AdapterSession; user: AdapterUser } | null> {
@@ -283,6 +346,79 @@ export function createCustomAdapter(): Adapter {
         sessionToken: created.sessionToken,
         userId: created.userId,
         expires: created.expires,
+      };
+    },
+
+    async updateUser(data: Partial<AdapterUser> & Pick<AdapterUser, "id">): Promise<AdapterUser> {
+      const { id, ...rest } = data;
+      const updated = await withBypassRls(prisma, async () =>
+        prisma.user.update({
+          where: { id },
+          data: rest,
+          select: { id: true, name: true, email: true, image: true, emailVerified: true },
+        }),
+      );
+      if (!updated.email) throw new Error("USER_EMAIL_MISSING");
+      return { id: updated.id, name: updated.name, email: updated.email, image: updated.image, emailVerified: updated.emailVerified };
+    },
+
+    async deleteUser(userId: string) {
+      await withBypassRls(prisma, async () =>
+        prisma.user.delete({ where: { id: userId } }),
+      );
+    },
+
+    async unlinkAccount(providerAccountId: Pick<AdapterAccount, "provider" | "providerAccountId">) {
+      await withBypassRls(prisma, async () =>
+        prisma.account.delete({
+          where: {
+            provider_providerAccountId: {
+              provider: providerAccountId.provider,
+              providerAccountId: providerAccountId.providerAccountId,
+            },
+          },
+        }),
+      );
+    },
+
+    async deleteSession(sessionToken: string) {
+      await withBypassRls(prisma, async () =>
+        prisma.session.delete({ where: { sessionToken } }),
+      );
+    },
+
+    async getAccount(providerAccountId: string, provider: string): Promise<AdapterAccount | null> {
+      const account = await withBypassRls(prisma, async () =>
+        prisma.account.findFirst({
+          where: { providerAccountId, provider },
+          select: {
+            userId: true,
+            type: true,
+            provider: true,
+            providerAccountId: true,
+            refresh_token: true,
+            access_token: true,
+            expires_at: true,
+            token_type: true,
+            scope: true,
+            id_token: true,
+            session_state: true,
+          },
+        }),
+      );
+      if (!account) return null;
+      return {
+        userId: account.userId,
+        type: account.type as AdapterAccount["type"],
+        provider: account.provider,
+        providerAccountId: account.providerAccountId,
+        refresh_token: account.refresh_token ?? undefined,
+        access_token: account.access_token ?? undefined,
+        expires_at: account.expires_at ?? undefined,
+        token_type: (account.token_type ?? undefined) as Lowercase<string> | undefined,
+        scope: account.scope ?? undefined,
+        id_token: account.id_token ?? undefined,
+        session_state: account.session_state ?? undefined,
       };
     },
 
