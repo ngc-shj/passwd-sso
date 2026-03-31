@@ -211,7 +211,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           {/* Filters */}
-          <Card className="rounded-xl border bg-card/80 p-4">
+          <div className="rounded-xl border bg-card/80 p-4">
             <div className="space-y-3">
               <div className="flex flex-wrap gap-3 items-end">
                 <div className="space-y-1">
@@ -294,7 +294,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
                 groupLabelResolver={(v) => GROUP_LABEL_MAP[v]}
               />
             </div>
-          </Card>
+          </div>
 
           {/* Download */}
           <div className="flex justify-end">

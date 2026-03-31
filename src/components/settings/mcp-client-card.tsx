@@ -407,7 +407,6 @@ export function McpClientCard() {
           )}
         </div>
       )}
-
       </CardContent>
 
       {/* Create dialog */}

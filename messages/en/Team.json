@@ -110,7 +110,7 @@
   "tags": "Tags",
   "keyPendingTitle": "Waiting for Key Distribution",
   "keyPendingDesc": "An administrator needs to distribute the encryption key before you can access passwords. This happens automatically when an admin is online.",
-  "scimTitle": "SCIM Provisioning",
+  "scimTitle": "SCIM",
   "scimDescription": "Connect your identity provider to automatically provision and deprovision members.",
   "scimTenantScopeNote": "Tokens are tenant-scoped. Changes here affect SCIM access for all teams in this tenant.",
   "scimEndpointUrl": "SCIM Endpoint URL",
@@ -163,5 +163,11 @@
   "tabWebhookDesc": "Configure webhook endpoints to receive team event notifications.",
   "dangerZone": "Danger Zone",
   "rotateKeyTitle": "Key Rotation",
-  "rotateKeyDesc": "Generate a new team encryption key and re-encrypt all team data. All members must be online to receive the new key."
+  "rotateKeyDesc": "Generate a new team encryption key and re-encrypt all team data. All members must be online to receive the new key.",
+  "memberListTitle": "List",
+  "memberListDescription": "View and manage team members and their roles.",
+  "addMemberTitle": "Add",
+  "addMemberDescription": "Add members from the organization or invite by email.",
+  "transferTitle": "Transfer",
+  "transferDescription": "Transfer team ownership to another member."
 }

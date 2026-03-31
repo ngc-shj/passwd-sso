@@ -93,7 +93,6 @@ export function CliTokenCard() {
           passwd-sso login
         </code>
       </section>
-
       </CardContent>
     </Card>
   );

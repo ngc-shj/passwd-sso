@@ -731,7 +731,6 @@ export function ServiceAccountCard() {
           )}
         </div>
       )}
-
       </CardContent>
 
       {/* Create SA dialog */}

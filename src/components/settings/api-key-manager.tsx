@@ -265,7 +265,6 @@ export function ApiKeyManager() {
         getStatus={getStatus}
         onRevoke={handleRevoke}
       />
-
       </CardContent>
     </Card>
   );

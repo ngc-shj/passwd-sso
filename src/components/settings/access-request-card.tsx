@@ -354,7 +354,6 @@ export function AccessRequestCard() {
           ))}
         </div>
       )}
-
       </CardContent>
 
       {/* Create access request dialog */}
