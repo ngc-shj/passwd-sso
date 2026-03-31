@@ -17,6 +17,7 @@
   "saDescriptionPlaceholder": "Optional description",
   "saActive": "Active",
   "saInactive": "Inactive",
+  "saCreatedAt": "Created: {date}",
   "saInactiveError": "Service account is inactive. Reactivate it first.",
   "saDeactivateWarning": "Deactivating will immediately reject all existing tokens for this service account.",
   "saCreatedAt": "Created",

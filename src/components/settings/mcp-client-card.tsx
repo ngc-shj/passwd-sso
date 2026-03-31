@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { fetchApi } from "@/lib/url-helpers";
+import { formatDateTime } from "@/lib/format-datetime";
 
 interface McpClient {
   id: string;
@@ -110,6 +111,7 @@ function validateRedirectUris(uris: string[]): boolean {
 export function McpClientCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const locale = useLocale();
 
   const [clients, setClients] = useState<McpClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -362,11 +364,12 @@ export function McpClientCard() {
             {client.connectedUsers.map((u) => u.name).join(", ")}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">
-          {t("mcpCreatedAt", { date: new Date(client.createdAt).toLocaleDateString() })}
-        </p>
       </div>
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <span className="text-xs text-muted-foreground">
+          {t("mcpCreatedAt", { date: formatDateTime(client.createdAt, locale) })}
+        </span>
+        <div className="flex items-center gap-1">
         <Button
           variant="ghost"
           size="icon"
@@ -398,6 +401,7 @@ export function McpClientCard() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
     </div>
   );

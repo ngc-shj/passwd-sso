@@ -419,7 +419,11 @@ export function ServiceAccountCard() {
                       </button>
                     </CollapsibleTrigger>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="text-xs text-muted-foreground">
+                      {t("saCreatedAt", { date: formatDateTime(sa.createdAt, locale) })}
+                    </span>
+                    <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -451,6 +455,7 @@ export function ServiceAccountCard() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    </div>
                   </div>
                 </div>
 
@@ -591,7 +596,11 @@ export function ServiceAccountCard() {
                             </button>
                           </CollapsibleTrigger>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className="text-xs text-muted-foreground">
+                            {t("saCreatedAt", { date: formatDateTime(sa.createdAt, locale) })}
+                          </span>
+                          <div className="flex items-center gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -623,6 +632,7 @@ export function ServiceAccountCard() {
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
+                          </div>
                         </div>
                       </div>
                       <CollapsibleContent>

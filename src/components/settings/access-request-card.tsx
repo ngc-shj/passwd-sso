@@ -302,12 +302,13 @@ export function AccessRequestCard() {
                   {req.justification && (
                     <p className="text-xs text-muted-foreground">{req.justification}</p>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    {formatDateTime(req.createdAt, locale)}
-                  </p>
                 </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-xs text-muted-foreground">
+                    {formatDateTime(req.createdAt, locale)}
+                  </span>
                 {req.status === "PENDING" && (
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
                       size="sm"
@@ -344,6 +345,7 @@ export function AccessRequestCard() {
                     </AlertDialog>
                   </div>
                 )}
+                </div>
               </div>
             </div>
           ))}
