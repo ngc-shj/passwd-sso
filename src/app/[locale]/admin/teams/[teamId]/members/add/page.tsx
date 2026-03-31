@@ -4,7 +4,9 @@ import { useEffect, useState, useRef, useCallback, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -205,16 +207,19 @@ export default function TeamAddMemberPage({
 
   if (!isAdmin && team !== null) {
     return (
-      <Card className="rounded-xl border bg-card/80 p-6">
-        <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
+      <Card>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
+        </CardContent>
       </Card>
     );
   }
 
   return (
-    <div className="space-y-4">
-      {/* Add from organization */}
-      <Card className="rounded-xl border bg-card/80 p-4">
+    <Card>
+      <SectionCardHeader icon={UserPlus} title={t("addMemberTitle")} description={t("addMemberDescription")} />
+      <CardContent className="space-y-6">
+        {/* Add from organization */}
         <section className="space-y-4">
           <div>
             <h3 className="text-sm font-medium">{t("addFromTenantLabel")}</h3>
@@ -284,10 +289,8 @@ export default function TeamAddMemberPage({
             </div>
           )}
         </section>
-      </Card>
-
-      {/* Invite by email */}
-      <Card className="rounded-xl border bg-card/80 p-4">
+        <Separator />
+        {/* Invite by email */}
         <section className="space-y-4">
           <div>
             <h3 className="text-sm font-medium">{t("inviteByEmailLabel")}</h3>
@@ -330,48 +333,48 @@ export default function TeamAddMemberPage({
             </Button>
           </div>
         </section>
-      </Card>
-
-      {/* Pending invitations */}
-      {invitations.length > 0 && (
-        <Card className="rounded-xl border bg-card/80 p-4">
-          <section className="space-y-4">
-            <h3 className="flex items-center gap-2 text-sm font-medium">
-              <LinkIcon className="h-4 w-4 text-muted-foreground" />
-              {t("pendingInvitations")}
-            </h3>
-            <div className="space-y-2">
-              {invitations.map((inv) => (
-                <div
-                  key={inv.id}
-                  className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
-                >
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium">{inv.email}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {t("expiresAt", { date: formatDate(inv.expiresAt, locale) })}
-                    </p>
-                  </div>
-                  <TeamRoleBadge role={inv.role} />
-                  <CopyButton
-                    getValue={() =>
-                      appUrl(`/dashboard/teams/invite/${inv.token}`)
-                    }
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    onClick={() => handleCancelInvitation(inv.id)}
+        {invitations.length > 0 && (
+          <>
+            <Separator />
+            {/* Pending invitations */}
+            <section className="space-y-4">
+              <h3 className="flex items-center gap-2 text-sm font-medium">
+                <LinkIcon className="h-4 w-4 text-muted-foreground" />
+                {t("pendingInvitations")}
+              </h3>
+              <div className="space-y-2">
+                {invitations.map((inv) => (
+                  <div
+                    key={inv.id}
+                    className="flex items-center gap-3 rounded-xl border bg-card/80 p-3 transition-colors hover:bg-accent/30 dark:hover:bg-accent/50"
                   >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </section>
-        </Card>
-      )}
-    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium">{inv.email}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {t("expiresAt", { date: formatDate(inv.expiresAt, locale) })}
+                      </p>
+                    </div>
+                    <TeamRoleBadge role={inv.role} />
+                    <CopyButton
+                      getValue={() =>
+                        appUrl(`/dashboard/teams/invite/${inv.token}`)
+                      }
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={() => handleCancelInvitation(inv.id)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

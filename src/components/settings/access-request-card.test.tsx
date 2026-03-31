@@ -47,11 +47,29 @@ vi.mock("@/components/passwords/copy-button", () => ({
   ),
 }));
 
+vi.mock("@/components/settings/section-card-header", () => ({
+  SectionCardHeader: ({ title, description, action }: { title: string; description: string; action?: ReactNode }) => (
+    <div data-testid="section-card-header"><span>{title}</span><span>{description}</span>{action}</div>
+  ),
+}));
+
 vi.mock("@/components/ui/card", () => ({
   Card: ({ children, className }: { children: ReactNode; className?: string }) => (
     <div data-testid="card" className={className}>
       {children}
     </div>
+  ),
+  CardHeader: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div data-testid="card-header" className={className}>{children}</div>
+  ),
+  CardContent: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div data-testid="card-content" className={className}>{children}</div>
+  ),
+  CardTitle: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div data-testid="card-title" className={className}>{children}</div>
+  ),
+  CardDescription: ({ children, className }: { children: ReactNode; className?: string }) => (
+    <div data-testid="card-description" className={className}>{children}</div>
   ),
 }));
 

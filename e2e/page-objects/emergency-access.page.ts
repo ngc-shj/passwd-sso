@@ -39,15 +39,15 @@ export class EmergencyAccessPage {
 
   /**
    * Return a locator scoped to the individual grant card matching either the display name
-   * or email. Excludes outer section container cards (which have an h2 heading) to avoid
+   * or email. Excludes outer section container cards (which have a card-title slot) to avoid
    * strict-mode violations from nested card matches.
    */
   grantByUser(nameOrEmail: string): Locator {
-    // Section container cards have an h2 heading; individual GrantCards do not.
+    // Section container cards have a CardTitle (data-slot="card-title"); individual GrantCards do not.
     return this.page
       .locator("[data-slot='card']")
       .filter({ hasText: nameOrEmail })
-      .filter({ hasNot: this.page.locator("h2") });
+      .filter({ hasNot: this.page.locator("[data-slot='card-title']") });
   }
 
   /**

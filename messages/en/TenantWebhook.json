@@ -1,5 +1,5 @@
 {
-  "title": "Tenant Webhooks",
+  "title": "Webhooks",
   "description": "Send real-time tenant-level audit events to external services",
   "addWebhook": "Add webhook",
   "url": "Endpoint URL",

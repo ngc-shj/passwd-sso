@@ -26,13 +26,13 @@ export class WatchtowerPage {
 
   /**
    * The score gauge card shown after analysis completes.
-   * Identified by the h2 heading with t("overallScore") = "Security Score" / "セキュリティスコア".
+   * Identified by the "overallScore" text inside a <p> tag.
    * (The page header card also contains "セキュリティスコア" in its description text,
-   *  so we must narrow by the h2 role to avoid false matches.)
+   *  so we narrow by the font-semibold paragraph to avoid false matches.)
    */
   get scoreCard() {
     return this.page.locator("[data-slot='card']").filter({
-      has: this.page.locator("h2").filter({
+      has: this.page.locator("p.font-semibold").filter({
         hasText: /Security Score|セキュリティスコア/i,
       }),
     });

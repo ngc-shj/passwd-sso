@@ -1,7 +1,7 @@
 {
   "settingsTitle": "Personal Settings",
   "settingsDescription": "Manage your personal settings.",
-  "tabAccount": "Account",
+  "tabAccount": "Sessions",
   "tabSecurity": "Security",
   "tabDeveloper": "Developer",
   "title": "Sessions",
@@ -26,11 +26,11 @@
   "loading": "Loading sessions...",
   "tabAccountDesc": "Manage your active sessions and sign-in devices.",
   "tabSecurityDesc": "Manage passkeys, travel mode, and key rotation to protect your vault.",
-  "subTabPasskey": "Passkey",
+  "subTabPasskey": "Passkeys",
   "subTabTravelMode": "Travel Mode",
-  "subTabKeyRotation": "Key Rotation",
+  "subTabKeyRotation": "Rotate Encryption Key",
   "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access.",
-  "subTabCli": "CLI",
-  "subTabApi": "API",
-  "subTabDelegation": "Delegation"
+  "subTabCli": "CLI Token",
+  "subTabApi": "API Keys",
+  "subTabDelegation": "Delegated Access"
 }

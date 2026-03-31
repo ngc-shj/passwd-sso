@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Badge } from "@/components/ui/badge";
 import { MemberInfo } from "@/components/member-info";
 import {
@@ -130,15 +131,7 @@ export function TenantMembersCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Users className="h-5 w-5" />
-          <div>
-            <CardTitle>{t("membersTitle")}</CardTitle>
-            <CardDescription>{t("membersDescription")}</CardDescription>
-          </div>
-        </div>
-      </CardHeader>
+      <SectionCardHeader icon={Users} title={t("membersTitle")} description={t("membersDescription")} />
       <CardContent>
         {members.length === 0 ? (
           <p className="py-4 text-center text-sm text-muted-foreground">
