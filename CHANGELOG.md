@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.6](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.5...passwd-sso-v0.4.6) (2026-03-31)
+
+
+### Bug Fixes
+
+* improve inline vault unlock edge cases in TeamCreateDialog ([#283](https://github.com/ngc-shj/passwd-sso/issues/283)) ([08e412d](https://github.com/ngc-shj/passwd-sso/commit/08e412db4409edeaf82e66838d8654556bf36ecc))
+
 ## [0.4.5](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.4...passwd-sso-v0.4.5) (2026-03-30)
 
 
