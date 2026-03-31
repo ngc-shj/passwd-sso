@@ -1,4 +1,5 @@
 import type { Locator, Page } from "@playwright/test";
+import { expect } from "@playwright/test";
 
 export class TeamsPage {
   constructor(private page: Page) {}
@@ -33,17 +34,35 @@ export class TeamsPage {
     return this.page.locator("a.rounded-xl").filter({ hasText: name });
   }
 
+  private get dialog() {
+    return this.page.locator("[role='dialog']");
+  }
+
   /**
    * Open the create team dialog, fill in the form fields, and submit.
+   * If unlockPassphrase is provided, handles inline vault unlock first.
    * Slug is auto-generated from name if not provided.
    */
   async createTeam(
     name: string,
     slug?: string,
     description?: string,
+    unlockPassphrase?: string,
   ): Promise<void> {
     await this.createTeamButton.click();
-    await this.page.locator("[role='dialog']").waitFor({ timeout: 5_000 });
+    await this.dialog.waitFor({ timeout: 5_000 });
+
+    // Handle inline vault unlock if passphrase is provided
+    if (unlockPassphrase) {
+      const passphraseInput = this.dialog.locator("#unlock-passphrase");
+      await expect(passphraseInput).toBeVisible({ timeout: 5_000 });
+      await passphraseInput.fill(unlockPassphrase);
+      await this.dialog
+        .getByRole("button", { name: /^Unlock$|^解錠$|^アンロック$/i })
+        .click();
+      // Wait for PBKDF2 unlock to complete and form to appear
+      await expect(this.teamNameInput).toBeVisible({ timeout: 20_000 });
+    }
 
     await this.teamNameInput.fill(name);
     if (slug) {
@@ -55,7 +74,7 @@ export class TeamsPage {
 
     await this.createButton.click();
     // Wait for dialog to close after creation
-    await this.page.locator("[role='dialog']").waitFor({
+    await this.dialog.waitFor({
       state: "hidden",
       timeout: 10_000,
     });
