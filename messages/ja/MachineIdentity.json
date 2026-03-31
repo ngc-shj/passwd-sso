@@ -1,5 +1,11 @@
 {
   "serviceAccounts": "サービスアカウント",
+  "saCardTitle": "サービスアカウント",
+  "saCardDescription": "自動化されたAPIアクセスのためのサービスアカウントを作成・管理します。サービスアカウントはトークンベースの認証を使用します。",
+  "mcpCardTitle": "MCP クライアント",
+  "mcpCardDescription": "AI エージェント統合のための MCP（Model Context Protocol）クライアントを登録・管理します。",
+  "accessRequestCardTitle": "アクセスリクエスト",
+  "accessRequestCardDescription": "サービスアカウントからのジャストインタイムアクセスリクエストを管理します。",
   "noServiceAccounts": "サービスアカウントがありません",
   "noActiveServiceAccounts": "有効なサービスアカウントがありません",
   "createServiceAccount": "サービスアカウントを作成",

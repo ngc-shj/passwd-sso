@@ -1,5 +1,5 @@
 {
-  "title": "Break-Glass Personal Log Access",
+  "title": "Break Glass",
   "description": "Access a user's personal audit logs with mandatory justification. All access is recorded and the user is notified.",
   "requestAccess": "Request Access",
   "targetUser": "Target User",

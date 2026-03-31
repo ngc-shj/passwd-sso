@@ -4,7 +4,8 @@ import { useEffect, useState, use } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
@@ -111,14 +112,16 @@ export default function TeamTransferOwnershipPage({
   if (!team) {
     if (loadError) {
       return (
-        <Card className="rounded-xl border bg-card/80 p-6">
-          <div className="flex flex-col items-start gap-3">
-            <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
-            <p className="text-sm text-muted-foreground">{t("noTeamsDesc")}</p>
-            <Button variant="ghost" asChild>
-              <Link href="/dashboard/teams">{t("manage")}</Link>
-            </Button>
-          </div>
+        <Card>
+          <CardContent>
+            <div className="flex flex-col items-start gap-3">
+              <h1 className="text-xl font-semibold">{t("forbidden")}</h1>
+              <p className="text-sm text-muted-foreground">{t("noTeamsDesc")}</p>
+              <Button variant="ghost" asChild>
+                <Link href="/dashboard/teams">{t("manage")}</Link>
+              </Button>
+            </div>
+          </CardContent>
         </Card>
       );
     }
@@ -131,20 +134,18 @@ export default function TeamTransferOwnershipPage({
 
   if (!isOwner) {
     return (
-      <Card className="rounded-xl border bg-card/80 p-6">
-        <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
+      <Card>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">{t("forbidden")}</p>
+        </CardContent>
       </Card>
     );
   }
 
   return (
-    <Card className="rounded-xl border bg-card/80 p-4">
-      <section className="space-y-4">
-        <h2 className="flex items-center gap-2 text-sm font-medium">
-          <Crown className="h-4 w-4" />
-          {t("transferOwnership")}
-        </h2>
-        <p className="text-sm text-muted-foreground">{t("transferOwnershipDesc")}</p>
+    <Card>
+      <SectionCardHeader icon={Crown} title={t("transferTitle")} description={t("transferDescription")} />
+      <CardContent className="space-y-4">
         {members.length > 1 && (
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -202,7 +203,7 @@ export default function TeamTransferOwnershipPage({
             ))}
           </div>
         )}
-      </section>
+      </CardContent>
     </Card>
   );
 }

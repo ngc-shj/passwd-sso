@@ -1,5 +1,5 @@
 {
-  "title": "テナントWebhook",
+  "title": "Webhook",
   "description": "テナントレベルの監査イベントを外部サービスにリアルタイム送信",
   "addWebhook": "Webhook を追加",
   "url": "エンドポイント URL",
