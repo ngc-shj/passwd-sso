@@ -801,5 +801,192 @@ export function createWebhookCardTests(
 
       expect(screen.queryByText(/inactiveWebhooks/)).not.toBeInTheDocument();
     });
+
+    // 19. shows validationError toast on 400 without field errors
+    it("shows validationError toast on 400 without field errors", async () => {
+      mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+        if (!init?.method || init.method === "GET") {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ webhooks: [] }),
+          });
+        }
+        if (init.method === "POST") {
+          return Promise.resolve({
+            ok: false,
+            status: 400,
+            json: () => Promise.resolve({ message: "Bad request" }),
+          });
+        }
+        return Promise.resolve({ ok: false, status: 500 });
+      });
+
+      await act(async () => {
+        render(renderComponent());
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+      });
+
+      const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+      fireEvent.change(urlInput, {
+        target: { value: "https://valid.example.com/hook" },
+      });
+
+      const checkboxes = screen.getAllByTestId("checkbox");
+      fireEvent.click(checkboxes[0]);
+
+      const createButtons = screen
+        .getAllByRole("button")
+        .filter((b) => b.textContent?.includes("addWebhook"));
+      await act(async () => {
+        fireEvent.click(createButtons[0]);
+      });
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith("validationError");
+      });
+    });
+
+    // 20. shows toast error on create network exception
+    it("shows toast error on create network exception", async () => {
+      mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+        if (!init?.method || init.method === "GET") {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ webhooks: [] }),
+          });
+        }
+        if (init.method === "POST") {
+          return Promise.reject(new Error("Network error"));
+        }
+        return Promise.resolve({ ok: false, status: 500 });
+      });
+
+      await act(async () => {
+        render(renderComponent());
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+      });
+
+      const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+      fireEvent.change(urlInput, {
+        target: { value: "https://valid.example.com/hook" },
+      });
+
+      const checkboxes = screen.getAllByTestId("checkbox");
+      fireEvent.click(checkboxes[0]);
+
+      const createButtons = screen
+        .getAllByRole("button")
+        .filter((b) => b.textContent?.includes("addWebhook"));
+      await act(async () => {
+        fireEvent.click(createButtons[0]);
+      });
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith("createFailed");
+      });
+    });
+
+    // 21. shows toast error on delete network exception
+    it("shows toast error on delete network exception", async () => {
+      mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+        if (!init?.method || init.method === "GET") {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ webhooks: sampleWebhooks }),
+          });
+        }
+        if (init.method === "DELETE") {
+          return Promise.reject(new Error("Network error"));
+        }
+        return Promise.resolve({ ok: false, status: 500 });
+      });
+
+      await act(async () => {
+        render(renderComponent());
+      });
+
+      await waitFor(() => {
+        expect(
+          screen.getAllByText(activeUrl).length,
+        ).toBeGreaterThanOrEqual(1);
+      });
+
+      const alertActions = screen.getAllByTestId("alert-action");
+      await act(async () => {
+        fireEvent.click(alertActions[0]);
+      });
+
+      await waitFor(() => {
+        expect(mockToast.error).toHaveBeenCalledWith("deleteFailed");
+      });
+    });
+
+    // 22. shows noActiveWebhooks when only inactive webhooks exist
+    it("shows noActiveWebhooks when only inactive webhooks exist", async () => {
+      const allInactiveWebhooks = sampleWebhooks.map((w) => ({
+        ...w,
+        isActive: false,
+      }));
+      setup(allInactiveWebhooks);
+
+      await act(async () => {
+        render(renderComponent());
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("noActiveWebhooks")).toBeInTheDocument();
+      });
+    });
+
+    // 23. toggles group checkbox to select all events in a group
+    it("toggles group checkbox to select all events in a group", async () => {
+      setup([]);
+
+      await act(async () => {
+        render(renderComponent());
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+      });
+
+      const urlInput = screen.getByPlaceholderText("urlPlaceholder");
+      fireEvent.change(urlInput, {
+        target: { value: "https://valid.example.com/hook" },
+      });
+
+      // Click the first group checkbox (index 0) to select all events in the first group
+      const checkboxes = screen.getAllByTestId("checkbox");
+      await act(async () => {
+        fireEvent.click(checkboxes[0]);
+      });
+
+      // Create button should now be enabled (URL + events selected)
+      const createButtons = screen
+        .getAllByRole("button")
+        .filter((b) => b.textContent?.includes("addWebhook"));
+      expect(createButtons[0]).not.toBeDisabled();
+
+      await act(async () => {
+        fireEvent.click(createButtons[0]);
+      });
+
+      await waitFor(() => {
+        const postCalls = mockFetch.mock.calls.filter(
+          (c: unknown[]) =>
+            (c[1] as Record<string, unknown>)?.method === "POST",
+        );
+        expect(postCalls.length).toBe(1);
+        const body = JSON.parse(postCalls[0][1].body as string);
+        expect(Array.isArray(body.events)).toBe(true);
+        expect(body.events.length).toBeGreaterThan(0);
+      });
+    });
   });
 }
