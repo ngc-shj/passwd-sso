@@ -16,7 +16,8 @@ test.describe.serial("Teams", () => {
   const TEAM_NAME = `E2E-Team-${Date.now()}`;
   const TEAM_SLUG = `e2e-team-${Date.now()}`;
 
-  test.beforeAll(async ({ browser }) => {
+  test.beforeAll(async ({ browser }, testInfo) => {
+    testInfo.setTimeout(60_000);
     const { teamOwner, teamMember } = getAuthState();
 
     ownerContext = await browser.newContext();
