@@ -131,10 +131,10 @@ test.describe.serial("Emergency Access", () => {
 
     // The page should render two sections: "Trusted Contacts" and "Trusted by Others"
     await expect(
-      granteePage.locator("h2").filter({ hasText: /Trusted Contacts|信頼(できる|する)連絡先/i }),
+      granteePage.locator("[data-slot='card-title']").filter({ hasText: /Trusted Contacts|信頼(できる|する)連絡先/i }),
     ).toBeVisible({ timeout: 10_000 });
     await expect(
-      granteePage.locator("h2").filter({ hasText: /Trusted by Others|他のユーザーから信頼|委任を受けた保管庫/i }),
+      granteePage.locator("[data-slot='card-title']").filter({ hasText: /Trusted by Others|他のユーザーから信頼|委任を受けた保管庫/i }),
     ).toBeVisible({ timeout: 5_000 });
   });
 });
