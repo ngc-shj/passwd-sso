@@ -77,6 +77,7 @@ export const NS_DASHBOARD_ALL: readonly Namespace[] = [
 /** Namespaces needed by admin console pages. */
 export const NS_ADMIN_ALL: readonly Namespace[] = [
   ...NS_GLOBAL,
+  "Vault",
   "AdminConsole",
   "TenantAdmin",
   "TenantWebhook",
