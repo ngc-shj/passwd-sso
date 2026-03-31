@@ -113,6 +113,7 @@
   "arDenied": "アクセスリクエストを拒否しました",
   "arApproveFailed": "承認に失敗しました",
   "arDenyFailed": "拒否に失敗しました",
+  "arCreatedAt": "申請日: {date}",
   "arDenyConfirm": "このアクセスリクエストを拒否しますか？",
   "arDenyWarning": "申請したサービスアカウントはアクセスを受け取れません。",
   "arAlreadyProcessed": "このリクエストは既に処理済みです",

@@ -113,6 +113,7 @@
   "arDenied": "Access request denied",
   "arApproveFailed": "Failed to approve request",
   "arDenyFailed": "Failed to deny request",
+  "arCreatedAt": "Created: {date}",
   "arDenyConfirm": "Deny this access request?",
   "arDenyWarning": "The requesting service account will not receive access.",
   "arAlreadyProcessed": "This request has already been processed",

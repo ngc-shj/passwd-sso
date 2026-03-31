@@ -305,7 +305,7 @@ export function AccessRequestCard() {
                 </div>
                 <div className="flex flex-col items-end gap-1 shrink-0">
                   <span className="text-xs text-muted-foreground">
-                    {formatDateTime(req.createdAt, locale)}
+                    {t("arCreatedAt", { date: formatDateTime(req.createdAt, locale) })}
                   </span>
                 {req.status === "PENDING" && (
                   <div className="flex items-center gap-1">
