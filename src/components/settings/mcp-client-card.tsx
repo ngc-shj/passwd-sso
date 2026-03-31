@@ -361,7 +361,7 @@ export function McpClientCard() {
         {client.connectedUsers && client.connectedUsers.length > 0 && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users className="h-3 w-3" />
-            {client.connectedUsers.map((u) => u.name ?? u.email ?? "Unknown").join(", ")}
+            {client.connectedUsers.map((u) => u.name ?? u.email ?? t("mcpUnknownUser")).join(", ")}
           </div>
         )}
       </div>
