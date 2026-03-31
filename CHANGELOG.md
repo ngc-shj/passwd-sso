@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.8](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.7...passwd-sso-v0.4.8) (2026-03-31)
+
+
+### Code Refactoring
+
+* extract BaseWebhookCard shared component ([#287](https://github.com/ngc-shj/passwd-sso/issues/287)) ([5e72620](https://github.com/ngc-shj/passwd-sso/commit/5e7262060259ff6215e2a4cdf03d0145451ec1d3))
+
 ## [0.4.7](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.6...passwd-sso-v0.4.7) (2026-03-31)
 
 
