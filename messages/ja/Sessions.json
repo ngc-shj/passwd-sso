@@ -4,6 +4,7 @@
   "tabAccount": "セッション",
   "tabSecurity": "セキュリティ",
   "tabDeveloper": "開発者",
+  "tabMcp": "MCP",
   "title": "セッション",
   "description": "アクティブなセッションを管理できます。不要なセッションを取り消すことができます。",
   "current": "現在",
