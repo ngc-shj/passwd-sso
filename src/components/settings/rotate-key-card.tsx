@@ -7,10 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { RotateKeyDialog } from "@/components/vault/rotate-key-dialog";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
@@ -25,15 +23,7 @@ export function RotateKeyCard() {
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-5 w-5" />
-            <div>
-              <CardTitle>{t("rotateKey")}</CardTitle>
-              <CardDescription>{t("rotateKeyDescription")}</CardDescription>
-            </div>
-          </div>
-        </CardHeader>
+        <SectionCardHeader icon={KeyRound} title={t("rotateKey")} description={t("rotateKeyDescription")} />
         <CardContent>
           <Button
             variant="destructive"

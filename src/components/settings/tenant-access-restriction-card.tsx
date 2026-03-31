@@ -8,10 +8,8 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -146,13 +144,7 @@ export function TenantAccessRestrictionCard() {
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Globe className="h-5 w-5" />
-            <CardTitle>{t("accessRestrictionTitle")}</CardTitle>
-          </div>
-          <CardDescription>{t("accessRestrictionDescription")}</CardDescription>
-        </CardHeader>
+        <SectionCardHeader icon={Globe} title={t("accessRestrictionTitle")} description={t("accessRestrictionDescription")} />
         <CardContent className="space-y-4">
           {/* CIDR allowlist */}
           <div className="space-y-2">

@@ -9,11 +9,9 @@ import { VAULT_STATUS } from "@/lib/constants";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { Handshake, Plus } from "lucide-react";
@@ -126,15 +124,11 @@ export function DelegationManager() {
   return (
     <>
     <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Handshake className="h-5 w-5" />
-              {t("title")}
-            </CardTitle>
-            <CardDescription>{t("description")}</CardDescription>
-          </div>
+      <SectionCardHeader
+        icon={Handshake}
+        title={t("title")}
+        description={t("description")}
+        action={
           <div className="flex gap-2">
             {sessions.length > 0 && (
               <Button variant="destructive" size="sm" onClick={handleRevokeAll}>
@@ -146,8 +140,8 @@ export function DelegationManager() {
               {t("newDelegation")}
             </Button>
           </div>
-        </div>
-      </CardHeader>
+        }
+      />
       <CardContent>
         {sessions.length === 0 ? (
           <p className="text-sm text-muted-foreground">{t("noSessions")}</p>
