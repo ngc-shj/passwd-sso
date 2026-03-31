@@ -35,13 +35,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Blocks, ChevronDown, ChevronUp, Loader2, Plus, Trash2, Pencil, Users } from "lucide-react";
+import { Blocks, ChevronDown, Loader2, Plus, Trash2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 
 interface McpClient {
   id: string;
@@ -53,43 +54,6 @@ interface McpClient {
   isDcr: boolean;
   createdAt: string;
   connectedUsers?: { name: string | null; email: string | null }[];
-}
-
-const SCOPE_DISPLAY_LIMIT = 3;
-
-function ScopeBadges({ scopes }: { scopes: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const all = scopes.split(",").map((s) => s.trim()).filter(Boolean);
-  const visible = expanded ? all : all.slice(0, SCOPE_DISPLAY_LIMIT);
-  const hidden = all.length - SCOPE_DISPLAY_LIMIT;
-
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      {visible.map((scope) => (
-        <Badge key={scope} variant="outline" className="text-xs font-normal">
-          {scope}
-        </Badge>
-      ))}
-      {hidden > 0 && !expanded && (
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setExpanded(true)}
-        >
-          +{hidden}
-        </button>
-      )}
-      {expanded && hidden > 0 && (
-        <button
-          type="button"
-          className="text-xs text-muted-foreground hover:text-foreground"
-          onClick={() => setExpanded(false)}
-        >
-          <ChevronUp className="h-3 w-3 inline" />
-        </button>
-      )}
-    </div>
-  );
 }
 
 interface NewClientCredentials {

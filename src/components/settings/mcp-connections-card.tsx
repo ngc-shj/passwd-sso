@@ -22,6 +22,7 @@ import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { API_PATH, apiPath } from "@/lib/constants/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 
 interface McpClientConnection {
   id: string;
@@ -129,20 +130,7 @@ export function McpConnectionsCard() {
                   </div>
                   {client.connection && (
                     <>
-                      <div className="flex flex-wrap gap-1">
-                        {client.connection.scope
-                          .split(/[\s,]+/)
-                          .filter(Boolean)
-                          .map((s) => (
-                            <Badge
-                              key={s}
-                              variant="secondary"
-                              className="text-xs"
-                            >
-                              {s}
-                            </Badge>
-                          ))}
-                      </div>
+                      <ScopeBadges scopes={client.connection.scope} separator={/[\s,]+/} />
                       <div className="flex gap-4 text-xs text-muted-foreground">
                         <span>
                           {t("created")}:{" "}

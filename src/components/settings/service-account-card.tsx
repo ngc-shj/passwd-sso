@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface ServiceAccount {
@@ -502,13 +503,7 @@ export function ServiceAccountCard() {
                                   </Badge>
                                 )}
                               </div>
-                              <div className="flex flex-wrap gap-1">
-                                {token.scope.map((s) => (
-                                  <Badge key={s} variant="outline" className="text-[10px] px-1 h-3.5">
-                                    {s}
-                                  </Badge>
-                                ))}
-                              </div>
+                              <ScopeBadges scopes={token.scope.join(",")} />
                               <div className="text-[10px] text-muted-foreground space-x-2">
                                 <span>
                                   {t("tokenLastUsed")}:{" "}

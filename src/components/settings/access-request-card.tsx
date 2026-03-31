@@ -41,6 +41,7 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 
 type AccessRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
@@ -292,13 +293,7 @@ export function AccessRequestCard() {
                       {statusLabel(req.status)}
                     </Badge>
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {parseScopes(req.requestedScope).map((s) => (
-                      <Badge key={s} variant="outline" className="text-xs font-normal">
-                        {s}
-                      </Badge>
-                    ))}
-                  </div>
+                  <ScopeBadges scopes={req.requestedScope} />
                   {req.justification && (
                     <p className="text-xs text-muted-foreground">{req.justification}</p>
                   )}
