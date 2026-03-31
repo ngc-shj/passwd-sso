@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.6](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.5...passwd-sso-v0.4.6) (2026-03-31)
+
+
+### Refactoring
+
+* separate vault and admin console with page-per-route navigation ([#282](https://github.com/ngc-shj/passwd-sso/issues/282)) ([cdf82ee](https://github.com/ngc-shj/passwd-sso/commit/cdf82ee8eacaad3b4513be16bac79d6ca1d39a77))
+  * Vault (`/dashboard`) and Admin (`/admin`) contexts fully separated
+  * Admin console with scope selector (tenant/team switching) and tree nav sidebar
+  * Personal settings split into page-per-route (`/account`, `/security/*`, `/developer/*`)
+  * MCP consent UI with scope risk-level badge coloring
+  * Unified sidebar style (border-l tree nav) across dashboard and admin
+
+### Bug Fixes
+
+* improve inline vault unlock edge cases in TeamCreateDialog ([#283](https://github.com/ngc-shj/passwd-sso/issues/283)) ([08e412d](https://github.com/ngc-shj/passwd-sso/commit/08e412db4409edeaf82e66838d8654556bf36ecc))
+
 ## [0.4.5](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.4...passwd-sso-v0.4.5) (2026-03-30)
 
 
