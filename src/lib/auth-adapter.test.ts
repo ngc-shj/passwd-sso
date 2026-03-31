@@ -10,6 +10,8 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   mockPrismaUser: {
     findUnique: vi.fn(),
     create: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
   },
   mockPrismaTenant: {
     create: vi.fn(),
@@ -20,6 +22,9 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   },
   mockPrismaAccount: {
     create: vi.fn(),
+    findUnique: vi.fn(),
+    findFirst: vi.fn(),
+    delete: vi.fn(),
   },
   mockPrismaTransaction: vi.fn(),
   mockSessionMetaGetStore: vi.fn(),
@@ -651,6 +656,192 @@ describe("createCustomAdapter", () => {
       await expect(
         adapter.updateSession!({ sessionToken: "tok-1" }),
       ).rejects.toThrow("connection lost");
+    });
+  });
+
+  describe("getUser", () => {
+    it("returns user when found with email", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null,
+      });
+      const adapter = createCustomAdapter();
+      const user = await adapter.getUser!("u-1");
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(mockPrismaUser.findUnique).toHaveBeenCalledWith({
+        where: { id: "u-1" },
+        select: { id: true, name: true, email: true, image: true, emailVerified: true },
+      });
+      expect(user).toEqual({
+        id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null,
+      });
+    });
+
+    it("returns null when user not found", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue(null);
+      const adapter = createCustomAdapter();
+      expect(await adapter.getUser!("missing")).toBeNull();
+    });
+
+    it("returns null when user has no email", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        id: "u-1", name: "No Email", email: null, image: null, emailVerified: null,
+      });
+      const adapter = createCustomAdapter();
+      expect(await adapter.getUser!("u-1")).toBeNull();
+    });
+  });
+
+  describe("getUserByEmail", () => {
+    it("returns user when found", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null,
+      });
+      const adapter = createCustomAdapter();
+      const user = await adapter.getUserByEmail!("test@example.com");
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(user).toEqual({
+        id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null,
+      });
+    });
+
+    it("returns null when not found", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue(null);
+      const adapter = createCustomAdapter();
+      expect(await adapter.getUserByEmail!("no@example.com")).toBeNull();
+    });
+  });
+
+  describe("getUserByAccount", () => {
+    it("returns user when account found", async () => {
+      mockPrismaAccount.findUnique.mockResolvedValue({
+        user: { id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null },
+      });
+      const adapter = createCustomAdapter();
+      const user = await adapter.getUserByAccount!({
+        provider: "google", providerAccountId: "g-1",
+      });
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(user).toEqual({
+        id: "u-1", name: "Test", email: "test@example.com", image: null, emailVerified: null,
+      });
+    });
+
+    it("returns null when account not found", async () => {
+      mockPrismaAccount.findUnique.mockResolvedValue(null);
+      const adapter = createCustomAdapter();
+      expect(await adapter.getUserByAccount!({
+        provider: "google", providerAccountId: "missing",
+      })).toBeNull();
+    });
+
+    it("returns null when user has no email", async () => {
+      mockPrismaAccount.findUnique.mockResolvedValue({
+        user: { id: "u-1", name: "Test", email: null, image: null, emailVerified: null },
+      });
+      const adapter = createCustomAdapter();
+      expect(await adapter.getUserByAccount!({
+        provider: "google", providerAccountId: "g-1",
+      })).toBeNull();
+    });
+  });
+
+  describe("updateUser", () => {
+    it("updates and returns user", async () => {
+      mockPrismaUser.update.mockResolvedValue({
+        id: "u-1", name: "Updated", email: "test@example.com", image: null, emailVerified: null,
+      });
+      const adapter = createCustomAdapter();
+      const user = await adapter.updateUser!({ id: "u-1", name: "Updated" });
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(mockPrismaUser.update).toHaveBeenCalledWith({
+        where: { id: "u-1" },
+        data: { name: "Updated" },
+        select: { id: true, name: true, email: true, image: true, emailVerified: true },
+      });
+      expect(user).toEqual({
+        id: "u-1", name: "Updated", email: "test@example.com", image: null, emailVerified: null,
+      });
+    });
+
+    it("throws when updated user has no email", async () => {
+      mockPrismaUser.update.mockResolvedValue({
+        id: "u-1", name: "Test", email: null, image: null, emailVerified: null,
+      });
+      const adapter = createCustomAdapter();
+      await expect(adapter.updateUser!({ id: "u-1", name: "Test" })).rejects.toThrow("USER_EMAIL_MISSING");
+    });
+  });
+
+  describe("deleteUser", () => {
+    it("deletes user with withBypassRls", async () => {
+      mockPrismaUser.delete.mockResolvedValue({});
+      const adapter = createCustomAdapter();
+      await adapter.deleteUser!("u-1");
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(mockPrismaUser.delete).toHaveBeenCalledWith({ where: { id: "u-1" } });
+    });
+  });
+
+  describe("unlinkAccount", () => {
+    it("deletes account with withBypassRls", async () => {
+      mockPrismaAccount.delete.mockResolvedValue({});
+      const adapter = createCustomAdapter();
+      await adapter.unlinkAccount!({ provider: "google", providerAccountId: "g-1" });
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(mockPrismaAccount.delete).toHaveBeenCalledWith({
+        where: {
+          provider_providerAccountId: { provider: "google", providerAccountId: "g-1" },
+        },
+      });
+    });
+  });
+
+  describe("deleteSession", () => {
+    it("deletes session with withBypassRls", async () => {
+      mockPrismaSession.delete.mockResolvedValue({});
+      const adapter = createCustomAdapter();
+      await adapter.deleteSession!("tok-1");
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-1" } });
+    });
+  });
+
+  describe("getAccount", () => {
+    it("returns account when found", async () => {
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
+        refresh_token: "rt", access_token: "at", expires_at: 1234, token_type: "bearer",
+        scope: "openid", id_token: "idt", session_state: "ss",
+      });
+      const adapter = createCustomAdapter();
+      const account = await adapter.getAccount!("g-1", "google");
+      expect(mockWithBypassRls).toHaveBeenCalled();
+      expect(account).toEqual({
+        userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
+        refresh_token: "rt", access_token: "at", expires_at: 1234, token_type: "bearer",
+        scope: "openid", id_token: "idt", session_state: "ss",
+      });
+    });
+
+    it("converts null optional fields to undefined", async () => {
+      mockPrismaAccount.findFirst.mockResolvedValue({
+        userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
+        refresh_token: null, access_token: null, expires_at: null, token_type: null,
+        scope: null, id_token: null, session_state: null,
+      });
+      const adapter = createCustomAdapter();
+      const account = await adapter.getAccount!("g-1", "google");
+      expect(account).toEqual({
+        userId: "u-1", type: "oidc", provider: "google", providerAccountId: "g-1",
+        refresh_token: undefined, access_token: undefined, expires_at: undefined,
+        token_type: undefined, scope: undefined, id_token: undefined, session_state: undefined,
+      });
+    });
+
+    it("returns null when account not found", async () => {
+      mockPrismaAccount.findFirst.mockResolvedValue(null);
+      const adapter = createCustomAdapter();
+      expect(await adapter.getAccount!("missing", "google")).toBeNull();
     });
   });
 });
