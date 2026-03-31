@@ -73,7 +73,7 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const links = screen.getAllByRole("link");
-    // Leaf items (members, teams) + children under groups (security×3, provisioning×2, machine-identity×3, audit-logs×2)
+    // Leaf items (members, teams) + children under groups (security×3, provisioning×2, service-accounts×2, mcp×1, audit-logs×2)
     // = 2 leaf + 10 children = 12 per sidebar × 2 sidebars = 24
     expect(links.length).toBe(24);
   });
@@ -97,9 +97,9 @@ describe("AdminSidebar — tenant scope", () => {
       "/admin/tenant/security/webhooks",
       "/admin/tenant/provisioning/scim",
       "/admin/tenant/provisioning/directory-sync",
-      "/admin/tenant/machine-identity/service-accounts",
-      "/admin/tenant/machine-identity/mcp-clients",
-      "/admin/tenant/machine-identity/access-requests",
+      "/admin/tenant/service-accounts/accounts",
+      "/admin/tenant/service-accounts/access-requests",
+      "/admin/tenant/mcp/clients",
       "/admin/tenant/audit-logs/logs",
       "/admin/tenant/audit-logs/breakglass",
     ];
@@ -150,6 +150,46 @@ describe("AdminSidebar — tenant scope", () => {
     expect(inactiveLinks.length).toBeGreaterThan(0);
     inactiveLinks.forEach((link) => {
       expect(link.parentElement?.getAttribute("data-variant")).toBe("ghost");
+    });
+  });
+
+  it("active child link under service-accounts group has secondary variant", () => {
+    mockUsePathname.mockReturnValue("/ja/admin/tenant/service-accounts/accounts");
+    render(
+      <AdminSidebar
+        open={false}
+        onOpenChange={() => {}}
+        adminTeams={adminTeams}
+        hasTenantRole={true}
+      />
+    );
+
+    const activeLinks = screen.getAllByRole("link").filter(
+      (el) => el.getAttribute("href") === "/admin/tenant/service-accounts/accounts"
+    );
+    expect(activeLinks.length).toBeGreaterThan(0);
+    activeLinks.forEach((link) => {
+      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
+    });
+  });
+
+  it("active child link under mcp group has secondary variant", () => {
+    mockUsePathname.mockReturnValue("/ja/admin/tenant/mcp/clients");
+    render(
+      <AdminSidebar
+        open={false}
+        onOpenChange={() => {}}
+        adminTeams={adminTeams}
+        hasTenantRole={true}
+      />
+    );
+
+    const activeLinks = screen.getAllByRole("link").filter(
+      (el) => el.getAttribute("href") === "/admin/tenant/mcp/clients"
+    );
+    expect(activeLinks.length).toBeGreaterThan(0);
+    activeLinks.forEach((link) => {
+      expect(link.parentElement?.getAttribute("data-variant")).toBe("secondary");
     });
   });
 });

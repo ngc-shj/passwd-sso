@@ -121,13 +121,20 @@ function useNavItems(
       ],
     },
     {
-      href: "/admin/tenant/machine-identity",
-      label: t("navMachineIdentity"),
+      href: "/admin/tenant/service-accounts",
+      label: t("navServiceAccounts"),
       icon: <Bot className="h-4 w-4 shrink-0" />,
       children: [
-        { href: "/admin/tenant/machine-identity/service-accounts", label: t("navServiceAccounts"), icon: <Key className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/machine-identity/mcp-clients", label: t("navMcpClients"), icon: <Cpu className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/machine-identity/access-requests", label: t("navAccessRequests"), icon: <KeyRound className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/service-accounts/accounts", label: t("navSaAccounts"), icon: <Key className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/service-accounts/access-requests", label: t("navAccessRequests"), icon: <KeyRound className="h-3.5 w-3.5 shrink-0" /> },
+      ],
+    },
+    {
+      href: "/admin/tenant/mcp",
+      label: t("navMcp"),
+      icon: <Cpu className="h-4 w-4 shrink-0" />,
+      children: [
+        { href: "/admin/tenant/mcp/clients", label: t("navMcpClients"), icon: <Cpu className="h-3.5 w-3.5 shrink-0" /> },
       ],
     },
     {
