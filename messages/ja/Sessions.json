@@ -32,5 +32,6 @@
   "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。",
   "subTabCli": "CLI トークン",
   "subTabApi": "API キー",
-  "subTabDelegation": "委任アクセス"
+  "subTabDelegation": "委任アクセス",
+  "subTabMcpConnections": "MCP接続"
 }

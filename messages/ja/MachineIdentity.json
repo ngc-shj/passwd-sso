@@ -168,5 +168,21 @@
     "bannerManage": "管理",
     "back": "戻る",
     "next": "次へ"
+  },
+  "mcpConnections": {
+    "title": "MCP接続",
+    "description": "承認済みMCPクライアント接続を表示・管理します。",
+    "clientName": "クライアント名",
+    "clientId": "クライアントID",
+    "scopes": "スコープ",
+    "created": "作成日",
+    "expires": "有効期限",
+    "revoke": "取り消し",
+    "revokeTitle": "接続の取り消し",
+    "revokeDescription": "この接続を取り消しますか？MCPクライアントはこのトークンを使用してアカウントにアクセスできなくなります。",
+    "revokeSuccess": "接続を取り消しました。",
+    "revokeError": "接続の取り消しに失敗しました。",
+    "noConnections": "アクティブな接続はありません",
+    "noConnectionsDescription": "まだMCPクライアントを承認していません。"
   }
 }

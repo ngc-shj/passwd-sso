@@ -168,5 +168,21 @@
     "bannerManage": "Manage",
     "back": "Back",
     "next": "Next"
+  },
+  "mcpConnections": {
+    "title": "MCP Connections",
+    "description": "View and manage your authorized MCP client connections.",
+    "clientName": "Client Name",
+    "clientId": "Client ID",
+    "scopes": "Scopes",
+    "created": "Created",
+    "expires": "Expires",
+    "revoke": "Revoke",
+    "revokeTitle": "Revoke Connection",
+    "revokeDescription": "Are you sure you want to revoke this connection? The MCP client will no longer be able to access your account with this token.",
+    "revokeSuccess": "Connection revoked successfully.",
+    "revokeError": "Failed to revoke connection.",
+    "noConnections": "No active connections",
+    "noConnectionsDescription": "You have not authorized any MCP clients yet."
   }
 }

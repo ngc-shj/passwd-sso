@@ -11,6 +11,7 @@ import {
   Terminal,
   Key,
   Handshake,
+  Plug,
 } from "lucide-react";
 import { SectionLayout } from "@/components/settings/section-layout";
 import { useTranslations } from "next-intl";
@@ -38,6 +39,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
         { href: "/dashboard/settings/developer/cli-token", label: t("subTabCli"), icon: Terminal },
         { href: "/dashboard/settings/developer/api-keys", label: t("subTabApi"), icon: Key },
         { href: "/dashboard/settings/developer/delegation", label: t("subTabDelegation"), icon: Handshake },
+        { href: "/dashboard/settings/developer/mcp-connections", label: t("subTabMcpConnections"), icon: Plug },
       ],
     },
   ];

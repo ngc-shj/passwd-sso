@@ -32,5 +32,6 @@
   "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access.",
   "subTabCli": "CLI Token",
   "subTabApi": "API Keys",
-  "subTabDelegation": "Delegated Access"
+  "subTabDelegation": "Delegated Access",
+  "subTabMcpConnections": "MCP Connections"
 }
