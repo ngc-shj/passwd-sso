@@ -55,8 +55,8 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
   const locale = getLocaleFromPathname(pathname);
   const pathWithoutLocale = stripLocalePrefix(pathname);
 
-  // Auth check for protected routes
-  if (pathWithoutLocale.startsWith("/dashboard")) {
+  // Auth check for protected routes (/dashboard/* and /admin/*)
+  if (pathWithoutLocale.startsWith("/dashboard") || pathWithoutLocale.startsWith("/admin")) {
     const session = await getSessionInfo(request);
     if (!session.valid) {
       const signInUrl = request.nextUrl.clone();

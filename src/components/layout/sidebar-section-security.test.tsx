@@ -97,46 +97,12 @@ describe("SecuritySection", () => {
 });
 
 describe("SettingsNavSection", () => {
-  it("shows team settings link for admin", () => {
+  it("shows settings link pointing to /dashboard/settings/account in personal context", () => {
     render(
       <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tTeam={(k) => k}
-        selectedTeam={{ id: "team-1", name: "Acme", role: "ADMIN" }}
-        onNavigate={() => {}}
-      />
-    );
-
-    expect(screen.getByRole("link", { name: "teamSettings" })).toHaveAttribute(
-      "href",
-      "/dashboard/teams/team-1/settings"
-    );
-  });
-
-  it("hides team settings link for member", () => {
-    render(
-      <SettingsNavSection
-        isOpen
-        onOpenChange={() => {}}
-        t={(k) => k}
-        tTeam={(k) => k}
-        selectedTeam={{ id: "team-1", name: "Acme", role: "MEMBER" }}
-        onNavigate={() => {}}
-      />
-    );
-
-    expect(screen.queryByRole("link", { name: "teamSettings" })).toBeNull();
-  });
-
-  it("shows settings and team settings links in personal context", () => {
-    render(
-      <SettingsNavSection
-        isOpen
-        onOpenChange={() => {}}
-        t={(k) => k}
-        tTeam={(k) => k}
         selectedTeam={null}
         onNavigate={() => {}}
       />
@@ -144,47 +110,41 @@ describe("SettingsNavSection", () => {
 
     expect(screen.getByRole("link", { name: "settings" })).toHaveAttribute(
       "href",
-      "/dashboard/settings"
-    );
-    expect(screen.getByRole("link", { name: "teamSettings" })).toHaveAttribute(
-      "href",
-      "/dashboard/teams"
+      "/dashboard/settings/account"
     );
   });
 
-  it("shows tenant settings link when isAdmin is true", () => {
+  it("shows admin console link when isAdmin is true", () => {
     render(
       <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tTeam={(k) => k}
         selectedTeam={null}
         isAdmin={true}
         onNavigate={() => {}}
       />
     );
 
-    expect(screen.getByRole("link", { name: "tenantSettings" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
       "href",
-      "/dashboard/tenant"
+      "/admin"
     );
   });
 
-  it("hides tenant settings link when isAdmin is false", () => {
+  it("hides admin console link when isAdmin is false", () => {
     render(
       <SettingsNavSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tTeam={(k) => k}
         selectedTeam={null}
         isAdmin={false}
         onNavigate={() => {}}
       />
     );
 
-    expect(screen.queryByRole("link", { name: "tenantSettings" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "adminConsole" })).toBeNull();
   });
 
   it("hides settings link when team is selected", () => {
@@ -193,13 +153,31 @@ describe("SettingsNavSection", () => {
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        tTeam={(k) => k}
         selectedTeam={{ id: "team-1", name: "Acme", role: "ADMIN" }}
         onNavigate={() => {}}
       />
     );
 
     expect(screen.queryByRole("link", { name: "settings" })).toBeNull();
+  });
+
+  it("applies secondary variant to admin console link when isAdminActive is true", () => {
+    render(
+      <SettingsNavSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        selectedTeam={null}
+        isAdmin={true}
+        isAdminActive={true}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "adminConsole" })).toHaveAttribute(
+      "href",
+      "/admin"
+    );
   });
 });
 

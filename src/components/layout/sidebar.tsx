@@ -28,6 +28,7 @@ import {
 import { useTeamVaultContext } from "@/hooks/use-vault-context";
 import { useSetActiveVault } from "@/lib/active-vault-context";
 import { useTenantRole } from "@/hooks/use-tenant-role";
+import { isTeamAdminRole } from "@/lib/constants";
 
 interface SidebarProps {
   open: boolean;
@@ -88,16 +89,19 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
   });
 
   const vaultContext = useTeamVaultContext(teams);
-  const { isAdmin } = useTenantRole();
+  const { isAdmin: isTenantAdmin } = useTenantRole();
+  // Show admin console link for tenant admins AND team admins
+  const isAdmin = isTenantAdmin || teams.some(
+    (t) => isTeamAdminRole(t.role)
+  );
   const setActiveVault = useSetActiveVault();
   useEffect(() => {
     setActiveVault(vaultContext);
   }, [vaultContext, setActiveVault]);
   const {
     activeAuditTeamId,
-    isTeamsManage,
-    isTeamSettings,
-    isTenantSettings,
+    isAdminActive,
+    isTeamsManage: _isTeamsManage,
     isSettings,
     isExport,
     isImport,
@@ -138,9 +142,10 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isShareLinks,
     isEmergencyAccess,
     isAuditLog,
-    isSettingsActive: isSettings || isTenantSettings || isTeamSettings || isTeamsManage,
+    isSettingsActive: isSettings,
     isExportActive: isExport,
     isImportActive: isImport,
+    isAdminActive,
   });
 
   const sidebarContentProps = useSidebarViewModel({
@@ -160,8 +165,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isSelectedVaultFavorites,
     isSelectedVaultArchive,
     isSelectedVaultTrash,
-    isTeamSettingsActive: isTeamSettings || isTeamsManage,
-    isTenantSettingsActive: isTenantSettings,
+    isAdminActive,
     isSettingsActive: isSettings,
     isExportActive: isExport,
     isImportActive: isImport,

@@ -44,7 +44,9 @@ export function useSidebarNavigationState({
     const isVaultFavorites = cleanPath === "/dashboard/favorites";
     const isVaultArchive = cleanPath === "/dashboard/archive";
     const isVaultTrash = cleanPath === "/dashboard/trash";
-    const isAuditLog = cleanPath === "/dashboard/audit-logs" || cleanPath.endsWith("/audit-logs");
+    const isAdminActive = cleanPath.startsWith("/admin");
+    // Scope to /dashboard/ only — don't match /admin/teams/[id]/audit-logs
+    const isAuditLog = cleanPath === "/dashboard/audit-logs" || (cleanPath.startsWith("/dashboard/") && cleanPath.endsWith("/audit-logs"));
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
     const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
     const activeAuditTeamId = auditTeamMatch ? auditTeamMatch[1] : null;
@@ -62,11 +64,9 @@ export function useSidebarNavigationState({
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/watchtower`
       : cleanPath === "/dashboard/watchtower";
     const isTeamsManage = cleanPath === "/dashboard/teams";
-    const isTeamSettings = teamMatch
-      ? cleanPath === `/dashboard/teams/${teamMatch[1]}/settings`
-      : false;
-    const isSettings = cleanPath === "/dashboard/settings";
-    const isTenantSettings = cleanPath === "/dashboard/tenant";
+    // Team settings moved to /admin/teams/[id]/* — keep exclusion for vault-all detection
+    const isTeamSettings = false;
+    const isSettings = cleanPath.startsWith("/dashboard/settings");
     const isExport = teamMatch
       ? cleanPath === `/dashboard/teams/${teamMatch[1]}/export`
       : cleanPath === "/dashboard/export";
@@ -158,9 +158,8 @@ export function useSidebarNavigationState({
     return {
       activeTeamId,
       activeAuditTeamId,
+      isAdminActive,
       isTeamsManage,
-      isTeamSettings,
-      isTenantSettings,
       isSettings,
       isExport,
       isImport,

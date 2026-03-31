@@ -99,6 +99,92 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.activeTeamId).toBeNull();
   });
 
+  it("does not match isAuditLog regex for admin teams audit-logs path", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/admin/teams/team-1/audit-logs",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "personal" },
+        teams,
+        folders,
+        tags,
+        teamFolderGroups,
+        teamTagGroups,
+      }),
+    );
+
+    expect(result.current.activeAuditTeamId).toBeNull();
+    expect(result.current.isAuditLog).toBe(false);
+  });
+
+  it("sets isAdminActive for admin paths", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/admin/tenant/members",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "personal" },
+        teams,
+        folders,
+        tags,
+        teamFolderGroups,
+        teamTagGroups,
+      }),
+    );
+
+    expect(result.current.isAdminActive).toBe(true);
+  });
+
+  it("sets isAdminActive false for non-admin paths", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/dashboard",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "personal" },
+        teams,
+        folders,
+        tags,
+        teamFolderGroups,
+        teamTagGroups,
+      }),
+    );
+
+    expect(result.current.isAdminActive).toBe(false);
+  });
+
+  it("matches isSettings with prefix for sub-paths like /dashboard/settings/account", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/dashboard/settings/account",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "personal" },
+        teams,
+        folders,
+        tags,
+        teamFolderGroups,
+        teamTagGroups,
+      }),
+    );
+
+    expect(result.current.isSettings).toBe(true);
+  });
+
+  it("matches isSettings with prefix for /dashboard/settings/security", () => {
+    const { result } = renderHook(() =>
+      useSidebarNavigationState({
+        pathname: "/ja/dashboard/settings/security",
+        searchParams: new URLSearchParams(),
+        vaultContext: { type: "personal" },
+        teams,
+        folders,
+        tags,
+        teamFolderGroups,
+        teamTagGroups,
+      }),
+    );
+
+    expect(result.current.isSettings).toBe(true);
+  });
+
   it("marks team watchtower without selecting team vault all", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({

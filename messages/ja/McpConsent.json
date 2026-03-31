@@ -9,7 +9,10 @@
     "credentials:use": "ローカルエージェント経由でのクレデンシャル使用",
     "credentials:decrypt": "クレデンシャルの一覧と使用（レガシー）",
     "team:credentials:read": "チーム資格情報の読み取り",
-    "vault:status": "保管庫のステータス確認"
+    "vault:status": "保管庫のステータス確認",
+    "vault:unlock-data": "暗号化された保管庫キーの取得",
+    "passwords:read": "パスワードエントリの読み取り",
+    "passwords:write": "パスワードエントリの作成・更新・削除"
   },
   "errors": {
     "missingParams": "必須パラメータが不足しています",

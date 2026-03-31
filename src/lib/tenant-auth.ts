@@ -71,6 +71,9 @@ export function isTenantRoleAbove(
   return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
 }
 
+// Re-export isTenantAdminRole from constants for backward compatibility
+export { isTenantAdminRole } from "@/lib/constants";
+
 /**
  * Get the membership record for a user in their tenant.
  * Returns null if the user has no active tenant membership.
@@ -84,6 +87,18 @@ export async function getTenantMembership(userId: string) {
       where: { userId, deactivatedAt: null },
     }),
   );
+}
+
+/**
+ * Get the tenant role for a user.
+ * Returns null if the user has no active tenant membership.
+ *
+ * Uses withBypassRls since this is called from layouts that do not
+ * yet know the tenantId.
+ */
+export async function getTenantRole(userId: string): Promise<TenantRole | null> {
+  const membership = await getTenantMembership(userId);
+  return membership?.role ?? null;
 }
 
 /**

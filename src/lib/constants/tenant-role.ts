@@ -13,3 +13,8 @@ export const TENANT_ROLE_VALUES = [
   TENANT_ROLE.ADMIN,
   TENANT_ROLE.MEMBER,
 ] as const satisfies readonly [TenantRole, ...TenantRole[]];
+
+/** Check if a tenant role has admin-level privileges (OWNER or ADMIN). */
+export function isTenantAdminRole(role: string | null | undefined): boolean {
+  return role === TENANT_ROLE.OWNER || role === TENANT_ROLE.ADMIN;
+}
