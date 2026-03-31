@@ -1,6 +1,7 @@
 {
   "title": "監査ログ",
   "description": "個人のセキュリティイベントとアクティビティ履歴を確認できます。",
+  "tenantDescription": "テナント全体のセキュリティイベントとアクティビティ履歴を確認できます。",
   "noLogs": "監査ログはまだありません。",
   "loadMore": "さらに読み込む",
   "date": "日時",
@@ -187,7 +188,7 @@
   "MCP_CONSENT_DENY": "MCP認可を拒否",
   "MCP_REFRESH_TOKEN_ROTATE": "MCPリフレッシュトークンをローテーション",
   "MCP_REFRESH_TOKEN_REPLAY": "MCPリフレッシュトークンのリプレイを検出",
-  "subTabTenantLogs": "テナントログ",
+  "subTabTenantLogs": "ログ",
   "subTabBreakglass": "Break-Glass",
   "scopeLabel": "スコープ",
   "scopeAll": "すべて",

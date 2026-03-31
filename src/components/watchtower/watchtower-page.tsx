@@ -205,7 +205,7 @@ export function WatchtowerPage({ scope }: WatchtowerPageProps) {
                   }
                 />
                 <div className="text-center">
-                  <h2 className="font-semibold">{t("overallScore")}</h2>
+                  <p className="font-semibold">{t("overallScore")}</p>
                   <p className="text-sm text-muted-foreground mt-1">
                     {totalIssues === 0
                       ? t("noIssues")

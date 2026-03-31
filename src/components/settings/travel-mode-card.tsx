@@ -6,7 +6,8 @@ import { useTravelMode } from "@/hooks/use-travel-mode";
 import { useVault } from "@/lib/vault-context";
 import { computePassphraseVerifier } from "@/lib/crypto-client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -86,13 +87,7 @@ export function TravelModeCard() {
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Plane className="h-5 w-5" />
-            <CardTitle>{t("title")}</CardTitle>
-          </div>
-          <CardDescription>{t("description")}</CardDescription>
-        </CardHeader>
+        <SectionCardHeader icon={Plane} title={t("title")} description={t("description")} />
         <CardContent className="space-y-4">
           <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
             <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />

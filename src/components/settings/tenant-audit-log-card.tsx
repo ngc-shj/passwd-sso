@@ -2,7 +2,11 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -11,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { ScrollText, ShieldAlert, Users } from "lucide-react";
 import {
@@ -89,10 +92,10 @@ const GROUP_LABEL_MAP: Record<string, string> = {
 };
 
 interface TenantAuditLogCardProps {
-  variant?: "logs" | "breakglass" | "all";
+  variant: "logs" | "breakglass";
 }
 
-export function TenantAuditLogCard({ variant = "all" }: TenantAuditLogCardProps) {
+export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
   const t = useTranslations("AuditLog");
   const tb = useTranslations("Breakglass");
   const [grantRefreshTrigger, setGrantRefreshTrigger] = useState(0);
@@ -194,153 +197,130 @@ export function TenantAuditLogCard({ variant = "all" }: TenantAuditLogCardProps)
     />
   );
 
-  const logsContent = (
-    <div className="space-y-4">
-      {/* Filters */}
-      <Card className="rounded-xl border bg-card/80 p-4">
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-3 items-end">
-            <div className="space-y-1">
-              <Label className="text-xs">{t("scopeLabel")}</Label>
-              <Select
-                value={scopeFilter}
-                onValueChange={(v) => {
-                  const scope = v as "ALL" | "TENANT" | "TEAM";
-                  setScopeFilter(scope);
-                  setTeamFilter("");
-                  clearActions();
-                }}
-              >
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">{t("scopeAll")}</SelectItem>
-                  <SelectItem value="TENANT">{t("scopeTenant")}</SelectItem>
-                  <SelectItem value="TEAM">{t("scopeTeam")}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            {(scopeFilter === "TEAM" || scopeFilter === "ALL") && teams.length > 0 && (
-              <div className="space-y-1">
-                <Label className="text-xs">{t("scopeTeam")}</Label>
-                <Select
-                  value={teamFilter || "__all__"}
-                  onValueChange={(v) => setTeamFilter(v === "__all__" ? "" : v)}
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__all__">{t("scopeAllTeams")}</SelectItem>
-                    {teams.map((team) => (
-                      <SelectItem key={team.id} value={team.id}>
-                        {team.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+  if (variant === "logs") {
+    return (
+      <Card>
+        <SectionCardHeader icon={ScrollText} title={t("subTabTenantLogs")} description={t("tenantDescription")} />
+        <CardContent className="space-y-4">
+          {/* Filters */}
+          <div className="rounded-xl border bg-card/80 p-4">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-3 items-end">
+                <div className="space-y-1">
+                  <Label className="text-xs">{t("scopeLabel")}</Label>
+                  <Select
+                    value={scopeFilter}
+                    onValueChange={(v) => {
+                      const scope = v as "ALL" | "TENANT" | "TEAM";
+                      setScopeFilter(scope);
+                      setTeamFilter("");
+                      clearActions();
+                    }}
+                  >
+                    <SelectTrigger className="w-[140px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">{t("scopeAll")}</SelectItem>
+                      <SelectItem value="TENANT">{t("scopeTenant")}</SelectItem>
+                      <SelectItem value="TEAM">{t("scopeTeam")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {(scopeFilter === "TEAM" || scopeFilter === "ALL") && teams.length > 0 && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">{t("scopeTeam")}</Label>
+                    <Select
+                      value={teamFilter || "__all__"}
+                      onValueChange={(v) => setTeamFilter(v === "__all__" ? "" : v)}
+                    >
+                      <SelectTrigger className="w-[180px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__all__">{t("scopeAllTeams")}</SelectItem>
+                        {teams.map((team) => (
+                          <SelectItem key={team.id} value={team.id}>
+                            {team.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="space-y-1">
+                  <Label className="text-xs">{t("actorTypeLabel")}</Label>
+                  <Select value={actorTypeFilter} onValueChange={setActorTypeFilter}>
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                      <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                      <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
+                      <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <AuditDateFilter
+                  dateFrom={dateFrom}
+                  dateTo={dateTo}
+                  setDateFrom={setDateFrom}
+                  setDateTo={setDateTo}
+                />
               </div>
-            )}
-            <div className="space-y-1">
-              <Label className="text-xs">{t("actorTypeLabel")}</Label>
-              <Select value={actorTypeFilter} onValueChange={setActorTypeFilter}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
-                  <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
-                  <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
-                  <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
-                </SelectContent>
-              </Select>
+              <AuditActionFilter
+                actionGroups={actionGroups}
+                selectedActions={selectedActions}
+                actionSearch={actionSearch}
+                filterOpen={filterOpen}
+                actionSummary={actionSummary}
+                actionLabel={actionLabel}
+                filteredActions={filteredActions}
+                isActionSelected={isActionSelected}
+                toggleAction={toggleAction}
+                setGroupSelection={setGroupSelection}
+                clearActions={clearActions}
+                setActionSearch={setActionSearch}
+                setFilterOpen={setFilterOpen}
+                groupLabelResolver={(v) => GROUP_LABEL_MAP[v]}
+              />
             </div>
-            <AuditDateFilter
-              dateFrom={dateFrom}
-              dateTo={dateTo}
-              setDateFrom={setDateFrom}
-              setDateTo={setDateTo}
+          </div>
+
+          {/* Download */}
+          <div className="flex justify-end">
+            <AuditDownloadButton
+              downloading={downloading}
+              onDownload={handleDownload}
             />
           </div>
-          <AuditActionFilter
-            actionGroups={actionGroups}
-            selectedActions={selectedActions}
-            actionSearch={actionSearch}
-            filterOpen={filterOpen}
-            actionSummary={actionSummary}
-            actionLabel={actionLabel}
-            filteredActions={filteredActions}
-            isActionSelected={isActionSelected}
-            toggleAction={toggleAction}
-            setGroupSelection={setGroupSelection}
-            clearActions={clearActions}
-            setActionSearch={setActionSearch}
-            setFilterOpen={setFilterOpen}
-            groupLabelResolver={(v) => GROUP_LABEL_MAP[v]}
+
+          {/* Audit log list */}
+          <AuditLogList
+            logs={logs}
+            loading={loading}
+            loadingMore={loadingMore}
+            nextCursor={nextCursor}
+            onLoadMore={handleLoadMore}
+            renderItem={renderItem}
           />
-        </div>
+        </CardContent>
       </Card>
-
-      {/* Download */}
-      <div className="flex justify-end">
-        <AuditDownloadButton
-          downloading={downloading}
-          onDownload={handleDownload}
-        />
-      </div>
-
-      {/* Audit log list */}
-      <AuditLogList
-        logs={logs}
-        loading={loading}
-        loadingMore={loadingMore}
-        nextCursor={nextCursor}
-        onLoadMore={handleLoadMore}
-        renderItem={renderItem}
-      />
-    </div>
-  );
-
-  const breakglassContent = (
-    <div className="space-y-4">
-      <Card className="rounded-xl border bg-card/80 p-4">
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <ShieldAlert className="h-5 w-5 text-destructive" />
-              <div>
-                <p className="text-sm font-medium">{tb("title")}</p>
-                <p className="text-xs text-muted-foreground">{tb("description")}</p>
-              </div>
-            </div>
-            <BreakGlassDialog
-              onGrantCreated={() => setGrantRefreshTrigger((n) => n + 1)}
-            />
-          </div>
-          <BreakGlassGrantList refreshTrigger={grantRefreshTrigger} />
-        </div>
-      </Card>
-    </div>
-  );
-
-  if (variant === "logs") return logsContent;
-  if (variant === "breakglass") return breakglassContent;
+    );
+  }
 
   return (
-    <Tabs defaultValue="tenant-logs" className="space-y-4">
-      <TabsList className="grid w-full grid-cols-2">
-        <TabsTrigger value="tenant-logs">
-          <ScrollText className="h-4 w-4 mr-2" />
-          {t("subTabTenantLogs")}
-        </TabsTrigger>
-        <TabsTrigger value="breakglass">
-          <ShieldAlert className="h-4 w-4 mr-2" />
-          {t("subTabBreakglass")}
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="tenant-logs">{logsContent}</TabsContent>
-      <TabsContent value="breakglass">{breakglassContent}</TabsContent>
-    </Tabs>
+    <Card>
+      <SectionCardHeader icon={ShieldAlert} title={tb("title")} description={tb("description")} />
+      <CardContent className="space-y-4">
+        <div className="flex justify-end">
+          <BreakGlassDialog
+            onGrantCreated={() => setGrantRefreshTrigger((n) => n + 1)}
+          />
+        </div>
+        <BreakGlassGrantList refreshTrigger={grantRefreshTrigger} />
+      </CardContent>
+    </Card>
   );
 }
