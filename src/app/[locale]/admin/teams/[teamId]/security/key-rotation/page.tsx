@@ -19,11 +19,9 @@ export default function TeamKeyRotationPage({
       <CardHeader>
         <div className="flex items-center gap-2">
           <KeyRound className="h-5 w-5" />
-          <div>
-            <CardTitle>{t("rotateKeyTitle")}</CardTitle>
-            <CardDescription>{t("rotateKeyDesc")}</CardDescription>
-          </div>
+          <CardTitle>{t("rotateKeyTitle")}</CardTitle>
         </div>
+        <CardDescription>{t("rotateKeyDesc")}</CardDescription>
       </CardHeader>
       <CardContent>
         <TeamRotateKeyButton teamId={teamId} />

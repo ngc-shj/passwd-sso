@@ -26,7 +26,7 @@
   "loading": "Loading sessions...",
   "tabAccountDesc": "Manage your active sessions and sign-in devices.",
   "tabSecurityDesc": "Manage passkeys, travel mode, and key rotation to protect your vault.",
-  "subTabPasskey": "Passkey",
+  "subTabPasskey": "Passkeys",
   "subTabTravelMode": "Travel Mode",
   "subTabKeyRotation": "Rotate Encryption Key",
   "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access.",
