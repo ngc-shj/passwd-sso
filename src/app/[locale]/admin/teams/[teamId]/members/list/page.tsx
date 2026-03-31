@@ -4,7 +4,8 @@ import { useEffect, useState, use } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -159,13 +160,7 @@ export default function TeamMemberListPage({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Users className="h-5 w-5" />
-          <CardTitle>{t("memberListTitle")}</CardTitle>
-        </div>
-        <CardDescription>{t("memberListDescription")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={Users} title={t("memberListTitle")} description={t("memberListDescription")} />
       <CardContent className="space-y-4">
         {members.length > 0 && (
           <div className="relative">

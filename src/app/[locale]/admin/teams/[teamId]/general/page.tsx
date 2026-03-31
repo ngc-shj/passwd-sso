@@ -7,10 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -167,13 +165,7 @@ export default function TeamGeneralPage({
       description={t("tabGeneralDesc")}
     >
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <Settings2 className="h-5 w-5" />
-            <CardTitle>{tAdmin("navGeneral")}</CardTitle>
-          </div>
-          <CardDescription>{t("tabGeneralDesc")}</CardDescription>
-        </CardHeader>
+        <SectionCardHeader icon={Settings2} title={tAdmin("navGeneral")} description={t("tabGeneralDesc")} />
         <CardContent className="space-y-6">
           {isAdmin ? (
             <section className="space-y-4">

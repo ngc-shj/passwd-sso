@@ -6,10 +6,8 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -308,13 +306,7 @@ export function PasskeyCredentialsCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Fingerprint className="h-5 w-5" />
-          <CardTitle>{t("title")}</CardTitle>
-        </div>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={Fingerprint} title={t("title")} description={t("description")} />
       <CardContent className="space-y-6">
         {/* Register section */}
         {webAuthnAvailable && (

@@ -5,10 +5,8 @@ import { useTranslations } from "next-intl";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   LogIn,
@@ -242,13 +240,7 @@ export default function TeamAdminAuditLogsPage({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <ScrollText className="h-5 w-5" />
-          <CardTitle>{tAdmin("navAuditLogs")}</CardTitle>
-        </div>
-        <CardDescription>{tAdmin("teamSectionAuditLogsDesc")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={ScrollText} title={tAdmin("navAuditLogs")} description={tAdmin("teamSectionAuditLogsDesc")} />
       <CardContent className="space-y-4">
         <div className="space-y-3">
           <div className="flex flex-wrap items-end gap-3">

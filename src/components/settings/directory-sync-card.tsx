@@ -3,7 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -462,19 +463,17 @@ export function DirectorySyncCard() {
   return (
     <>
       <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <FolderSync className="h-5 w-5 shrink-0" />
-              <CardTitle>{t("title")}</CardTitle>
-            </div>
+        <SectionCardHeader
+          icon={FolderSync}
+          title={t("title")}
+          description={t("description")}
+          action={
             <Button size="sm" className="shrink-0" onClick={openCreateDialog}>
               <Plus className="h-4 w-4 mr-1" />
               {t("addConfig")}
             </Button>
-          </div>
-          <CardDescription>{t("description")}</CardDescription>
-        </CardHeader>
+          }
+        />
         <CardContent>
           {loading ? (
             <div className="flex justify-center py-8">

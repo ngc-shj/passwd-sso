@@ -4,7 +4,8 @@ import { useEffect, useState, useRef, useCallback, use } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -216,13 +217,7 @@ export default function TeamAddMemberPage({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <UserPlus className="h-5 w-5" />
-          <CardTitle>{t("addMemberTitle")}</CardTitle>
-        </div>
-        <CardDescription>{t("addMemberDescription")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={UserPlus} title={t("addMemberTitle")} description={t("addMemberDescription")} />
       <CardContent className="space-y-6">
         {/* Add from organization */}
         <section className="space-y-4">

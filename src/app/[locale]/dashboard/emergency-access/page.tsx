@@ -9,10 +9,8 @@ import { GrantCard } from "@/components/emergency-access/grant-card";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import type { EaStatusValue } from "@/lib/constants";
 import { API_PATH, EA_STATUS } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -83,16 +81,12 @@ export default function EmergencyAccessPage() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <Users className="h-5 w-5" />
-                <CardTitle>{t("trustedContacts")}</CardTitle>
-              </div>
-              <CreateGrantDialog onCreated={fetchGrants} />
-            </div>
-            <CardDescription>{t("trustedContactsDesc")}</CardDescription>
-          </CardHeader>
+          <SectionCardHeader
+            icon={Users}
+            title={t("trustedContacts")}
+            description={t("trustedContactsDesc")}
+            action={<CreateGrantDialog onCreated={fetchGrants} />}
+          />
           <CardContent className="space-y-4">
             {loading ? (
               <div className="py-8 text-center text-muted-foreground">...</div>
@@ -149,13 +143,11 @@ export default function EmergencyAccessPage() {
         </Card>
 
         <Card>
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <Shield className="h-5 w-5" />
-              <CardTitle>{t("trustedByOthers")}</CardTitle>
-            </div>
-            <CardDescription>{t("trustedByOthersDesc")}</CardDescription>
-          </CardHeader>
+          <SectionCardHeader
+            icon={Shield}
+            title={t("trustedByOthers")}
+            description={t("trustedByOthersDesc")}
+          />
           <CardContent className="space-y-4">
             {loading ? (
               <div className="py-8 text-center text-muted-foreground">...</div>

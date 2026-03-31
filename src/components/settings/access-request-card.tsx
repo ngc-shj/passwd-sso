@@ -4,7 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -247,13 +248,7 @@ export function AccessRequestCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <ShieldCheck className="h-5 w-5" />
-          <CardTitle>{t("accessRequestCardTitle")}</CardTitle>
-        </div>
-        <CardDescription>{t("accessRequestCardDescription")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={ShieldCheck} title={t("accessRequestCardTitle")} description={t("accessRequestCardDescription")} />
       <CardContent className="space-y-4">
       <div className="flex items-center justify-between">
         <Select

@@ -4,7 +4,8 @@ import { useEffect, useState, use } from "react";
 import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import {
   AlertDialog,
@@ -143,13 +144,7 @@ export default function TeamTransferOwnershipPage({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Crown className="h-5 w-5" />
-          <CardTitle>{t("transferTitle")}</CardTitle>
-        </div>
-        <CardDescription>{t("transferDescription")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={Crown} title={t("transferTitle")} description={t("transferDescription")} />
       <CardContent className="space-y-4">
         {members.length > 1 && (
           <div className="relative">

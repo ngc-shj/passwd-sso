@@ -7,7 +7,8 @@ import { toast } from "sonner";
 import { Monitor, Smartphone, Tablet, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -136,13 +137,7 @@ export function SessionsCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Monitor className="h-5 w-5" />
-          <CardTitle>{t("title")}</CardTitle>
-        </div>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={Monitor} title={t("title")} description={t("description")} />
       <CardContent className="space-y-4">
         <div className="divide-y">
           {sessions.map((session) => {

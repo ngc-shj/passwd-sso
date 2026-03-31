@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { Loader2, Terminal, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -49,13 +50,7 @@ export function CliTokenCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Terminal className="h-5 w-5" />
-          <CardTitle>{t("title")}</CardTitle>
-        </div>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={Terminal} title={t("title")} description={t("description")} />
       <CardContent className="space-y-4">
 
       {token ? (

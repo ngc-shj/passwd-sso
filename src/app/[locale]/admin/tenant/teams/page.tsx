@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
@@ -63,13 +64,12 @@ export default function AdminTenantTeamsPage() {
       description={tAdmin("sectionTeamsDesc")}
     >
       <Card>
-        <CardHeader>
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <UsersRound className="h-5 w-5" />
-              <CardTitle>{tAdmin("navTeams")}</CardTitle>
-            </div>
-            {isAdmin ? (
+        <SectionCardHeader
+          icon={UsersRound}
+          title={tAdmin("navTeams")}
+          description={t("teamsDescription")}
+          action={
+            isAdmin ? (
               <TeamCreateDialog
                 trigger={
                   <Button size="sm">
@@ -79,10 +79,9 @@ export default function AdminTenantTeamsPage() {
                 }
                 onCreated={handleCreated}
               />
-            ) : null}
-          </div>
-          <CardDescription>{t("teamsDescription")}</CardDescription>
-        </CardHeader>
+            ) : undefined
+          }
+        />
         <CardContent className="space-y-3">
           {loading ? (
             <div className="flex items-center justify-center py-12">

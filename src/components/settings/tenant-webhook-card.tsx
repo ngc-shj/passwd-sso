@@ -7,10 +7,8 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
@@ -283,13 +281,7 @@ export function TenantWebhookCard() {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Webhook className="h-5 w-5" />
-          <CardTitle>{t("title")}</CardTitle>
-        </div>
-        <CardDescription>{t("description")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={Webhook} title={t("title")} description={t("description")} />
       <CardContent className="space-y-6">
         {/* Create webhook form (fixed) */}
         <section className="space-y-4">

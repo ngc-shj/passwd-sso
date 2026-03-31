@@ -5,10 +5,8 @@ import { useTranslations } from "next-intl";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -202,13 +200,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
   if (variant === "logs") {
     return (
       <Card>
-        <CardHeader>
-          <div className="flex items-center gap-2">
-            <ScrollText className="h-5 w-5" />
-            <CardTitle>{t("subTabTenantLogs")}</CardTitle>
-          </div>
-          <CardDescription>{t("tenantDescription")}</CardDescription>
-        </CardHeader>
+        <SectionCardHeader icon={ScrollText} title={t("subTabTenantLogs")} description={t("tenantDescription")} />
         <CardContent className="space-y-4">
           {/* Filters */}
           <div className="rounded-xl border bg-card/80 p-4">
@@ -320,13 +312,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <ShieldAlert className="h-5 w-5" />
-          <CardTitle>{tb("title")}</CardTitle>
-        </div>
-        <CardDescription>{tb("description")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={ShieldAlert} title={tb("title")} description={tb("description")} />
       <CardContent className="space-y-4">
         <div className="flex justify-end">
           <BreakGlassDialog

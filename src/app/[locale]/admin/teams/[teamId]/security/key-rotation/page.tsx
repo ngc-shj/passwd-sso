@@ -2,7 +2,8 @@
 
 import { use } from "react";
 import { useTranslations } from "next-intl";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { TeamRotateKeyButton } from "@/components/team/team-rotate-key-button";
 import { KeyRound } from "lucide-react";
 
@@ -16,13 +17,7 @@ export default function TeamKeyRotationPage({
 
   return (
     <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <KeyRound className="h-5 w-5" />
-          <CardTitle>{t("rotateKeyTitle")}</CardTitle>
-        </div>
-        <CardDescription>{t("rotateKeyDesc")}</CardDescription>
-      </CardHeader>
+      <SectionCardHeader icon={KeyRound} title={t("rotateKeyTitle")} description={t("rotateKeyDesc")} />
       <CardContent>
         <TeamRotateKeyButton teamId={teamId} />
       </CardContent>
