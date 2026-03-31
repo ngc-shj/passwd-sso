@@ -138,7 +138,7 @@ export function McpConnectionsCard() {
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
                       <AlertDialogAction onClick={() => handleRevoke(conn.id)}>
                         {t("revoke")}
                       </AlertDialogAction>

@@ -32,7 +32,7 @@ async function handleDELETE(
 
     const now = new Date();
 
-    await prisma.$transaction(async (tx) => {
+    const revokedDelegationSessionIds = await prisma.$transaction(async (tx) => {
       await tx.mcpAccessToken.update({
         where: { id },
         data: { revokedAt: now },
@@ -74,6 +74,7 @@ async function handleDELETE(
         });
       }
 
+      // Audit: MCP connection revoke
       await tx.auditLog.create({
         data: {
           userId,
@@ -85,11 +86,27 @@ async function handleDELETE(
         },
       });
 
-      // Evict Redis delegation keys best-effort (outside transaction)
+      // Audit: individual delegation session revocations
       for (const ds of sessions) {
-        evictDelegationRedisKeys(userId, ds.id).catch(() => {});
+        await tx.auditLog.create({
+          data: {
+            userId,
+            tenantId,
+            action: AUDIT_ACTION.DELEGATION_REVOKE,
+            scope: AUDIT_SCOPE.PERSONAL,
+            targetType: "DelegationSession",
+            targetId: ds.id,
+          },
+        });
       }
+
+      return sessions.map((s) => s.id);
     });
+
+    // Evict Redis delegation keys best-effort (after transaction commit)
+    for (const sessionId of revokedDelegationSessionIds) {
+      evictDelegationRedisKeys(userId, sessionId).catch(() => {});
+    }
 
     return token;
   });

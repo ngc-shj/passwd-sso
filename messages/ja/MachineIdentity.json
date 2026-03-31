@@ -182,6 +182,7 @@
     "revokeDescription": "この接続を取り消しますか？MCPクライアントはこのトークンを使用してアカウントにアクセスできなくなります。",
     "revokeSuccess": "接続を取り消しました。",
     "revokeError": "接続の取り消しに失敗しました。",
+    "cancel": "キャンセル",
     "noConnections": "アクティブな接続はありません",
     "noConnectionsDescription": "まだMCPクライアントを承認していません。"
   }

@@ -107,7 +107,7 @@ const sampleConnections = [
     id: "token-2",
     clientName: "Another Agent",
     clientId: "mcpc_def456",
-    scope: "vault:unlock-data",
+    scope: "vault:unlock-data,passwords:read",
     createdAt: "2025-02-01T00:00:00Z",
     expiresAt: "2026-02-01T00:00:00Z",
   },
@@ -156,6 +156,18 @@ describe("McpConnectionsCard", () => {
     expect(screen.getByText("noConnectionsDescription")).toBeInTheDocument();
   });
 
+  it("shows empty state when initial fetch throws network error", async () => {
+    mockFetch.mockRejectedValue(new Error("Network error"));
+
+    await act(async () => {
+      render(<McpConnectionsCard />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noConnections")).toBeInTheDocument();
+    });
+  });
+
   it("renders connection list with client name, clientId, scope badges, and dates", async () => {
     setupFetchConnections();
 
@@ -175,13 +187,14 @@ describe("McpConnectionsCard", () => {
     expect(screen.getByText("credentials:list")).toBeInTheDocument();
     expect(screen.getByText("credentials:use")).toBeInTheDocument();
     expect(screen.getByText("vault:unlock-data")).toBeInTheDocument();
+    expect(screen.getByText("passwords:read")).toBeInTheDocument();
 
     // Date fields
     expect(screen.getAllByText(/created:/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/expires:/i).length).toBeGreaterThan(0);
   });
 
-  it("revoke connection — confirm dialog, verify DELETE called and item removed", async () => {
+  it("revoke connection — DELETE called with correct URL, success toast, item removed from DOM", async () => {
     setupFetchConnections();
 
     await act(async () => {
@@ -190,9 +203,10 @@ describe("McpConnectionsCard", () => {
 
     await waitFor(() => {
       expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
+      expect(screen.getByText("Another Agent")).toBeInTheDocument();
     });
 
-    // Click the first alert action (confirm revoke)
+    // Click the first alert action (confirm revoke for token-1)
     const alertActions = screen.getAllByTestId("alert-action");
     await act(async () => {
       fireEvent.click(alertActions[0]);
@@ -203,13 +217,20 @@ describe("McpConnectionsCard", () => {
         (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "DELETE"
       );
       expect(deleteCalls.length).toBe(1);
+      expect(deleteCalls[0][0]).toBe("/api/user/mcp-tokens/token-1");
     });
 
     // Success toast should be called
     expect(mockToast.success).toHaveBeenCalledWith("revokeSuccess");
+
+    // Revoked item removed, other connection still present
+    await waitFor(() => {
+      expect(screen.queryByText("My MCP Agent")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("Another Agent")).toBeInTheDocument();
   });
 
-  it("shows error toast when revoke fails", async () => {
+  it("shows error toast when revoke fails (non-ok response)", async () => {
     mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {
         return Promise.resolve({
@@ -239,10 +260,24 @@ describe("McpConnectionsCard", () => {
     await waitFor(() => {
       expect(mockToast.error).toHaveBeenCalledWith("revokeError");
     });
+
+    // Item must remain in DOM when revoke fails
+    expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
   });
 
-  it("removes revoked connection from list on success", async () => {
-    setupFetchConnections();
+  it("shows error toast when revoke throws network error", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ tokens: sampleConnections }),
+        });
+      }
+      if (init.method === "DELETE") {
+        return Promise.reject(new Error("Network error"));
+      }
+      return Promise.resolve({ ok: false });
+    });
 
     await act(async () => {
       render(<McpConnectionsCard />);
@@ -250,7 +285,6 @@ describe("McpConnectionsCard", () => {
 
     await waitFor(() => {
       expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
-      expect(screen.getByText("Another Agent")).toBeInTheDocument();
     });
 
     const alertActions = screen.getAllByTestId("alert-action");
@@ -259,10 +293,10 @@ describe("McpConnectionsCard", () => {
     });
 
     await waitFor(() => {
-      expect(screen.queryByText("My MCP Agent")).not.toBeInTheDocument();
+      expect(mockToast.error).toHaveBeenCalledWith("revokeError");
     });
 
-    // Second connection still present
-    expect(screen.getByText("Another Agent")).toBeInTheDocument();
+    // Item must remain in DOM when revoke throws
+    expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
   });
 });
