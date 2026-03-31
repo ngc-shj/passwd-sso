@@ -82,7 +82,7 @@ export async function GET(_req: NextRequest) {
       ...rest,
       connectedUsers: accessTokens.map((t) => {
         const u = userMap.get(t.userId!);
-        return { name: u?.name ?? u?.email ?? "Unknown" };
+        return { name: u?.name ?? null, email: u?.email ?? null };
       }),
     })),
   });

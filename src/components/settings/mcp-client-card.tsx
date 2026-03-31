@@ -52,7 +52,7 @@ interface McpClient {
   isActive: boolean;
   isDcr: boolean;
   createdAt: string;
-  connectedUsers?: { name: string }[];
+  connectedUsers?: { name: string | null; email: string | null }[];
 }
 
 const SCOPE_DISPLAY_LIMIT = 3;
@@ -361,7 +361,7 @@ export function McpClientCard() {
         {client.connectedUsers && client.connectedUsers.length > 0 && (
           <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users className="h-3 w-3" />
-            {client.connectedUsers.map((u) => u.name).join(", ")}
+            {client.connectedUsers.map((u) => u.name ?? u.email ?? "Unknown").join(", ")}
           </div>
         )}
       </div>
