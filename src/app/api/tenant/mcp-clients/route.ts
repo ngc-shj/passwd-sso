@@ -55,22 +55,35 @@ export async function GET(_req: NextRequest) {
         isDcr: true,
         createdAt: true,
         updatedAt: true,
-        _count: {
-          select: {
-            accessTokens: {
-              where: { revokedAt: null, expiresAt: { gt: new Date() }, userId: { not: null } },
-            },
-          },
+        accessTokens: {
+          where: { revokedAt: null, expiresAt: { gt: new Date() }, userId: { not: null } },
+          select: { userId: true },
+          distinct: ["userId"],
         },
       },
       orderBy: { createdAt: "desc" },
     }),
   );
 
+  // Batch-fetch connected user names
+  const allUserIds = [...new Set(clients.flatMap((c) => c.accessTokens.map((t) => t.userId!)))];
+  const users = allUserIds.length > 0
+    ? await withTenantRls(prisma, actor.tenantId, () =>
+        prisma.user.findMany({
+          where: { id: { in: allUserIds } },
+          select: { id: true, name: true, email: true },
+        }),
+      )
+    : [];
+  const userMap = new Map(users.map((u) => [u.id, u]));
+
   return NextResponse.json({
-    clients: clients.map(({ _count, ...rest }) => ({
+    clients: clients.map(({ accessTokens, ...rest }) => ({
       ...rest,
-      connectedUsers: _count?.accessTokens ?? 0,
+      connectedUsers: accessTokens.map((t) => {
+        const u = userMap.get(t.userId!);
+        return { name: u?.name ?? u?.email ?? "Unknown" };
+      }),
     })),
   });
 }

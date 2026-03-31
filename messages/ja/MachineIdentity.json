@@ -92,6 +92,7 @@
   "mcpActive": "有効",
   "mcpInactive": "無効",
   "mcpConnectedUsers": "{count}人接続中",
+  "mcpCreatedAt": "登録日: {date}",
   "noActiveMcpClients": "有効な MCP クライアントがありません",
   "mcpDcrFieldsReadOnly": "クライアントIDとリダイレクトURIはDCR登録時に設定され、変更できません。",
   "accessRequests": "アクセスリクエスト",

@@ -35,7 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Blocks, ChevronDown, Loader2, Plus, Trash2, Pencil } from "lucide-react";
+import { Blocks, ChevronDown, ChevronUp, Loader2, Plus, Trash2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
@@ -51,7 +51,44 @@ interface McpClient {
   isActive: boolean;
   isDcr: boolean;
   createdAt: string;
-  connectedUsers?: number;
+  connectedUsers?: { name: string }[];
+}
+
+const SCOPE_DISPLAY_LIMIT = 3;
+
+function ScopeBadges({ scopes }: { scopes: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const all = scopes.split(",").map((s) => s.trim()).filter(Boolean);
+  const visible = expanded ? all : all.slice(0, SCOPE_DISPLAY_LIMIT);
+  const hidden = all.length - SCOPE_DISPLAY_LIMIT;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1">
+      {visible.map((scope) => (
+        <Badge key={scope} variant="outline" className="text-xs font-normal">
+          {scope}
+        </Badge>
+      ))}
+      {hidden > 0 && !expanded && (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setExpanded(true)}
+        >
+          +{hidden}
+        </button>
+      )}
+      {expanded && hidden > 0 && (
+        <button
+          type="button"
+          className="text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => setExpanded(false)}
+        >
+          <ChevronUp className="h-3 w-3 inline" />
+        </button>
+      )}
+    </div>
+  );
 }
 
 interface NewClientCredentials {
@@ -314,26 +351,20 @@ export function McpClientCard() {
               DCR
             </Badge>
           )}
-          {client.connectedUsers != null && client.connectedUsers > 0 && (
-            <Badge variant="secondary" className="shrink-0">
-              {t("mcpConnectedUsers", { count: client.connectedUsers })}
-            </Badge>
-          )}
         </div>
         <p className="text-xs text-muted-foreground font-mono">
           {client.clientId}
         </p>
-        <div className="flex flex-wrap gap-1">
-          {client.allowedScopes
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((scope) => (
-              <Badge key={scope} variant="outline" className="text-xs font-normal">
-                {scope}
-              </Badge>
-            ))}
-        </div>
+        <ScopeBadges scopes={client.allowedScopes} />
+        {client.connectedUsers && client.connectedUsers.length > 0 && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Users className="h-3 w-3" />
+            {client.connectedUsers.map((u) => u.name).join(", ")}
+          </div>
+        )}
+        <p className="text-xs text-muted-foreground">
+          {t("mcpCreatedAt", { date: new Date(client.createdAt).toLocaleDateString() })}
+        </p>
       </div>
       <div className="flex items-center gap-1 shrink-0">
         <Button

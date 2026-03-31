@@ -92,6 +92,7 @@
   "mcpActive": "Active",
   "mcpInactive": "Inactive",
   "mcpConnectedUsers": "{count, plural, one {# user} other {# users}}",
+  "mcpCreatedAt": "Created: {date}",
   "noActiveMcpClients": "No active MCP clients",
   "mcpDcrFieldsReadOnly": "Client ID and redirect URIs are set at DCR registration time and cannot be changed.",
   "accessRequests": "Access Requests",
