@@ -91,6 +91,7 @@
   "mcpNameConflict": "同じ名前のクライアントが既に存在します",
   "mcpActive": "有効",
   "mcpInactive": "無効",
+  "mcpConnectedUsers": "{count}人接続中",
   "noActiveMcpClients": "有効な MCP クライアントがありません",
   "mcpDcrFieldsReadOnly": "クライアントIDとリダイレクトURIはDCR登録時に設定され、変更できません。",
   "accessRequests": "アクセスリクエスト",
@@ -183,7 +184,12 @@
     "revokeSuccess": "接続を取り消しました。",
     "revokeError": "接続の取り消しに失敗しました。",
     "cancel": "キャンセル",
+    "connected": "接続済み",
+    "notConnected": "未接続",
+    "noClients": "MCPクライアントがありません",
+    "noClientsDescription": "このテナントにMCPクライアントが登録されていません。",
     "noConnections": "アクティブな接続はありません",
-    "noConnectionsDescription": "まだMCPクライアントを承認していません。"
+    "noConnectionsDescription": "まだMCPクライアントを承認していません。",
+    "connectedUsers": "{count}人のユーザーが接続中"
   }
 }

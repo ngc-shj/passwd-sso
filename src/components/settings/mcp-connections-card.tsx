@@ -23,27 +23,31 @@ import { API_PATH, apiPath } from "@/lib/constants/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format-datetime";
 
-interface McpConnection {
+interface McpClientConnection {
   id: string;
-  clientName: string;
   clientId: string;
-  scope: string;
-  createdAt: string;
-  expiresAt: string;
+  name: string;
+  isDcr: boolean;
+  connection: {
+    tokenId: string;
+    scope: string;
+    createdAt: string;
+    expiresAt: string;
+  } | null;
 }
 
 export function McpConnectionsCard() {
   const t = useTranslations("MachineIdentity.mcpConnections");
   const locale = useLocale();
-  const [connections, setConnections] = useState<McpConnection[]>([]);
+  const [clients, setClients] = useState<McpClientConnection[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const fetchConnections = useCallback(async () => {
+  const fetchClients = useCallback(async () => {
     try {
       const res = await fetchApi(API_PATH.USER_MCP_TOKENS);
       if (res.ok) {
         const data = await res.json();
-        setConnections(data.tokens);
+        setClients(data.clients);
       }
     } catch {
       // Graceful failure — show empty state
@@ -53,16 +57,20 @@ export function McpConnectionsCard() {
   }, []);
 
   useEffect(() => {
-    fetchConnections();
-  }, [fetchConnections]);
+    fetchClients();
+  }, [fetchClients]);
 
-  const handleRevoke = async (tokenId: string) => {
+  const handleRevoke = async (tokenId: string, clientDbId: string) => {
     try {
       const res = await fetchApi(apiPath.userMcpTokenById(tokenId), {
         method: "DELETE",
       });
       if (res.ok) {
-        setConnections((prev) => prev.filter((c) => c.id !== tokenId));
+        setClients((prev) =>
+          prev.map((c) =>
+            c.id === clientDbId ? { ...c, connection: null } : c,
+          ),
+        );
         toast.success(t("revokeSuccess"));
       } else {
         toast.error(t("revokeError"));
@@ -84,67 +92,101 @@ export function McpConnectionsCard() {
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
-        ) : connections.length === 0 ? (
+        ) : clients.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8 text-center">
             <Unplug className="h-10 w-10 text-muted-foreground mb-3" />
-            <p className="text-sm font-medium">{t("noConnections")}</p>
+            <p className="text-sm font-medium">{t("noClients")}</p>
             <p className="text-sm text-muted-foreground mt-1">
-              {t("noConnectionsDescription")}
+              {t("noClientsDescription")}
             </p>
           </div>
         ) : (
           <div className="space-y-3">
-            {connections.map((conn) => (
+            {clients.map((client) => (
               <div
-                key={conn.id}
+                key={client.id}
                 className="flex items-start justify-between rounded-lg border p-3"
               >
                 <div className="space-y-1.5 min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium truncate">
-                      {conn.clientName}
+                      {client.name}
                     </span>
                     <span className="text-xs text-muted-foreground font-mono">
-                      {conn.clientId}
+                      {client.clientId}
                     </span>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {conn.scope.split(/[\s,]+/).filter(Boolean).map((s) => (
-                      <Badge key={s} variant="secondary" className="text-xs">
-                        {s}
+                    {client.isDcr && (
+                      <Badge variant="outline" className="text-xs">
+                        DCR
                       </Badge>
-                    ))}
+                    )}
+                    <Badge
+                      variant={client.connection ? "default" : "secondary"}
+                      className="text-xs"
+                    >
+                      {client.connection ? t("connected") : t("notConnected")}
+                    </Badge>
                   </div>
-                  <div className="flex gap-4 text-xs text-muted-foreground">
-                    <span>
-                      {t("created")}: {formatDateTime(conn.createdAt, locale)}
-                    </span>
-                    <span>
-                      {t("expires")}: {formatDateTime(conn.expiresAt, locale)}
-                    </span>
-                  </div>
+                  {client.connection && (
+                    <>
+                      <div className="flex flex-wrap gap-1">
+                        {client.connection.scope
+                          .split(/[\s,]+/)
+                          .filter(Boolean)
+                          .map((s) => (
+                            <Badge
+                              key={s}
+                              variant="secondary"
+                              className="text-xs"
+                            >
+                              {s}
+                            </Badge>
+                          ))}
+                      </div>
+                      <div className="flex gap-4 text-xs text-muted-foreground">
+                        <span>
+                          {t("created")}:{" "}
+                          {formatDateTime(client.connection.createdAt, locale)}
+                        </span>
+                        <span>
+                          {t("expires")}:{" "}
+                          {formatDateTime(client.connection.expiresAt, locale)}
+                        </span>
+                      </div>
+                    </>
+                  )}
                 </div>
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="ghost" size="sm" className="shrink-0 ml-2">
-                      {t("revoke")}
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>{t("revokeTitle")}</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        {t("revokeDescription")}
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
-                      <AlertDialogAction onClick={() => handleRevoke(conn.id)}>
+                {client.connection && (
+                  <AlertDialog>
+                    <AlertDialogTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="shrink-0 ml-2"
+                      >
                         {t("revoke")}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
+                      </Button>
+                    </AlertDialogTrigger>
+                    <AlertDialogContent>
+                      <AlertDialogHeader>
+                        <AlertDialogTitle>{t("revokeTitle")}</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          {t("revokeDescription")}
+                        </AlertDialogDescription>
+                      </AlertDialogHeader>
+                      <AlertDialogFooter>
+                        <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                        <AlertDialogAction
+                          onClick={() =>
+                            handleRevoke(client.connection!.tokenId, client.id)
+                          }
+                        >
+                          {t("revoke")}
+                        </AlertDialogAction>
+                      </AlertDialogFooter>
+                    </AlertDialogContent>
+                  </AlertDialog>
+                )}
               </div>
             ))}
           </div>

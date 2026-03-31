@@ -51,6 +51,7 @@ interface McpClient {
   isActive: boolean;
   isDcr: boolean;
   createdAt: string;
+  connectedUsers?: number;
 }
 
 interface NewClientCredentials {
@@ -311,6 +312,11 @@ export function McpClientCard() {
           {client.isDcr && (
             <Badge variant="outline" className="shrink-0">
               DCR
+            </Badge>
+          )}
+          {client.connectedUsers != null && client.connectedUsers > 0 && (
+            <Badge variant="secondary" className="shrink-0">
+              {t("mcpConnectedUsers", { count: client.connectedUsers })}
             </Badge>
           )}
         </div>

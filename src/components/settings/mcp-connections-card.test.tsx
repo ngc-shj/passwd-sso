@@ -94,31 +94,39 @@ vi.mock("@/components/ui/button", () => ({
 
 import { McpConnectionsCard } from "./mcp-connections-card";
 
-const sampleConnections = [
+const sampleClients = [
   {
-    id: "token-1",
-    clientName: "My MCP Agent",
+    id: "client-db-1",
     clientId: "mcpc_abc123",
-    scope: "credentials:list credentials:use",
-    createdAt: "2025-01-01T00:00:00Z",
-    expiresAt: "2026-01-01T00:00:00Z",
+    name: "My MCP Agent",
+    isDcr: false,
+    connection: {
+      tokenId: "token-1",
+      scope: "credentials:list credentials:use",
+      createdAt: "2025-01-01T00:00:00Z",
+      expiresAt: "2026-01-01T00:00:00Z",
+    },
   },
   {
-    id: "token-2",
-    clientName: "Another Agent",
+    id: "client-db-2",
     clientId: "mcpc_def456",
-    scope: "vault:unlock-data,passwords:read",
-    createdAt: "2025-02-01T00:00:00Z",
-    expiresAt: "2026-02-01T00:00:00Z",
+    name: "Another Agent",
+    isDcr: false,
+    connection: {
+      tokenId: "token-2",
+      scope: "vault:unlock-data,passwords:read",
+      createdAt: "2025-02-01T00:00:00Z",
+      expiresAt: "2026-02-01T00:00:00Z",
+    },
   },
 ];
 
-function setupFetchConnections(tokens = sampleConnections) {
+function setupFetchClients(clients = sampleClients) {
   mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
     if (!init?.method || init.method === "GET") {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ tokens }),
+        json: () => Promise.resolve({ clients }),
       });
     }
     if (init.method === "DELETE") {
@@ -142,18 +150,18 @@ describe("McpConnectionsCard", () => {
     expect(spinner).toBeInTheDocument();
   });
 
-  it("shows empty state when no connections", async () => {
-    setupFetchConnections([]);
+  it("shows empty state when no clients", async () => {
+    setupFetchClients([]);
 
     await act(async () => {
       render(<McpConnectionsCard />);
     });
 
     await waitFor(() => {
-      expect(screen.getByText("noConnections")).toBeInTheDocument();
+      expect(screen.getByText("noClients")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("noConnectionsDescription")).toBeInTheDocument();
+    expect(screen.getByText("noClientsDescription")).toBeInTheDocument();
   });
 
   it("shows empty state when initial fetch throws network error", async () => {
@@ -164,12 +172,12 @@ describe("McpConnectionsCard", () => {
     });
 
     await waitFor(() => {
-      expect(screen.getByText("noConnections")).toBeInTheDocument();
+      expect(screen.getByText("noClients")).toBeInTheDocument();
     });
   });
 
-  it("renders connection list with client name, clientId, scope badges, and dates", async () => {
-    setupFetchConnections();
+  it("renders client list with name, clientId, and connected/notConnected badges", async () => {
+    setupFetchClients();
 
     await act(async () => {
       render(<McpConnectionsCard />);
@@ -183,7 +191,10 @@ describe("McpConnectionsCard", () => {
     expect(screen.getByText("Another Agent")).toBeInTheDocument();
     expect(screen.getByText("mcpc_def456")).toBeInTheDocument();
 
-    // Scope badges
+    // Connection status badges — both clients have connections
+    expect(screen.getAllByText("connected").length).toBeGreaterThan(0);
+
+    // Scope badges for connected clients
     expect(screen.getByText("credentials:list")).toBeInTheDocument();
     expect(screen.getByText("credentials:use")).toBeInTheDocument();
     expect(screen.getByText("vault:unlock-data")).toBeInTheDocument();
@@ -194,8 +205,8 @@ describe("McpConnectionsCard", () => {
     expect(screen.getAllByText(/expires:/i).length).toBeGreaterThan(0);
   });
 
-  it("revoke connection — DELETE called with correct URL, success toast, item removed from DOM", async () => {
-    setupFetchConnections();
+  it("revoke connection — DELETE called with tokenId URL, success toast, item stays as notConnected", async () => {
+    setupFetchClients();
 
     await act(async () => {
       render(<McpConnectionsCard />);
@@ -217,17 +228,20 @@ describe("McpConnectionsCard", () => {
         (c: unknown[]) => (c[1] as Record<string, unknown>)?.method === "DELETE"
       );
       expect(deleteCalls.length).toBe(1);
+      // DELETE URL uses connection.tokenId
       expect(deleteCalls[0][0]).toBe("/api/user/mcp-tokens/token-1");
     });
 
     // Success toast should be called
     expect(mockToast.success).toHaveBeenCalledWith("revokeSuccess");
 
-    // Revoked item removed, other connection still present
+    // Revoked item stays in list but changes to notConnected
     await waitFor(() => {
-      expect(screen.queryByText("My MCP Agent")).not.toBeInTheDocument();
+      expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
     });
     expect(screen.getByText("Another Agent")).toBeInTheDocument();
+    // The revoked client now shows notConnected badge
+    expect(screen.getByText("notConnected")).toBeInTheDocument();
   });
 
   it("shows error toast when revoke fails (non-ok response)", async () => {
@@ -235,7 +249,7 @@ describe("McpConnectionsCard", () => {
       if (!init?.method || init.method === "GET") {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ tokens: sampleConnections }),
+          json: () => Promise.resolve({ clients: sampleClients }),
         });
       }
       if (init.method === "DELETE") {
@@ -270,7 +284,7 @@ describe("McpConnectionsCard", () => {
       if (!init?.method || init.method === "GET") {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ tokens: sampleConnections }),
+          json: () => Promise.resolve({ clients: sampleClients }),
         });
       }
       if (init.method === "DELETE") {

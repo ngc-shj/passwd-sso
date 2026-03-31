@@ -17,35 +17,39 @@ async function handleGET(_req: NextRequest) {
     return NextResponse.json({ error: "No tenant" }, { status: 403 });
   }
 
-  const tokens = await withBypassRls(prisma, () =>
-    prisma.mcpAccessToken.findMany({
-      where: {
-        userId,
-        tenantId,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
+  const clients = await withBypassRls(prisma, () =>
+    prisma.mcpClient.findMany({
+      where: { tenantId, isActive: true },
       select: {
         id: true,
-        scope: true,
-        expiresAt: true,
-        createdAt: true,
-        mcpClient: {
-          select: { name: true, clientId: true },
+        clientId: true,
+        name: true,
+        isDcr: true,
+        accessTokens: {
+          where: { userId, revokedAt: null, expiresAt: { gt: new Date() } },
+          select: { id: true, scope: true, createdAt: true, expiresAt: true },
+          orderBy: { createdAt: "desc" },
+          take: 1,
         },
       },
-      orderBy: { createdAt: "desc" },
+      orderBy: { name: "asc" },
     }),
   );
 
   return NextResponse.json({
-    tokens: tokens.map((t) => ({
-      id: t.id,
-      clientName: t.mcpClient.name,
-      clientId: t.mcpClient.clientId,
-      scope: t.scope,
-      createdAt: t.createdAt.toISOString(),
-      expiresAt: t.expiresAt.toISOString(),
+    clients: clients.map((c) => ({
+      id: c.id,
+      clientId: c.clientId,
+      name: c.name,
+      isDcr: c.isDcr,
+      connection: c.accessTokens[0]
+        ? {
+            tokenId: c.accessTokens[0].id,
+            scope: c.accessTokens[0].scope,
+            createdAt: c.accessTokens[0].createdAt.toISOString(),
+            expiresAt: c.accessTokens[0].expiresAt.toISOString(),
+          }
+        : null,
     })),
   });
 }

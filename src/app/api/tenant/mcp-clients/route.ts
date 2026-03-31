@@ -55,12 +55,24 @@ export async function GET(_req: NextRequest) {
         isDcr: true,
         createdAt: true,
         updatedAt: true,
+        _count: {
+          select: {
+            accessTokens: {
+              where: { revokedAt: null, expiresAt: { gt: new Date() }, userId: { not: null } },
+            },
+          },
+        },
       },
       orderBy: { createdAt: "desc" },
     }),
   );
 
-  return NextResponse.json({ clients });
+  return NextResponse.json({
+    clients: clients.map(({ _count, ...rest }) => ({
+      ...rest,
+      connectedUsers: _count?.accessTokens ?? 0,
+    })),
+  });
 }
 
 export async function POST(req: NextRequest) {
