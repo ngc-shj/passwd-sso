@@ -17,7 +17,6 @@ const TEAM_ENTRY = {
 
 // Name of the team pre-seeded in global-setup
 const PRE_SEEDED_TEAM_NAME = "E2E Pre-seeded Team";
-const E2E_TEAM_ID = "00000000-0000-4000-e2e0-000000e2e000";
 
 test.describe.serial("Teams", () => {
   let ownerContext: BrowserContext;
@@ -80,8 +79,8 @@ test.describe.serial("Teams", () => {
   // ── Dynamic team creation ────────────────────────────────────
 
   test("teamOwner: navigate to /teams and create a new team", async () => {
-    // Navigate back to teams list via sidebar click (client-side, vault stays unlocked).
-    await ownerPage.goto("/ja/admin/tenant/teams");
+    // ownerPage is already on /ja/admin/tenant/teams from beforeAll — reload to refresh
+    await ownerPage.reload();
     await ownerPage.waitForLoadState("networkidle");
 
     const teamsPage = new TeamsPage(ownerPage);
