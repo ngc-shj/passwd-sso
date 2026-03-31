@@ -148,3 +148,17 @@ Each test file becomes: import factory + add variant-specific tests (event group
 | `src/components/__tests__/webhook-card-test-factory.tsx` | **CREATE** — shared test helpers |
 | `src/components/settings/tenant-webhook-card.test.tsx` | **REWRITE** — use factory + tenant-specific tests |
 | `src/components/team/team-webhook-card.test.tsx` | **REWRITE** — use factory + team-specific tests |
+
+## Implementation Checklist
+
+- [ ] `src/components/settings/base-webhook-card.tsx` — CREATE shared component
+- [ ] `src/components/settings/tenant-webhook-card.tsx` — REWRITE as thin wrapper
+- [ ] `src/components/team/team-webhook-card.tsx` — REWRITE as thin wrapper
+- [ ] `src/components/__tests__/webhook-card-test-factory.tsx` — CREATE shared test factory
+- [ ] `src/components/settings/tenant-webhook-card.test.tsx` — REWRITE using factory
+- [ ] `src/components/team/team-webhook-card.test.tsx` — REWRITE using factory
+- [ ] Parent pages unchanged: `src/app/[locale]/admin/tenant/security/webhooks/page.tsx`, `src/app/[locale]/admin/teams/[teamId]/security/webhooks/page.tsx`
+- [ ] Shared utilities to reuse: `apiPath.*`, `fetchApi`, `formatDateTime`, `MAX_WEBHOOKS`, `AUDIT_ACTION_GROUP`, `AUDIT_ACTION_GROUPS_TENANT`, `AUDIT_ACTION_GROUPS_TEAM`, `TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS`, `SectionCardHeader`
+- [ ] `deleteEndpoint` stored in `useRef` (stale closure prevention)
+- [ ] `renderWebhookItem` as internal closure
+- [ ] Team test adds positive assertion for expected event groups
