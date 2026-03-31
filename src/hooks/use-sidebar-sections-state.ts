@@ -30,6 +30,7 @@ interface UseSidebarSectionsStateParams {
   isSettingsActive: boolean;
   isExportActive: boolean;
   isImportActive: boolean;
+  isAdminActive?: boolean;
 }
 
 export function useSidebarSectionsState({
@@ -44,6 +45,7 @@ export function useSidebarSectionsState({
   isSettingsActive,
   isExportActive,
   isImportActive,
+  isAdminActive,
 }: UseSidebarSectionsStateParams) {
   const [collapsed, setCollapsed] = useLocalStorage<Record<SidebarSection, boolean>>(
     "sidebar-collapsed",
@@ -63,7 +65,7 @@ export function useSidebarSectionsState({
     if (selectedTypeFilter !== null) toOpen.push("categories");
     if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("manage");
     if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
-    if (isSettingsActive) toOpen.push("settingsNav");
+    if (isSettingsActive && !isAdminActive) toOpen.push("settingsNav");
     if (isExportActive || isImportActive) toOpen.push("tools");
 
     if (toOpen.length === 0) return;
@@ -85,6 +87,7 @@ export function useSidebarSectionsState({
     isSettingsActive,
     isExportActive,
     isImportActive,
+    isAdminActive,
     setCollapsed,
   ]);
 

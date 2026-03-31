@@ -27,15 +27,10 @@ test.describe("Settings - Sessions", () => {
     const settingsPage = new SettingsPage(page);
     const lockPage = new VaultLockPage(page);
 
-    await test.step("navigate to settings and unlock vault", async () => {
-      await page.goto("/ja/dashboard/settings");
+    await test.step("navigate to Account settings page", async () => {
+      await settingsPage.gotoAccount();
       // Navigating to a new page resets React state; re-unlock the vault
       await lockPage.unlockAndWait(vaultReady.passphrase!);
-      await expect(settingsPage.accountTab).toBeVisible({ timeout: 10_000 });
-    });
-
-    await test.step("switch to Account tab", async () => {
-      await settingsPage.switchTab("account");
     });
 
     await test.step("sessions card is visible and lists the current session", async () => {

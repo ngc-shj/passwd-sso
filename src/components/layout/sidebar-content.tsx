@@ -1,6 +1,6 @@
 "use client";
 
-import { Separator } from "@/components/ui/separator";
+
 import { VaultSelector } from "@/components/layout/vault-selector";
 import { SecuritySection, SettingsNavSection, ToolsSection } from "@/components/layout/sidebar-section-security";
 import {
@@ -32,8 +32,7 @@ export interface SidebarContentProps {
   isSelectedVaultFavorites: boolean;
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
-  isTeamSettingsActive: boolean;
-  isTenantSettingsActive: boolean;
+  isAdminActive?: boolean;
   isSettingsActive: boolean;
   isExportActive: boolean;
   isImportActive: boolean;
@@ -59,7 +58,7 @@ export interface SidebarContentProps {
 
 export function SidebarContent({
   t,
-  tTeam,
+  tTeam: _tTeam,
   vaultContext,
   teams,
   selectedTeam,
@@ -72,8 +71,7 @@ export function SidebarContent({
   isSelectedVaultFavorites,
   isSelectedVaultArchive,
   isSelectedVaultTrash,
-  isTeamSettingsActive,
-  isTenantSettingsActive,
+  isAdminActive,
   isSettingsActive,
   isExportActive,
   isImportActive,
@@ -100,7 +98,7 @@ export function SidebarContent({
   const scopedTeamId =
     vaultContext.type === "team" ? (vaultContext.teamId) : "";
   return (
-    <nav className="space-y-4 p-4">
+    <nav className="space-y-2 p-4">
       <VaultSelector
         value={vaultContext.type === "team" ? scopedTeamId : "personal"}
         teams={teamItems}
@@ -123,8 +121,6 @@ export function SidebarContent({
         selectedTypeFilter={selectedTypeFilter}
         onNavigate={onNavigate}
       />
-
-      <Separator />
 
       <ManageSection
         isOpen={isOpen("manage")}
@@ -181,8 +177,6 @@ export function SidebarContent({
         onNavigate={onNavigate}
       />
 
-      <Separator />
-
       <VaultManagementSection
         t={t}
         vaultContext={vaultContext}
@@ -194,8 +188,6 @@ export function SidebarContent({
         onNavigate={onNavigate}
       />
 
-      <Separator />
-
       <SecuritySection
         isOpen={isOpen("security")}
         onOpenChange={toggleSection("security")}
@@ -206,16 +198,12 @@ export function SidebarContent({
         onNavigate={onNavigate}
       />
 
-      <Separator />
-
       <SettingsNavSection
         isOpen={isOpen("settingsNav")}
         onOpenChange={toggleSection("settingsNav")}
         t={t}
-        tTeam={tTeam}
         selectedTeam={selectedTeam}
-        isTeamSettingsActive={isTeamSettingsActive}
-        isTenantSettingsActive={isTenantSettingsActive}
+        isAdminActive={isAdminActive}
         isSettingsActive={isSettingsActive}
         isAdmin={isAdmin}
         onNavigate={onNavigate}

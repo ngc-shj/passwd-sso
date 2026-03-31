@@ -105,7 +105,7 @@ export function CategoriesSection({
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <CollapsibleSectionHeader isOpen={isOpen}>{t("categories")}</CollapsibleSectionHeader>
       <CollapsibleContent>
-        <div className="space-y-1">
+        <div className="ml-3 border-l pl-3 space-y-0.5">
           {categories.map((category) => {
             const Icon = category.icon;
             const href =
@@ -209,7 +209,7 @@ export function ManageSection({
         </DropdownMenu>
       </div>
       <CollapsibleContent>
-        <div className="space-y-1 mb-2">
+        <div className="ml-3 border-l pl-3 space-y-0.5 mb-2">
           {folders
             .filter((folder) => !folder.parentId)
             .map((folder) => (
@@ -227,7 +227,7 @@ export function ManageSection({
               />
             ))}
         </div>
-        <div className="space-y-1">
+        <div className="ml-3 border-l pl-3 space-y-0.5">
           {tags
             .filter((tag) => !tag.parentId)
             .map((tag) => (

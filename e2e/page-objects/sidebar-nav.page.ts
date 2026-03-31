@@ -45,14 +45,9 @@ export class SidebarNavPage {
     return this.page.getByRole("link", { name: /Personal Settings|個人設定/i });
   }
 
-  get teamsLink() {
-    // tTeam("teamSettings") = "Team Settings" / "チーム設定" — links to the /dashboard/teams list
-    return this.page.getByRole("link", { name: /Team Settings|チーム設定/i });
-  }
-
-  get tenantSettingsLink() {
-    // t("tenantSettings") = "Tenant Settings" / "テナント設定"
-    return this.page.getByRole("link", { name: /Tenant Settings|テナント設定/i });
+  get adminConsoleLink() {
+    // t("adminConsole") = "Admin Console" / "管理コンソール"
+    return this.page.getByRole("link", { name: /Admin Console|管理コンソール/i });
   }
 
   get emergencyAccessLink() {
@@ -152,7 +147,7 @@ export class SidebarNavPage {
    * Expands collapsed sidebar sections as needed before clicking the link.
    */
   async navigateTo(
-    view: "passwords" | "favorites" | "archive" | "trash" | "shareLinks" | "watchtower" | "auditLog" | "settings" | "export" | "import" | "teams" | "tenantSettings" | "emergencyAccess"
+    view: "passwords" | "favorites" | "archive" | "trash" | "shareLinks" | "watchtower" | "auditLog" | "settings" | "export" | "import" | "adminConsole" | "emergencyAccess"
   ): Promise<void> {
     // Expand collapsed sidebar sections as needed before clicking the link.
     // The Tools section (export/import) is collapsed by default.
@@ -177,8 +172,7 @@ export class SidebarNavPage {
       settings: this.settingsLink,
       export: this.exportLink,
       import: this.importLink,
-      teams: this.teamsLink,
-      tenantSettings: this.tenantSettingsLink,
+      adminConsole: this.adminConsoleLink,
       emergencyAccess: this.emergencyAccessLink,
     };
     const urlPatternMap: Record<string, RegExp> = {
@@ -192,12 +186,20 @@ export class SidebarNavPage {
       settings: /\/settings/,
       export: /\/export/,
       import: /\/import/,
-      teams: /\/teams$/,
-      tenantSettings: /\/tenant$/,
+      adminConsole: /\/admin/,
       emergencyAccess: /\/emergency-access$/,
     };
     await linkMap[view].click();
     await this.page.waitForURL(urlPatternMap[view], { timeout: 10_000 });
+  }
+
+  /**
+   * Click the Admin Console link and wait for navigation to the admin area.
+   */
+  async navigateToAdmin(): Promise<void> {
+    const link = this.page.getByRole("link", { name: /Admin Console|管理コンソール/i });
+    await link.click();
+    await this.page.waitForLoadState("networkidle");
   }
 
   /** Open the Manage section's create dropdown, then click "New Folder". */

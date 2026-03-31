@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withBypassRls } from "@/lib/tenant-rls";
 import type { TeamRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -70,6 +71,9 @@ const ROLE_LEVEL: Record<TeamRole, number> = {
   [TEAM_ROLE.VIEWER]: 1,
 };
 
+// Re-export isTeamAdminRole from constants for backward compatibility
+export { isTeamAdminRole } from "@/lib/constants";
+
 /** Check if actorRole is strictly higher than targetRole. */
 export function isRoleAbove(actorRole: TeamRole, targetRole: TeamRole): boolean {
   return ROLE_LEVEL[actorRole] > ROLE_LEVEL[targetRole];
@@ -122,6 +126,28 @@ export async function requireTeamPermission(
     throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
   }
   return membership;
+}
+
+/**
+ * Get all team memberships where the user holds an ADMIN or OWNER role.
+ * Uses withBypassRls to query across tenants since this is called from a
+ * layout that does not yet know the tenant context.
+ */
+export async function getAdminTeamMemberships(userId: string) {
+  return withBypassRls(prisma, async () =>
+    prisma.teamMember.findMany({
+      where: {
+        userId,
+        role: { in: [TEAM_ROLE.ADMIN, TEAM_ROLE.OWNER] },
+        deactivatedAt: null,
+      },
+      include: {
+        team: {
+          select: { id: true, name: true, slug: true },
+        },
+      },
+    }),
+  );
 }
 
 // ─── Error Class ────────────────────────────────────────────────

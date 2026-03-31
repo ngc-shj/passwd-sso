@@ -11,9 +11,11 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { ShieldCheck, ShieldX, Loader2 } from "lucide-react";
 import { useTranslations, useMessages } from "next-intl";
 import { withBasePath } from "@/lib/url-helpers";
+import { MCP_SCOPE_RISK, type McpScope, type ScopeRiskLevel } from "@/lib/constants/mcp";
 
 
 interface ConsentFormProps {
@@ -41,6 +43,24 @@ export function ConsentForm({
   const messages = useMessages();
   const scopeDescriptions = (messages.McpConsent as Record<string, unknown>)?.scopeDescriptions as Record<string, string> | undefined;
   const [loading, setLoading] = useState(false);
+
+  const scopeBadgeProps = (scope: string): {
+    variant: "outline" | "destructive";
+    className?: string;
+  } => {
+    const risk: ScopeRiskLevel = MCP_SCOPE_RISK[scope as McpScope] ?? "read";
+    switch (risk) {
+      case "write":
+        return { variant: "destructive" };
+      case "use":
+        return {
+          variant: "outline",
+          className: "border-amber-500 text-amber-700 dark:text-amber-400",
+        };
+      default:
+        return { variant: "outline" };
+    }
+  };
 
   const handleAllow = () => {
     setLoading(true);
@@ -108,16 +128,19 @@ export function ConsentForm({
         <CardContent>
           <div className="space-y-2">
             <p className="text-sm font-medium">{t("requestedScopes")}</p>
-            {scopes.map((scope) => (
-              <div key={scope} className="flex items-center gap-2 rounded-md border p-2">
-                <Badge variant="outline" className="shrink-0">
-                  {scope}
-                </Badge>
-                <span className="text-xs text-muted-foreground">
-                  {scopeDescriptions?.[scope] ?? scope}
-                </span>
-              </div>
-            ))}
+            {scopes.map((scope) => {
+              const badge = scopeBadgeProps(scope);
+              return (
+                <div key={scope} className="flex items-center gap-2 rounded-md border p-2">
+                  <Badge variant={badge.variant} className={cn("shrink-0", badge.className)}>
+                    {scope}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    {scopeDescriptions?.[scope] ?? scope}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </CardContent>
         <CardFooter className="flex gap-2">

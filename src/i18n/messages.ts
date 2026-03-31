@@ -68,6 +68,7 @@ export const NAMESPACES = [
   "Breakglass",
   "MachineIdentity",
   "McpConsent",
+  "AdminConsole",
 ] as const;
 
 export type Namespace = (typeof NAMESPACES)[number];

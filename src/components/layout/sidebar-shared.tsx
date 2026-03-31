@@ -343,7 +343,7 @@ export function CollapsibleSectionHeader({
     <CollapsibleTrigger asChild>
       <button
         type="button"
-        className="w-full px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center justify-between gap-1 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
+        className="w-full px-3 py-2 text-sm font-medium text-muted-foreground flex items-center justify-between gap-1 hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded-sm"
         aria-expanded={isOpen}
       >
         <span className="flex items-center gap-1">
@@ -364,7 +364,7 @@ export function SectionLabel({
   icon?: React.ReactNode;
 }) {
   return (
-    <p className="px-3 py-1 text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+    <p className="px-3 py-2 text-sm font-medium text-muted-foreground flex items-center gap-1">
       {icon}
       {children}
     </p>

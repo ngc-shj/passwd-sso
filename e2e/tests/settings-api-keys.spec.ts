@@ -29,13 +29,10 @@ test.describe("Settings - API Keys", () => {
     const settingsPage = new SettingsPage(page);
     const lockPage = new VaultLockPage(page);
 
-    await test.step("navigate to Developer tab in settings", async () => {
-      await page.goto("/ja/dashboard/settings");
+    await test.step("navigate to Developer settings page", async () => {
+      await settingsPage.gotoApiKeys();
       // Navigating to a new page resets React state; re-unlock the vault
       await lockPage.unlockAndWait(vaultReady.passphrase!);
-      await expect(settingsPage.developerTab).toBeVisible({ timeout: 10_000 });
-      await settingsPage.switchTab("developer");
-      await settingsPage.switchDeveloperSubTab("api");
     });
 
     await test.step("API key manager section is visible", async () => {

@@ -42,6 +42,7 @@ import { AuditDateFilter } from "@/components/audit/audit-date-filter";
 import { AuditDownloadButton } from "@/components/audit/audit-download-button";
 import { AuditLogList } from "@/components/audit/audit-log-list";
 import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
+import { SectionLayout } from "@/components/settings/section-layout";
 
 const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
   [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
@@ -90,13 +91,14 @@ interface TeamEntryOverview {
   itemKeyVersion: number;
 }
 
-export default function TeamAuditLogsPage({
+export default function TeamAdminAuditLogsPage({
   params,
 }: {
   params: Promise<{ teamId: string }>;
 }) {
   const { teamId } = use(params);
   const t = useTranslations("AuditLog");
+  const tAdmin = useTranslations("AdminConsole");
   const teamVault = useTeamVaultOptional();
   const [exportAllowed, setExportAllowed] = useState(true);
 
@@ -179,7 +181,6 @@ export default function TeamAuditLogsPage({
       );
       if (common !== null) return common;
 
-      // Member operations: show email
       if (
         (log.action === AUDIT_ACTION.TEAM_MEMBER_INVITE || log.action === AUDIT_ACTION.TEAM_MEMBER_REMOVE) &&
         meta?.email
@@ -235,62 +236,55 @@ export default function TeamAuditLogsPage({
   );
 
   return (
-    <div className="flex-1 overflow-auto p-4 md:p-6">
-      <div className="mx-auto max-w-4xl space-y-6">
-        <Card className="rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
-          <div className="flex items-center gap-3">
-            <ScrollText className="h-6 w-6" />
-            <div>
-              <h1 className="text-2xl font-bold">{t("title")}</h1>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="rounded-xl border bg-card/80 p-4">
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-end gap-3">
-              <AuditDateFilter
-                dateFrom={audit.dateFrom}
-                dateTo={audit.dateTo}
-                setDateFrom={audit.setDateFrom}
-                setDateTo={audit.setDateTo}
-              />
-            </div>
-            <AuditActionFilter
-              actionGroups={ACTION_GROUPS}
-              selectedActions={audit.selectedActions}
-              actionSearch={audit.actionSearch}
-              filterOpen={audit.filterOpen}
-              actionSummary={audit.actionSummary}
-              actionLabel={audit.actionLabel}
-              filteredActions={audit.filteredActions}
-              isActionSelected={audit.isActionSelected}
-              toggleAction={audit.toggleAction}
-              setGroupSelection={audit.setGroupSelection}
-              clearActions={audit.clearActions}
-              setActionSearch={audit.setActionSearch}
-              setFilterOpen={audit.setFilterOpen}
+    <SectionLayout
+      icon={ScrollText}
+      title={tAdmin("teamSectionAuditLogs")}
+      description={tAdmin("teamSectionAuditLogsDesc")}
+    >
+      <Card className="rounded-xl border bg-card/80 p-4">
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-end gap-3">
+            <AuditDateFilter
+              dateFrom={audit.dateFrom}
+              dateTo={audit.dateTo}
+              setDateFrom={audit.setDateFrom}
+              setDateTo={audit.setDateTo}
             />
           </div>
-        </Card>
-
-        <div className="flex justify-end">
-          <AuditDownloadButton
-            downloading={audit.downloading}
-            onDownload={audit.handleDownload}
-            exportAllowed={exportAllowed}
+          <AuditActionFilter
+            actionGroups={ACTION_GROUPS}
+            selectedActions={audit.selectedActions}
+            actionSearch={audit.actionSearch}
+            filterOpen={audit.filterOpen}
+            actionSummary={audit.actionSummary}
+            actionLabel={audit.actionLabel}
+            filteredActions={audit.filteredActions}
+            isActionSelected={audit.isActionSelected}
+            toggleAction={audit.toggleAction}
+            setGroupSelection={audit.setGroupSelection}
+            clearActions={audit.clearActions}
+            setActionSearch={audit.setActionSearch}
+            setFilterOpen={audit.setFilterOpen}
           />
         </div>
+      </Card>
 
-        <AuditLogList
-          logs={audit.logs}
-          loading={audit.loading}
-          loadingMore={audit.loadingMore}
-          nextCursor={audit.nextCursor}
-          onLoadMore={audit.handleLoadMore}
-          renderItem={renderItem}
+      <div className="flex justify-end">
+        <AuditDownloadButton
+          downloading={audit.downloading}
+          onDownload={audit.handleDownload}
+          exportAllowed={exportAllowed}
         />
       </div>
-    </div>
+
+      <AuditLogList
+        logs={audit.logs}
+        loading={audit.loading}
+        loadingMore={audit.loadingMore}
+        nextCursor={audit.nextCursor}
+        onLoadMore={audit.handleLoadMore}
+        renderItem={renderItem}
+      />
+    </SectionLayout>
   );
 }

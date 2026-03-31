@@ -8,6 +8,7 @@ import {
   NS_RECOVERY,
   NS_VAULT_RESET,
   NS_PRIVACY_POLICY,
+  NS_ADMIN_ALL,
 } from "./namespace-groups";
 
 describe("namespace-groups", () => {
@@ -37,7 +38,7 @@ describe("namespace-groups", () => {
 
   it("NS_DASHBOARD_ALL covers all namespaces except page-specific ones", () => {
     // Page-specific namespaces intentionally excluded from NS_DASHBOARD_ALL
-    const excluded = new Set(["Metadata", "Recovery", "VaultReset", "PrivacyPolicy", "McpConsent"]);
+    const excluded = new Set(["Metadata", "Recovery", "VaultReset", "PrivacyPolicy", "McpConsent", "AdminConsole"]);
     const uncovered = NAMESPACES.filter(
       (ns) => !NS_DASHBOARD_ALL.includes(ns) && !excluded.has(ns),
     );
@@ -110,5 +111,25 @@ describe("namespace-groups", () => {
 
   it("NS_PRIVACY_POLICY has no duplicate entries", () => {
     expect(NS_PRIVACY_POLICY.length).toBe(new Set(NS_PRIVACY_POLICY).size);
+  });
+
+  it("NS_ADMIN_ALL is a superset of NS_GLOBAL", () => {
+    for (const ns of NS_GLOBAL) {
+      expect(NS_ADMIN_ALL).toContain(ns);
+    }
+  });
+
+  it("every entry in NS_ADMIN_ALL belongs to NAMESPACES", () => {
+    for (const ns of NS_ADMIN_ALL) {
+      expect(NAMESPACES).toContain(ns);
+    }
+  });
+
+  it("NS_ADMIN_ALL has no duplicate entries", () => {
+    expect(NS_ADMIN_ALL.length).toBe(new Set(NS_ADMIN_ALL).size);
+  });
+
+  it("NS_ADMIN_ALL includes AdminConsole namespace", () => {
+    expect(NS_ADMIN_ALL).toContain("AdminConsole");
   });
 });

@@ -16,14 +16,6 @@ export class TeamDashboardPage {
     return this.page.getByRole("tab", { name: /^Members$|^メンバー$/i });
   }
 
-  get settingsTab() {
-    return this.page.getByRole("tab", { name: /General|一般設定/i });
-  }
-
-  get policyTab() {
-    return this.page.getByRole("tab", { name: /Security Policy|セキュリティポリシー/i });
-  }
-
   get addMemberTab() {
     // t("addMember") = "Add Member" (en) / "メンバー追加" (ja)
     return this.page.getByRole("tab", { name: /Add Member|メンバー追加/i });
@@ -54,17 +46,12 @@ export class TeamDashboardPage {
   }
 
   /**
-   * Navigate to a named tab on the team settings page.
-   * Valid values: "passwords" | "members" | "settings" | "policy" | "webhook"
+   * Navigate to the members tab on the team vault page.
    */
-  async switchTab(tab: "members" | "settings" | "policy" | "webhook"): Promise<void> {
-    const tabMap: Record<string, () => Promise<void>> = {
-      members: async () => { await this.page.getByRole("tab", { name: /Members|メンバー/i }).click(); },
-      settings: async () => { await this.page.getByRole("tab", { name: /General|一般設定/i }).click(); },
-      policy: async () => { await this.page.getByRole("tab", { name: /Security Policy|セキュリティポリシー/i }).click(); },
-      webhook: async () => { await this.page.getByRole("tab", { name: /Webhook/i }).click(); },
-    };
-    await tabMap[tab]();
+  async switchTab(tab: "members"): Promise<void> {
+    if (tab === "members") {
+      await this.page.getByRole("tab", { name: /Members|メンバー/i }).click();
+    }
   }
 
   /**

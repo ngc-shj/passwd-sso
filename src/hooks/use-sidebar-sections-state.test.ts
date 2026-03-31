@@ -30,6 +30,7 @@ function baseParams() {
     isSettingsActive: false,
     isExportActive: false,
     isImportActive: false,
+    isAdminActive: false,
   };
 }
 
@@ -70,5 +71,20 @@ describe("useSidebarSectionsState", () => {
     expect(next.categories).toBe(false);
     expect(next.manage).toBe(false);
     expect(next.security).toBe(false);
+  });
+
+  it("does not auto-open settings section when isAdminActive is true", () => {
+    renderHook(() =>
+      useSidebarSectionsState({
+        ...baseParams(),
+        routeKey: "/admin/tenant/members",
+        isSettingsActive: true,
+        isAdminActive: true,
+      }),
+    );
+
+    // isAdminActive prevents settings section from auto-opening,
+    // so setCollapsed should not be called at all (toOpen is empty)
+    expect(mockSetCollapsed).not.toHaveBeenCalled();
   });
 });

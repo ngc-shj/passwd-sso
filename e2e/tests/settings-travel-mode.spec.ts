@@ -27,13 +27,10 @@ test.describe("Settings - Travel Mode", () => {
     const settingsPage = new SettingsPage(page);
     const lockPage = new VaultLockPage(page);
 
-    await test.step("navigate to Security > Travel Mode tab", async () => {
-      await page.goto("/ja/dashboard/settings");
+    await test.step("navigate to Security settings page", async () => {
+      await settingsPage.gotoTravelMode();
       // Navigating to a new page resets React state; re-unlock the vault
       await lockPage.unlockAndWait(vaultReady.passphrase!);
-      await expect(settingsPage.securityTab).toBeVisible({ timeout: 10_000 });
-      await settingsPage.switchTab("security");
-      await settingsPage.switchSecuritySubTab("travel");
     });
 
     await test.step("travel mode card is visible and inactive initially", async () => {

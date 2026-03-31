@@ -31,7 +31,6 @@ interface TeamContextItem {
 const CROSS_VAULT_PATHS = [
   "/dashboard/share-links",
   "/dashboard/emergency-access",
-  "/dashboard/teams",
 ] as const;
 
 function isPersonalVaultPath(path: string): boolean {

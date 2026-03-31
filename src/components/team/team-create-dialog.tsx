@@ -15,10 +15,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Building2, Loader2 } from "lucide-react";
+import { Building2, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH } from "@/lib/constants";
-import { useVault } from "@/lib/vault-context";
+import { useVault, VaultUnlockError } from "@/lib/vault-context";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { preventIMESubmit } from "@/lib/ime-guard";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
 import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH, NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
@@ -30,13 +32,19 @@ interface TeamCreateDialogProps {
 
 export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) {
   const t = useTranslations("Team");
-  const { status, userId, getEcdhPublicKeyJwk } = useVault();
+  const tVault = useTranslations("Vault");
+  const { status, userId, unlock, getEcdhPublicKeyJwk } = useVault();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
   const [slugError, setSlugError] = useState("");
+
+  // Inline vault unlock state
+  const [passphrase, setPassphrase] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [unlockError, setUnlockError] = useState("");
 
   const vaultReady = status === "unlocked" && !!userId;
 
@@ -46,6 +54,41 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
     setDescription("");
     setSlugError("");
     setSaving(false);
+    setPassphrase("");
+    setUnlocking(false);
+    setUnlockError("");
+  };
+
+  const handleUnlock = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passphrase) return;
+    setUnlocking(true);
+    setUnlockError("");
+    try {
+      const success = await unlock(passphrase);
+      if (!success) {
+        setUnlockError(tVault("wrongPassphrase"));
+        setPassphrase("");
+      }
+    } catch (err) {
+      if (err instanceof VaultUnlockError) {
+        switch (err.code) {
+          case API_ERROR.ACCOUNT_LOCKED:
+            setUnlockError(tVault("accountLocked"));
+            break;
+          case API_ERROR.RATE_LIMIT_EXCEEDED:
+            setUnlockError(tVault("rateLimited"));
+            break;
+          default:
+            setUnlockError(tVault("unlockError"));
+        }
+      } else {
+        setUnlockError(tVault("unlockError"));
+      }
+      setPassphrase("");
+    } finally {
+      setUnlocking(false);
+    }
   };
 
   const handleNameChange = (value: string) => {
@@ -171,62 +214,96 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
           <DialogDescription>{t("createTeamDescription")}</DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="team-name">{t("teamName")}</Label>
-              <Input
-                id="team-name"
-                value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                placeholder={t("teamNamePlaceholder")}
-                maxLength={NAME_MAX_LENGTH}
-              />
+        {!vaultReady ? (
+          <div className="space-y-4 rounded-lg border bg-muted/20 p-6">
+            <div className="flex flex-col items-center gap-2 text-center">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-muted">
+                <Lock className="h-5 w-5 text-muted-foreground" />
+              </div>
+              <p className="text-sm text-muted-foreground">{tVault("lockedDescription")}</p>
             </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="team-slug">{t("slug")}</Label>
-              <Input
-                id="team-slug"
-                value={slug}
-                onChange={(e) => {
-                  const normalized = e.target.value
-                    .toLowerCase()
-                    .replace(/[^a-z0-9-]/g, "");
-                  setSlug(normalized);
-                  setSlugError("");
-                }}
-                placeholder={t("slugPlaceholder")}
-              />
-              <p className="text-xs text-muted-foreground">{t("slugHelp")}</p>
-              {slugError && (
-                <p className="text-sm text-destructive">{slugError}</p>
+            <form onSubmit={handleUnlock} onKeyDown={preventIMESubmit} className="space-y-3">
+              <div className="space-y-2">
+                <Label htmlFor="unlock-passphrase">{tVault("passphrase")}</Label>
+                <Input
+                  id="unlock-passphrase"
+                  type="password"
+                  value={passphrase}
+                  onChange={(e) => { setPassphrase(e.target.value); setUnlockError(""); }}
+                  placeholder={tVault("enterPassphrase")}
+                  autoComplete="current-password"
+                  autoFocus
+                />
+              </div>
+              {unlockError && (
+                <p className="text-sm text-destructive text-center">{unlockError}</p>
               )}
+              <Button type="submit" className="w-full" disabled={!passphrase || unlocking}>
+                {unlocking && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {tVault("unlock")}
+              </Button>
+            </form>
+          </div>
+        ) : (
+          <>
+            <div className="space-y-4 rounded-lg border bg-muted/20 p-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="team-name">{t("teamName")}</Label>
+                  <Input
+                    id="team-name"
+                    value={name}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    placeholder={t("teamNamePlaceholder")}
+                    maxLength={NAME_MAX_LENGTH}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="team-slug">{t("slug")}</Label>
+                  <Input
+                    id="team-slug"
+                    value={slug}
+                    onChange={(e) => {
+                      const normalized = e.target.value
+                        .toLowerCase()
+                        .replace(/[^a-z0-9-]/g, "");
+                      setSlug(normalized);
+                      setSlugError("");
+                    }}
+                    placeholder={t("slugPlaceholder")}
+                  />
+                  <p className="text-xs text-muted-foreground">{t("slugHelp")}</p>
+                  {slugError && (
+                    <p className="text-sm text-destructive">{slugError}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="team-desc">{t("description")}</Label>
+                <Textarea
+                  id="team-desc"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder={t("descriptionPlaceholder")}
+                  maxLength={DESCRIPTION_MAX_LENGTH}
+                  rows={3}
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="team-desc">{t("description")}</Label>
-            <Textarea
-              id="team-desc"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={t("descriptionPlaceholder")}
-              maxLength={DESCRIPTION_MAX_LENGTH}
-              rows={3}
-            />
-          </div>
-        </div>
-
-        <DialogFooter className="border-t pt-4">
-          <Button
-            onClick={handleSubmit}
-            disabled={saving || !name.trim() || !slug.trim() || !vaultReady}
-          >
-            {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {t("createButton")}
-          </Button>
-        </DialogFooter>
+            <DialogFooter className="border-t pt-4">
+              <Button
+                onClick={handleSubmit}
+                disabled={saving || !name.trim() || !slug.trim()}
+              >
+                {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {t("createButton")}
+              </Button>
+            </DialogFooter>
+          </>
+        )}
       </DialogContent>
     </Dialog>
   );
