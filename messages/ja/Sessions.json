@@ -1,7 +1,7 @@
 {
   "settingsTitle": "個人の設定",
   "settingsDescription": "個人設定を管理できます。",
-  "tabAccount": "アカウント",
+  "tabAccount": "セッション",
   "tabSecurity": "セキュリティ",
   "tabDeveloper": "開発者",
   "title": "セッション",
@@ -28,9 +28,9 @@
   "tabSecurityDesc": "パスキー、トラベルモード、鍵のローテーションを管理して、保管庫を保護します。",
   "subTabPasskey": "パスキー",
   "subTabTravelMode": "トラベルモード",
-  "subTabKeyRotation": "鍵のローテーション",
+  "subTabKeyRotation": "暗号化キーをローテーション",
   "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。",
-  "subTabCli": "CLI",
-  "subTabApi": "API",
-  "subTabDelegation": "委任"
+  "subTabCli": "CLI トークン",
+  "subTabApi": "API キー",
+  "subTabDelegation": "委任アクセス"
 }

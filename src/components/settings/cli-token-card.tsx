@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { Loader2, Terminal, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -48,16 +49,9 @@ export function CliTokenCard() {
   };
 
   return (
-    <Card className="p-6 space-y-4">
-      <section>
-        <div className="flex items-center gap-2">
-          <Terminal className="h-5 w-5" />
-          <h2 className="text-lg font-semibold">{t("title")}</h2>
-        </div>
-        <p className="text-sm text-muted-foreground mt-1">
-          {t("description")}
-        </p>
-      </section>
+    <Card>
+      <SectionCardHeader icon={Terminal} title={t("title")} description={t("description")} />
+      <CardContent className="space-y-4">
 
       {token ? (
         <section className="border rounded-md p-4 bg-muted/50 space-y-2">
@@ -94,6 +88,7 @@ export function CliTokenCard() {
           passwd-sso login
         </code>
       </section>
+      </CardContent>
     </Card>
   );
 }

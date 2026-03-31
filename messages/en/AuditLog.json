@@ -1,6 +1,7 @@
 {
   "title": "Audit Log",
   "description": "Review your personal security events and activity history.",
+  "tenantDescription": "Review tenant-wide security events and activity history.",
   "noLogs": "No audit logs yet.",
   "loadMore": "Load more",
   "date": "Date",
@@ -187,7 +188,7 @@
   "MCP_CONSENT_DENY": "Denied MCP authorization",
   "MCP_REFRESH_TOKEN_ROTATE": "Rotated MCP refresh token",
   "MCP_REFRESH_TOKEN_REPLAY": "Detected MCP refresh token replay",
-  "subTabTenantLogs": "Tenant Logs",
+  "subTabTenantLogs": "Logs",
   "subTabBreakglass": "Break-Glass",
   "scopeLabel": "Scope",
   "scopeAll": "All",

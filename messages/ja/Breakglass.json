@@ -1,5 +1,5 @@
 {
-  "title": "Break-Glass 個人ログアクセス",
+  "title": "Break Glass",
   "description": "ユーザーの個人監査ログにアクセスします。理由の記入が必須であり、すべてのアクセスが記録され、対象ユーザーに通知されます。",
   "requestAccess": "アクセスを申請",
   "targetUser": "対象ユーザー",
