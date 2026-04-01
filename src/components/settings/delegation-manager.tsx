@@ -152,7 +152,7 @@ export function DelegationManager() {
               return (
                 <div
                   key={session.id}
-                  className="flex items-center justify-between rounded-lg border p-3"
+                  className="flex items-center justify-between border rounded-md p-3"
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
