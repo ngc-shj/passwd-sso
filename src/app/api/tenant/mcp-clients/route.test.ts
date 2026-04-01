@@ -13,6 +13,7 @@ const {
   mockMcpClientFindFirst,
   mockMcpClientCreate,
   mockHashToken,
+  mockUserFindMany,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockMcpClientFindFirst: vi.fn(),
   mockMcpClientCreate: vi.fn(),
   mockHashToken: vi.fn((token: string) => `hashed:${token}`),
+  mockUserFindMany: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -47,6 +49,9 @@ vi.mock("@/lib/prisma", () => ({
       count: mockMcpClientCount,
       findFirst: mockMcpClientFindFirst,
       create: mockMcpClientCreate,
+    },
+    user: {
+      findMany: mockUserFindMany,
     },
   },
 }));
@@ -90,7 +95,14 @@ describe("GET /api/tenant/mcp-clients", () => {
   it("returns list of MCP clients for tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockMcpClientFindMany.mockResolvedValue([makeClient()]);
+    mockMcpClientFindMany.mockResolvedValue([
+      makeClient({
+        accessTokens: [{ userId: "user-1", lastUsedAt: new Date("2025-03-15T00:00:00Z") }],
+      }),
+    ]);
+    mockUserFindMany.mockResolvedValue([
+      { id: "user-1", name: "Test User", email: "test@example.com" },
+    ]);
 
     const req = createRequest("GET", "http://localhost/api/tenant/mcp-clients");
     const res = await GET(req);
@@ -102,6 +114,24 @@ describe("GET /api/tenant/mcp-clients", () => {
     expect(json.clients[0].id).toBe("client-1");
     expect(json.clients[0].clientId).toBe("mcpc_abc123");
     expect(Array.isArray(json.clients[0].connectedUsers)).toBe(true);
+    expect(json.clients[0].lastUsedAt).toBe("2025-03-15T00:00:00.000Z");
+  });
+
+  it("returns lastUsedAt as null when all access tokens have null lastUsedAt", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindMany.mockResolvedValue([
+      makeClient({
+        accessTokens: [{ userId: "user-1", lastUsedAt: null }],
+      }),
+    ]);
+
+    const req = createRequest("GET", "http://localhost/api/tenant/mcp-clients");
+    const res = await GET(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.clients[0].lastUsedAt).toBeNull();
   });
 
   it("returns 401 for unauthenticated users", async () => {

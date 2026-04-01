@@ -21,6 +21,14 @@ vi.mock("@/lib/crypto-server", () => ({
   hashToken: vi.fn((token: string) => `hashed:${token}`),
 }));
 
+vi.mock("@/lib/logger", () => ({
+  getLogger: vi.fn(() => ({
+    warn: vi.fn(),
+    info: vi.fn(),
+    child: vi.fn(() => ({ warn: vi.fn(), info: vi.fn() })),
+  })),
+}));
+
 // ─── PKCE tests ───────────────────────────────────────────────
 
 describe("computeS256Challenge", () => {
@@ -467,7 +475,9 @@ describe("validateMcpToken", () => {
         scope: "credentials:read,credentials:list",
         expiresAt: new Date(Date.now() + 3600000),
         revokedAt: null,
+        lastUsedAt: new Date(Date.now() - 60_000), // 1 minute ago (within threshold)
       }),
+      update: vi.fn().mockResolvedValue({}),
     };
 
     const result = await validateMcpToken("mcp_valid_token");
@@ -479,5 +489,86 @@ describe("validateMcpToken", () => {
       expect(result.data.mcpClientId).toBe("mcpc_testclient123");
       expect(result.data.scopes).toEqual(["credentials:read", "credentials:list"]);
     }
+  });
+
+  it("updates lastUsedAt when null", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockUpdate = vi.fn().mockResolvedValue({});
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "token-id",
+        tenantId: "t1",
+        clientId: "c1",
+        mcpClient: { clientId: "mcpc_abc" },
+        userId: "u1",
+        serviceAccountId: null,
+        scope: "credentials:list",
+        expiresAt: new Date(Date.now() + 3600_000),
+        revokedAt: null,
+        lastUsedAt: null,
+      }),
+      update: mockUpdate,
+    };
+
+    const { validateMcpToken } = await import("./oauth-server");
+    await validateMcpToken("mcp_valid_token");
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: "token-id" },
+      data: { lastUsedAt: expect.any(Date) },
+    });
+  });
+
+  it("updates lastUsedAt when older than threshold", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockUpdate = vi.fn().mockResolvedValue({});
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "token-id",
+        tenantId: "t1",
+        clientId: "c1",
+        mcpClient: { clientId: "mcpc_abc" },
+        userId: "u1",
+        serviceAccountId: null,
+        scope: "credentials:list",
+        expiresAt: new Date(Date.now() + 3600_000),
+        revokedAt: null,
+        lastUsedAt: new Date(Date.now() - 10 * 60 * 1000), // 10 minutes ago
+      }),
+      update: mockUpdate,
+    };
+
+    const { validateMcpToken } = await import("./oauth-server");
+    await validateMcpToken("mcp_valid_token");
+
+    expect(mockUpdate).toHaveBeenCalledWith({
+      where: { id: "token-id" },
+      data: { lastUsedAt: expect.any(Date) },
+    });
+  });
+
+  it("does not update lastUsedAt when within threshold", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    const mockUpdate = vi.fn().mockResolvedValue({});
+    (prisma as Record<string, unknown>).mcpAccessToken = {
+      findUnique: vi.fn().mockResolvedValue({
+        id: "token-id",
+        tenantId: "t1",
+        clientId: "c1",
+        mcpClient: { clientId: "mcpc_abc" },
+        userId: "u1",
+        serviceAccountId: null,
+        scope: "credentials:list",
+        expiresAt: new Date(Date.now() + 3600_000),
+        revokedAt: null,
+        lastUsedAt: new Date(Date.now() - 60_000), // 1 minute ago (within 5min threshold)
+      }),
+      update: mockUpdate,
+    };
+
+    const { validateMcpToken } = await import("./oauth-server");
+    await validateMcpToken("mcp_valid_token");
+
+    expect(mockUpdate).not.toHaveBeenCalled();
   });
 });

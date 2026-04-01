@@ -12,12 +12,14 @@ import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { withBypassRls } from "@/lib/tenant-rls";
+import { getLogger } from "@/lib/logger";
 import {
   MCP_TOKEN_PREFIX,
   MCP_CODE_EXPIRY_SEC,
   MCP_TOKEN_EXPIRY_SEC,
   MCP_REFRESH_TOKEN_PREFIX,
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
+  MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
   type McpScope,
 } from "@/lib/constants/mcp";
 
@@ -418,6 +420,7 @@ export async function validateMcpToken(
         scope: true,
         expiresAt: true,
         revokedAt: true,
+        lastUsedAt: true,
       },
     }),
   );
@@ -425,6 +428,21 @@ export async function validateMcpToken(
   if (!record) return { ok: false, error: "invalid_token" };
   if (record.revokedAt) return { ok: false, error: "token_revoked" };
   if (record.expiresAt < new Date()) return { ok: false, error: "token_expired" };
+
+  // Throttled lastUsedAt update (fire-and-forget)
+  const shouldUpdate =
+    !record.lastUsedAt ||
+    Date.now() - record.lastUsedAt.getTime() > MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS;
+  if (shouldUpdate) {
+    void withBypassRls(prisma, () =>
+      prisma.mcpAccessToken.update({
+        where: { id: record.id },
+        data: { lastUsedAt: new Date() },
+      }),
+    ).catch((err) => {
+      getLogger().warn({ err }, "mcp.token.lastUsedAt.update_failed");
+    });
+  }
 
   return {
     ok: true,
