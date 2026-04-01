@@ -133,6 +133,40 @@ if [ -n "$e2e_testids" ]; then
   done
 fi
 
+# ── 4. Deleted export/component name check ───────────────────
+#
+# When a component or function is removed from source, E2E page objects
+# may still reference it by name (e.g. ManageSection deleted →
+# expandManageSection in E2E breaks).
+
+printf "${BOLD}▸ Checking deleted exports/components referenced in E2E${RESET}\n"
+
+# Extract names from removed "export function/class/const" lines
+removed_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
+  | grep -E '^\-.*export (function|class|const|interface|type) ' \
+  | grep -v '^\-\-\-' \
+  | sed -E 's/.*export (function|class|const|interface|type) ([A-Za-z0-9_]+).*/\2/' \
+  | sort -u || true)
+
+# Check if added lines re-introduce the same export (renamed, not deleted)
+added_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
+  | grep -E '^\+.*export (function|class|const|interface|type) ' \
+  | grep -v '^\+\+\+' \
+  | sed -E 's/.*export (function|class|const|interface|type) ([A-Za-z0-9_]+).*/\2/' \
+  | sort -u || true)
+
+for name in $removed_exports; do
+  # Skip if re-exported under the same name
+  if echo "$added_exports" | grep -qx "$name"; then
+    continue
+  fi
+  # Case-insensitive search in E2E for the export name
+  if grep -riq "$name" "$E2E_DIR/" 2>/dev/null; then
+    ref_files=$(grep -ril "$name" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+    warn "Deleted export '$name' is still referenced in E2E: $ref_files"
+  fi
+done
+
 # ── Summary ──────────────────────────────────────────────────
 
 echo ""
