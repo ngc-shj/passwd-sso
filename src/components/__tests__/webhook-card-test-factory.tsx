@@ -134,6 +134,23 @@ export function setupWebhookCardMocks() {
         {children}
       </div>
     ),
+    CardContent: ({
+      children,
+      className,
+    }: {
+      children: ReactNode;
+      className?: string;
+    }) => (
+      <div data-testid="card-content" className={className}>
+        {children}
+      </div>
+    ),
+  }));
+
+  vi.mock("@/components/settings/section-card-header", () => ({
+    SectionCardHeader: ({ title, description, action }: { title: string; description: string; action?: ReactNode }) => (
+      <div data-testid="section-card-header"><span>{title}</span><span>{description}</span>{action}</div>
+    ),
   }));
 
   vi.mock("@/components/ui/separator", () => ({

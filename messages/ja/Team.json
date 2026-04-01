@@ -160,7 +160,7 @@
   "tabMembersDesc": "チームメンバーの管理、オーナー権限の委譲、新規メンバーの招待ができます。",
   "tabPolicyDesc": "チームのパスワード要件とセキュリティポリシーを設定します。",
   "subTabPolicy": "ポリシー",
-  "subTabKeyRotation": "鍵のローテーション",
+  "subTabKeyRotation": "キーローテーション",
   "tabWebhookDesc": "Webhookエンドポイントを設定して、チームイベントの通知を受信します。",
   "dangerZone": "危険な操作",
   "rotateKeyTitle": "キーローテーション",
