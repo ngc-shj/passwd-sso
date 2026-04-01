@@ -276,6 +276,9 @@ describe("logAuditBatch data equivalence", () => {
   });
 
   it("suppresses dispatch for WEBHOOK_DELIVERY_FAILED", async () => {
+    const { prisma } = await import("@/lib/prisma");
+    (prisma.team.findUnique as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ tenantId: "tenant-1" });
+
     logAudit({
       scope: "TEAM",
       action: "WEBHOOK_DELIVERY_FAILED",

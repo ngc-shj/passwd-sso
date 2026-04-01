@@ -8,7 +8,6 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { logAudit } from "@/lib/audit";
 import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { getLogger } from "@/lib/logger";
 import {
@@ -332,6 +331,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
           });
         });
 
+        // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
+        const { logAudit } = await import("@/lib/audit");
         logAudit({
           scope: AUDIT_SCOPE.TEAM,
           action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
@@ -402,6 +403,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
           });
         });
 
+        const { logAudit } = await import("@/lib/audit");
         logAudit({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
