@@ -3,8 +3,13 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+} from "@/components/ui/card";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -25,7 +30,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ChevronDown, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Loader2, Plus, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
@@ -277,12 +282,14 @@ export function BaseWebhookCard({ config }: Props) {
   );
 
   return (
-    <div className="space-y-4">
-      {/* Create webhook form (fixed) */}
-      <Card className="p-6 space-y-4">
-        <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
+    <Card>
+      <SectionCardHeader icon={Webhook} title={t("title")} description={t("description")} />
+      <CardContent className="space-y-6">
+        {/* Create webhook form */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-medium">{t("addWebhook")}</h3>
 
-        {limitReached ? (
+          {limitReached ? (
           <p className="text-sm text-muted-foreground">{t("limitReached")}</p>
         ) : (
           <>
@@ -374,43 +381,46 @@ export function BaseWebhookCard({ config }: Props) {
             </Button>
           </div>
         )}
-      </Card>
+        </section>
 
-      {/* Webhook list (dynamic) */}
-      <Card className="p-6 space-y-3">
-        <h3 className="text-sm font-medium">{t("registeredWebhooks")}</h3>
-        {loading ? (
-          <Loader2 className="h-4 w-4 animate-spin" />
-        ) : webhooks.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
-        ) : (
-          <div className="max-h-80 space-y-3 overflow-y-auto">
-            {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
-              <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
-            )}
-            {activeWebhooks.map(renderWebhookItem)}
-            {inactiveWebhooks.length > 0 && (
-              <div>
-                <button
-                  type="button"
-                  onClick={() => setShowInactive((v) => !v)}
-                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <ChevronDown
-                    className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
-                  />
-                  {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
-                </button>
-                {showInactive && (
-                  <div className="mt-2 space-y-3">
-                    {inactiveWebhooks.map(renderWebhookItem)}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-    </div>
+        <Separator />
+
+        {/* Webhook list */}
+        <section className="space-y-4">
+          <h3 className="text-sm font-medium">{t("registeredWebhooks")}</h3>
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : webhooks.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("noWebhooks")}</p>
+          ) : (
+            <div className="max-h-80 space-y-3 overflow-y-auto">
+              {activeWebhooks.length === 0 && inactiveWebhooks.length > 0 && (
+                <p className="text-sm text-muted-foreground">{t("noActiveWebhooks")}</p>
+              )}
+              {activeWebhooks.map(renderWebhookItem)}
+              {inactiveWebhooks.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowInactive((v) => !v)}
+                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <ChevronDown
+                      className={`h-3 w-3 transition-transform ${showInactive ? "rotate-0" : "-rotate-90"}`}
+                    />
+                    {t("inactiveWebhooks", { count: inactiveWebhooks.length })}
+                  </button>
+                  {showInactive && (
+                    <div className="mt-2 space-y-3">
+                      {inactiveWebhooks.map(renderWebhookItem)}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      </CardContent>
+    </Card>
   );
 }
