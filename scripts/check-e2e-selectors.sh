@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Detect E2E test selectors that may break due to source code changes.
+#
+# Checks two categories against the current git diff (main...HEAD):
+#   1. Deleted/renamed route paths referenced in E2E page.goto() calls
+#   2. Removed CSS class combinations used in E2E .locator() selectors
+#
+# Usage: bash scripts/check-e2e-selectors.sh [base-branch]
+#   base-branch defaults to "main"
+
+set -euo pipefail
+
+BASE="${1:-main}"
+E2E_DIR="e2e"
+
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+BOLD='\033[1m'
+RESET='\033[0m'
+
+warnings=0
+
+warn() {
+  printf "${YELLOW}  ⚠ %s${RESET}\n" "$1"
+  warnings=$((warnings + 1))
+}
+
+# ── 1. Route path check ──────────────────────────────────────
+#
+# Extract deleted route page files from the diff, then check if
+# any E2E file references that route path.
+
+printf "${BOLD}▸ Checking deleted/moved route paths vs E2E tests${RESET}\n"
+
+# Find deleted page.tsx files under src/app/
+deleted_pages=$(git diff "${BASE}...HEAD" --diff-filter=D --name-only \
+  | grep -E '^src/app/.*page\.tsx$' || true)
+
+if [ -n "$deleted_pages" ]; then
+  for page_file in $deleted_pages; do
+    # Convert file path to route path:
+    #   src/app/[locale]/dashboard/settings/account/page.tsx
+    #   → /dashboard/settings/account
+    route=$(echo "$page_file" \
+      | sed 's|^src/app/\[locale\]/||' \
+      | sed 's|/page\.tsx$||' \
+      | sed 's|^|/|')
+
+    # Search E2E files for this route (with or without locale prefix)
+    if grep -rq "$route" "$E2E_DIR/" 2>/dev/null; then
+      matching_files=$(grep -rl "$route" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+      warn "Deleted route '$route' is still referenced in: $matching_files"
+    fi
+  done
+fi
+
+# Also check renamed/moved pages (file added + deleted in same diff)
+added_pages=$(git diff "${BASE}...HEAD" --diff-filter=A --name-only \
+  | grep -E '^src/app/.*page\.tsx$' || true)
+
+# ── 2. CSS class selector check ──────────────────────────────
+#
+# Extract CSS class selectors used in E2E .locator() calls,
+# then check if any of those classes were removed from changed source files.
+
+printf "${BOLD}▸ Checking CSS class selectors in E2E vs source changes${RESET}\n"
+
+# Extract unique CSS class patterns from E2E locator() calls
+# Matches patterns like: .locator(".px-4.py-3") or .locator('.border.rounded-md')
+e2e_class_selectors=$(grep -roPhE '\.locator\(\s*["\x27](\.[a-zA-Z0-9_-]+(?:\.[a-zA-Z0-9_-]+)*)["\x27]' "$E2E_DIR/" 2>/dev/null \
+  | sed -E "s/.*\.locator\([\"']//; s/[\"']\)$//" \
+  | sort -u || true)
+
+if [ -n "$e2e_class_selectors" ]; then
+  # Get the full diff of changed .tsx source files (not E2E or test files)
+  changed_src=$(git diff "${BASE}...HEAD" --name-only \
+    | grep -E '^src/.*\.tsx$' \
+    | grep -v '\.test\.' \
+    | grep -v '__tests__' || true)
+
+  if [ -n "$changed_src" ]; then
+    # Get removed lines from the diff (lines starting with -)
+    removed_classes=$(git diff "${BASE}...HEAD" -- $changed_src \
+      | grep -E '^\-.*className=' \
+      | grep -v '^\-\-\-' || true)
+
+    for selector in $e2e_class_selectors; do
+      # Split compound selector (.border.rounded-md.p-3) into individual classes
+      classes=$(echo "$selector" | tr '.' ' ' | xargs)
+      for cls in $classes; do
+        [ -z "$cls" ] && continue
+        # Check if this class appears in removed lines but NOT in added lines
+        if echo "$removed_classes" | grep -q "\b${cls}\b" 2>/dev/null; then
+          # Verify it's actually gone (not just moved)
+          added_with_class=$(git diff "${BASE}...HEAD" -- $changed_src \
+            | grep -E '^\+.*className=.*\b'"${cls}"'\b' \
+            | grep -v '^\+\+\+' || true)
+          if [ -z "$added_with_class" ]; then
+            ref_files=$(grep -rl "\\.$cls" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+            warn "CSS class '$cls' removed from source but used in E2E selector '$selector' in: $ref_files"
+          fi
+        fi
+      done
+    done
+  fi
+fi
+
+# ── 3. data-testid check ─────────────────────────────────────
+#
+# Check if any data-testid values used in E2E were removed from source.
+
+printf "${BOLD}▸ Checking data-testid attributes vs source changes${RESET}\n"
+
+e2e_testids=$(grep -roPhE "data-testid=[\"'][^\"']+[\"']" "$E2E_DIR/" 2>/dev/null \
+  | sed -E "s/data-testid=[\"']//; s/[\"']$//" \
+  | sort -u || true)
+
+if [ -n "$e2e_testids" ]; then
+  for testid in $e2e_testids; do
+    # Check if this testid was removed from any source file
+    removed=$(git diff "${BASE}...HEAD" \
+      | grep -E '^\-.*data-testid=.*'"$testid" \
+      | grep -v '^\-\-\-' || true)
+    if [ -n "$removed" ]; then
+      added=$(git diff "${BASE}...HEAD" \
+        | grep -E '^\+.*data-testid=.*'"$testid" \
+        | grep -v '^\+\+\+' || true)
+      if [ -z "$added" ]; then
+        ref_files=$(grep -rl "$testid" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+        warn "data-testid='$testid' removed from source but used in E2E: $ref_files"
+      fi
+    fi
+  done
+fi
+
+# ── Summary ──────────────────────────────────────────────────
+
+echo ""
+if [ "$warnings" -gt 0 ]; then
+  printf "${YELLOW}${BOLD}⚠ %d potential E2E breakage(s) detected.${RESET}\n" "$warnings"
+  printf "${YELLOW}  Review the warnings above and update E2E tests if needed.${RESET}\n"
+  exit 1
+else
+  printf "  No E2E selector issues detected.\n"
+  exit 0
+fi
