@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { MCP_SCOPE, MCP_SCOPES, MCP_SCOPE_RISK } from "./mcp";
+import { MCP_SCOPE, MCP_SCOPES, MCP_SCOPE_RISK, MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS } from "./mcp";
 
 describe("MCP_SCOPE", () => {
   it("MCP_SCOPES contains all MCP_SCOPE values", () => {
@@ -65,5 +65,12 @@ describe("MCP_SCOPE_RISK", () => {
 
   it("credentials:decrypt (legacy) is risk level 'write'", () => {
     expect(MCP_SCOPE_RISK[MCP_SCOPE.CREDENTIALS_DECRYPT]).toBe("write");
+  });
+});
+
+describe("MCP token constants", () => {
+  it("MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS is a positive number", () => {
+    expect(MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS).toBeGreaterThan(0);
+    expect(Number.isInteger(MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS)).toBe(true);
   });
 });

@@ -35,7 +35,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Blocks, ChevronDown, Loader2, Plus, Trash2, Pencil, Users } from "lucide-react";
+import { Blocks, ChevronDown, Loader2, Plus, Search, Trash2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
@@ -53,6 +53,7 @@ interface McpClient {
   isActive: boolean;
   isDcr: boolean;
   createdAt: string;
+  lastUsedAt: string | null;
   connectedUsers?: { name: string | null; email: string | null }[];
 }
 
@@ -80,6 +81,7 @@ export function McpClientCard() {
   const [clients, setClients] = useState<McpClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInactive, setShowInactive] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Create dialog
   const [createOpen, setCreateOpen] = useState(false);
@@ -333,6 +335,11 @@ export function McpClientCard() {
         <span className="text-xs text-muted-foreground">
           {t("mcpCreatedAt", { date: formatDateTime(client.createdAt, locale) })}
         </span>
+        <span className="text-xs text-muted-foreground">
+          {client.lastUsedAt
+            ? t("mcpLastUsed", { date: formatDateTime(client.lastUsedAt, locale) })
+            : t("mcpNeverUsed")}
+        </span>
         <div className="flex items-center gap-1">
         <Button
           variant="ghost"
@@ -370,8 +377,16 @@ export function McpClientCard() {
     </div>
   );
 
-  const activeClients = clients.filter((c) => c.isActive);
-  const inactiveClients = clients.filter((c) => !c.isActive);
+  const searchFiltered = searchQuery
+    ? clients.filter(
+        (c) =>
+          c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.clientId.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : clients;
+
+  const activeClients = searchFiltered.filter((c) => c.isActive);
+  const inactiveClients = searchFiltered.filter((c) => !c.isActive);
 
   return (
     <Card>
@@ -387,7 +402,17 @@ export function McpClientCard() {
         }
       />
       <CardContent className="space-y-4">
-
+      {!loading && clients.length > 0 && (
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder={t("mcpSearchPlaceholder")}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-9"
+          />
+        </div>
+      )}
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin" />
       ) : clients.length === 0 ? (
@@ -408,6 +433,11 @@ export function McpClientCard() {
                 {inactiveClients.map(renderClientItem)}
               </CollapsibleContent>
             </Collapsible>
+          )}
+          {searchFiltered.length === 0 && searchQuery && (
+            <p className="text-sm text-center text-muted-foreground py-4">
+              {t("mcpNoMatchingClients")}
+            </p>
           )}
         </div>
       )}

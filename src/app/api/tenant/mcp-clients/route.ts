@@ -57,7 +57,7 @@ export async function GET(_req: NextRequest) {
         updatedAt: true,
         accessTokens: {
           where: { revokedAt: null, expiresAt: { gt: new Date() }, userId: { not: null } },
-          select: { userId: true },
+          select: { userId: true, lastUsedAt: true },
           distinct: ["userId"],
         },
       },
@@ -78,13 +78,22 @@ export async function GET(_req: NextRequest) {
   const userMap = new Map(users.map((u) => [u.id, u]));
 
   return NextResponse.json({
-    clients: clients.map(({ accessTokens, ...rest }) => ({
-      ...rest,
-      connectedUsers: accessTokens.map((t) => {
-        const u = userMap.get(t.userId!);
-        return { name: u?.name ?? null, email: u?.email ?? null };
-      }),
-    })),
+    clients: clients.map(({ accessTokens, ...rest }) => {
+      // Find the most recent lastUsedAt from all access tokens
+      const mostRecentLastUsed = accessTokens
+        .map(t => t.lastUsedAt)
+        .filter((d): d is Date => d !== null)
+        .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+
+      return {
+        ...rest,
+        lastUsedAt: mostRecentLastUsed?.toISOString() ?? null,
+        connectedUsers: accessTokens.map((t) => {
+          const u = userMap.get(t.userId!);
+          return { name: u?.name ?? null, email: u?.email ?? null };
+        }),
+      };
+    }),
   });
 }
 
