@@ -42,10 +42,11 @@ export class SettingsPage {
 
   // --- Content accessors ---
 
-  /** Sessions list card rendered on the Account page. */
+  /** Sessions list card rendered on the Security > Sessions page. */
   get sessionsCard(): Locator {
-    // Skip the SectionLayout header card (first card) — sessions card is second
-    return this.page.locator("[data-slot='card']").nth(1);
+    return this.page.locator("[data-slot='card']").filter({
+      hasText: /Sessions|セッション/i,
+    });
   }
 
   /** CLI token card rendered on the Developer > CLI Token page. */

@@ -22,7 +22,7 @@ test.describe("Settings - Sessions", () => {
     await context.close();
   });
 
-  test("active session is listed in Account tab", async () => {
+  test("active session is listed in Sessions page", async () => {
     const { vaultReady } = getAuthState();
     const settingsPage = new SettingsPage(page);
     const lockPage = new VaultLockPage(page);
@@ -39,7 +39,7 @@ test.describe("Settings - Sessions", () => {
 
       // At least one session row should be present (the E2E session itself)
       const sessionRows = settingsPage.sessionsCard.locator(
-        ".px-4.py-3"
+        ".border.rounded-md.p-3"
       );
       await expect(sessionRows.first()).toBeVisible({ timeout: 10_000 });
     });
