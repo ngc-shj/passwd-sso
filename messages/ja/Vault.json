@@ -62,7 +62,7 @@
   "vaultMustBeUnlocked": "保管庫のロックを解除してください。",
   "or": "または",
   "setupInviteContext": "招待を受け入れるには、まず保管庫のセットアップが必要です。以下でパスフレーズを設定してください。",
-  "rotateKey": "暗号化キーをローテーション",
+  "rotateKey": "キーローテーション",
   "rotateKeyDescription": "新しいシークレットキーを生成し、すべての保管庫エントリを再暗号化します。緊急アクセスの付与はすべて無効になります。",
   "rotateKeyButton": "キーをローテーション",
   "rotateKeySuccess": "暗号化キーをローテーションしました。",
