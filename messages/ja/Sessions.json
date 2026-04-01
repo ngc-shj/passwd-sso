@@ -29,7 +29,7 @@
   "tabSecurityDesc": "パスキー、トラベルモード、鍵のローテーションを管理して、保管庫を保護します。",
   "subTabPasskey": "パスキー",
   "subTabTravelMode": "トラベルモード",
-  "subTabKeyRotation": "暗号化キーをローテーション",
+  "subTabKeyRotation": "キーローテーション",
   "tabDeveloperDesc": "CLIトークンとAPIキーを生成して、プログラムからアクセスできます。",
   "subTabCli": "CLI トークン",
   "subTabApi": "API キー",

@@ -62,7 +62,7 @@
   "vaultMustBeUnlocked": "Vault must be unlocked.",
   "or": "or",
   "setupInviteContext": "To accept this invitation, you need to set up your vault first. Please set a passphrase below.",
-  "rotateKey": "Rotate Encryption Key",
+  "rotateKey": "Key Rotation",
   "rotateKeyDescription": "Generate a new secret key and re-encrypt all vault entries. This invalidates all emergency access grants.",
   "rotateKeyButton": "Rotate Key",
   "rotateKeySuccess": "Encryption key rotated successfully.",

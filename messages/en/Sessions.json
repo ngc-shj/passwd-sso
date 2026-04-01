@@ -29,7 +29,7 @@
   "tabSecurityDesc": "Manage passkeys, travel mode, and key rotation to protect your vault.",
   "subTabPasskey": "Passkeys",
   "subTabTravelMode": "Travel Mode",
-  "subTabKeyRotation": "Rotate Encryption Key",
+  "subTabKeyRotation": "Key Rotation",
   "tabDeveloperDesc": "Generate CLI tokens and API keys for programmatic access.",
   "subTabCli": "CLI Token",
   "subTabApi": "API Keys",
