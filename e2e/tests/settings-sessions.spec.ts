@@ -27,8 +27,8 @@ test.describe("Settings - Sessions", () => {
     const settingsPage = new SettingsPage(page);
     const lockPage = new VaultLockPage(page);
 
-    await test.step("navigate to Account settings page", async () => {
-      await settingsPage.gotoAccount();
+    await test.step("navigate to Sessions settings page", async () => {
+      await settingsPage.gotoSessions();
       // Navigating to a new page resets React state; re-unlock the vault
       await lockPage.unlockAndWait(vaultReady.passphrase!);
     });

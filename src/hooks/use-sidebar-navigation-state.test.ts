@@ -150,10 +150,10 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.isAdminActive).toBe(false);
   });
 
-  it("matches isSettings with prefix for sub-paths like /dashboard/settings/account", () => {
+  it("matches isSettings with prefix for sub-paths like /dashboard/settings/security/sessions", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/settings/account",
+        pathname: "/ja/dashboard/settings/security/sessions",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "personal" },
         teams,

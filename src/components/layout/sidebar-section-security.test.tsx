@@ -101,7 +101,7 @@ describe("SecuritySection", () => {
 });
 
 describe("SettingsNavSection", () => {
-  it("shows settings link pointing to /dashboard/settings/account in personal context", () => {
+  it("shows settings link pointing to /dashboard/settings in personal context", () => {
     render(
       <SettingsNavSection
         isOpen
@@ -114,7 +114,7 @@ describe("SettingsNavSection", () => {
 
     expect(screen.getByRole("link", { name: "settings" })).toHaveAttribute(
       "href",
-      "/dashboard/settings/account"
+      "/dashboard/settings"
     );
   });
 

@@ -128,7 +128,7 @@ export function SettingsNavSection({
           {!scopedTeam && (
             <>
               <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/settings/account" onClick={onNavigate}>
+                <Link href="/dashboard/settings" onClick={onNavigate}>
                   <UserRound className="h-4 w-4" />
                   {t("settings")}
                 </Link>

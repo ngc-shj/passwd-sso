@@ -5,8 +5,8 @@ export class SettingsPage {
 
   // --- Route-based navigation ---
 
-  async gotoAccount(): Promise<void> {
-    await this.page.goto("/ja/dashboard/settings/account");
+  async gotoSessions(): Promise<void> {
+    await this.page.goto("/ja/dashboard/settings/security/sessions");
     await this.page.waitForLoadState("networkidle");
   }
 
