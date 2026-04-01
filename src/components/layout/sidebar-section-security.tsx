@@ -10,6 +10,7 @@ import {
   Download,
   HeartPulse,
   LayoutDashboard,
+  ScrollText,
   Shield,
   Upload,
   UserRound,
@@ -28,6 +29,7 @@ interface SecuritySectionProps {
   vaultContext: VaultContext;
   isWatchtower: boolean;
   isEmergencyAccess: boolean;
+  isPersonalAuditLog: boolean;
   onNavigate: () => void;
 }
 
@@ -38,6 +40,7 @@ export function SecuritySection({
   vaultContext,
   isWatchtower,
   isEmergencyAccess,
+  isPersonalAuditLog,
   onNavigate,
 }: SecuritySectionProps) {
   const watchtowerHref =
@@ -73,6 +76,18 @@ export function SecuritySection({
               <Link href="/dashboard/emergency-access" onClick={onNavigate}>
                 <HeartPulse className="h-4 w-4" />
                 {t("emergencyAccess")}
+              </Link>
+            </Button>
+          )}
+          {vaultContext.type !== "team" && (
+            <Button
+              variant={isPersonalAuditLog ? "secondary" : "ghost"}
+              className="w-full justify-start gap-2"
+              asChild
+            >
+              <Link href="/dashboard/audit-logs" onClick={onNavigate}>
+                <ScrollText className="h-4 w-4" />
+                {t("auditLog")}
               </Link>
             </Button>
           )}

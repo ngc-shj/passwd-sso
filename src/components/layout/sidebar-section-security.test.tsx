@@ -36,6 +36,7 @@ describe("SecuritySection", () => {
         vaultContext={{ type: "personal" }}
         isWatchtower={false}
         isEmergencyAccess={false}
+        isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
     );
@@ -53,6 +54,7 @@ describe("SecuritySection", () => {
         vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
         isWatchtower={true}
         isEmergencyAccess={false}
+        isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
     );
@@ -72,6 +74,7 @@ describe("SecuritySection", () => {
         vaultContext={{ type: "team", teamId: "team-1", teamRole: "MEMBER" }}
         isWatchtower={false}
         isEmergencyAccess={false}
+        isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
     );
@@ -88,6 +91,7 @@ describe("SecuritySection", () => {
         vaultContext={{ type: "team", teamId: "team-1", teamRole: "VIEWER" }}
         isWatchtower={false}
         isEmergencyAccess={false}
+        isPersonalAuditLog={false}
         onNavigate={() => {}}
       />
     );
@@ -178,6 +182,64 @@ describe("SettingsNavSection", () => {
       "href",
       "/admin"
     );
+  });
+});
+
+describe("SecuritySection audit log", () => {
+  it("renders audit log link for personal vault", () => {
+    render(
+      <SecuritySection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "personal" }}
+        isWatchtower={false}
+        isEmergencyAccess={false}
+        isPersonalAuditLog={true}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/audit-logs");
+  });
+
+  it("renders audit log link for personal vault (inactive)", () => {
+    render(
+      <SecuritySection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        vaultContext={{ type: "personal" }}
+        isWatchtower={false}
+        isEmergencyAccess={false}
+        isPersonalAuditLog={false}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/audit-logs");
+  });
+
+  it("does not render audit log link for team vault (all roles)", () => {
+    const roles = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const;
+
+    for (const teamRole of roles) {
+      const { unmount } = render(
+        <SecuritySection
+          isOpen
+          onOpenChange={() => {}}
+          t={(k) => k}
+          vaultContext={{ type: "team", teamId: "team-1", teamRole }}
+          isWatchtower={false}
+          isEmergencyAccess={false}
+          isPersonalAuditLog={false}
+          onNavigate={() => {}}
+        />
+      );
+
+      expect(screen.queryByRole("link", { name: "auditLog" })).toBeNull();
+      unmount();
+    }
   });
 });
 

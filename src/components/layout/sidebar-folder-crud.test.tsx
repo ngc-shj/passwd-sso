@@ -270,7 +270,7 @@ describe("Sidebar folder CRUD integration", () => {
     const sidebar = within(getDesktopSidebar());
 
     // Open folder dialog via the "+" button
-    const createBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const createBtn = sidebar.getByRole("button", { name: "createFolder" });
     fireEvent.click(createBtn);
 
     // FolderDialog should now be open with captured props
@@ -414,7 +414,7 @@ describe("Sidebar folder CRUD integration", () => {
     const sidebar = within(getDesktopSidebar());
 
     // Open folder dialog
-    const createBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const createBtn = sidebar.getByRole("button", { name: "createFolder" });
     fireEvent.click(createBtn);
 
     // Reset call count to track only the post-submit re-fetch
@@ -454,7 +454,7 @@ describe("Sidebar folder CRUD integration", () => {
     });
 
     const sidebar = within(getDesktopSidebar());
-    const createBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const createBtn = sidebar.getByRole("button", { name: "createFolder" });
     fireEvent.click(createBtn);
 
     // Configure fetch to fail with non-JSON response
@@ -519,7 +519,7 @@ describe("Sidebar team folder CRUD integration", () => {
     });
 
     // Team folder create button with team-specific aria-label
-    const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const teamCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     expect(teamCreateBtn).toBeInTheDocument();
   });
 
@@ -541,7 +541,7 @@ describe("Sidebar team folder CRUD integration", () => {
       expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
-    const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const teamCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     expect(teamCreateBtn).toBeInTheDocument();
   });
 
@@ -563,7 +563,7 @@ describe("Sidebar team folder CRUD integration", () => {
       expect(sidebar.getByText("TeamWork")).toBeInTheDocument();
     });
 
-    const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const teamCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     expect(teamCreateBtn).toBeEnabled();
   });
 
@@ -630,7 +630,7 @@ describe("Sidebar team folder CRUD integration", () => {
     });
 
     // Click the team folder create button
-    const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const teamCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     fireEvent.click(teamCreateBtn);
 
     expect(capturedFolderDialogProps).not.toBeNull();
@@ -675,7 +675,7 @@ describe("Sidebar team folder CRUD integration", () => {
 
     // Even with zero team folders, OWNER should see the create button inside team submenu
     await waitFor(() => {
-      expect(sidebar.getByRole("menuitem", { name: "createFolder" })).toBeInTheDocument();
+      expect(sidebar.getByRole("button", { name: "createFolder" })).toBeInTheDocument();
     });
   });
 
@@ -699,7 +699,7 @@ describe("Sidebar team folder CRUD integration", () => {
     });
 
     // MEMBER can create folders, even when team has zero folders.
-    const teamCreateBtn = sidebar.getByRole("menuitem", { name: "createFolder" });
+    const teamCreateBtn = sidebar.getByRole("button", { name: "createFolder" });
     expect(teamCreateBtn).toBeEnabled();
   });
 });

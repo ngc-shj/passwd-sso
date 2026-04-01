@@ -166,6 +166,40 @@ interface TagsSectionProps {
 - **SettingsNavSection dual guard**: `SettingsNavSection` already hides its inner links via `!scopedTeam` (line 113). The new outer `{vaultContext.type !== "team" && ...}` guard in `sidebar-content.tsx` prevents the empty collapsible header from rendering. Both guards serve different purposes: inner = link visibility, outer = section visibility.
 - **Team audit log RBAC**: Verified that `/api/teams/[teamId]/audit-logs` requires `TEAM_PERMISSION.TEAM_UPDATE` (ADMIN/OWNER only). Member/Viewer cannot access the endpoint, so removing the sidebar link has no access regression — ADMIN/OWNER use admin console instead.
 
+## Implementation Checklist
+
+### Files that MUST be modified (source)
+- [ ] `src/hooks/use-sidebar-sections-state.ts` — SidebarSection type, COLLAPSE_DEFAULTS, auto-expand
+- [ ] `src/components/layout/sidebar-sections.tsx` — Split ManageSection → FoldersSection + TagsSection; remove Audit Log from VaultManagementSection
+- [ ] `src/components/layout/sidebar-section-security.tsx` — Add Audit Log + isPersonalAuditLog prop
+- [ ] `src/components/layout/sidebar-content.tsx` — Replace ManageSection; add guards for Security/Settings
+- [ ] `src/hooks/use-sidebar-view-model.ts` — Remove activeAuditTeamId, onCreateTag; add isPersonalAuditLog
+- [ ] `src/hooks/use-sidebar-navigation-state.ts` — Remove activeAuditTeamId from return
+- [ ] `src/components/layout/sidebar.tsx` — Update destructuring and prop threading
+
+### Files that MUST be modified (tests)
+- [ ] `src/hooks/use-sidebar-sections-state.test.ts` — manage → folders/tags; auto-expand; isPersonalAuditLog
+- [ ] `src/hooks/use-sidebar-navigation-state.test.ts` — Remove activeAuditTeamId assertions
+- [ ] `src/hooks/use-sidebar-view-model.test.ts` — Update prop shape
+- [ ] `src/components/layout/sidebar-content.test.tsx` — Replace ManageSection mock; add conditional rendering tests
+- [ ] `src/components/layout/sidebar-sections.test.tsx` — Replace ManageSection tests; add FoldersSection/TagsSection tests
+- [ ] `src/components/layout/sidebar-section-security.test.tsx` — Add Audit Log tests
+
+### Files to VERIFY ONLY (no changes expected)
+- [ ] `src/components/layout/sidebar-shared.test.tsx` — FolderTreeNode/TagTreeNode unchanged
+- [ ] `src/components/layout/sidebar-folder-crud.test.tsx` — No ManageSection dependency
+- [ ] `src/hooks/use-sidebar-folder-crud.test.ts` — onCreate handler path unchanged
+- [ ] `src/hooks/use-sidebar-tag-crud.test.ts` — onCreate handler path unchanged
+- [ ] `messages/en/Dashboard.json` — "folders"/"tags" keys exist
+- [ ] `messages/ja/Dashboard.json` — "folders"/"tags" keys exist
+
+### Shared utilities to REUSE (not reimplement)
+- `CollapsibleSectionHeader` from `sidebar-shared.tsx`
+- `FolderTreeNode` from `sidebar-shared.tsx`
+- `TagTreeNode` from `sidebar-shared.tsx`
+- `TEAM_ROLE` from `@/lib/constants`
+- `SidebarFolderItem`, `SidebarTeamTagItem` from `use-sidebar-data`
+
 ## User Operation Scenarios
 
 1. **Personal vault user navigates sidebar**: Sees Folders and Tags as separate sections. Clicks Audit Log inside Security section. Section auto-expands correctly.

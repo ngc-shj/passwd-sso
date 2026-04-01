@@ -5,14 +5,16 @@ import { useLocalStorage } from "@/hooks/use-local-storage";
 
 export type SidebarSection =
   | "categories"
-  | "manage"
+  | "folders"
+  | "tags"
   | "security"
   | "settingsNav"
   | "tools";
 
 const COLLAPSE_DEFAULTS: Record<SidebarSection, boolean> = {
   categories: true,
-  manage: true,
+  folders: true,
+  tags: true,
   security: false,
   settingsNav: true,
   tools: true,
@@ -26,7 +28,7 @@ interface UseSidebarSectionsStateParams {
   isWatchtower: boolean;
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
-  isAuditLog: boolean;
+  isPersonalAuditLog: boolean;
   isSettingsActive: boolean;
   isExportActive: boolean;
   isImportActive: boolean;
@@ -41,7 +43,7 @@ export function useSidebarSectionsState({
   isWatchtower,
   isShareLinks,
   isEmergencyAccess,
-  isAuditLog,
+  isPersonalAuditLog,
   isSettingsActive,
   isExportActive,
   isImportActive,
@@ -63,8 +65,9 @@ export function useSidebarSectionsState({
   useEffect(() => {
     const toOpen: SidebarSection[] = [];
     if (selectedTypeFilter !== null) toOpen.push("categories");
-    if (selectedTagId !== null || selectedFolderId !== null) toOpen.push("manage");
-    if (isWatchtower || isShareLinks || isEmergencyAccess || isAuditLog) toOpen.push("security");
+    if (selectedFolderId !== null) toOpen.push("folders");
+    if (selectedTagId !== null) toOpen.push("tags");
+    if (isWatchtower || isShareLinks || isEmergencyAccess || isPersonalAuditLog) toOpen.push("security");
     if (isSettingsActive && !isAdminActive) toOpen.push("settingsNav");
     if (isExportActive || isImportActive) toOpen.push("tools");
 
@@ -83,7 +86,7 @@ export function useSidebarSectionsState({
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
-    isAuditLog,
+    isPersonalAuditLog,
     isSettingsActive,
     isExportActive,
     isImportActive,
