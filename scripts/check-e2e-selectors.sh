@@ -71,12 +71,13 @@ e2e_class_selectors=$(grep -roPhE '\.locator\(\s*["\x27](\.[a-zA-Z0-9_-]+(?:\.[a
   | sed -E "s/.*\.locator\([\"']//; s/[\"']\)$//" \
   | sort -u || true)
 
+# Get the full list of changed .tsx source files (reused by checks 2, 5, 6)
+changed_src=$(git diff "${BASE}...HEAD" --name-only \
+  | grep -E '^src/.*\.tsx$' \
+  | grep -v '\.test\.' \
+  | grep -v '__tests__' || true)
+
 if [ -n "$e2e_class_selectors" ]; then
-  # Get the full diff of changed .tsx source files (not E2E or test files)
-  changed_src=$(git diff "${BASE}...HEAD" --name-only \
-    | grep -E '^src/.*\.tsx$' \
-    | grep -v '\.test\.' \
-    | grep -v '__tests__' || true)
 
   if [ -n "$changed_src" ]; then
     # Get removed lines from the diff (lines starting with -)
@@ -166,6 +167,101 @@ for name in $removed_exports; do
     warn "Deleted export '$name' is still referenced in E2E: $ref_files"
   fi
 done
+
+# ── 5. aria-label check ───────────────────────────────────────
+#
+# E2E uses getByRole("button", { name: "..." }) which matches aria-label.
+# If an aria-label value is removed/changed, E2E selectors break.
+
+printf "${BOLD}▸ Checking aria-label changes vs E2E selectors${RESET}\n"
+
+# Extract aria-label values used in E2E (from { name: "..." } or { name: /.../ })
+e2e_aria_names=$(grep -roPhE 'name:\s*["\x27/]([^"\x27/]+)["\x27/]' "$E2E_DIR/" 2>/dev/null \
+  | sed -E "s/name:\s*[\"'/]//; s/[\"'/]$//" \
+  | grep -v '|' \
+  | sort -u || true)
+
+if [ -n "$e2e_aria_names" ] && [ -n "$changed_src" ]; then
+  removed_aria=$(git diff "${BASE}...HEAD" -- $changed_src \
+    | grep -E '^\-.*aria-label=' \
+    | grep -v '^\-\-\-' || true)
+
+  if [ -n "$removed_aria" ]; then
+    for name in $e2e_aria_names; do
+      [ ${#name} -lt 3 ] && continue
+      if echo "$removed_aria" | grep -qi "$name" 2>/dev/null; then
+        added_aria=$(git diff "${BASE}...HEAD" -- $changed_src \
+          | grep -E '^\+.*aria-label=.*'"$name" \
+          | grep -v '^\+\+\+' || true)
+        if [ -z "$added_aria" ]; then
+          ref_files=$(grep -ril "$name" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+          warn "aria-label containing '$name' removed from source but used in E2E: $ref_files"
+        fi
+      fi
+    done
+  fi
+fi
+
+# ── 6. id attribute check ────────────────────────────────────
+#
+# E2E uses #id selectors (e.g. #title, #password, #unlock-passphrase).
+# If an id is removed, those selectors break.
+
+printf "${BOLD}▸ Checking id attribute changes vs E2E selectors${RESET}\n"
+
+# Extract #id selectors from E2E (from locator("#foo") or page.locator("#foo"))
+e2e_ids=$(grep -roPhE '#[a-zA-Z][a-zA-Z0-9_-]+' "$E2E_DIR/" 2>/dev/null \
+  | sed 's/^#//' \
+  | sort -u || true)
+
+if [ -n "$e2e_ids" ] && [ -n "$changed_src" ]; then
+  removed_ids=$(git diff "${BASE}...HEAD" -- $changed_src \
+    | grep -E '^\-.*\bid=' \
+    | grep -v '^\-\-\-' || true)
+
+  if [ -n "$removed_ids" ]; then
+    for id in $e2e_ids; do
+      [ ${#id} -lt 2 ] && continue
+      if echo "$removed_ids" | grep -q "\"${id}\"" 2>/dev/null; then
+        added_id=$(git diff "${BASE}...HEAD" -- $changed_src \
+          | grep -E '^\+.*\bid=.*"'"${id}"'"' \
+          | grep -v '^\+\+\+' || true)
+        if [ -z "$added_id" ]; then
+          ref_files=$(grep -rl "#${id}" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+          warn "id='$id' removed from source but used as #$id in E2E: $ref_files"
+        fi
+      fi
+    done
+  fi
+fi
+
+# ── 7. data-slot attribute check ─────────────────────────────
+#
+# shadcn/ui uses data-slot for component identification.
+# E2E heavily relies on [data-slot='card'], [data-slot='select-trigger'], etc.
+
+printf "${BOLD}▸ Checking data-slot attribute changes vs E2E selectors${RESET}\n"
+
+e2e_slots=$(grep -roPhE "data-slot=[\"'][^\"']+[\"']" "$E2E_DIR/" 2>/dev/null \
+  | sed -E "s/data-slot=[\"']//; s/[\"']$//" \
+  | sort -u || true)
+
+if [ -n "$e2e_slots" ]; then
+  for slot in $e2e_slots; do
+    removed=$(git diff "${BASE}...HEAD" \
+      | grep -E '^\-.*data-slot=.*'"$slot" \
+      | grep -v '^\-\-\-' || true)
+    if [ -n "$removed" ]; then
+      added=$(git diff "${BASE}...HEAD" \
+        | grep -E '^\+.*data-slot=.*'"$slot" \
+        | grep -v '^\+\+\+' || true)
+      if [ -z "$added" ]; then
+        ref_files=$(grep -rl "data-slot.*$slot" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+        warn "data-slot='$slot' removed from source but used in E2E: $ref_files"
+      fi
+    fi
+  done
+fi
 
 # ── Summary ──────────────────────────────────────────────────
 
