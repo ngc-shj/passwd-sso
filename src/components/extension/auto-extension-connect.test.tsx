@@ -28,7 +28,7 @@ vi.mock("@/lib/inject-extension-token", () => ({
   injectExtensionToken: mockInjectToken,
 }));
 
-import { AutoExtensionConnect } from "./auto-extension-connect";
+import { AutoExtensionConnect, isOverlayActive } from "./auto-extension-connect";
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -198,5 +198,98 @@ describe("AutoExtensionConnect", () => {
 
     // APP_NAME defaults to "passwd-sso" (from NEXT_PUBLIC_APP_NAME env)
     expect(screen.getByText("passwd-sso")).toBeInTheDocument();
+  });
+
+  it("sets data-overlay-active on overlay div when CONNECTED", async () => {
+    setSearchParams("?ext_connect=1");
+    fetchSpy.mockResolvedValue(
+      new Response(JSON.stringify({ token: "t", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+    );
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectedTitle")).toBeInTheDocument();
+    });
+
+    expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
+  });
+
+  it("sets data-overlay-active on overlay div when CONNECTING", async () => {
+    setSearchParams("?ext_connect=1");
+    // Never resolve fetch to stay in CONNECTING state
+    fetchSpy.mockReturnValue(new Promise(() => {}));
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connecting")).toBeInTheDocument();
+    });
+
+    expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
+  });
+
+  it("sets data-overlay-active on overlay div when FAILED", async () => {
+    setSearchParams("?ext_connect=1");
+    fetchSpy.mockResolvedValue(new Response("", { status: 500 }));
+
+    render(<AutoExtensionConnect />);
+
+    await waitFor(() => {
+      expect(screen.getByText("connectFailedTitle")).toBeInTheDocument();
+    });
+
+    expect(document.querySelector("[data-overlay-active]")).not.toBeNull();
+  });
+
+  it("does not have data-overlay-active when IDLE (no ext_connect)", () => {
+    setSearchParams("");
+    render(<AutoExtensionConnect />);
+
+    expect(document.querySelector("[data-overlay-active]")).toBeNull();
+  });
+});
+
+describe("keyboard shortcut guard with isOverlayActive", () => {
+  it("suppresses shortcuts when data-overlay-active is in the DOM", () => {
+    // Simulate the guard pattern used in password-dashboard.tsx
+    const shortcutFired = vi.fn();
+    const handler = (e: KeyboardEvent) => {
+      if (isOverlayActive()) return;
+      if (e.key === "n") shortcutFired();
+    };
+
+    window.addEventListener("keydown", handler);
+
+    // With overlay active — shortcut should NOT fire
+    const overlay = document.createElement("div");
+    overlay.setAttribute("data-overlay-active", "");
+    document.body.appendChild(overlay);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
+    expect(shortcutFired).not.toHaveBeenCalled();
+
+    // After overlay removed — shortcut should fire (F3: resume)
+    document.body.removeChild(overlay);
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "n" }));
+    expect(shortcutFired).toHaveBeenCalledTimes(1);
+
+    window.removeEventListener("keydown", handler);
+  });
+});
+
+describe("isOverlayActive", () => {
+  it("returns true when data-overlay-active element exists", () => {
+    const div = document.createElement("div");
+    div.setAttribute("data-overlay-active", "");
+    document.body.appendChild(div);
+
+    expect(isOverlayActive()).toBe(true);
+
+    document.body.removeChild(div);
+  });
+
+  it("returns false when no data-overlay-active element exists", () => {
+    expect(isOverlayActive()).toBe(false);
   });
 });

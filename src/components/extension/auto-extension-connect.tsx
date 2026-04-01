@@ -16,6 +16,17 @@ import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
 
 /**
+ * Returns true when a full-screen overlay with `data-overlay-active` is
+ * present in the DOM. Used by keyboard-shortcut handlers to suppress
+ * shortcuts while an overlay covers the page.
+ *
+ * Client-side only — must not be called during SSR.
+ */
+export function isOverlayActive(): boolean {
+  return !!document.querySelector("[data-overlay-active]");
+}
+
+/**
  * Automatically connects the browser extension after vault unlock
  * when the page was opened from the extension (indicated by ?ext_connect=1).
  *
@@ -69,7 +80,7 @@ export function AutoExtensionConnect() {
   if (status === CONNECT_STATUS.IDLE) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex min-h-screen items-center justify-center bg-background p-4">
+    <div data-overlay-active className="fixed inset-0 z-50 flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardContent className="flex flex-col items-center text-center pt-8 pb-8 space-y-6">
           {/* Icon */}
