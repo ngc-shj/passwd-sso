@@ -2,13 +2,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // ── Hoisted mocks ─────────────────────────────────────────────────────────────
 
-const { mockCreate, mockCreateMany, mockUserFindUnique, mockWithBypassRls, mockAuditLoggerInfo } =
+const { mockCreate, mockCreateMany, mockUserFindUnique, mockWithBypassRls, mockAuditLoggerInfo, mockDispatchWebhook, mockDispatchTenantWebhook } =
   vi.hoisted(() => ({
     mockCreate: vi.fn(),
     mockCreateMany: vi.fn(),
     mockUserFindUnique: vi.fn(),
     mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
     mockAuditLoggerInfo: vi.fn(),
+    mockDispatchWebhook: vi.fn(),
+    mockDispatchTenantWebhook: vi.fn(),
   }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -28,6 +30,15 @@ vi.mock("@/lib/prisma", () => ({
 
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: mockWithBypassRls,
+}));
+
+vi.mock("@/lib/webhook-dispatcher", () => ({
+  dispatchWebhook: mockDispatchWebhook,
+  dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ error: vi.fn() }),
 }));
 
 vi.mock("@/lib/audit-logger", () => ({
@@ -225,6 +236,82 @@ describe("logAuditBatch data equivalence", () => {
     const singleUA = mockCreate.mock.calls[0][0].data.userAgent;
     expect(singleUA).toHaveLength(512);
     expect(singleUA).toBe(batchUA);
+  });
+
+  it("dispatches team webhook for TEAM scope actions", async () => {
+    const mockTeamFindUnique = vi.fn().mockResolvedValue({ tenantId: "tenant-1" });
+    const { prisma } = await import("@/lib/prisma");
+    (prisma.team.findUnique as ReturnType<typeof vi.fn>) = mockTeamFindUnique;
+
+    logAudit({
+      scope: "TEAM",
+      action: "ENTRY_CREATE",
+      userId: "u1",
+      teamId: "team-1",
+      metadata: { entryId: "e1" },
+    });
+
+    await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled());
+    expect(mockDispatchWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "ENTRY_CREATE", teamId: "team-1" }),
+    );
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  });
+
+  it("dispatches tenant webhook for TENANT scope actions", async () => {
+    logAudit({
+      scope: "TENANT",
+      action: "SCIM_USER_CREATE",
+      userId: "u1",
+      tenantId: "tenant-1",
+      metadata: { scimUserId: "su1" },
+    });
+
+    // Wait for both the DB write and the async dispatch to complete
+    await vi.waitFor(() => expect(mockDispatchTenantWebhook).toHaveBeenCalled());
+    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "SCIM_USER_CREATE", tenantId: "tenant-1" }),
+    );
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+  });
+
+  it("suppresses dispatch for WEBHOOK_DELIVERY_FAILED", async () => {
+    logAudit({
+      scope: "TEAM",
+      action: "WEBHOOK_DELIVERY_FAILED",
+      userId: "system",
+      teamId: "team-1",
+    });
+
+    await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled());
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  });
+
+  it("suppresses dispatch for TENANT_WEBHOOK_DELIVERY_FAILED", async () => {
+    logAudit({
+      scope: "TENANT",
+      action: "TENANT_WEBHOOK_DELIVERY_FAILED",
+      userId: "system",
+      tenantId: "tenant-1",
+    });
+
+    await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled());
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  });
+
+  it("skips dispatch for PERSONAL scope", async () => {
+    logAudit({
+      scope: "PERSONAL",
+      action: "ENTRY_UPDATE",
+      userId: "u1",
+      metadata: { entryId: "e1" },
+    });
+
+    await vi.waitFor(() => expect(mockCreate).toHaveBeenCalled());
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
   });
 
   it("emits structured JSON per entry (not batched) via auditLogger", () => {

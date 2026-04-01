@@ -10,7 +10,6 @@ import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
-import { dispatchWebhook, dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { getLogger } from "@/lib/logger";
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
 import type { NextRequest } from "next/server";
@@ -21,9 +20,9 @@ import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/com
  * Audit actions that must NOT trigger webhook dispatch.
  * Prevents infinite loops: delivery failure → logAudit → dispatch → failure → ...
  */
-const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<string> = new Set([
-  "WEBHOOK_DELIVERY_FAILED",
-  "TENANT_WEBHOOK_DELIVERY_FAILED",
+const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<AuditAction> = new Set<AuditAction>([
+  "WEBHOOK_DELIVERY_FAILED" as AuditAction,
+  "TENANT_WEBHOOK_DELIVERY_FAILED" as AuditAction,
 ]);
 
 export interface AuditLogParams {
@@ -146,7 +145,9 @@ export function logAudit(params: AuditLogParams): void {
     });
 
     // --- Webhook dispatch (after transaction commits) ---
+    // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
     if (resolvedTenantId && !WEBHOOK_DISPATCH_SUPPRESS.has(action)) {
+      const { dispatchWebhook, dispatchTenantWebhook } = await import("@/lib/webhook-dispatcher");
       const webhookData = safeMetadata ?? {};
       const timestamp = new Date().toISOString();
       if (scope === "TEAM" && teamId) {
@@ -253,15 +254,23 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
     });
 
     // --- Webhook dispatch per entry (after transaction commits) ---
+    // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
     if (resolvedTenantId) {
+      const { dispatchWebhook, dispatchTenantWebhook } = await import("@/lib/webhook-dispatcher");
       const timestamp = new Date().toISOString();
       for (const p of paramsList) {
         if (WEBHOOK_DISPATCH_SUPPRESS.has(p.action)) continue;
-        const webhookData = p.metadata ?? {};
+        let webhookMeta: Record<string, unknown> = {};
+        if (p.metadata) {
+          const json = JSON.stringify(p.metadata);
+          webhookMeta = json.length <= METADATA_MAX_BYTES
+            ? p.metadata
+            : { _truncated: true, _originalSize: json.length };
+        }
         if (p.scope === "TEAM" && p.teamId) {
-          void dispatchWebhook({ type: p.action, teamId: p.teamId, timestamp, data: webhookData });
+          void dispatchWebhook({ type: p.action, teamId: p.teamId, timestamp, data: webhookMeta });
         } else if (p.scope === "TENANT" && resolvedTenantId) {
-          void dispatchTenantWebhook({ type: p.action, tenantId: resolvedTenantId, timestamp, data: webhookData });
+          void dispatchTenantWebhook({ type: p.action, tenantId: resolvedTenantId, timestamp, data: webhookMeta });
         }
       }
     }

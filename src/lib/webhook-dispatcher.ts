@@ -330,18 +330,18 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
+        });
 
-          logAudit({
-            scope: AUDIT_SCOPE.TEAM,
-            action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
-            userId: "system",
-            teamId: event.teamId,
-            metadata: {
-              webhookId: id,
-              url,
-              failCount: newFailCount,
-            },
-          });
+        logAudit({
+          scope: AUDIT_SCOPE.TEAM,
+          action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
+          userId: "system",
+          teamId: event.teamId,
+          metadata: {
+            webhookId: id,
+            url,
+            failCount: newFailCount,
+          },
         });
       },
     );
@@ -400,18 +400,18 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
+        });
 
-          logAudit({
-            scope: AUDIT_SCOPE.TENANT,
-            action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
-            userId: "system",
-            tenantId: event.tenantId,
-            metadata: {
-              webhookId: id,
-              url,
-              failCount: newFailCount,
-            },
-          });
+        logAudit({
+          scope: AUDIT_SCOPE.TENANT,
+          action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
+          userId: "system",
+          tenantId: event.tenantId,
+          metadata: {
+            webhookId: id,
+            url,
+            failCount: newFailCount,
+          },
         });
       },
     );
