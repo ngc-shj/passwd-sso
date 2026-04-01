@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.12](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.11...passwd-sso-v0.4.12) (2026-04-01)
+
+
+### Code Refactoring
+
+* restructure sidebar navigation and unify settings UI ([#295](https://github.com/ngc-shj/passwd-sso/issues/295)) ([32c75dc](https://github.com/ngc-shj/passwd-sso/commit/32c75dc6fa049340dfbdcbf8f70ee80a112aef18))
+
 ## [0.4.11](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.10...passwd-sso-v0.4.11) (2026-04-01)
 
 
