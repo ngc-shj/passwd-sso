@@ -32,6 +32,7 @@ import { buildFolderPath } from "@/lib/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
 import { VAULT_DATA_CHANGED_EVENT, notifyVaultDataChanged } from "@/lib/events";
+import { isOverlayActive } from "@/components/extension/auto-extension-connect";
 
 // Static icon map — created once at module scope to avoid re-creation on every render
 const ENTRY_TYPE_ICONS: Record<string, React.ReactNode> = {
@@ -160,6 +161,9 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Suppress all shortcuts while a full-screen overlay is active
+      if (isOverlayActive()) return;
+
       const target = e.target as HTMLElement;
       const inInput = target.tagName === "INPUT" || target.tagName === "TEXTAREA"
         || target.isContentEditable;
