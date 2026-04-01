@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.15](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.14...passwd-sso-v0.4.15) (2026-04-01)
+
+
+### Bug Fixes
+
+* suppress keyboard shortcuts while extension connect overlay is active ([#302](https://github.com/ngc-shj/passwd-sso/issues/302)) ([fcb86c0](https://github.com/ngc-shj/passwd-sso/commit/fcb86c0b44c8ae153f8e01316b8e9714fb732203))
+
 ## [0.4.14](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.13...passwd-sso-v0.4.14) (2026-04-01)
 
 
