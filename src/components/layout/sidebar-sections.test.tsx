@@ -20,23 +20,18 @@ vi.mock("@/components/ui/collapsible", () => ({
   CollapsibleContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/components/ui/dropdown-menu", () => ({
-  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-    <button onClick={onClick}>{children}</button>
-  ),
-}));
-
 vi.mock("@/components/layout/sidebar-shared", () => ({
   CollapsibleSectionHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FolderTreeNode: ({ folder }: { folder: { name: string } }) => <div>{folder.name}</div>,
-  TagTreeNode: ({ tag, onEdit, onDelete }: { tag: { id: string; name: string }; onEdit: (t: unknown) => void; onDelete: (t: unknown) => void }) => (
+  TagTreeNode: ({ tag, showMenu, onEdit, onDelete }: { tag: { id: string; name: string }; showMenu?: boolean; onEdit: (t: unknown) => void; onDelete: (t: unknown) => void }) => (
     <div>
       <span>{tag.name}</span>
-      <button type="button" onClick={() => onEdit(tag)}>editTag</button>
-      <button type="button" onClick={() => onDelete(tag)}>deleteTag</button>
+      {showMenu !== false && (
+        <>
+          <button type="button" onClick={() => onEdit(tag)}>editTag</button>
+          <button type="button" onClick={() => onDelete(tag)}>deleteTag</button>
+        </>
+      )}
     </div>
   ),
 }));
@@ -53,7 +48,8 @@ import {
   CategoriesSection,
   VaultSection,
   VaultManagementSection,
-  ManageSection,
+  FoldersSection,
+  TagsSection,
 } from "./sidebar-sections";
 
 describe("VaultSection", () => {
@@ -139,8 +135,6 @@ describe("VaultManagementSection", () => {
         isSelectedVaultArchive={false}
         isSelectedVaultTrash={false}
         isShareLinks={false}
-        isPersonalAuditLog={false}
-        activeAuditTeamId={null}
         onNavigate={() => {}}
       />
     );
@@ -148,7 +142,7 @@ describe("VaultManagementSection", () => {
     expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/archive");
     expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/trash");
     expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links");
-    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/audit-logs");
+    expect(screen.queryByRole("link", { name: "auditLog" })).toBeNull();
   });
 
   it("renders team scoped links", () => {
@@ -159,8 +153,6 @@ describe("VaultManagementSection", () => {
         isSelectedVaultArchive={false}
         isSelectedVaultTrash={false}
         isShareLinks={false}
-        isPersonalAuditLog={false}
-        activeAuditTeamId="team-1"
         onNavigate={() => {}}
       />
     );
@@ -168,100 +160,72 @@ describe("VaultManagementSection", () => {
     expect(screen.getByRole("link", { name: "archive" })).toHaveAttribute("href", "/dashboard/teams/team-1?scope=archive");
     expect(screen.getByRole("link", { name: "trash" })).toHaveAttribute("href", "/dashboard/teams/team-1?scope=trash");
     expect(screen.getByRole("link", { name: "shareLinks" })).toHaveAttribute("href", "/dashboard/share-links?team=team-1");
-    expect(screen.getByRole("link", { name: "auditLog" })).toHaveAttribute("href", "/dashboard/teams/team-1/audit-logs");
   });
 });
 
-describe("ManageSection", () => {
-  it("calls onCreateFolder when plus button is clicked", () => {
-    const onCreateFolder = vi.fn();
+describe("FoldersSection", () => {
+  it("calls onCreate when plus button is clicked", () => {
+    const onCreate = vi.fn();
 
     render(
-      <ManageSection
+      <FoldersSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        canCreateFolder
-        canCreateTag={false}
+        canCreate
         folders={[]}
         activeFolderId={null}
         linkHref={() => "/dashboard"}
-        showFolderMenu={false}
-        tags={[]}
-        activeTagId={null}
-        tagHref={() => "/dashboard"}
-        onCreateFolder={onCreateFolder}
-        onCreateTag={() => {}}
-        onEditFolder={() => {}}
-        onDeleteFolder={() => {}}
-        onEditTag={() => {}}
-        onDeleteTag={() => {}}
-        showTagMenu
+        showMenu={false}
+        onCreate={onCreate}
+        onEdit={() => {}}
+        onDelete={() => {}}
         onNavigate={() => {}}
       />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "createFolder" }));
-    expect(onCreateFolder).toHaveBeenCalledTimes(1);
+    expect(onCreate).toHaveBeenCalledTimes(1);
   });
 
-  it("calls onCreateTag when create tag button is clicked", () => {
-    const onCreateTag = vi.fn();
-
+  it("disables plus button when canCreate is false", () => {
     render(
-      <ManageSection
+      <FoldersSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        canCreateFolder={false}
-        canCreateTag
+        canCreate={false}
         folders={[]}
         activeFolderId={null}
         linkHref={() => "/dashboard"}
-        showFolderMenu={false}
-        tags={[]}
-        activeTagId={null}
-        tagHref={() => "/dashboard"}
-        onCreateFolder={() => {}}
-        onCreateTag={onCreateTag}
-        onEditFolder={() => {}}
-        onDeleteFolder={() => {}}
-        onEditTag={() => {}}
-        onDeleteTag={() => {}}
-        showTagMenu
+        showMenu={false}
+        onCreate={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
         onNavigate={() => {}}
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "createTag" }));
-    expect(onCreateTag).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button")).toBeDisabled();
   });
+});
 
+describe("TagsSection", () => {
   it("calls tag menu callbacks", () => {
     const onEditTag = vi.fn();
     const onDeleteTag = vi.fn();
 
     render(
-      <ManageSection
+      <TagsSection
         isOpen
         onOpenChange={() => {}}
         t={(k) => k}
-        canCreateFolder
-        canCreateTag
-        folders={[]}
-        activeFolderId={null}
-        linkHref={() => "/dashboard"}
-        showFolderMenu={false}
         tags={[{ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 }]}
         activeTagId={null}
         tagHref={(id) => `/dashboard/tags/${id}`}
-        onCreateFolder={() => {}}
-        onCreateTag={() => {}}
-        onEditFolder={() => {}}
-        onDeleteFolder={() => {}}
-        onEditTag={onEditTag}
-        onDeleteTag={onDeleteTag}
-        showTagMenu
+        showMenu
+        onEdit={onEditTag}
+        onDelete={onDeleteTag}
         onNavigate={() => {}}
       />
     );
@@ -271,5 +235,44 @@ describe("ManageSection", () => {
 
     expect(onEditTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 });
     expect(onDeleteTag).toHaveBeenCalledWith({ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 });
+  });
+
+  it("renders no create button", () => {
+    render(
+      <TagsSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tags={[]}
+        activeTagId={null}
+        tagHref={() => "/dashboard"}
+        showMenu={false}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("hides edit/delete menu when showMenu is false", () => {
+    render(
+      <TagsSection
+        isOpen
+        onOpenChange={() => {}}
+        t={(k) => k}
+        tags={[{ id: "tag-1", name: "work", color: "#111111", parentId: null, count: 2 }]}
+        activeTagId={null}
+        tagHref={(id) => `/dashboard/tags/${id}`}
+        showMenu={false}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        onNavigate={() => {}}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: "editTag" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "deleteTag" })).toBeNull();
   });
 });

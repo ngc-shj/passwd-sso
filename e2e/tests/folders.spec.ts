@@ -57,9 +57,9 @@ test.describe("Folders", () => {
   });
 
   test("entry appears in folder filtered view via sidebar", async () => {
-    // Ensure the Manage section is expanded before clicking the folder link
+    // Ensure the Folders section is expanded before clicking the folder link
     const sidebar = new SidebarNavPage(page);
-    await sidebar.expandManageSection();
+    await sidebar.expandFoldersSection();
 
     // Click the folder link in the sidebar
     const folderLink = page.getByRole("link", { name: folderName });

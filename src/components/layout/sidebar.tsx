@@ -77,7 +77,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     editingTag,
     deletingTag,
     tagTeamId,
-    handleTagCreate,
+    handleTagCreate: _handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
     handleTagSubmit,
@@ -99,7 +99,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     setActiveVault(vaultContext);
   }, [vaultContext, setActiveVault]);
   const {
-    activeAuditTeamId,
     isAdminActive,
     isTeamsManage: _isTeamsManage,
     isSettings,
@@ -108,7 +107,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
-    isAuditLog,
+    isAuditLog: _isAuditLog,
     isPersonalAuditLog,
     selectedTeam,
     selectedTeamCanManageFolders,
@@ -141,7 +140,7 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isWatchtower,
     isShareLinks,
     isEmergencyAccess,
-    isAuditLog,
+    isPersonalAuditLog: vaultContext.type !== "team" && isPersonalAuditLog,
     isSettingsActive: isSettings,
     isExportActive: isExport,
     isImportActive: isImport,
@@ -174,7 +173,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     isShareLinks,
     isEmergencyAccess,
     isPersonalAuditLog,
-    activeAuditTeamId,
     selectedFolders,
     selectedTags,
     isOpen,
@@ -182,7 +180,6 @@ export function Sidebar({ open, onOpenChange }: SidebarProps) {
     handleFolderCreate,
     handleFolderEdit,
     handleFolderDeleteClick,
-    handleTagCreate,
     handleTagEdit,
     handleTagDeleteClick,
   });

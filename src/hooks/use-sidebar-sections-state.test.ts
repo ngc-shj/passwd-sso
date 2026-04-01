@@ -5,7 +5,8 @@ import { renderHook, act } from "@testing-library/react";
 const mockSetCollapsed = vi.fn();
 const mockCollapsed = {
   categories: true,
-  manage: true,
+  folders: true,
+  tags: true,
   security: true,
   settingsNav: true,
   tools: true,
@@ -26,7 +27,7 @@ function baseParams() {
     isWatchtower: false,
     isShareLinks: false,
     isEmergencyAccess: false,
-    isAuditLog: false,
+    isPersonalAuditLog: false,
     isSettingsActive: false,
     isExportActive: false,
     isImportActive: false,
@@ -69,7 +70,54 @@ describe("useSidebarSectionsState", () => {
     const next = updater(mockCollapsed);
 
     expect(next.categories).toBe(false);
-    expect(next.manage).toBe(false);
+    expect(next.tags).toBe(false);
+    expect(next.security).toBe(false);
+  });
+
+  it("auto-opens only folders section when selectedFolderId is set", () => {
+    renderHook(() =>
+      useSidebarSectionsState({
+        ...baseParams(),
+        routeKey: "/dashboard/folders/f1",
+        selectedFolderId: "f1",
+      }),
+    );
+
+    const updater = mockSetCollapsed.mock.calls[0][0] as (prev: typeof mockCollapsed) => typeof mockCollapsed;
+    const next = updater(mockCollapsed);
+
+    expect(next.folders).toBe(false);
+    expect(next.tags).toBe(true);
+  });
+
+  it("auto-opens only tags section when selectedTagId is set", () => {
+    renderHook(() =>
+      useSidebarSectionsState({
+        ...baseParams(),
+        routeKey: "/dashboard/tags/t1",
+        selectedTagId: "t1",
+      }),
+    );
+
+    const updater = mockSetCollapsed.mock.calls[0][0] as (prev: typeof mockCollapsed) => typeof mockCollapsed;
+    const next = updater(mockCollapsed);
+
+    expect(next.tags).toBe(false);
+    expect(next.folders).toBe(true);
+  });
+
+  it("auto-opens security section when isPersonalAuditLog is true", () => {
+    renderHook(() =>
+      useSidebarSectionsState({
+        ...baseParams(),
+        routeKey: "/dashboard/audit-logs",
+        isPersonalAuditLog: true,
+      }),
+    );
+
+    const updater = mockSetCollapsed.mock.calls[0][0] as (prev: typeof mockCollapsed) => typeof mockCollapsed;
+    const next = updater(mockCollapsed);
+
     expect(next.security).toBe(false);
   });
 

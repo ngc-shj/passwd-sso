@@ -36,7 +36,6 @@ interface UseSidebarViewModelParams {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
   selectedTags: SidebarTeamTagItem[];
   isOpen: (key: SidebarSection) => boolean;
@@ -44,7 +43,6 @@ interface UseSidebarViewModelParams {
   handleFolderCreate: (teamId?: string) => void;
   handleFolderEdit: (folder: SidebarFolderItem, teamId?: string) => void;
   handleFolderDeleteClick: (folder: SidebarFolderItem, teamId?: string) => void;
-  handleTagCreate: (teamId?: string) => void;
   handleTagEdit: (tag: SidebarTeamTagItem, teamId?: string) => void;
   handleTagDeleteClick: (tag: SidebarTeamTagItem, teamId?: string) => void;
 }
@@ -75,7 +73,6 @@ export function useSidebarViewModel({
   isShareLinks,
   isEmergencyAccess,
   isPersonalAuditLog,
-  activeAuditTeamId,
   selectedFolders,
   selectedTags,
   isOpen,
@@ -83,7 +80,6 @@ export function useSidebarViewModel({
   handleFolderCreate,
   handleFolderEdit,
   handleFolderDeleteClick,
-  handleTagCreate,
   handleTagEdit,
   handleTagDeleteClick,
 }: UseSidebarViewModelParams): SidebarContentProps {
@@ -131,14 +127,12 @@ export function useSidebarViewModel({
     isShareLinks,
     isEmergencyAccess,
     isPersonalAuditLog,
-    activeAuditTeamId,
     selectedFolders,
     selectedTags,
     isOpen,
     toggleSection,
     onVaultChange,
     onCreateFolder: handleFolderCreate,
-    onCreateTag: handleTagCreate,
     onEditFolder: handleFolderEdit,
     onDeleteFolder: handleFolderDeleteClick,
     onEditTag: handleTagEdit,

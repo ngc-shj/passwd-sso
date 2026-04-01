@@ -58,10 +58,10 @@ test.describe("Tags", () => {
   });
 
   test("entry appears in tag filtered view via sidebar", async () => {
-    // The tag should now appear in the sidebar under the Manage section.
-    // Expand the Manage section first (it is collapsed by default).
+    // The tag should now appear in the sidebar under the Tags section.
+    // Expand the Tags section first (it is collapsed by default).
     const sidebar = new SidebarNavPage(page);
-    await sidebar.expandManageSection();
+    await sidebar.expandTagsSection();
 
     // Click the tag link in the sidebar to filter by it.
     const tagLink = page.getByRole("link", { name: tagName });

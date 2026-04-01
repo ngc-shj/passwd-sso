@@ -106,7 +106,7 @@ export function McpConnectionsCard() {
             {clients.map((client) => (
               <div
                 key={client.id}
-                className="flex items-start justify-between rounded-lg border p-3"
+                className="flex items-start justify-between border rounded-md p-3"
               >
                 <div className="space-y-1.5 min-w-0 flex-1">
                   <div className="flex items-center gap-2">

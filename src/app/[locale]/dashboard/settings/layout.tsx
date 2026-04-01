@@ -21,12 +21,12 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   const t = useTranslations("Sessions");
 
   const navItems = [
-    { href: "/dashboard/settings/account", label: t("tabAccount"), icon: Monitor },
     {
       href: "/dashboard/settings/security",
       label: t("tabSecurity"),
       icon: Shield,
       children: [
+        { href: "/dashboard/settings/security/sessions", label: t("tabAccount"), icon: Monitor },
         { href: "/dashboard/settings/security/passkey", label: t("subTabPasskey"), icon: Fingerprint },
         { href: "/dashboard/settings/security/travel-mode", label: t("subTabTravelMode"), icon: Plane },
         { href: "/dashboard/settings/security/key-rotation", label: t("subTabKeyRotation"), icon: KeyRound },

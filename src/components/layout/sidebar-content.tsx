@@ -6,7 +6,8 @@ import { SecuritySection, SettingsNavSection, ToolsSection } from "@/components/
 import {
   VaultSection,
   CategoriesSection,
-  ManageSection,
+  FoldersSection,
+  TagsSection,
   VaultManagementSection,
 } from "@/components/layout/sidebar-sections";
 import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
@@ -16,6 +17,7 @@ import type {
   SidebarTeamTagItem,
 } from "@/hooks/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
+import { TEAM_ROLE } from "@/lib/constants";
 
 export interface SidebarContentProps {
   t: (key: string) => string;
@@ -41,14 +43,12 @@ export interface SidebarContentProps {
   isShareLinks: boolean;
   isEmergencyAccess: boolean;
   isPersonalAuditLog: boolean;
-  activeAuditTeamId: string | null;
   selectedFolders: SidebarFolderItem[];
   selectedTags: SidebarTeamTagItem[];
   isOpen: (key: SidebarSection) => boolean;
   toggleSection: (key: SidebarSection) => (open: boolean) => void;
   onVaultChange: (value: string) => void;
   onCreateFolder: (teamId?: string) => void;
-  onCreateTag: (teamId?: string) => void;
   onEditFolder: (folder: SidebarFolderItem, teamId?: string) => void;
   onDeleteFolder: (folder: SidebarFolderItem, teamId?: string) => void;
   onEditTag: (tag: SidebarTeamTagItem, teamId?: string) => void;
@@ -80,14 +80,12 @@ export function SidebarContent({
   isShareLinks,
   isEmergencyAccess,
   isPersonalAuditLog,
-  activeAuditTeamId,
   selectedFolders,
   selectedTags,
   isOpen,
   toggleSection,
   onVaultChange,
   onCreateFolder,
-  onCreateTag,
   onEditFolder,
   onDeleteFolder,
   onEditTag,
@@ -122,11 +120,11 @@ export function SidebarContent({
         onNavigate={onNavigate}
       />
 
-      <ManageSection
-        isOpen={isOpen("manage")}
-        onOpenChange={toggleSection("manage")}
+      <FoldersSection
+        isOpen={isOpen("folders")}
+        onOpenChange={toggleSection("folders")}
         t={t}
-        canCreateFolder={vaultContext.type !== "team" || selectedTeamCanManageFolders}
+        canCreate={vaultContext.type !== "team" || selectedTeamCanManageFolders}
         folders={selectedFolders}
         activeFolderId={selectedFolderId}
         linkHref={(id) =>
@@ -134,7 +132,29 @@ export function SidebarContent({
             ? `/dashboard/teams/${scopedTeamId}?folder=${id}`
             : `/dashboard/folders/${id}`
         }
-        showFolderMenu={vaultContext.type === "team" ? selectedTeamCanManageFolders : true}
+        showMenu={vaultContext.type === "team" ? selectedTeamCanManageFolders : true}
+        onCreate={() =>
+          vaultContext.type === "team"
+            ? onCreateFolder(scopedTeamId)
+            : onCreateFolder()
+        }
+        onEdit={(f) =>
+          vaultContext.type === "team"
+            ? onEditFolder(f, scopedTeamId)
+            : onEditFolder(f)
+        }
+        onDelete={(f) =>
+          vaultContext.type === "team"
+            ? onDeleteFolder(f, scopedTeamId)
+            : onDeleteFolder(f)
+        }
+        onNavigate={onNavigate}
+      />
+
+      <TagsSection
+        isOpen={isOpen("tags")}
+        onOpenChange={toggleSection("tags")}
+        t={t}
         tags={selectedTags}
         activeTagId={selectedTagId}
         tagHref={(id) =>
@@ -142,38 +162,17 @@ export function SidebarContent({
             ? `/dashboard/teams/${scopedTeamId}?tag=${id}`
             : `/dashboard/tags/${id}`
         }
-        onCreateFolder={() =>
-          vaultContext.type === "team"
-            ? onCreateFolder(scopedTeamId)
-            : onCreateFolder()
-        }
-        onCreateTag={() =>
-          vaultContext.type === "team"
-            ? onCreateTag(scopedTeamId)
-            : onCreateTag()
-        }
-        canCreateTag={vaultContext.type !== "team" || selectedTeamCanManageTags}
-        onEditFolder={(f) =>
-          vaultContext.type === "team"
-            ? onEditFolder(f, scopedTeamId)
-            : onEditFolder(f)
-        }
-        onDeleteFolder={(f) =>
-          vaultContext.type === "team"
-            ? onDeleteFolder(f, scopedTeamId)
-            : onDeleteFolder(f)
-        }
-        onEditTag={(tag) =>
+        showMenu={vaultContext.type !== "team" || selectedTeamCanManageTags}
+        onEdit={(tag) =>
           vaultContext.type === "team"
             ? onEditTag(tag, scopedTeamId)
             : onEditTag(tag)
         }
-        onDeleteTag={(tag) =>
+        onDelete={(tag) =>
           vaultContext.type === "team"
             ? onDeleteTag(tag, scopedTeamId)
             : onDeleteTag(tag)
         }
-        showTagMenu={vaultContext.type !== "team" || selectedTeamCanManageTags}
         onNavigate={onNavigate}
       />
 
@@ -183,31 +182,34 @@ export function SidebarContent({
         isSelectedVaultArchive={isSelectedVaultArchive}
         isSelectedVaultTrash={isSelectedVaultTrash}
         isShareLinks={isShareLinks}
-        isPersonalAuditLog={isPersonalAuditLog}
-        activeAuditTeamId={activeAuditTeamId}
         onNavigate={onNavigate}
       />
 
-      <SecuritySection
-        isOpen={isOpen("security")}
-        onOpenChange={toggleSection("security")}
-        t={t}
-        vaultContext={vaultContext}
-        isWatchtower={isWatchtower}
-        isEmergencyAccess={isEmergencyAccess}
-        onNavigate={onNavigate}
-      />
+      {!(vaultContext.type === "team" && vaultContext.teamRole === TEAM_ROLE.VIEWER) && (
+        <SecuritySection
+          isOpen={isOpen("security")}
+          onOpenChange={toggleSection("security")}
+          t={t}
+          vaultContext={vaultContext}
+          isWatchtower={isWatchtower}
+          isEmergencyAccess={isEmergencyAccess}
+          isPersonalAuditLog={isPersonalAuditLog}
+          onNavigate={onNavigate}
+        />
+      )}
 
-      <SettingsNavSection
-        isOpen={isOpen("settingsNav")}
-        onOpenChange={toggleSection("settingsNav")}
-        t={t}
-        selectedTeam={selectedTeam}
-        isAdminActive={isAdminActive}
-        isSettingsActive={isSettingsActive}
-        isAdmin={isAdmin}
-        onNavigate={onNavigate}
-      />
+      {vaultContext.type !== "team" && (
+        <SettingsNavSection
+          isOpen={isOpen("settingsNav")}
+          onOpenChange={toggleSection("settingsNav")}
+          t={t}
+          selectedTeam={selectedTeam}
+          isAdminActive={isAdminActive}
+          isSettingsActive={isSettingsActive}
+          isAdmin={isAdmin}
+          onNavigate={onNavigate}
+        />
+      )}
 
       <ToolsSection
         isOpen={isOpen("tools")}

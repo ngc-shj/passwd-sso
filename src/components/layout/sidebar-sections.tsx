@@ -3,12 +3,6 @@
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
@@ -28,7 +22,6 @@ import {
   FolderOpen,
   Plus,
   Link as LinkIcon,
-  ScrollText,
 } from "lucide-react";
 import { CollapsibleSectionHeader, FolderTreeNode, TagTreeNode, type SidebarFolderItem } from "@/components/layout/sidebar-shared";
 
@@ -132,84 +125,54 @@ export function CategoriesSection({
   );
 }
 
-interface ManageSectionProps {
+interface FoldersSectionProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   t: (key: string) => string;
-  canCreateFolder: boolean;
-  canCreateTag: boolean;
+  canCreate: boolean;
   folders: SidebarFolderItem[];
   activeFolderId: string | null;
   linkHref: (folderId: string) => string;
-  showFolderMenu: boolean;
-  tags: SidebarTeamTagItem[];
-  activeTagId: string | null;
-  tagHref: (tagId: string) => string;
-  onCreateFolder: () => void;
-  onCreateTag: () => void;
-  onEditFolder: (folder: SidebarFolderItem) => void;
-  onDeleteFolder: (folder: SidebarFolderItem) => void;
-  onEditTag: (tag: SidebarTeamTagItem) => void;
-  onDeleteTag: (tag: SidebarTeamTagItem) => void;
-  showTagMenu: boolean;
+  showMenu: boolean;
   onNavigate: () => void;
+  onCreate: () => void;
+  onEdit: (folder: SidebarFolderItem) => void;
+  onDelete: (folder: SidebarFolderItem) => void;
 }
 
-export function ManageSection({
+export function FoldersSection({
   isOpen,
   onOpenChange,
   t,
-  canCreateFolder,
-  canCreateTag,
+  canCreate,
   folders,
   activeFolderId,
   linkHref,
-  showFolderMenu,
-  tags,
-  activeTagId,
-  tagHref,
-  onCreateFolder,
-  onCreateTag,
-  onEditFolder,
-  onDeleteFolder,
-  onEditTag,
-  onDeleteTag,
-  showTagMenu,
+  showMenu,
   onNavigate,
-}: ManageSectionProps) {
+  onCreate,
+  onEdit,
+  onDelete,
+}: FoldersSectionProps) {
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
       <div className="flex items-center">
         <div className="flex-1">
-          <CollapsibleSectionHeader icon={<Tag className="h-3 w-3" />} isOpen={isOpen}>
-            {t("manage")}
-          </CollapsibleSectionHeader>
+          <CollapsibleSectionHeader icon={<FolderOpen className="h-3 w-3" />} isOpen={isOpen}>{t("folders")}</CollapsibleSectionHeader>
         </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 shrink-0 mr-1"
-              disabled={!canCreateFolder && !canCreateTag}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={onCreateFolder} disabled={!canCreateFolder}>
-              <FolderOpen className="h-3.5 w-3.5 mr-2" />
-              {t("createFolder")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onCreateTag} disabled={!canCreateTag}>
-              <Tag className="h-3.5 w-3.5 mr-2" />
-              {t("createTag")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 shrink-0 mr-1"
+          disabled={!canCreate}
+          onClick={onCreate}
+          aria-label={t("createFolder")}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
       </div>
       <CollapsibleContent>
-        <div className="ml-3 border-l pl-3 space-y-0.5 mb-2">
+        <div className="ml-3 border-l pl-3 space-y-0.5">
           {folders
             .filter((folder) => !folder.parentId)
             .map((folder) => (
@@ -220,13 +183,49 @@ export function ManageSection({
                 activeFolderId={activeFolderId}
                 depth={0}
                 linkHref={linkHref}
-                showMenu={showFolderMenu}
+                showMenu={showMenu}
                 onNavigate={onNavigate}
-                onEdit={onEditFolder}
-                onDelete={onDeleteFolder}
+                onEdit={onEdit}
+                onDelete={onDelete}
               />
             ))}
         </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+interface TagsSectionProps {
+  isOpen: boolean;
+  onOpenChange: (open: boolean) => void;
+  t: (key: string) => string;
+  tags: SidebarTeamTagItem[];
+  activeTagId: string | null;
+  tagHref: (tagId: string) => string;
+  showMenu: boolean;
+  onNavigate: () => void;
+  onEdit: (tag: SidebarTeamTagItem) => void;
+  onDelete: (tag: SidebarTeamTagItem) => void;
+}
+
+export function TagsSection({
+  isOpen,
+  onOpenChange,
+  t,
+  tags,
+  activeTagId,
+  tagHref,
+  showMenu,
+  onNavigate,
+  onEdit,
+  onDelete,
+}: TagsSectionProps) {
+  return (
+    <Collapsible open={isOpen} onOpenChange={onOpenChange}>
+      <CollapsibleSectionHeader icon={<Tag className="h-3 w-3" />} isOpen={isOpen}>
+        {t("tags")}
+      </CollapsibleSectionHeader>
+      <CollapsibleContent>
         <div className="ml-3 border-l pl-3 space-y-0.5">
           {tags
             .filter((tag) => !tag.parentId)
@@ -238,10 +237,10 @@ export function ManageSection({
                 activeTagId={activeTagId}
                 depth={0}
                 linkHref={tagHref}
-                showMenu={showTagMenu}
+                showMenu={showMenu}
                 onNavigate={onNavigate}
-                onEdit={onEditTag}
-                onDelete={onDeleteTag}
+                onEdit={onEdit}
+                onDelete={onDelete}
               />
             ))}
         </div>
@@ -256,8 +255,6 @@ interface VaultManagementSectionProps {
   isSelectedVaultArchive: boolean;
   isSelectedVaultTrash: boolean;
   isShareLinks: boolean;
-  isPersonalAuditLog: boolean;
-  activeAuditTeamId: string | null;
   onNavigate: () => void;
 }
 
@@ -267,8 +264,6 @@ export function VaultManagementSection({
   isSelectedVaultArchive,
   isSelectedVaultTrash,
   isShareLinks,
-  isPersonalAuditLog,
-  activeAuditTeamId,
   onNavigate,
 }: VaultManagementSectionProps) {
   const isTeam = vaultContext.type === "team";
@@ -276,12 +271,6 @@ export function VaultManagementSection({
   const shareLinksHref = isTeam
     ? `/dashboard/share-links?team=${encodeURIComponent(scopedTeamId)}`
     : "/dashboard/share-links";
-  const auditLogHref = isTeam
-    ? `/dashboard/teams/${scopedTeamId}/audit-logs`
-    : "/dashboard/audit-logs";
-  const isAuditActive = isTeam
-    ? activeAuditTeamId === scopedTeamId
-    : isPersonalAuditLog;
 
   return (
     <div className="space-y-1">
@@ -319,16 +308,6 @@ export function VaultManagementSection({
         <Link href={shareLinksHref} onClick={onNavigate}>
           <LinkIcon className="h-4 w-4" />
           {t("shareLinks")}
-        </Link>
-      </Button>
-      <Button
-        variant={isAuditActive ? "secondary" : "ghost"}
-        className="w-full justify-start gap-2"
-        asChild
-      >
-        <Link href={auditLogHref} onClick={onNavigate}>
-          <ScrollText className="h-4 w-4" />
-          {t("auditLog")}
         </Link>
       </Button>
     </div>
