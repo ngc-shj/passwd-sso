@@ -92,6 +92,10 @@
   "mcpInactive": "Inactive",
   "mcpConnectedUsers": "{count, plural, one {# user} other {# users}}",
   "mcpCreatedAt": "Created: {date}",
+  "mcpLastUsed": "Last used: {date}",
+  "mcpNeverUsed": "Last used: Never",
+  "mcpSearchPlaceholder": "Search clients...",
+  "mcpNoMatchingClients": "No matching clients",
   "mcpUnknownUser": "Unknown user",
   "noActiveMcpClients": "No active MCP clients",
   "mcpDcrFieldsReadOnly": "Client ID and redirect URIs are set at DCR registration time and cannot be changed.",
@@ -192,6 +196,17 @@
     "noClientsDescription": "No MCP clients are registered in this tenant.",
     "noConnections": "No active connections",
     "noConnectionsDescription": "You have not authorized any MCP clients yet.",
-    "connectedUsers": "{count, plural, one {# user} other {# users}} connected"
+    "connectedUsers": "{count, plural, one {# user} other {# users}} connected",
+    "allowedScopes": "Allowed scopes",
+    "registeredAt": "Registered: {date}",
+    "lastUsed": "Last used: {date}",
+    "neverUsed": "Last used: Never",
+    "searchPlaceholder": "Search connections...",
+    "noMatchingConnections": "No matching connections",
+    "revokeAll": "Revoke all",
+    "revokeAllTitle": "Revoke all connections?",
+    "revokeAllDescription": "All active MCP connections will be revoked. Connected agents will lose access immediately.",
+    "revokeAllSuccess": "All connections revoked ({count})",
+    "revokeAllError": "Failed to revoke connections."
   }
 }

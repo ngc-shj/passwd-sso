@@ -64,12 +64,12 @@ async function handleDELETE(
       }
 
       const sessions = await tx.delegationSession.findMany({
-        where: { mcpTokenId: id, revokedAt: null },
+        where: { mcpTokenId: id, userId, revokedAt: null },
         select: { id: true },
       });
       if (sessions.length > 0) {
         await tx.delegationSession.updateMany({
-          where: { mcpTokenId: id, revokedAt: null },
+          where: { mcpTokenId: id, userId, revokedAt: null },
           data: { revokedAt: now },
         });
       }

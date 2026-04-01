@@ -202,7 +202,14 @@ describe("dispatchWebhook", () => {
     mockFetch.mockResolvedValue({ ok: false, status: 500 });
 
     dispatchWebhook(EVENT);
-    await vi.advanceTimersByTimeAsync(32_000);
+    // Advance through all retries in steps to allow microtasks to settle
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    // Switch to real timers and flush microtasks from dynamic import("@/lib/audit")
+    vi.useRealTimers();
+    await new Promise((r) => setTimeout(r, 50));
 
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({

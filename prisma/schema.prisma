@@ -847,6 +847,7 @@ enum AuditAction {
   DELEGATION_READ
   DELEGATION_CHECK
   MCP_CONNECTION_REVOKE
+  MCP_CONNECTION_REVOKE_ALL
 }
 
 enum AuditScope {
@@ -1516,6 +1517,7 @@ model McpAccessToken {
   scope            String    @db.VarChar(1024)
   expiresAt        DateTime  @map("expires_at")
   revokedAt        DateTime? @map("revoked_at")
+  lastUsedAt       DateTime? @map("last_used_at")
   createdAt        DateTime  @default(now()) @map("created_at")
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)

@@ -92,6 +92,10 @@
   "mcpInactive": "無効",
   "mcpConnectedUsers": "{count}人接続中",
   "mcpCreatedAt": "登録日: {date}",
+  "mcpLastUsed": "最終利用: {date}",
+  "mcpNeverUsed": "最終利用: 未使用",
+  "mcpSearchPlaceholder": "クライアントを検索...",
+  "mcpNoMatchingClients": "一致するクライアントがありません",
   "mcpUnknownUser": "不明なユーザー",
   "noActiveMcpClients": "有効な MCP クライアントがありません",
   "mcpDcrFieldsReadOnly": "クライアントIDとリダイレクトURIはDCR登録時に設定され、変更できません。",
@@ -192,6 +196,17 @@
     "noClientsDescription": "このテナントにMCPクライアントが登録されていません。",
     "noConnections": "アクティブな接続はありません",
     "noConnectionsDescription": "まだMCPクライアントを承認していません。",
-    "connectedUsers": "{count}人のユーザーが接続中"
+    "connectedUsers": "{count}人のユーザーが接続中",
+    "allowedScopes": "許可されたスコープ",
+    "registeredAt": "登録日: {date}",
+    "lastUsed": "最終利用: {date}",
+    "neverUsed": "最終利用: 未使用",
+    "searchPlaceholder": "接続を検索...",
+    "noMatchingConnections": "一致する接続がありません",
+    "revokeAll": "すべて失効",
+    "revokeAllTitle": "すべての接続を失効しますか？",
+    "revokeAllDescription": "すべてのアクティブなMCP接続が失効されます。接続中のエージェントは即座にアクセスを失います。",
+    "revokeAllSuccess": "すべての接続を失効しました（{count}件）",
+    "revokeAllError": "接続の失効に失敗しました。"
   }
 }

@@ -36,8 +36,8 @@ vi.mock("@/lib/format-datetime", () => ({
 }));
 
 vi.mock("@/components/settings/section-card-header", () => ({
-  SectionCardHeader: ({ title, description }: { title: string; description: string }) => (
-    <div data-testid="section-card-header"><span>{title}</span><span>{description}</span></div>
+  SectionCardHeader: ({ title, description, action }: { title: string; description: string; action?: ReactNode }) => (
+    <div data-testid="section-card-header"><span>{title}</span><span>{description}</span>{action && <div data-testid="header-action">{action}</div>}</div>
   ),
 }));
 
@@ -92,6 +92,16 @@ vi.mock("@/components/ui/button", () => ({
   ),
 }));
 
+vi.mock("@/components/ui/input", () => ({
+  Input: (props: React.ComponentProps<"input">) => <input {...props} />,
+}));
+
+vi.mock("@/components/settings/scope-badges", () => ({
+  ScopeBadges: ({ scopes }: { scopes: string }) => (
+    <span data-testid="scope-badges">{scopes}</span>
+  ),
+}));
+
 import { McpConnectionsCard } from "./mcp-connections-card";
 
 const sampleClients = [
@@ -100,11 +110,14 @@ const sampleClients = [
     clientId: "mcpc_abc123",
     name: "My MCP Agent",
     isDcr: false,
+    allowedScopes: "credentials:list,credentials:use",
+    clientCreatedAt: "2024-06-01T00:00:00Z",
     connection: {
       tokenId: "token-1",
       scope: "credentials:list credentials:use",
       createdAt: "2025-01-01T00:00:00Z",
       expiresAt: "2026-01-01T00:00:00Z",
+      lastUsedAt: "2025-03-15T10:00:00Z",
     },
   },
   {
@@ -112,11 +125,14 @@ const sampleClients = [
     clientId: "mcpc_def456",
     name: "Another Agent",
     isDcr: false,
+    allowedScopes: "vault:unlock-data,passwords:read",
+    clientCreatedAt: "2024-07-01T00:00:00Z",
     connection: {
       tokenId: "token-2",
       scope: "vault:unlock-data,passwords:read",
       createdAt: "2025-02-01T00:00:00Z",
       expiresAt: "2026-02-01T00:00:00Z",
+      lastUsedAt: null,
     },
   },
 ];
@@ -130,7 +146,10 @@ function setupFetchClients(clients = sampleClients) {
       });
     }
     if (init.method === "DELETE") {
-      return Promise.resolve({ ok: true });
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ revokedCount: 2 }),
+      });
     }
     return Promise.resolve({ ok: false });
   });
@@ -194,13 +213,12 @@ describe("McpConnectionsCard", () => {
     // Connection status badges — both clients have connections
     expect(screen.getAllByText("connected").length).toBeGreaterThan(0);
 
-    // Scope badges for connected clients
-    expect(screen.getByText("credentials:list")).toBeInTheDocument();
-    expect(screen.getByText("credentials:use")).toBeInTheDocument();
-    expect(screen.getByText("vault:unlock-data")).toBeInTheDocument();
-    expect(screen.getByText("passwords:read")).toBeInTheDocument();
+    // Scope badges rendered (mocked ScopeBadges shows raw scope string)
+    const scopeBadges = screen.getAllByTestId("scope-badges");
+    expect(scopeBadges.length).toBeGreaterThan(0);
 
-    // Date fields
+    // Date fields — registeredAt, created, expires, lastUsed
+    expect(screen.getAllByText(/registeredAt/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/created:/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/expires:/i).length).toBeGreaterThan(0);
   });
@@ -217,10 +235,10 @@ describe("McpConnectionsCard", () => {
       expect(screen.getByText("Another Agent")).toBeInTheDocument();
     });
 
-    // Click the first alert action (confirm revoke for token-1)
+    // alertActions[0] is Revoke All; alertActions[1] is first client's individual revoke
     const alertActions = screen.getAllByTestId("alert-action");
     await act(async () => {
-      fireEvent.click(alertActions[0]);
+      fireEvent.click(alertActions[1]);
     });
 
     await waitFor(() => {
@@ -266,9 +284,10 @@ describe("McpConnectionsCard", () => {
       expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
     });
 
+    // alertActions[0] is Revoke All; alertActions[1] is first client's individual revoke
     const alertActions = screen.getAllByTestId("alert-action");
     await act(async () => {
-      fireEvent.click(alertActions[0]);
+      fireEvent.click(alertActions[1]);
     });
 
     await waitFor(() => {
@@ -301,9 +320,10 @@ describe("McpConnectionsCard", () => {
       expect(screen.getByText("My MCP Agent")).toBeInTheDocument();
     });
 
+    // alertActions[0] is Revoke All; alertActions[1] is first client's individual revoke
     const alertActions = screen.getAllByTestId("alert-action");
     await act(async () => {
-      fireEvent.click(alertActions[0]);
+      fireEvent.click(alertActions[1]);
     });
 
     await waitFor(() => {
