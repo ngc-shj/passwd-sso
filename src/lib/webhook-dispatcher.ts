@@ -66,6 +66,8 @@ export const WEBHOOK_METADATA_BLOCKLIST = new Set([
   "reason",
   "incidentRef",
   "displayName",
+  "justification",
+  "requestedScope",
 ]);
 
 // ─── Helpers ────────────────────────────────────────────────────

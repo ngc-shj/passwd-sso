@@ -70,7 +70,7 @@ describe("TeamWebhookCard (team-specific)", () => {
     vi.clearAllMocks();
   });
 
-  it("excludes group:webhook from event groups", async () => {
+  it("does not include group:webhook actions", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -81,7 +81,6 @@ describe("TeamWebhookCard (team-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // The group:webhook label and its actions must NOT appear
     expect(screen.queryByText("WEBHOOK_CREATE")).not.toBeInTheDocument();
     expect(screen.queryByText("WEBHOOK_DELETE")).not.toBeInTheDocument();
     expect(
@@ -89,7 +88,7 @@ describe("TeamWebhookCard (team-specific)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("includes expected team entry events in event selector", async () => {
+  it("includes only actually dispatched entry events", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -100,12 +99,33 @@ describe("TeamWebhookCard (team-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // Core entry lifecycle events must be subscribable
-    // Note: team webhook uses ENTRY_TRASH + ENTRY_PERMANENT_DELETE instead of ENTRY_DELETE
+    // Only events with actual dispatchWebhook() calls should appear
     expect(screen.getByText("ENTRY_CREATE")).toBeInTheDocument();
     expect(screen.getByText("ENTRY_UPDATE")).toBeInTheDocument();
-    expect(screen.getByText("ENTRY_TRASH")).toBeInTheDocument();
-    expect(screen.getByText("ENTRY_PERMANENT_DELETE")).toBeInTheDocument();
-    expect(screen.getByText("ENTRY_RESTORE")).toBeInTheDocument();
+    expect(screen.getByText("ENTRY_DELETE")).toBeInTheDocument();
+
+    // Audit-log-only actions must NOT appear (no dispatch calls)
+    expect(screen.queryByText("ENTRY_TRASH")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("ENTRY_PERMANENT_DELETE"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("ENTRY_RESTORE")).not.toBeInTheDocument();
+  });
+
+  it("does not include tenant-scoped events", async () => {
+    setupFetchWebhooks(mockFetch, []);
+
+    await act(async () => {
+      render(<TeamWebhookCard teamId="team-1" locale="en" />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
+    });
+
+    // Tenant-scoped events must NOT appear in team webhooks
+    expect(screen.queryByText("SCIM_USER_CREATE")).not.toBeInTheDocument();
+    expect(screen.queryByText("MASTER_KEY_ROTATION")).not.toBeInTheDocument();
+    expect(screen.queryByText("HISTORY_PURGE")).not.toBeInTheDocument();
   });
 });

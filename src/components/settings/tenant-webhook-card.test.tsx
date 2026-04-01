@@ -82,12 +82,18 @@ describe("TenantWebhookCard (tenant-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // TENANT_WEBHOOK group actions must NOT appear in the event selector
+    // TENANT_WEBHOOK group actions must NOT appear
     expect(screen.queryByText("TENANT_WEBHOOK_CREATE")).not.toBeInTheDocument();
     expect(screen.queryByText("TENANT_WEBHOOK_DELETE")).not.toBeInTheDocument();
     expect(
       screen.queryByText("TENANT_WEBHOOK_DELIVERY_FAILED"),
     ).not.toBeInTheDocument();
+
+    // MCP_CLIENT group must NOT appear (no dispatch calls yet)
+    expect(screen.queryByText("MCP_CLIENT_CREATE")).not.toBeInTheDocument();
+
+    // DELEGATION group must NOT appear (no dispatch calls yet)
+    expect(screen.queryByText("DELEGATION_CREATE")).not.toBeInTheDocument();
   });
 
   it("excludes PERSONAL_LOG_ACCESS_VIEW and PERSONAL_LOG_ACCESS_EXPIRE from event selector", async () => {
@@ -110,7 +116,7 @@ describe("TenantWebhookCard (tenant-specific)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("includes only ADMIN/SCIM/DIRECTORY_SYNC/BREAKGLASS(REQUEST+REVOKE) events", async () => {
+  it("includes ADMIN/SCIM/DIRECTORY_SYNC/BREAKGLASS/SERVICE_ACCOUNT events", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -121,7 +127,7 @@ describe("TenantWebhookCard (tenant-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // Subscribable breakglass actions must be present
+    // Breakglass actions (REQUEST + REVOKE only)
     expect(
       screen.getByText("PERSONAL_LOG_ACCESS_REQUEST"),
     ).toBeInTheDocument();
@@ -129,14 +135,34 @@ describe("TenantWebhookCard (tenant-specific)", () => {
       screen.getByText("PERSONAL_LOG_ACCESS_REVOKE"),
     ).toBeInTheDocument();
 
-    // Admin actions must be present
+    // Admin actions
+    expect(screen.getByText("ADMIN_VAULT_RESET_INITIATE")).toBeInTheDocument();
+    expect(screen.getByText("ADMIN_VAULT_RESET_EXECUTE")).toBeInTheDocument();
+    expect(screen.getByText("ADMIN_VAULT_RESET_REVOKE")).toBeInTheDocument();
     expect(screen.getByText("TENANT_ROLE_UPDATE")).toBeInTheDocument();
 
-    // SCIM actions must be present
+    // SCIM actions
     expect(screen.getByText("SCIM_TOKEN_CREATE")).toBeInTheDocument();
     expect(screen.getByText("SCIM_USER_CREATE")).toBeInTheDocument();
 
-    // Directory sync actions must be present
+    // Directory sync actions
     expect(screen.getByText("DIRECTORY_SYNC_RUN")).toBeInTheDocument();
+
+    // Service Account actions (newly subscribable — all 8)
+    expect(screen.getByText("SERVICE_ACCOUNT_CREATE")).toBeInTheDocument();
+    expect(screen.getByText("SERVICE_ACCOUNT_UPDATE")).toBeInTheDocument();
+    expect(screen.getByText("SERVICE_ACCOUNT_DELETE")).toBeInTheDocument();
+    expect(
+      screen.getByText("SERVICE_ACCOUNT_TOKEN_CREATE"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("SERVICE_ACCOUNT_TOKEN_REVOKE"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("ACCESS_REQUEST_CREATE")).toBeInTheDocument();
+    expect(screen.getByText("ACCESS_REQUEST_APPROVE")).toBeInTheDocument();
+    expect(screen.getByText("ACCESS_REQUEST_DENY")).toBeInTheDocument();
+
+    // HISTORY_PURGE must NOT appear (no dispatch call)
+    expect(screen.queryByText("HISTORY_PURGE")).not.toBeInTheDocument();
   });
 });

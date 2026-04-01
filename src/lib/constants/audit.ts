@@ -521,21 +521,85 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
 };
 
 /**
- * Tenant audit actions that can be subscribed to via tenant webhooks.
- * Excludes:
+ * Event groups subscribable via tenant webhooks.
+ * Separate from AUDIT_ACTION_GROUPS_TENANT (which is for audit log UI).
+ * Only includes events that have actual dispatchTenantWebhook() calls.
+ *
+ * Intentionally excluded:
  * - TENANT_WEBHOOK group (prevents self-referential loops)
  * - PERSONAL_LOG_ACCESS_VIEW/EXPIRE (privacy-sensitive timing data)
+ * - MCP_CLIENT group (no dispatch calls yet)
+ * - DELEGATION group (no dispatch calls yet)
+ * - HISTORY_PURGE (no dispatch call yet — add here when implemented)
  */
-export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = [
-  ...AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.ADMIN],
-  ...AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SCIM],
-  ...AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.DIRECTORY_SYNC],
-  AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
-  AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
-] as const;
+export const TENANT_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
+  [AUDIT_ACTION_GROUP.ADMIN]: [
+    AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE,
+    AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
+    AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
+    AUDIT_ACTION.TENANT_ROLE_UPDATE,
+    // HISTORY_PURGE omitted — no dispatchTenantWebhook call exists yet
+  ],
+  [AUDIT_ACTION_GROUP.SCIM]: [
+    AUDIT_ACTION.SCIM_TOKEN_CREATE,
+    AUDIT_ACTION.SCIM_TOKEN_REVOKE,
+    AUDIT_ACTION.SCIM_USER_CREATE,
+    AUDIT_ACTION.SCIM_USER_UPDATE,
+    AUDIT_ACTION.SCIM_USER_DEACTIVATE,
+    AUDIT_ACTION.SCIM_USER_REACTIVATE,
+    AUDIT_ACTION.SCIM_USER_DELETE,
+    AUDIT_ACTION.SCIM_GROUP_UPDATE,
+  ],
+  [AUDIT_ACTION_GROUP.DIRECTORY_SYNC]: [
+    AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_CREATE,
+    AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_UPDATE,
+    AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_DELETE,
+    AUDIT_ACTION.DIRECTORY_SYNC_RUN,
+    AUDIT_ACTION.DIRECTORY_SYNC_STALE_RESET,
+  ],
+  [AUDIT_ACTION_GROUP.BREAKGLASS]: [
+    AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
+    AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
+    // VIEW and EXPIRE excluded (privacy-sensitive timing data)
+  ],
+  [AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]: [
+    AUDIT_ACTION.SERVICE_ACCOUNT_CREATE,
+    AUDIT_ACTION.SERVICE_ACCOUNT_UPDATE,
+    AUDIT_ACTION.SERVICE_ACCOUNT_DELETE,
+    AUDIT_ACTION.SERVICE_ACCOUNT_TOKEN_CREATE,
+    AUDIT_ACTION.SERVICE_ACCOUNT_TOKEN_REVOKE,
+    AUDIT_ACTION.ACCESS_REQUEST_CREATE,
+    AUDIT_ACTION.ACCESS_REQUEST_APPROVE,
+    AUDIT_ACTION.ACCESS_REQUEST_DENY,
+  ],
+};
+
+export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
+  TENANT_WEBHOOK_EVENT_GROUPS,
+).flat() as unknown as readonly AuditAction[];
+
+/**
+ * Event groups subscribable via team webhooks.
+ * Separate from AUDIT_ACTION_GROUPS_TEAM (which is for audit log UI).
+ * Only includes events that have actual dispatchWebhook() calls.
+ *
+ * Currently dispatched: ENTRY_CREATE, ENTRY_UPDATE, ENTRY_DELETE
+ * (from teams/[teamId]/passwords/ route handlers).
+ *
+ * Note: ENTRY_DELETE is the action dispatched by the DELETE handler.
+ * This differs from the audit log groups which use ENTRY_TRASH and
+ * ENTRY_PERMANENT_DELETE for the same operations.
+ */
+export const TEAM_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
+  [AUDIT_ACTION_GROUP.ENTRY]: [
+    AUDIT_ACTION.ENTRY_CREATE,
+    AUDIT_ACTION.ENTRY_UPDATE,
+    AUDIT_ACTION.ENTRY_DELETE,
+  ],
+};
 
 export const TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
-  AUDIT_ACTION_GROUPS_TEAM,
+  TEAM_WEBHOOK_EVENT_GROUPS,
 ).flat() as unknown as readonly AuditAction[];
 
 export const AUDIT_METADATA_KEY = {

@@ -7,6 +7,10 @@ import {
   AUDIT_ACTION_GROUPS_PERSONAL,
   AUDIT_ACTION_GROUPS_TENANT,
   AUDIT_ACTION_VALUES,
+  TENANT_WEBHOOK_EVENT_GROUPS,
+  TEAM_WEBHOOK_EVENT_GROUPS,
+  TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
+  TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
 } from "@/lib/constants";
 
 describe("audit constants", () => {
@@ -99,5 +103,52 @@ describe("audit constants", () => {
       AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
       AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE,
     ]);
+  });
+
+  it("has TENANT_WEBHOOK_EVENT_GROUPS with expected group keys", () => {
+    const keys = Object.keys(TENANT_WEBHOOK_EVENT_GROUPS);
+    expect(keys).toEqual([
+      AUDIT_ACTION_GROUP.ADMIN,
+      AUDIT_ACTION_GROUP.SCIM,
+      AUDIT_ACTION_GROUP.DIRECTORY_SYNC,
+      AUDIT_ACTION_GROUP.BREAKGLASS,
+      AUDIT_ACTION_GROUP.SERVICE_ACCOUNT,
+    ]);
+  });
+
+  it("excludes TENANT_WEBHOOK/MCP_CLIENT/DELEGATION from tenant webhook event groups", () => {
+    const keys = new Set(Object.keys(TENANT_WEBHOOK_EVENT_GROUPS));
+    expect(keys.has(AUDIT_ACTION_GROUP.TENANT_WEBHOOK)).toBe(false);
+    expect(keys.has(AUDIT_ACTION_GROUP.MCP_CLIENT)).toBe(false);
+    expect(keys.has(AUDIT_ACTION_GROUP.DELEGATION)).toBe(false);
+
+    // Also verify at action value level
+    const allSubscribable = new Set<string>(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS);
+    expect(allSubscribable.has(AUDIT_ACTION.TENANT_WEBHOOK_CREATE)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.MCP_CLIENT_CREATE)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.DELEGATION_CREATE)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_VIEW)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.HISTORY_PURGE)).toBe(false);
+  });
+
+  it("has TEAM_WEBHOOK_EVENT_GROUPS with only ENTRY group", () => {
+    expect(Object.keys(TEAM_WEBHOOK_EVENT_GROUPS)).toEqual([
+      AUDIT_ACTION_GROUP.ENTRY,
+    ]);
+    expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.ENTRY]).toEqual([
+      AUDIT_ACTION.ENTRY_CREATE,
+      AUDIT_ACTION.ENTRY_UPDATE,
+      AUDIT_ACTION.ENTRY_DELETE,
+    ]);
+  });
+
+  it("derives SUBSCRIBABLE_ACTIONS from EVENT_GROUPS", () => {
+    expect([...TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS]).toEqual(
+      Object.values(TENANT_WEBHOOK_EVENT_GROUPS).flat(),
+    );
+    expect([...TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS]).toEqual(
+      Object.values(TEAM_WEBHOOK_EVENT_GROUPS).flat(),
+    );
   });
 });
