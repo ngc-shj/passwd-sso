@@ -139,13 +139,13 @@ export function SessionsCard() {
     <Card>
       <SectionCardHeader icon={Monitor} title={t("title")} description={t("description")} />
       <CardContent className="space-y-4">
-        <div className="divide-y">
+        <div className="space-y-3">
           {sessions.map((session) => {
             const device = parseDevice(session.userAgent);
             return (
               <div
                 key={session.id}
-                className="px-4 py-3 flex items-center gap-3"
+                className="flex items-center gap-3 border rounded-md p-3"
               >
                 <div className="shrink-0 text-muted-foreground">
                   <DeviceIcon type={device.deviceType} />

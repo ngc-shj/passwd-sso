@@ -2,6 +2,7 @@
 import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 
 vi.mock("@/components/ui/separator", () => ({
   Separator: () => <hr />,
@@ -23,12 +24,10 @@ vi.mock("@/components/layout/sidebar-sections", () => ({
   VaultSection: () => <div>vault</div>,
   CategoriesSection: () => <div>categories</div>,
   VaultManagementSection: () => <div>vault-management</div>,
-  ManageSection: ({ onCreateFolder, onCreateTag }: { onCreateFolder: () => void; onCreateTag: () => void }) => (
-    <>
-      <button onClick={onCreateFolder}>create-folder</button>
-      <button onClick={onCreateTag}>create-tag</button>
-    </>
+  FoldersSection: ({ onCreate }: { onCreate: () => void }) => (
+    <button onClick={onCreate}>create-folder</button>
   ),
+  TagsSection: () => <div>tags</div>,
 }));
 
 import { SidebarContent, type SidebarContentProps } from "./sidebar-content";
@@ -58,14 +57,12 @@ function baseProps(overrides: Partial<SidebarContentProps> = {}): SidebarContent
     isShareLinks: false,
     isEmergencyAccess: false,
     isPersonalAuditLog: false,
-    activeAuditTeamId: null,
     selectedFolders: [],
     selectedTags: [],
     isOpen: vi.fn(() => true),
     toggleSection: vi.fn(() => vi.fn()),
     onVaultChange: vi.fn(),
     onCreateFolder: vi.fn(),
-    onCreateTag: vi.fn(),
     onEditFolder: vi.fn(),
     onDeleteFolder: vi.fn(),
     onEditTag: vi.fn(),
@@ -103,21 +100,32 @@ describe("SidebarContent", () => {
     expect(props.onCreateFolder).toHaveBeenCalledWith("team-1");
   });
 
-  it("calls onCreateTag without teamId in personal context", () => {
+  it("does not render SettingsNavSection for team vault", () => {
+    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "ADMIN" } });
+    render(<SidebarContent {...props} />);
+
+    expect(screen.queryByText("settings-nav")).toBeNull();
+  });
+
+  it("does not render SecuritySection for team Viewer", () => {
+    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "VIEWER" } });
+    render(<SidebarContent {...props} />);
+
+    expect(screen.queryByText("security")).toBeNull();
+  });
+
+  it("renders SecuritySection for team non-Viewer", () => {
+    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "OWNER" } });
+    render(<SidebarContent {...props} />);
+
+    expect(screen.getByText("security")).toBeInTheDocument();
+  });
+
+  it("renders SettingsNavSection for personal vault", () => {
     const props = baseProps({ vaultContext: { type: "personal" } });
     render(<SidebarContent {...props} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "create-tag" }));
-
-    expect(props.onCreateTag).toHaveBeenCalledWith();
+    expect(screen.getByText("settings-nav")).toBeInTheDocument();
   });
 
-  it("calls onCreateTag with teamId in team context", () => {
-    const props = baseProps({ vaultContext: { type: "team", teamId: "team-1" } });
-    render(<SidebarContent {...props} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "create-tag" }));
-
-    expect(props.onCreateTag).toHaveBeenCalledWith("team-1");
-  });
 });

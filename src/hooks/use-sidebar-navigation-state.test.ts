@@ -95,7 +95,7 @@ describe("useSidebarNavigationState", () => {
     );
 
     expect(result.current.isAuditLog).toBe(true);
-    expect(result.current.activeAuditTeamId).toBe("team-1");
+    expect(result.current.isPersonalAuditLog).toBe(false);
     expect(result.current.activeTeamId).toBeNull();
   });
 
@@ -113,7 +113,6 @@ describe("useSidebarNavigationState", () => {
       }),
     );
 
-    expect(result.current.activeAuditTeamId).toBeNull();
     expect(result.current.isAuditLog).toBe(false);
   });
 
@@ -151,10 +150,10 @@ describe("useSidebarNavigationState", () => {
     expect(result.current.isAdminActive).toBe(false);
   });
 
-  it("matches isSettings with prefix for sub-paths like /dashboard/settings/account", () => {
+  it("matches isSettings with prefix for sub-paths like /dashboard/settings/security/sessions", () => {
     const { result } = renderHook(() =>
       useSidebarNavigationState({
-        pathname: "/ja/dashboard/settings/account",
+        pathname: "/ja/dashboard/settings/security/sessions",
         searchParams: new URLSearchParams(),
         vaultContext: { type: "personal" },
         teams,

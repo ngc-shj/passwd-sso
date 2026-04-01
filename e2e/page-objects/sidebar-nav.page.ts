@@ -65,36 +65,41 @@ export class SidebarNavPage {
     return this.page.getByRole("link", { name: /^Import$|^インポート$/i });
   }
 
-  // --- Manage section (folders and tags) ---
+  // --- Folders section ---
 
-  /** The "管理" section header button (CollapsibleTrigger). */
-  get manageSectionHeader() {
-    return this.page.locator("nav").getByRole("button", { name: /^Manage$|^管理$/i });
+  /** The "Folders" / "フォルダ" section header button (CollapsibleTrigger). */
+  get foldersSectionHeader() {
+    return this.page.locator("nav").getByRole("button", { name: /^Folders$|^フォルダ$/i });
   }
 
-  /** Plus button that opens the folder/tag creation dropdown in the Manage section. */
-  get manageCreateButton() {
-    // The Plus icon button (lucide-plus) sits next to the "管理" collapsible header.
-    // It has no accessible name — locate it by the SVG class within nav scope.
+  /** Plus button that opens the folder creation dialog. Has aria-label="createFolder". */
+  get folderCreateButton() {
     return this.page
       .locator("nav")
-      .locator("button:has(svg.lucide-plus)")
-      .first();
+      .getByRole("button", { name: /New Folder|新規フォルダ|createFolder/i });
   }
 
-  get createFolderMenuItem() {
-    // t("createFolder") = "New Folder" / "新規フォルダ"
-    return this.page.getByRole("menuitem", { name: /New Folder|新規フォルダ/i });
+  /** Expand the Folders section if it is currently collapsed. */
+  async expandFoldersSection(): Promise<void> {
+    const header = this.foldersSectionHeader;
+    await header.waitFor({ timeout: 10_000 });
+    const expanded = await header.getAttribute("aria-expanded");
+    if (expanded !== "true") {
+      await header.click();
+    }
   }
 
-  get createTagMenuItem() {
-    // t("createTag") = "New Tag" / "新規タグ"
-    return this.page.getByRole("menuitem", { name: /New Tag|新規タグ/i });
+  // --- Tags section ---
+
+  /** The "Tags" / "タグ" section header button (CollapsibleTrigger). */
+  get tagsSectionHeader() {
+    return this.page.locator("nav").getByRole("button", { name: /^Tags$|^タグ$/i });
   }
 
-  /** Expand the Manage section if it is currently collapsed. */
-  async expandManageSection(): Promise<void> {
-    const header = this.manageSectionHeader;
+  /** Expand the Tags section if it is currently collapsed. */
+  async expandTagsSection(): Promise<void> {
+    const header = this.tagsSectionHeader;
+    await header.waitFor({ timeout: 10_000 });
     const expanded = await header.getAttribute("aria-expanded");
     if (expanded !== "true") {
       await header.click();
@@ -149,15 +154,9 @@ export class SidebarNavPage {
   async navigateTo(
     view: "passwords" | "favorites" | "archive" | "trash" | "shareLinks" | "watchtower" | "auditLog" | "settings" | "export" | "import" | "adminConsole" | "emergencyAccess"
   ): Promise<void> {
-    // Expand collapsed sidebar sections as needed before clicking the link.
-    // The Tools section (export/import) is collapsed by default.
-    // The Security section (watchtower/emergencyAccess) is open by default but
-    // may have been collapsed by a previous test.
-    // Archive, Trash, Share Links, and Audit Log are in VaultManagementSection
-    // which has no collapsible wrapper and is always visible.
     if (view === "export" || view === "import") {
       await this.expandToolsSection();
-    } else if (view === "watchtower" || view === "emergencyAccess") {
+    } else if (view === "watchtower" || view === "emergencyAccess" || view === "auditLog") {
       await this.expandSecuritySection();
     }
 
@@ -202,10 +201,10 @@ export class SidebarNavPage {
     await this.page.waitForLoadState("networkidle");
   }
 
-  /** Open the Manage section's create dropdown, then click "New Folder". */
+  /** Click the Folders section [+] button and create a folder via the dialog. */
   async createFolder(name: string): Promise<void> {
-    await this.manageCreateButton.click();
-    await this.createFolderMenuItem.click();
+    await this.expandFoldersSection();
+    await this.folderCreateButton.click();
     // Fill in the folder name dialog
     const dialog = this.page.locator("[role='dialog']");
     await dialog.waitFor({ timeout: 5_000 });
@@ -213,21 +212,7 @@ export class SidebarNavPage {
     // The submit button says "作成" (Create) for new folders, "保存" (Save) for edits
     await dialog.getByRole("button", { name: /Save|保存|Create|作成/i }).click();
     await dialog.waitFor({ state: "hidden", timeout: 5_000 });
-    // Expand the Manage section so the newly created folder is visible
-    await this.expandManageSection();
-  }
-
-  /** Open the Manage section's create dropdown, then click "New Tag". */
-  async createTag(name: string): Promise<void> {
-    await this.manageCreateButton.click();
-    await this.createTagMenuItem.click();
-    const dialog = this.page.locator("[role='dialog']");
-    await dialog.waitFor({ timeout: 5_000 });
-    await dialog.getByRole("textbox").fill(name);
-    // The submit button says "作成" (Create) for new tags, "保存" (Save) for edits
-    await dialog.getByRole("button", { name: /Save|保存|Create|作成/i }).click();
-    await dialog.waitFor({ state: "hidden", timeout: 5_000 });
-    // Expand the Manage section so the newly created tag is visible
-    await this.expandManageSection();
+    // Expand the Folders section so the newly created folder is visible
+    await this.expandFoldersSection();
   }
 }

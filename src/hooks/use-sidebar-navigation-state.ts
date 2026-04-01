@@ -48,8 +48,6 @@ export function useSidebarNavigationState({
     // Scope to /dashboard/ only — don't match /admin/teams/[id]/audit-logs
     const isAuditLog = cleanPath === "/dashboard/audit-logs" || (cleanPath.startsWith("/dashboard/") && cleanPath.endsWith("/audit-logs"));
     const isPersonalAuditLog = cleanPath === "/dashboard/audit-logs";
-    const auditTeamMatch = cleanPath.match(/^\/dashboard\/teams\/([^/]+)\/audit-logs$/);
-    const activeAuditTeamId = auditTeamMatch ? auditTeamMatch[1] : null;
     const tagMatch = cleanPath.match(/^\/dashboard\/tags\/([^/]+)/);
     const activeTagId = tagMatch ? tagMatch[1] : null;
     const folderMatch = cleanPath.match(/^\/dashboard\/folders\/([^/]+)/);
@@ -157,7 +155,6 @@ export function useSidebarNavigationState({
 
     return {
       activeTeamId,
-      activeAuditTeamId,
       isAdminActive,
       isTeamsManage,
       isSettings,

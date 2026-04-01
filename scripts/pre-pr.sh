@@ -29,6 +29,7 @@ run_step() {
 echo ""
 printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 
+run_step "Static: e2e-selectors"  bash scripts/check-e2e-selectors.sh
 run_step "Lint"                   npx eslint .
 run_step "Static: team-auth-rls"  node scripts/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/check-bypass-rls.mjs
