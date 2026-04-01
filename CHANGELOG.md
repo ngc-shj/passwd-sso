@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.11](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.10...passwd-sso-v0.4.11) (2026-04-01)
+
+
+### Bug Fixes
+
+* align BaseWebhookCard with SectionCardHeader and unify key rotation labels ([#293](https://github.com/ngc-shj/passwd-sso/issues/293)) ([1b4da82](https://github.com/ngc-shj/passwd-sso/commit/1b4da82064bd97918907be212ff6c49c771d764e))
+
 ## [0.4.10](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.9...passwd-sso-v0.4.10) (2026-04-01)
 
 
