@@ -103,7 +103,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
   it("returns 401 when not authenticated", async () => {
     mockAuth.mockResolvedValue(null);
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
     });
     const res = await GET(req);
     expect(res.status).toBe(401);
@@ -112,7 +112,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
   it("returns 403 when permission denied", async () => {
     mockRequireTenantPermission.mockRejectedValue(new TenantAuthError("INSUFFICIENT_PERMISSION", 403));
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
     });
     const res = await GET(req);
     expect(res.status).toBe(403);
@@ -121,7 +121,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
   it("rethrows unexpected permission errors", async () => {
     mockRequireTenantPermission.mockRejectedValue(new Error("boom"));
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
     });
     await expect(GET(req)).rejects.toThrow("boom");
   });
@@ -129,7 +129,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
   it("returns 429 when rate limited", async () => {
     mockDownloadLimiterCheck.mockResolvedValue({ allowed: false });
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
     });
     const res = await GET(req);
     expect(res.status).toBe(429);
@@ -159,7 +159,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
   it("returns 400 when date range exceeds 90 days", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z", to: "2026-06-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 91 * 86400000).toISOString(), to: new Date().toISOString() },
     });
     const res = await GET(req);
     expect(res.status).toBe(400);
@@ -169,7 +169,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
   it("returns 400 for invalid action filters", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z", actions: "ENTRY_CREATE,NOT_REAL" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString(), actions: "ENTRY_CREATE,NOT_REAL" },
     });
     const res = await GET(req);
     expect(res.status).toBe(400);
@@ -177,7 +177,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
   it("streams JSONL format by default", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
     });
     const res = await GET(req);
     expect(res.status).toBe(200);
@@ -193,7 +193,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
   it("streams CSV format when requested", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z", format: "csv" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString(), format: "csv" },
     });
     const res = await GET(req);
     expect(res.status).toBe(200);
@@ -208,7 +208,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
 
   it("records audit log download event", async () => {
     const req = createRequest("GET", "http://localhost:3000/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString() },
     });
     const res = await GET(req);
     await streamToString(res);

@@ -53,7 +53,7 @@ export function DelegationRevokeBanner() {
       <Button
         variant="outline"
         size="sm"
-        onClick={() => router.push("/dashboard/settings/developer/delegation")}
+        onClick={() => router.push("/dashboard/settings/mcp/delegation")}
       >
         {t("bannerManage")}
       </Button>

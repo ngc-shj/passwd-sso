@@ -77,8 +77,10 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   redirectUris: ["https://example.com/callback"],
   allowedScopes: "credentials:decrypt",
   isActive: true,
+  isDcr: false,
   createdAt: new Date(),
   updatedAt: new Date(),
+  accessTokens: [],
   ...overrides,
 });
 
@@ -99,6 +101,7 @@ describe("GET /api/tenant/mcp-clients", () => {
     expect(json.clients).toHaveLength(1);
     expect(json.clients[0].id).toBe("client-1");
     expect(json.clients[0].clientId).toBe("mcpc_abc123");
+    expect(Array.isArray(json.clients[0].connectedUsers)).toBe(true);
   });
 
   it("returns 401 for unauthenticated users", async () => {

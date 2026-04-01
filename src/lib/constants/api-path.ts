@@ -75,6 +75,7 @@ export const API_PATH = {
   TENANT_MCP_CLIENTS: "/api/tenant/mcp-clients",
   TENANT_ACCESS_REQUESTS: "/api/tenant/access-requests",
   VAULT_DELEGATION: "/api/vault/delegation",
+  USER_MCP_TOKENS: "/api/user/mcp-tokens",
 } as const;
 
 export const apiPath = {
@@ -197,4 +198,6 @@ export const apiPath = {
     `${API_PATH.TENANT_ACCESS_REQUESTS}/${requestId}/deny`,
   vaultDelegation: () => API_PATH.VAULT_DELEGATION,
   vaultDelegationById: (sessionId: string) => `${API_PATH.VAULT_DELEGATION}/${sessionId}`,
+  userMcpTokens: () => API_PATH.USER_MCP_TOKENS,
+  userMcpTokenById: (tokenId: string) => `${API_PATH.USER_MCP_TOKENS}/${tokenId}`,
 } as const;

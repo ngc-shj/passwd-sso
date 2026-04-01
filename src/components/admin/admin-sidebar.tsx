@@ -8,13 +8,14 @@ import { VisuallyHidden } from "radix-ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { AdminScopeSelector } from "./admin-scope-selector";
 import {
+  Blocks,
   Bot,
   ChevronDown,
   Clock,
+  Crown,
   Cpu,
   Database,
   FolderSync,
-  Key,
   KeyRound,
   Link2,
   ListChecks,
@@ -23,6 +24,8 @@ import {
   Shield,
   ShieldAlert,
   ShieldBan,
+  ShieldCheck,
+  UserPlus,
   Users,
   UsersRound,
   Webhook,
@@ -67,8 +70,8 @@ function useNavItems(
         icon: <Users className="h-4 w-4 shrink-0" />,
         children: [
           { href: `/admin/teams/${teamId}/members/list`, label: t("navMemberList"), icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
-          { href: `/admin/teams/${teamId}/members/add`, label: t("navAddMember"), icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
-          { href: `/admin/teams/${teamId}/members/transfer`, label: t("navTransferOwnership"), icon: <Users className="h-3.5 w-3.5 shrink-0" /> },
+          { href: `/admin/teams/${teamId}/members/add`, label: t("navAddMember"), icon: <UserPlus className="h-3.5 w-3.5 shrink-0" /> },
+          { href: `/admin/teams/${teamId}/members/transfer`, label: t("navTransferOwnership"), icon: <Crown className="h-3.5 w-3.5 shrink-0" /> },
         ],
       },
       {
@@ -121,13 +124,20 @@ function useNavItems(
       ],
     },
     {
-      href: "/admin/tenant/machine-identity",
-      label: t("navMachineIdentity"),
+      href: "/admin/tenant/service-accounts",
+      label: t("navServiceAccounts"),
       icon: <Bot className="h-4 w-4 shrink-0" />,
       children: [
-        { href: "/admin/tenant/machine-identity/service-accounts", label: t("navServiceAccounts"), icon: <Key className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/machine-identity/mcp-clients", label: t("navMcpClients"), icon: <Cpu className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/machine-identity/access-requests", label: t("navAccessRequests"), icon: <KeyRound className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/service-accounts/accounts", label: t("navSaAccounts"), icon: <Bot className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/service-accounts/access-requests", label: t("navAccessRequests"), icon: <ShieldCheck className="h-3.5 w-3.5 shrink-0" /> },
+      ],
+    },
+    {
+      href: "/admin/tenant/mcp",
+      label: t("navMcp"),
+      icon: <Cpu className="h-4 w-4 shrink-0" />,
+      children: [
+        { href: "/admin/tenant/mcp/clients", label: t("navMcpClients"), icon: <Blocks className="h-3.5 w-3.5 shrink-0" /> },
       ],
     },
     {

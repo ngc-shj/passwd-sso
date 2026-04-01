@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useTranslations } from "next-intl";
+import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
@@ -35,12 +35,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Blocks, ChevronDown, Loader2, Plus, Trash2, Pencil } from "lucide-react";
+import { Blocks, ChevronDown, Loader2, Plus, Trash2, Pencil, Users } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { fetchApi } from "@/lib/url-helpers";
+import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 
 interface McpClient {
   id: string;
@@ -51,6 +53,7 @@ interface McpClient {
   isActive: boolean;
   isDcr: boolean;
   createdAt: string;
+  connectedUsers?: { name: string | null; email: string | null }[];
 }
 
 interface NewClientCredentials {
@@ -72,6 +75,7 @@ function validateRedirectUris(uris: string[]): boolean {
 export function McpClientCard() {
   const t = useTranslations("MachineIdentity");
   const tCommon = useTranslations("Common");
+  const locale = useLocale();
 
   const [clients, setClients] = useState<McpClient[]>([]);
   const [loading, setLoading] = useState(true);
@@ -317,19 +321,19 @@ export function McpClientCard() {
         <p className="text-xs text-muted-foreground font-mono">
           {client.clientId}
         </p>
-        <div className="flex flex-wrap gap-1">
-          {client.allowedScopes
-            .split(",")
-            .map((s) => s.trim())
-            .filter(Boolean)
-            .map((scope) => (
-              <Badge key={scope} variant="outline" className="text-xs font-normal">
-                {scope}
-              </Badge>
-            ))}
-        </div>
+        <ScopeBadges scopes={client.allowedScopes} />
+        {client.connectedUsers && client.connectedUsers.length > 0 && (
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Users className="h-3 w-3" />
+            {client.connectedUsers.map((u) => u.name ?? u.email ?? t("mcpUnknownUser")).join(", ")}
+          </div>
+        )}
       </div>
-      <div className="flex items-center gap-1 shrink-0">
+      <div className="flex flex-col items-end gap-1 shrink-0">
+        <span className="text-xs text-muted-foreground">
+          {t("mcpCreatedAt", { date: formatDateTime(client.createdAt, locale) })}
+        </span>
+        <div className="flex items-center gap-1">
         <Button
           variant="ghost"
           size="icon"
@@ -361,6 +365,7 @@ export function McpClientCard() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+        </div>
       </div>
     </div>
   );
