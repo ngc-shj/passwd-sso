@@ -20,7 +20,6 @@ import { scimUserSchema } from "@/lib/scim/validations";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
@@ -247,12 +246,6 @@ async function handlePOST(req: NextRequest) {
       targetId: created.user.id,
       metadata: { email: userName, externalId },
       ...extractRequestMeta(req),
-    });
-    void dispatchTenantWebhook({
-      type: AUDIT_ACTION.SCIM_USER_CREATE,
-      tenantId,
-      timestamp: new Date().toISOString(),
-      data: { userId: created.user.id },
     });
 
     const baseUrl = getScimBaseUrl();

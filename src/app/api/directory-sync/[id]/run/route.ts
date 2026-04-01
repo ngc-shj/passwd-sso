@@ -13,7 +13,6 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited } from "@/lib/api-response";
@@ -121,14 +120,6 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     },
     ...extractRequestMeta(req),
   });
-  if (!dryRun) {
-    void dispatchTenantWebhook({
-      type: AUDIT_ACTION.DIRECTORY_SYNC_RUN,
-      tenantId,
-      timestamp: new Date().toISOString(),
-      data: { configId: config.id },
-    });
-  }
 
   if (!result.success) {
     // If it was a lock conflict, return 409

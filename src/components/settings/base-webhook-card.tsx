@@ -237,13 +237,21 @@ export function BaseWebhookCard({ config }: Props) {
             {w.isActive ? t("active") : t("inactive")}
           </Badge>
         </div>
-        <div className="flex flex-wrap gap-1 mt-1">
-          {w.events.map((e) => (
-            <Badge key={e} variant="outline" className="text-xs font-normal">
-              {tAudit(e)}
-            </Badge>
-          ))}
-        </div>
+        <Collapsible>
+          <CollapsibleTrigger className="flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronDown className="h-3 w-3" />
+            <span>{t("events")} ({w.events.length})</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {w.events.map((e) => (
+                <Badge key={e} variant="outline" className="text-xs font-normal">
+                  {tAudit(e)}
+                </Badge>
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
         <div className="text-xs text-muted-foreground space-x-3">
           {w.failCount > 0 && (
             <span className="text-amber-600 dark:text-amber-400">

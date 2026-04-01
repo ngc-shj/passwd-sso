@@ -8,8 +8,8 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls } from "@/lib/tenant-rls";
-import { logAudit } from "@/lib/audit";
 import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { getLogger } from "@/lib/logger";
 import {
   getMasterKeyByVersion,
   decryptServerData,
@@ -66,6 +66,8 @@ export const WEBHOOK_METADATA_BLOCKLIST = new Set([
   "reason",
   "incidentRef",
   "displayName",
+  "justification",
+  "requestedScope",
 ]);
 
 // ─── Helpers ────────────────────────────────────────────────────
@@ -237,11 +239,7 @@ async function deliverSingleWebhook(
         masterKey,
       );
     } catch (err) {
-      console.error("[webhook-dispatcher] secret decryption failed", {
-        webhookId: webhook.id,
-        masterKeyVersion: webhook.masterKeyVersion,
-        error: err instanceof Error ? err.message : "unknown",
-      });
+      getLogger().error({ webhookId: webhook.id, masterKeyVersion: webhook.masterKeyVersion, err }, "webhook secret decryption failed");
       return;
     }
 
@@ -254,10 +252,7 @@ async function deliverSingleWebhook(
       await onFailure(webhook.id, webhook.failCount + 1, webhook.url);
     }
   } catch (err) {
-    console.error("[webhook-dispatcher] dispatch error", {
-      webhookId: webhook.id,
-      error: err instanceof Error ? err.message : "unknown",
-    });
+    getLogger().error({ webhookId: webhook.id, err }, "webhook dispatch error");
   }
 }
 
@@ -334,23 +329,25 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
+        });
 
-          logAudit({
-            scope: AUDIT_SCOPE.TEAM,
-            action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
-            userId: "system",
-            teamId: event.teamId,
-            metadata: {
-              webhookId: id,
-              url,
-              failCount: newFailCount,
-            },
-          });
+        // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
+        const { logAudit } = await import("@/lib/audit");
+        logAudit({
+          scope: AUDIT_SCOPE.TEAM,
+          action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
+          userId: "system",
+          teamId: event.teamId,
+          metadata: {
+            webhookId: id,
+            url,
+            failCount: newFailCount,
+          },
         });
       },
     );
-  })().catch(() => {
-    // Outer safety net
+  })().catch((err) => {
+    getLogger().error({ err }, "webhook dispatch failed");
   });
 }
 
@@ -404,22 +401,23 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
+        });
 
-          logAudit({
-            scope: AUDIT_SCOPE.TENANT,
-            action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
-            userId: "system",
-            tenantId: event.tenantId,
-            metadata: {
-              webhookId: id,
-              url,
-              failCount: newFailCount,
-            },
-          });
+        const { logAudit } = await import("@/lib/audit");
+        logAudit({
+          scope: AUDIT_SCOPE.TENANT,
+          action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
+          userId: "system",
+          tenantId: event.tenantId,
+          metadata: {
+            webhookId: id,
+            url,
+            failCount: newFailCount,
+          },
         });
       },
     );
-  })().catch(() => {
-    // Outer safety net
+  })().catch((err) => {
+    getLogger().error({ err }, "webhook dispatch failed");
   });
 }

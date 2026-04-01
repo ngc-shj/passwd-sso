@@ -7,6 +7,10 @@ import {
   AUDIT_ACTION_GROUPS_PERSONAL,
   AUDIT_ACTION_GROUPS_TENANT,
   AUDIT_ACTION_VALUES,
+  TENANT_WEBHOOK_EVENT_GROUPS,
+  TEAM_WEBHOOK_EVENT_GROUPS,
+  TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
+  TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
 } from "@/lib/constants";
 
 describe("audit constants", () => {
@@ -99,5 +103,55 @@ describe("audit constants", () => {
       AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
       AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE,
     ]);
+  });
+
+  it("has TENANT_WEBHOOK_EVENT_GROUPS with expected group keys", () => {
+    const keys = Object.keys(TENANT_WEBHOOK_EVENT_GROUPS);
+    expect(keys).toEqual([
+      AUDIT_ACTION_GROUP.ADMIN,
+      AUDIT_ACTION_GROUP.SCIM,
+      AUDIT_ACTION_GROUP.DIRECTORY_SYNC,
+      AUDIT_ACTION_GROUP.BREAKGLASS,
+      AUDIT_ACTION_GROUP.SERVICE_ACCOUNT,
+      AUDIT_ACTION_GROUP.MCP_CLIENT,
+      AUDIT_ACTION_GROUP.DELEGATION,
+    ]);
+  });
+
+  it("excludes TENANT_WEBHOOK group and privacy-sensitive actions from tenant webhook event groups", () => {
+    const keys = new Set(Object.keys(TENANT_WEBHOOK_EVENT_GROUPS));
+    expect(keys.has(AUDIT_ACTION_GROUP.TENANT_WEBHOOK)).toBe(false);
+
+    // Privacy-sensitive actions must not be subscribable
+    const allSubscribable = new Set<string>(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS);
+    expect(allSubscribable.has(AUDIT_ACTION.TENANT_WEBHOOK_CREATE)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_VIEW)).toBe(false);
+    expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE)).toBe(false);
+  });
+
+  it("has TEAM_WEBHOOK_EVENT_GROUPS with expected groups", () => {
+    const keys = new Set(Object.keys(TEAM_WEBHOOK_EVENT_GROUPS));
+
+    // Self-referential and tenant-scoped groups excluded
+    expect(keys.has(AUDIT_ACTION_GROUP.WEBHOOK)).toBe(false);
+    expect(keys.has(AUDIT_ACTION_GROUP.SCIM)).toBe(false);
+
+    // Admin group present with team-scoped subset
+    expect(keys.has(AUDIT_ACTION_GROUP.ADMIN)).toBe(true);
+    const adminActions = new Set(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.ADMIN]);
+    expect(adminActions.has(AUDIT_ACTION.POLICY_UPDATE)).toBe(true);
+    expect(adminActions.has(AUDIT_ACTION.TEAM_KEY_ROTATION)).toBe(true);
+    // Tenant-scoped admin actions excluded
+    expect(adminActions.has(AUDIT_ACTION.MASTER_KEY_ROTATION)).toBe(false);
+    expect(adminActions.has(AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE)).toBe(false);
+  });
+
+  it("derives SUBSCRIBABLE_ACTIONS from EVENT_GROUPS", () => {
+    expect([...TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS]).toEqual(
+      Object.values(TENANT_WEBHOOK_EVENT_GROUPS).flat(),
+    );
+    expect([...TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS]).toEqual(
+      Object.values(TEAM_WEBHOOK_EVENT_GROUPS).flat(),
+    );
   });
 });

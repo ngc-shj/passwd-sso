@@ -7,7 +7,6 @@ const {
   mockRequireTeamMember, mockHasTeamPermission, TeamAuthError,
   mockPrismaTransaction,
   mockWithTeamTenantRls,
-  mockDispatchWebhook,
 } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
@@ -33,7 +32,6 @@ const {
     TeamAuthError: _TeamAuthError,
     mockPrismaTransaction: vi.fn(),
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
-    mockDispatchWebhook: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -55,9 +53,6 @@ vi.mock("@/lib/team-auth", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchWebhook: mockDispatchWebhook,
 }));
 
 import { GET, PUT, DELETE } from "./route";
@@ -441,28 +436,6 @@ describe("PUT /api/teams/[teamId]/passwords/[id]", () => {
           aadVersion: 1,
           teamKeyVersion: 1,
         }),
-      }),
-    );
-  });
-
-  it("dispatches webhook on entry update", async () => {
-    mockPrismaTeamPasswordEntry.findUnique.mockResolvedValue(makeEntryForPUT());
-
-    const res = await PUT(
-      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/passwords/${PW_ID}`, {
-        body: validE2EBody,
-      }),
-      createParams({ teamId: TEAM_ID, id: PW_ID }),
-    );
-    expect(res.status).toBe(200);
-
-    // dispatchWebhook is called with void (fire-and-forget), so wait a microtask
-    await Promise.resolve();
-    expect(mockDispatchWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "ENTRY_UPDATE",
-        teamId: TEAM_ID,
-        data: expect.objectContaining({ entryId: PW_ID }),
       }),
     );
   });

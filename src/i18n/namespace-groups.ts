@@ -91,6 +91,7 @@ export const NS_ADMIN_ALL: readonly Namespace[] = [
   "TeamWebhook",
   "Sessions",
   "Breakglass",
+  "CopyButton",
 ];
 
 /**

@@ -10,7 +10,6 @@ import { assertOrigin } from "@/lib/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE, TENANT_ROLE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 
 export const runtime = "nodejs";
 
@@ -110,12 +109,6 @@ async function handleDELETE(
     },
     ip,
     userAgent,
-  });
-  void dispatchTenantWebhook({
-    type: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
-    tenantId: actor.tenantId,
-    timestamp: new Date().toISOString(),
-    data: { grantId: id, targetUserId: grant.targetUserId },
   });
 
   return NextResponse.json({ ok: true });

@@ -17,7 +17,6 @@ const {
   mockTenantFindUnique,
   mockPrismaTransaction,
   mockHashToken,
-  mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -28,7 +27,6 @@ const {
   mockTenantFindUnique: vi.fn(),
   mockPrismaTransaction: vi.fn(),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
-  mockDispatchTenantWebhook: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -69,9 +67,6 @@ vi.mock("@/lib/with-request-log", () => ({
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/approve/route";
@@ -143,12 +138,6 @@ describe("POST /api/tenant/access-requests/[id]/approve", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ACCESS_REQUEST_APPROVE",
-        tenantId: "tenant-1",
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "ACCESS_REQUEST_APPROVE",
         tenantId: "tenant-1",
       }),
     );

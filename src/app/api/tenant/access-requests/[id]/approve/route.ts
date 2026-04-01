@@ -7,7 +7,6 @@ import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -182,12 +181,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       ttlSec,
     },
     ...extractRequestMeta(req),
-  });
-  void dispatchTenantWebhook({
-    type: AUDIT_ACTION.ACCESS_REQUEST_APPROVE,
-    tenantId: actor.tenantId,
-    timestamp: new Date().toISOString(),
-    data: { accessRequestId: requestId, serviceAccountId: request.serviceAccountId },
   });
 
   // Return plaintext token only once — no-store prevents caching of sensitive token

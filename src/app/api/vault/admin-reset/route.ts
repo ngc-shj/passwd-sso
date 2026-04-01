@@ -11,7 +11,6 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -153,14 +152,6 @@ async function handlePOST(req: NextRequest) {
     },
     ...extractRequestMeta(req),
   });
-  if (!resetRecord.teamId) {
-    void dispatchTenantWebhook({
-      type: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
-      tenantId: resetRecord.tenantId,
-      timestamp: new Date().toISOString(),
-      data: { targetUserId: session.user.id, resetId: resetRecord.id, initiatedById: resetRecord.initiatedById },
-    });
-  }
 
   return NextResponse.json({ success: true });
 }
