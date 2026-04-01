@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.14](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.13...passwd-sso-v0.4.14) (2026-04-01)
+
+
+### Bug Fixes
+
+* improve MCP connection management UI ([#299](https://github.com/ngc-shj/passwd-sso/issues/299)) ([cc989a2](https://github.com/ngc-shj/passwd-sso/commit/cc989a20c89f8584425b475cb351171d1cc8568f))
+
 ## [0.4.13](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.12...passwd-sso-v0.4.13) (2026-04-01)
 
 
