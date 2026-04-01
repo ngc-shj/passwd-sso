@@ -3,13 +3,13 @@
 import { apiPath } from "@/lib/constants";
 import {
   AUDIT_ACTION_GROUP,
-  AUDIT_ACTION_GROUPS_TEAM,
+  TEAM_WEBHOOK_EVENT_GROUPS,
 } from "@/lib/constants/audit";
 import { BaseWebhookCard } from "@/components/settings/base-webhook-card";
 
-const EVENT_GROUPS = Object.entries(AUDIT_ACTION_GROUPS_TEAM)
-  .filter(([key]) => key !== AUDIT_ACTION_GROUP.WEBHOOK)
-  .map(([key, actions]) => ({ key, actions }));
+const EVENT_GROUPS = Object.entries(TEAM_WEBHOOK_EVENT_GROUPS).map(
+  ([key, actions]) => ({ key, actions }),
+);
 
 const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.ENTRY]: "groupEntry",
@@ -21,7 +21,6 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.TEAM]: "groupTeam",
   [AUDIT_ACTION_GROUP.SHARE]: "groupShare",
   [AUDIT_ACTION_GROUP.ADMIN]: "groupAdmin",
-  [AUDIT_ACTION_GROUP.SCIM]: "groupScim",
 };
 
 interface Props {

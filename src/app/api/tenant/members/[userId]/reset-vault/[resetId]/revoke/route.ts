@@ -16,7 +16,6 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
@@ -91,12 +90,6 @@ async function handlePOST(
     targetId: targetUserId,
     metadata: { revokedById: session.user.id, resetId },
     ...extractRequestMeta(req),
-  });
-  void dispatchTenantWebhook({
-    type: AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
-    tenantId: actor.tenantId,
-    timestamp: new Date().toISOString(),
-    data: { targetUserId, resetId },
   });
 
   // Fetch target user for notification + email

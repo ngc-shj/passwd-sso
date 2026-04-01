@@ -13,7 +13,6 @@ const {
   mockLogAudit,
   mockAccessRequestFindUnique,
   mockAccessRequestUpdateMany,
-  mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -21,7 +20,6 @@ const {
   mockLogAudit: vi.fn(),
   mockAccessRequestFindUnique: vi.fn(),
   mockAccessRequestUpdateMany: vi.fn(),
-  mockDispatchTenantWebhook: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -55,9 +53,6 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/deny/route";
@@ -101,12 +96,6 @@ describe("POST /api/tenant/access-requests/[id]/deny", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ACCESS_REQUEST_DENY",
-        tenantId: "tenant-1",
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "ACCESS_REQUEST_DENY",
         tenantId: "tenant-1",
       }),
     );

@@ -9,7 +9,6 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
@@ -144,12 +143,6 @@ async function handlePOST(req: NextRequest) {
     targetId: token.id,
     metadata: { description: result.data.description, expiresInDays: result.data.expiresInDays },
     ...extractRequestMeta(req),
-  });
-  void dispatchTenantWebhook({
-    type: AUDIT_ACTION.SCIM_TOKEN_CREATE,
-    tenantId: actor.tenantId,
-    timestamp: new Date().toISOString(),
-    data: { tokenId: token.id },
   });
 
   // Return plaintext only once — no-store prevents caching of sensitive token

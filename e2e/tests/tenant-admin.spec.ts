@@ -2,7 +2,7 @@ import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { injectSession } from "../helpers/auth";
 import { getAuthState } from "../helpers/fixtures";
 import { VaultLockPage } from "../page-objects/vault-lock.page";
-import { SidebarNavPage } from "../page-objects/sidebar-nav.page";
+
 
 test.describe("Tenant Admin", () => {
   let context: BrowserContext;

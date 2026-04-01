@@ -9,7 +9,6 @@ import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { dispatchWebhook } from "@/lib/webhook-dispatcher";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
@@ -147,13 +146,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
           };
     })(),
     ...extractRequestMeta(req),
-  });
-
-  void dispatchWebhook({
-    type: AUDIT_ACTION.ENTRY_CREATE,
-    teamId,
-    timestamp: new Date().toISOString(),
-    data: { entryId: entry.id, entryType: entry.entryType },
   });
 
   return NextResponse.json(

@@ -386,6 +386,7 @@ export const AUDIT_ACTION_GROUPS_TEAM: Record<string, AuditAction[]> = {
   [AUDIT_ACTION_GROUP.ENTRY]: [
     AUDIT_ACTION.ENTRY_CREATE,
     AUDIT_ACTION.ENTRY_UPDATE,
+    AUDIT_ACTION.ENTRY_DELETE,
     AUDIT_ACTION.ENTRY_TRASH,
     AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
     AUDIT_ACTION.ENTRY_RESTORE,
@@ -459,6 +460,10 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
     AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
     AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
     AUDIT_ACTION.TENANT_ROLE_UPDATE,
+    AUDIT_ACTION.POLICY_UPDATE,
+    AUDIT_ACTION.ACCESS_DENIED,
+    AUDIT_ACTION.MASTER_KEY_ROTATION,
+    AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
     AUDIT_ACTION.HISTORY_PURGE,
   ],
   [AUDIT_ACTION_GROUP.SCIM]: [
@@ -521,21 +526,69 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
 };
 
 /**
- * Tenant audit actions that can be subscribed to via tenant webhooks.
- * Excludes:
+ * Event groups subscribable via tenant webhooks.
+ * Derived from AUDIT_ACTION_GROUPS_TENANT minus self-referential and
+ * privacy-sensitive groups. logAudit() dispatches webhooks automatically
+ * for all audit actions, so every action here is guaranteed to fire.
+ *
+ * Intentionally excluded:
  * - TENANT_WEBHOOK group (prevents self-referential loops)
  * - PERSONAL_LOG_ACCESS_VIEW/EXPIRE (privacy-sensitive timing data)
  */
-export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = [
-  ...AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.ADMIN],
-  ...AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SCIM],
-  ...AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.DIRECTORY_SYNC],
-  AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
-  AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
-] as const;
+export const TENANT_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
+  [AUDIT_ACTION_GROUP.ADMIN]: AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.ADMIN],
+  [AUDIT_ACTION_GROUP.SCIM]: AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SCIM],
+  [AUDIT_ACTION_GROUP.DIRECTORY_SYNC]: AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.DIRECTORY_SYNC],
+  [AUDIT_ACTION_GROUP.BREAKGLASS]: [
+    AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
+    AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
+    // VIEW and EXPIRE excluded (privacy-sensitive timing data)
+  ],
+  [AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]: AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SERVICE_ACCOUNT],
+  [AUDIT_ACTION_GROUP.MCP_CLIENT]: AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.MCP_CLIENT],
+  [AUDIT_ACTION_GROUP.DELEGATION]: AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.DELEGATION],
+};
+
+export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
+  TENANT_WEBHOOK_EVENT_GROUPS,
+).flat() as unknown as readonly AuditAction[];
+
+/**
+ * Event groups subscribable via team webhooks.
+ * Derived from AUDIT_ACTION_GROUPS_TEAM with overrides:
+ *
+ * - WEBHOOK group excluded (prevents self-referential loops)
+ * - SCIM group excluded (all tenant-scoped provisioning actions)
+ * - ADMIN group replaced with team-scoped subset only:
+ *   Includes: TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION,
+ *     TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD
+ *   Excludes: MASTER_KEY_ROTATION, VAULT_KEY_ROTATION,
+ *     WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_* (all tenant/personal-scoped)
+ */
+const TEAM_WEBHOOK_EXCLUDED_GROUPS: ReadonlySet<string> = new Set([
+  AUDIT_ACTION_GROUP.WEBHOOK,
+  AUDIT_ACTION_GROUP.SCIM,
+  AUDIT_ACTION_GROUP.ADMIN,
+]);
+
+export const TEAM_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
+  ...Object.fromEntries(
+    Object.entries(AUDIT_ACTION_GROUPS_TEAM).filter(
+      ([key]) => !TEAM_WEBHOOK_EXCLUDED_GROUPS.has(key),
+    ),
+  ),
+  // Team-scoped subset of the ADMIN group
+  [AUDIT_ACTION_GROUP.ADMIN]: [
+    AUDIT_ACTION.TEAM_E2E_MIGRATION,
+    AUDIT_ACTION.TEAM_KEY_ROTATION,
+    AUDIT_ACTION.TEAM_MEMBER_KEY_DISTRIBUTE,
+    AUDIT_ACTION.POLICY_UPDATE,
+    AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
+  ],
+};
 
 export const TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
-  AUDIT_ACTION_GROUPS_TEAM,
+  TEAM_WEBHOOK_EVENT_GROUPS,
 ).flat() as unknown as readonly AuditAction[];
 
 export const AUDIT_METADATA_KEY = {

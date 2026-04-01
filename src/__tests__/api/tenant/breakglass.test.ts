@@ -233,27 +233,6 @@ describe("POST /api/tenant/breakglass", () => {
     expect(status).toBe(403);
   });
 
-  it("dispatches PERSONAL_LOG_ACCESS_REQUEST tenant webhook with correct tenantId on success", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockTenantMemberFindFirst.mockResolvedValue(makeMember());
-    mockPersonalLogAccessGrantFindFirst.mockResolvedValue(null);
-    const grant = makeGrant();
-    mockPersonalLogAccessGrantCreate.mockResolvedValue(grant);
-
-    const req = createRequest("POST", "http://localhost/api/tenant/breakglass", {
-      body: { targetUserId: TARGET_USER_ID, reason: "Valid reason for incident" },
-    });
-    await POST(req);
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "PERSONAL_LOG_ACCESS_REQUEST",
-        tenantId: "tenant1",
-      }),
-    );
-  });
-
   it("does not dispatch tenant webhook when request fails validation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -429,23 +408,6 @@ describe("DELETE /api/tenant/breakglass/[id]", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.ok).toBe(true);
-  });
-
-  it("dispatches PERSONAL_LOG_ACCESS_REVOKE tenant webhook with correct tenantId on successful revoke", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockPersonalLogAccessGrantFindFirst.mockResolvedValue(makeGrant());
-    mockPersonalLogAccessGrantUpdateMany.mockResolvedValue({ count: 1 });
-
-    const req = createRequest("DELETE", `http://localhost/api/tenant/breakglass/${GRANT_ID}`);
-    await DELETE(req, createParams({ id: GRANT_ID }));
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "PERSONAL_LOG_ACCESS_REVOKE",
-        tenantId: "tenant1",
-      }),
-    );
   });
 
   it("does not dispatch tenant webhook when grant is already revoked", async () => {

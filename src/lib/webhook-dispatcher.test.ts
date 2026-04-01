@@ -623,6 +623,8 @@ describe("dispatchTenantWebhook", () => {
         reason: "Security incident",
         incidentRef: "INC-123",
         displayName: "Admin User",
+        justification: "Emergency access needed",
+        requestedScope: "credentials:list",
         // crypto-level keys (from METADATA_BLOCKLIST)
         secret: "should-be-stripped",
         token: "should-be-stripped",
@@ -646,6 +648,8 @@ describe("dispatchTenantWebhook", () => {
     expect(sentPayload.data).not.toHaveProperty("reason");
     expect(sentPayload.data).not.toHaveProperty("incidentRef");
     expect(sentPayload.data).not.toHaveProperty("displayName");
+    expect(sentPayload.data).not.toHaveProperty("justification");
+    expect(sentPayload.data).not.toHaveProperty("requestedScope");
     // crypto keys must also be absent
     expect(sentPayload.data).not.toHaveProperty("secret");
     expect(sentPayload.data).not.toHaveProperty("token");

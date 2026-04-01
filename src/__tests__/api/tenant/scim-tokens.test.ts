@@ -192,26 +192,6 @@ describe("POST /api/tenant/scim-tokens", () => {
     );
   });
 
-  it("dispatches SCIM_TOKEN_CREATE tenant webhook with correct tenantId", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockScimTokenCount.mockResolvedValue(0);
-    const token = makeToken();
-    mockScimTokenCreate.mockResolvedValue(token);
-
-    const req = createRequest("POST", "http://localhost/api/tenant/scim-tokens", {
-      body: { description: "CI token" },
-    });
-    await POST(req);
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SCIM_TOKEN_CREATE",
-        tenantId: "tenant-abc",
-      }),
-    );
-  });
-
   it("does not dispatch tenant webhook when token limit is exceeded", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
@@ -275,23 +255,6 @@ describe("DELETE /api/tenant/scim-tokens/[tokenId]", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(200);
     expect(json.success).toBe(true);
-  });
-
-  it("dispatches SCIM_TOKEN_REVOKE tenant webhook with correct tenantId", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTenantPermission.mockResolvedValue(ACTOR);
-    mockScimTokenFindUnique.mockResolvedValue(makeToken());
-    mockScimTokenUpdate.mockResolvedValue(makeToken({ revokedAt: new Date() }));
-
-    const req = createRequest("DELETE", `http://localhost/api/tenant/scim-tokens/${TOKEN_ID}`);
-    await DELETE(req, createParams({ tokenId: TOKEN_ID }));
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SCIM_TOKEN_REVOKE",
-        tenantId: "tenant-abc",
-      }),
-    );
   });
 
   it("does not dispatch tenant webhook when token is already revoked", async () => {

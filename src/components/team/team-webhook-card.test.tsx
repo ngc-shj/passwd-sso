@@ -70,7 +70,7 @@ describe("TeamWebhookCard (team-specific)", () => {
     vi.clearAllMocks();
   });
 
-  it("excludes group:webhook from event groups", async () => {
+  it("does not include group:webhook actions", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -81,7 +81,6 @@ describe("TeamWebhookCard (team-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // The group:webhook label and its actions must NOT appear
     expect(screen.queryByText("WEBHOOK_CREATE")).not.toBeInTheDocument();
     expect(screen.queryByText("WEBHOOK_DELETE")).not.toBeInTheDocument();
     expect(
@@ -89,7 +88,7 @@ describe("TeamWebhookCard (team-specific)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("includes expected team entry events in event selector", async () => {
+  it("includes team-scoped event groups", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -100,12 +99,30 @@ describe("TeamWebhookCard (team-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // Core entry lifecycle events must be subscribable
-    // Note: team webhook uses ENTRY_TRASH + ENTRY_PERMANENT_DELETE instead of ENTRY_DELETE
+    // Entry group
     expect(screen.getByText("ENTRY_CREATE")).toBeInTheDocument();
     expect(screen.getByText("ENTRY_UPDATE")).toBeInTheDocument();
     expect(screen.getByText("ENTRY_TRASH")).toBeInTheDocument();
-    expect(screen.getByText("ENTRY_PERMANENT_DELETE")).toBeInTheDocument();
-    expect(screen.getByText("ENTRY_RESTORE")).toBeInTheDocument();
+
+    // Bulk group
+    expect(screen.getByText("ENTRY_BULK_TRASH")).toBeInTheDocument();
+
+    // Folder group
+    expect(screen.getByText("FOLDER_CREATE")).toBeInTheDocument();
+
+    // Team group
+    expect(screen.getByText("TEAM_MEMBER_ADD")).toBeInTheDocument();
+
+    // Share group
+    expect(screen.getByText("SHARE_CREATE")).toBeInTheDocument();
+
+    // Admin group (team-scoped subset only)
+    expect(screen.getByText("POLICY_UPDATE")).toBeInTheDocument();
+    expect(screen.getByText("TEAM_KEY_ROTATION")).toBeInTheDocument();
+
+    // Tenant-scoped actions must NOT appear
+    expect(screen.queryByText("SCIM_USER_CREATE")).not.toBeInTheDocument();
+    expect(screen.queryByText("MASTER_KEY_ROTATION")).not.toBeInTheDocument();
+    expect(screen.queryByText("ADMIN_VAULT_RESET_INITIATE")).not.toBeInTheDocument();
   });
 });
