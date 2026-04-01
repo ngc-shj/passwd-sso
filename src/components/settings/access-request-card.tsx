@@ -235,8 +235,7 @@ export function AccessRequestCard() {
     return t(map[status]);
   };
 
-  const parseScopes = (scope: string): string[] =>
-    typeof scope === "string" ? scope.split(",").filter(Boolean) : [];
+
 
   const toggleScope = (scope: string, checked: boolean) => {
     setSelectedScopes((prev) => {
