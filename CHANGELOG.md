@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.10](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.9...passwd-sso-v0.4.10) (2026-04-01)
+
+
+### Bug Fixes
+
+* add MCP Connections page and restructure Machine Identity nav ([#291](https://github.com/ngc-shj/passwd-sso/issues/291)) ([5cb7cad](https://github.com/ngc-shj/passwd-sso/commit/5cb7cad32c28bd190121192b5637b50e631dbba7))
+
 ## [0.4.9](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.8...passwd-sso-v0.4.9) (2026-03-31)
 
 
