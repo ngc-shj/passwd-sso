@@ -14,7 +14,6 @@ const {
   mockServiceAccountFindUnique,
   mockServiceAccountTokenFindUnique,
   mockServiceAccountTokenUpdate,
-  mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -23,7 +22,6 @@ const {
   mockServiceAccountFindUnique: vi.fn(),
   mockServiceAccountTokenFindUnique: vi.fn(),
   mockServiceAccountTokenUpdate: vi.fn(),
-  mockDispatchTenantWebhook: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -60,9 +58,6 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 
 import { DELETE } from "@/app/api/tenant/service-accounts/[id]/tokens/[tokenId]/route";
@@ -103,12 +98,6 @@ describe("DELETE /api/tenant/service-accounts/[id]/tokens/[tokenId]", () => {
         action: "SERVICE_ACCOUNT_TOKEN_REVOKE",
         tenantId: "tenant-1",
         targetId: TOKEN_ID,
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SERVICE_ACCOUNT_TOKEN_REVOKE",
-        tenantId: "tenant-1",
       }),
     );
   });

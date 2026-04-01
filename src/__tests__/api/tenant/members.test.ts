@@ -158,7 +158,7 @@ describe("PUT /api/tenant/members/[userId]", () => {
     expect(status).toBe(409);
   });
 
-  it("returns 200 and dispatches TENANT_ROLE_UPDATE webhook on role change", async () => {
+  it("returns 200 on successful role change", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(OWNER_ACTOR);
     // First findFirst call: target member lookup
@@ -177,35 +177,6 @@ describe("PUT /api/tenant/members/[userId]", () => {
       expect.objectContaining({
         action: "TENANT_ROLE_UPDATE",
         tenantId: "tenant-xyz",
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "TENANT_ROLE_UPDATE",
-        tenantId: "tenant-xyz",
-      }),
-    );
-  });
-
-  it("dispatches TENANT_ROLE_UPDATE with correct tenantId on role change", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTenantPermission.mockResolvedValue(OWNER_ACTOR);
-    mockTenantMemberFindFirst.mockResolvedValue(makeMember({ role: "MEMBER" }));
-    mockTenantMemberUpdate.mockResolvedValue(makeUpdatedMember("ADMIN"));
-
-    const req = createRequest("PUT", `http://localhost/api/tenant/members/${TARGET_USER_ID}`, {
-      body: { role: "ADMIN" },
-    });
-    await PUT(req, createParams({ userId: TARGET_USER_ID }));
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "TENANT_ROLE_UPDATE",
-        tenantId: "tenant-xyz",
-        data: expect.objectContaining({
-          targetMemberId: MEMBER_ID,
-          targetUserId: TARGET_USER_ID,
-        }),
       }),
     );
   });

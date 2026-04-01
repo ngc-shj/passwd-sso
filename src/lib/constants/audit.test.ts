@@ -113,34 +113,40 @@ describe("audit constants", () => {
       AUDIT_ACTION_GROUP.DIRECTORY_SYNC,
       AUDIT_ACTION_GROUP.BREAKGLASS,
       AUDIT_ACTION_GROUP.SERVICE_ACCOUNT,
+      AUDIT_ACTION_GROUP.MCP_CLIENT,
+      AUDIT_ACTION_GROUP.DELEGATION,
     ]);
   });
 
-  it("excludes TENANT_WEBHOOK/MCP_CLIENT/DELEGATION from tenant webhook event groups", () => {
+  it("excludes TENANT_WEBHOOK group and privacy-sensitive actions from tenant webhook event groups", () => {
     const keys = new Set(Object.keys(TENANT_WEBHOOK_EVENT_GROUPS));
     expect(keys.has(AUDIT_ACTION_GROUP.TENANT_WEBHOOK)).toBe(false);
-    expect(keys.has(AUDIT_ACTION_GROUP.MCP_CLIENT)).toBe(false);
-    expect(keys.has(AUDIT_ACTION_GROUP.DELEGATION)).toBe(false);
 
-    // Also verify at action value level
+    // Privacy-sensitive actions must not be subscribable
     const allSubscribable = new Set<string>(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS);
     expect(allSubscribable.has(AUDIT_ACTION.TENANT_WEBHOOK_CREATE)).toBe(false);
-    expect(allSubscribable.has(AUDIT_ACTION.MCP_CLIENT_CREATE)).toBe(false);
-    expect(allSubscribable.has(AUDIT_ACTION.DELEGATION_CREATE)).toBe(false);
     expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_VIEW)).toBe(false);
     expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE)).toBe(false);
-    expect(allSubscribable.has(AUDIT_ACTION.HISTORY_PURGE)).toBe(false);
   });
 
-  it("has TEAM_WEBHOOK_EVENT_GROUPS with only ENTRY group", () => {
-    expect(Object.keys(TEAM_WEBHOOK_EVENT_GROUPS)).toEqual([
-      AUDIT_ACTION_GROUP.ENTRY,
+  it("has TEAM_WEBHOOK_EVENT_GROUPS matching AUDIT_ACTION_GROUPS_TEAM minus excluded groups", () => {
+    const teamKeys = Object.keys(TEAM_WEBHOOK_EVENT_GROUPS);
+    const excluded = new Set<string>([
+      AUDIT_ACTION_GROUP.WEBHOOK,
+      AUDIT_ACTION_GROUP.ADMIN,
+      AUDIT_ACTION_GROUP.SCIM,
     ]);
-    expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.ENTRY]).toEqual([
-      AUDIT_ACTION.ENTRY_CREATE,
-      AUDIT_ACTION.ENTRY_UPDATE,
-      AUDIT_ACTION.ENTRY_DELETE,
-    ]);
+    const auditKeys = Object.keys(AUDIT_ACTION_GROUPS_TEAM).filter(
+      (k) => !excluded.has(k),
+    );
+    expect(teamKeys).toEqual(auditKeys);
+  });
+
+  it("excludes WEBHOOK/ADMIN/SCIM groups from team webhook event groups", () => {
+    const keys = new Set(Object.keys(TEAM_WEBHOOK_EVENT_GROUPS));
+    expect(keys.has(AUDIT_ACTION_GROUP.WEBHOOK)).toBe(false);
+    expect(keys.has(AUDIT_ACTION_GROUP.ADMIN)).toBe(false);
+    expect(keys.has(AUDIT_ACTION_GROUP.SCIM)).toBe(false);
   });
 
   it("derives SUBSCRIBABLE_ACTIONS from EVENT_GROUPS", () => {

@@ -10,7 +10,6 @@ const {
   mockTransaction,
   mockWithUserTenantRls,
   mockLogAudit,
-  mockDispatchTenantWebhook,
   mockEncryptCredentials,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -20,7 +19,6 @@ const {
   mockTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
-  mockDispatchTenantWebhook: vi.fn(),
   mockEncryptCredentials: vi.fn(),
 }));
 
@@ -46,9 +44,6 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 vi.mock("@/lib/directory-sync/credentials", () => ({
   encryptCredentials: mockEncryptCredentials,
@@ -277,7 +272,7 @@ describe("POST /api/directory-sync", () => {
     );
   });
 
-  it("calls logAudit and dispatchTenantWebhook after successful creation", async () => {
+  it("calls logAudit after successful creation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(null);
@@ -316,13 +311,6 @@ describe("POST /api/directory-sync", () => {
           provider: "AZURE_AD",
           displayName: "My Azure AD",
         }),
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "DIRECTORY_SYNC_CONFIG_CREATE",
-        tenantId: "tenant-1",
-        data: { configId: "new-config-1" },
       }),
     );
   });

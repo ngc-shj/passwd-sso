@@ -15,7 +15,6 @@ const {
   mockServiceAccountTokenFindMany,
   mockPrismaTransaction,
   mockHashToken,
-  mockDispatchTenantWebhook,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -25,7 +24,6 @@ const {
   mockServiceAccountTokenFindMany: vi.fn(),
   mockPrismaTransaction: vi.fn(),
   mockHashToken: vi.fn().mockReturnValue("hashed-token"),
-  mockDispatchTenantWebhook: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -65,9 +63,6 @@ vi.mock("@/lib/with-request-log", () => ({
 }));
 vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/[id]/tokens/route";
@@ -197,12 +192,6 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "SERVICE_ACCOUNT_TOKEN_CREATE",
-        tenantId: "tenant-1",
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "SERVICE_ACCOUNT_TOKEN_CREATE",
         tenantId: "tenant-1",
       }),
     );

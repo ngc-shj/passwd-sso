@@ -13,6 +13,13 @@ const EVENT_GROUPS = Object.entries(TEAM_WEBHOOK_EVENT_GROUPS).map(
 
 const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.ENTRY]: "groupEntry",
+  [AUDIT_ACTION_GROUP.BULK]: "groupBulk",
+  [AUDIT_ACTION_GROUP.TRANSFER]: "groupTransfer",
+  [AUDIT_ACTION_GROUP.ATTACHMENT]: "groupAttachment",
+  [AUDIT_ACTION_GROUP.FOLDER]: "groupFolder",
+  [AUDIT_ACTION_GROUP.HISTORY]: "groupHistory",
+  [AUDIT_ACTION_GROUP.TEAM]: "groupTeam",
+  [AUDIT_ACTION_GROUP.SHARE]: "groupShare",
 };
 
 interface Props {

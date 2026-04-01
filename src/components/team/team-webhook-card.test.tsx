@@ -88,7 +88,7 @@ describe("TeamWebhookCard (team-specific)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("includes only actually dispatched entry events", async () => {
+  it("includes team-scoped event groups", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -99,33 +99,26 @@ describe("TeamWebhookCard (team-specific)", () => {
       expect(screen.getByText("noWebhooks")).toBeInTheDocument();
     });
 
-    // Only events with actual dispatchWebhook() calls should appear
+    // Entry group
     expect(screen.getByText("ENTRY_CREATE")).toBeInTheDocument();
     expect(screen.getByText("ENTRY_UPDATE")).toBeInTheDocument();
-    expect(screen.getByText("ENTRY_DELETE")).toBeInTheDocument();
+    expect(screen.getByText("ENTRY_TRASH")).toBeInTheDocument();
 
-    // Audit-log-only actions must NOT appear (no dispatch calls)
-    expect(screen.queryByText("ENTRY_TRASH")).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("ENTRY_PERMANENT_DELETE"),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("ENTRY_RESTORE")).not.toBeInTheDocument();
-  });
+    // Bulk group
+    expect(screen.getByText("ENTRY_BULK_TRASH")).toBeInTheDocument();
 
-  it("does not include tenant-scoped events", async () => {
-    setupFetchWebhooks(mockFetch, []);
+    // Folder group
+    expect(screen.getByText("FOLDER_CREATE")).toBeInTheDocument();
 
-    await act(async () => {
-      render(<TeamWebhookCard teamId="team-1" locale="en" />);
-    });
+    // Team group
+    expect(screen.getByText("TEAM_MEMBER_ADD")).toBeInTheDocument();
 
-    await waitFor(() => {
-      expect(screen.getByText("noWebhooks")).toBeInTheDocument();
-    });
+    // Share group
+    expect(screen.getByText("SHARE_CREATE")).toBeInTheDocument();
 
-    // Tenant-scoped events must NOT appear in team webhooks
+    // Tenant-scoped groups must NOT appear
     expect(screen.queryByText("SCIM_USER_CREATE")).not.toBeInTheDocument();
     expect(screen.queryByText("MASTER_KEY_ROTATION")).not.toBeInTheDocument();
-    expect(screen.queryByText("HISTORY_PURGE")).not.toBeInTheDocument();
+    expect(screen.queryByText("ADMIN_VAULT_RESET_INITIATE")).not.toBeInTheDocument();
   });
 });

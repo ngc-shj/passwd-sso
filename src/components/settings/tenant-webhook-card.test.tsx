@@ -89,11 +89,9 @@ describe("TenantWebhookCard (tenant-specific)", () => {
       screen.queryByText("TENANT_WEBHOOK_DELIVERY_FAILED"),
     ).not.toBeInTheDocument();
 
-    // MCP_CLIENT group must NOT appear (no dispatch calls yet)
-    expect(screen.queryByText("MCP_CLIENT_CREATE")).not.toBeInTheDocument();
-
-    // DELEGATION group must NOT appear (no dispatch calls yet)
-    expect(screen.queryByText("DELEGATION_CREATE")).not.toBeInTheDocument();
+    // MCP_CLIENT and DELEGATION groups MUST appear (now dispatched via logAudit)
+    expect(screen.getByText("MCP_CLIENT_CREATE")).toBeInTheDocument();
+    expect(screen.getByText("DELEGATION_CREATE")).toBeInTheDocument();
   });
 
   it("excludes PERSONAL_LOG_ACCESS_VIEW and PERSONAL_LOG_ACCESS_EXPIRE from event selector", async () => {
@@ -116,7 +114,7 @@ describe("TenantWebhookCard (tenant-specific)", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("includes ADMIN/SCIM/DIRECTORY_SYNC/BREAKGLASS/SERVICE_ACCOUNT events", async () => {
+  it("includes all tenant webhook event groups", async () => {
     setupFetchWebhooks(mockFetch, []);
 
     await act(async () => {
@@ -162,7 +160,13 @@ describe("TenantWebhookCard (tenant-specific)", () => {
     expect(screen.getByText("ACCESS_REQUEST_APPROVE")).toBeInTheDocument();
     expect(screen.getByText("ACCESS_REQUEST_DENY")).toBeInTheDocument();
 
-    // HISTORY_PURGE must NOT appear (no dispatch call)
-    expect(screen.queryByText("HISTORY_PURGE")).not.toBeInTheDocument();
+    // HISTORY_PURGE is now subscribable (dispatched via logAudit)
+    expect(screen.getByText("HISTORY_PURGE")).toBeInTheDocument();
+
+    // MCP Client actions
+    expect(screen.getByText("MCP_CLIENT_CREATE")).toBeInTheDocument();
+
+    // Delegation actions
+    expect(screen.getByText("DELEGATION_CREATE")).toBeInTheDocument();
   });
 });

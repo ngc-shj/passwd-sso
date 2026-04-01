@@ -10,10 +10,20 @@ import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
+import { dispatchWebhook, dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+
+/**
+ * Audit actions that must NOT trigger webhook dispatch.
+ * Prevents infinite loops: delivery failure → logAudit → dispatch → failure → ...
+ */
+const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<string> = new Set([
+  "WEBHOOK_DELIVERY_FAILED",
+  "TENANT_WEBHOOK_DELIVERY_FAILED",
+]);
 
 export interface AuditLogParams {
   scope: AuditScope;
@@ -129,6 +139,19 @@ export function logAudit(params: AuditLogParams): void {
           userAgent: safeUserAgent,
         },
       });
+
+      // --- Webhook dispatch (co-located with audit write) ---
+      // Suppress dispatch for webhook-lifecycle actions to prevent infinite loops:
+      // delivery failure → logAudit → dispatchWebhook → failure → logAudit → ...
+      if (!WEBHOOK_DISPATCH_SUPPRESS.has(action)) {
+        const webhookData = safeMetadata ?? {};
+        const timestamp = new Date().toISOString();
+        if (scope === "TEAM" && teamId) {
+          void dispatchWebhook({ type: action, teamId, timestamp, data: webhookData });
+        } else if (scope === "TENANT" && resolvedTenantId) {
+          void dispatchTenantWebhook({ type: action, tenantId: resolvedTenantId, timestamp, data: webhookData });
+        }
+      }
     });
   })().catch(() => {
     // Silently swallow — audit logging must never break the app
@@ -223,6 +246,18 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
           };
         }),
       });
+
+      // --- Webhook dispatch per entry (co-located with audit write) ---
+      const timestamp = new Date().toISOString();
+      for (const p of paramsList) {
+        if (WEBHOOK_DISPATCH_SUPPRESS.has(p.action)) continue;
+        const webhookData = p.metadata ?? {};
+        if (p.scope === "TEAM" && p.teamId) {
+          void dispatchWebhook({ type: p.action, teamId: p.teamId, timestamp, data: webhookData });
+        } else if (p.scope === "TENANT" && resolvedTenantId) {
+          void dispatchTenantWebhook({ type: p.action, tenantId: resolvedTenantId, timestamp, data: webhookData });
+        }
+      }
     });
   })().catch(() => {
     // Silently swallow — audit logging must never break the app

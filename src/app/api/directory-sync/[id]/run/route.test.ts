@@ -231,19 +231,6 @@ describe("POST /api/directory-sync/[id]/run", () => {
     );
   });
 
-  it("dispatches webhook when not a dry run", async () => {
-    const req = createRequest("POST", ROUTE_URL, { body: { dryRun: false } });
-    await POST(req, CTX);
-
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "DIRECTORY_SYNC_RUN",
-        tenantId: "tenant-1",
-        data: { configId: "config-1" },
-      }),
-    );
-  });
-
   it("does not dispatch webhook for dry runs", async () => {
     const req = createRequest("POST", ROUTE_URL, { body: { dryRun: true } });
     await POST(req, CTX);

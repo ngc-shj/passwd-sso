@@ -18,6 +18,8 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.DIRECTORY_SYNC]: "groupDirectorySync",
   [AUDIT_ACTION_GROUP.BREAKGLASS]: "groupBreakglass",
   [AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]: "groupServiceAccount",
+  [AUDIT_ACTION_GROUP.MCP_CLIENT]: "groupMcpClient",
+  [AUDIT_ACTION_GROUP.DELEGATION]: "groupDelegation",
 };
 
 export function TenantWebhookCard() {

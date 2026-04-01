@@ -9,7 +9,6 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
@@ -168,12 +167,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     targetId: token.id,
     metadata: { serviceAccountId: id, name: result.data.name, scope },
     ...extractRequestMeta(req),
-  });
-  void dispatchTenantWebhook({
-    type: AUDIT_ACTION.SERVICE_ACCOUNT_TOKEN_CREATE,
-    tenantId: actor.tenantId,
-    timestamp: new Date().toISOString(),
-    data: { serviceAccountId: id, tokenId: token.id },
   });
 
   // Return plaintext token only once — no-store prevents caching of sensitive token

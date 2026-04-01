@@ -12,7 +12,6 @@ const {
   mockConfigDelete,
   mockWithUserTenantRls,
   mockLogAudit,
-  mockDispatchTenantWebhook,
   mockEncryptCredentials,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -22,7 +21,6 @@ const {
   mockConfigDelete: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
-  mockDispatchTenantWebhook: vi.fn(),
   mockEncryptCredentials: vi.fn(),
 }));
 
@@ -46,9 +44,6 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
-}));
-vi.mock("@/lib/webhook-dispatcher", () => ({
-  dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 vi.mock("@/lib/directory-sync/credentials", () => ({
   encryptCredentials: mockEncryptCredentials,
@@ -253,7 +248,7 @@ describe("PUT /api/directory-sync/[id]", () => {
     );
   });
 
-  it("calls logAudit and dispatchTenantWebhook after successful update", async () => {
+  it("calls logAudit after successful update", async () => {
     const req = createRequest("PUT", ROUTE_URL, { body: { enabled: false } });
     await PUT(req, CTX);
 
@@ -262,13 +257,6 @@ describe("PUT /api/directory-sync/[id]", () => {
         action: "DIRECTORY_SYNC_CONFIG_UPDATE",
         tenantId: "tenant-1",
         targetId: "config-1",
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "DIRECTORY_SYNC_CONFIG_UPDATE",
-        tenantId: "tenant-1",
-        data: { configId: "config-1" },
       }),
     );
   });
@@ -329,7 +317,7 @@ describe("DELETE /api/directory-sync/[id]", () => {
     );
   });
 
-  it("calls logAudit and dispatchTenantWebhook after successful delete", async () => {
+  it("calls logAudit after successful delete", async () => {
     const req = createRequest("DELETE", ROUTE_URL);
     await DELETE(req, CTX);
 
@@ -342,13 +330,6 @@ describe("DELETE /api/directory-sync/[id]", () => {
           provider: "AZURE_AD",
           displayName: "My Azure AD",
         }),
-      }),
-    );
-    expect(mockDispatchTenantWebhook).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "DIRECTORY_SYNC_CONFIG_DELETE",
-        tenantId: "tenant-1",
-        data: { configId: "config-1" },
       }),
     );
   });

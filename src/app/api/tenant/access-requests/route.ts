@@ -8,7 +8,6 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
@@ -219,12 +218,6 @@ async function handlePOST(req: NextRequest) {
       expiresInMinutes,
     },
     ...extractRequestMeta(req),
-  });
-  void dispatchTenantWebhook({
-    type: AUDIT_ACTION.ACCESS_REQUEST_CREATE,
-    tenantId,
-    timestamp: new Date().toISOString(),
-    data: { accessRequestId: accessRequest.id, serviceAccountId },
   });
 
   return NextResponse.json(accessRequest, { status: 201 });
