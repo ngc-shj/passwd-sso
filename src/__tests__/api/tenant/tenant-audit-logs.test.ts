@@ -225,7 +225,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
     mockAuditLogFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z", format: "csv" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString(), format: "csv" },
     });
     const res = await GET_DOWNLOAD(req);
 
@@ -240,7 +240,7 @@ describe("GET /api/tenant/audit-logs/download", () => {
     mockAuditLogFindMany.mockResolvedValue([]);
 
     const req = createRequest("GET", "http://localhost/api/tenant/audit-logs/download", {
-      searchParams: { from: "2026-01-01T00:00:00Z", format: "jsonl" },
+      searchParams: { from: new Date(Date.now() - 7 * 86400000).toISOString(), format: "jsonl" },
     });
     const res = await GET_DOWNLOAD(req);
 

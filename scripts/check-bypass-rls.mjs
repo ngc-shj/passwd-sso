@@ -80,6 +80,9 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/delegation.ts", ["delegationSession"]],
   ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
   ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
+  // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)
+  ["src/app/api/user/mcp-tokens/route.ts", ["mcpAccessToken", "mcpClient"]],
+  ["src/app/api/user/mcp-tokens/[id]/route.ts", ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "auditLog"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)

@@ -41,6 +41,7 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 
 type AccessRequestStatus = "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
@@ -234,8 +235,7 @@ export function AccessRequestCard() {
     return t(map[status]);
   };
 
-  const parseScopes = (scope: string): string[] =>
-    typeof scope === "string" ? scope.split(",").filter(Boolean) : [];
+
 
   const toggleScope = (scope: string, checked: boolean) => {
     setSelectedScopes((prev) => {
@@ -292,22 +292,17 @@ export function AccessRequestCard() {
                       {statusLabel(req.status)}
                     </Badge>
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {parseScopes(req.requestedScope).map((s) => (
-                      <Badge key={s} variant="outline" className="text-xs font-normal">
-                        {s}
-                      </Badge>
-                    ))}
-                  </div>
+                  <ScopeBadges scopes={req.requestedScope} />
                   {req.justification && (
                     <p className="text-xs text-muted-foreground">{req.justification}</p>
                   )}
-                  <p className="text-xs text-muted-foreground">
-                    {formatDateTime(req.createdAt, locale)}
-                  </p>
                 </div>
+                <div className="flex flex-col items-end gap-1 shrink-0">
+                  <span className="text-xs text-muted-foreground">
+                    {t("arCreatedAt", { date: formatDateTime(req.createdAt, locale) })}
+                  </span>
                 {req.status === "PENDING" && (
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1">
                     <Button
                       variant="outline"
                       size="sm"
@@ -344,6 +339,7 @@ export function AccessRequestCard() {
                     </AlertDialog>
                   </div>
                 )}
+                </div>
               </div>
             </div>
           ))}

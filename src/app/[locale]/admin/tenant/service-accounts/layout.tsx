@@ -1,0 +1,19 @@
+"use client";
+
+import { useTranslations } from "next-intl";
+import { Bot } from "lucide-react";
+import { SectionLayout } from "@/components/settings/section-layout";
+
+export default function TenantServiceAccountsLayout({ children }: { children: React.ReactNode }) {
+  const t = useTranslations("AdminConsole");
+
+  return (
+    <SectionLayout
+      icon={Bot}
+      title={t("sectionServiceAccounts")}
+      description={t("sectionServiceAccountsDesc")}
+    >
+      {children}
+    </SectionLayout>
+  );
+}

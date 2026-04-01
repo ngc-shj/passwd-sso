@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format-datetime";
+import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface ServiceAccount {
@@ -419,7 +420,11 @@ export function ServiceAccountCard() {
                       </button>
                     </CollapsibleTrigger>
                   </div>
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className="text-xs text-muted-foreground">
+                      {t("saCreatedAt", { date: formatDateTime(sa.createdAt, locale) })}
+                    </span>
+                    <div className="flex items-center gap-1">
                     <Button
                       variant="ghost"
                       size="icon"
@@ -451,6 +456,7 @@ export function ServiceAccountCard() {
                         </AlertDialogFooter>
                       </AlertDialogContent>
                     </AlertDialog>
+                    </div>
                   </div>
                 </div>
 
@@ -497,13 +503,7 @@ export function ServiceAccountCard() {
                                   </Badge>
                                 )}
                               </div>
-                              <div className="flex flex-wrap gap-1">
-                                {token.scope.map((s) => (
-                                  <Badge key={s} variant="outline" className="text-[10px] px-1 h-3.5">
-                                    {s}
-                                  </Badge>
-                                ))}
-                              </div>
+                              <ScopeBadges scopes={token.scope.join(",")} />
                               <div className="text-[10px] text-muted-foreground space-x-2">
                                 <span>
                                   {t("tokenLastUsed")}:{" "}
@@ -591,7 +591,11 @@ export function ServiceAccountCard() {
                             </button>
                           </CollapsibleTrigger>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className="text-xs text-muted-foreground">
+                            {t("saCreatedAt", { date: formatDateTime(sa.createdAt, locale) })}
+                          </span>
+                          <div className="flex items-center gap-1">
                           <Button
                             variant="ghost"
                             size="icon"
@@ -623,6 +627,7 @@ export function ServiceAccountCard() {
                               </AlertDialogFooter>
                             </AlertDialogContent>
                           </AlertDialog>
+                          </div>
                         </div>
                       </div>
                       <CollapsibleContent>
