@@ -11,6 +11,7 @@ import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { dispatchWebhook, dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
+import { getLogger } from "@/lib/logger";
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
@@ -103,10 +104,13 @@ export function logAudit(params: AuditLogParams): void {
 
   const safeUserAgent = userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
 
-  // --- DB write (existing, unchanged) ---
+  // --- DB write + webhook dispatch ---
   void (async () => {
+    // Resolve tenantId inside transaction, then dispatch webhook after commit
+    let resolvedTenantId: string | null = null;
+
     await withBypassRls(prisma, async () => {
-      let resolvedTenantId = tenantId ?? null;
+      resolvedTenantId = tenantId ?? null;
       if (!resolvedTenantId && teamId) {
         const team = await prisma.team.findUnique({
           where: { id: teamId },
@@ -139,22 +143,20 @@ export function logAudit(params: AuditLogParams): void {
           userAgent: safeUserAgent,
         },
       });
-
-      // --- Webhook dispatch (co-located with audit write) ---
-      // Suppress dispatch for webhook-lifecycle actions to prevent infinite loops:
-      // delivery failure → logAudit → dispatchWebhook → failure → logAudit → ...
-      if (!WEBHOOK_DISPATCH_SUPPRESS.has(action)) {
-        const webhookData = safeMetadata ?? {};
-        const timestamp = new Date().toISOString();
-        if (scope === "TEAM" && teamId) {
-          void dispatchWebhook({ type: action, teamId, timestamp, data: webhookData });
-        } else if (scope === "TENANT" && resolvedTenantId) {
-          void dispatchTenantWebhook({ type: action, tenantId: resolvedTenantId, timestamp, data: webhookData });
-        }
-      }
     });
-  })().catch(() => {
-    // Silently swallow — audit logging must never break the app
+
+    // --- Webhook dispatch (after transaction commits) ---
+    if (resolvedTenantId && !WEBHOOK_DISPATCH_SUPPRESS.has(action)) {
+      const webhookData = safeMetadata ?? {};
+      const timestamp = new Date().toISOString();
+      if (scope === "TEAM" && teamId) {
+        void dispatchWebhook({ type: action, teamId, timestamp, data: webhookData });
+      } else if (scope === "TENANT") {
+        void dispatchTenantWebhook({ type: action, tenantId: resolvedTenantId, timestamp, data: webhookData });
+      }
+    }
+  })().catch((err) => {
+    getLogger().error({ err }, "audit log write failed");
   });
 
   // --- Structured JSON emit for external forwarding ---
@@ -201,11 +203,13 @@ export function logAudit(params: AuditLogParams): void {
 export function logAuditBatch(paramsList: AuditLogParams[]): void {
   if (paramsList.length === 0) return;
 
-  // --- DB write: resolve tenantId once, then createMany ---
+  // --- DB write: resolve tenantId once, then createMany, then dispatch ---
   void (async () => {
+    let resolvedTenantId: string | null = null;
+
     await withBypassRls(prisma, async () => {
       const first = paramsList[0];
-      let resolvedTenantId = first.tenantId ?? null;
+      resolvedTenantId = first.tenantId ?? null;
       if (!resolvedTenantId && first.teamId) {
         const team = await prisma.team.findUnique({
           where: { id: first.teamId },
@@ -246,8 +250,10 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
           };
         }),
       });
+    });
 
-      // --- Webhook dispatch per entry (co-located with audit write) ---
+    // --- Webhook dispatch per entry (after transaction commits) ---
+    if (resolvedTenantId) {
       const timestamp = new Date().toISOString();
       for (const p of paramsList) {
         if (WEBHOOK_DISPATCH_SUPPRESS.has(p.action)) continue;
@@ -258,9 +264,9 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
           void dispatchTenantWebhook({ type: p.action, tenantId: resolvedTenantId, timestamp, data: webhookData });
         }
       }
-    });
-  })().catch(() => {
-    // Silently swallow — audit logging must never break the app
+    }
+  })().catch((err) => {
+    getLogger().error({ err }, "audit log write failed");
   });
 
   // --- Structured JSON emit per entry for external forwarding ---
