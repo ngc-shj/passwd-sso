@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.13](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.12...passwd-sso-v0.4.13) (2026-04-01)
+
+
+### Bug Fixes
+
+* correct webhook subscribable events and centralize dispatch in logAudit ([#297](https://github.com/ngc-shj/passwd-sso/issues/297)) ([50ddfad](https://github.com/ngc-shj/passwd-sso/commit/50ddfadf5bf8da4d17583437635dd54955f21da5))
+
 ## [0.4.12](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.11...passwd-sso-v0.4.12) (2026-04-01)
 
 
