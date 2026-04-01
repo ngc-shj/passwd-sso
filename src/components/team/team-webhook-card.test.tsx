@@ -116,7 +116,11 @@ describe("TeamWebhookCard (team-specific)", () => {
     // Share group
     expect(screen.getByText("SHARE_CREATE")).toBeInTheDocument();
 
-    // Tenant-scoped groups must NOT appear
+    // Admin group (team-scoped subset only)
+    expect(screen.getByText("POLICY_UPDATE")).toBeInTheDocument();
+    expect(screen.getByText("TEAM_KEY_ROTATION")).toBeInTheDocument();
+
+    // Tenant-scoped actions must NOT appear
     expect(screen.queryByText("SCIM_USER_CREATE")).not.toBeInTheDocument();
     expect(screen.queryByText("MASTER_KEY_ROTATION")).not.toBeInTheDocument();
     expect(screen.queryByText("ADMIN_VAULT_RESET_INITIATE")).not.toBeInTheDocument();

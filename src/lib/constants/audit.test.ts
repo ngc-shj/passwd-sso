@@ -129,24 +129,21 @@ describe("audit constants", () => {
     expect(allSubscribable.has(AUDIT_ACTION.PERSONAL_LOG_ACCESS_EXPIRE)).toBe(false);
   });
 
-  it("has TEAM_WEBHOOK_EVENT_GROUPS matching AUDIT_ACTION_GROUPS_TEAM minus excluded groups", () => {
-    const teamKeys = Object.keys(TEAM_WEBHOOK_EVENT_GROUPS);
-    const excluded = new Set<string>([
-      AUDIT_ACTION_GROUP.WEBHOOK,
-      AUDIT_ACTION_GROUP.ADMIN,
-      AUDIT_ACTION_GROUP.SCIM,
-    ]);
-    const auditKeys = Object.keys(AUDIT_ACTION_GROUPS_TEAM).filter(
-      (k) => !excluded.has(k),
-    );
-    expect(teamKeys).toEqual(auditKeys);
-  });
-
-  it("excludes WEBHOOK/ADMIN/SCIM groups from team webhook event groups", () => {
+  it("has TEAM_WEBHOOK_EVENT_GROUPS with expected groups", () => {
     const keys = new Set(Object.keys(TEAM_WEBHOOK_EVENT_GROUPS));
+
+    // Self-referential and tenant-scoped groups excluded
     expect(keys.has(AUDIT_ACTION_GROUP.WEBHOOK)).toBe(false);
-    expect(keys.has(AUDIT_ACTION_GROUP.ADMIN)).toBe(false);
     expect(keys.has(AUDIT_ACTION_GROUP.SCIM)).toBe(false);
+
+    // Admin group present with team-scoped subset
+    expect(keys.has(AUDIT_ACTION_GROUP.ADMIN)).toBe(true);
+    const adminActions = new Set(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.ADMIN]);
+    expect(adminActions.has(AUDIT_ACTION.POLICY_UPDATE)).toBe(true);
+    expect(adminActions.has(AUDIT_ACTION.TEAM_KEY_ROTATION)).toBe(true);
+    // Tenant-scoped admin actions excluded
+    expect(adminActions.has(AUDIT_ACTION.MASTER_KEY_ROTATION)).toBe(false);
+    expect(adminActions.has(AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE)).toBe(false);
   });
 
   it("derives SUBSCRIBABLE_ACTIONS from EVENT_GROUPS", () => {

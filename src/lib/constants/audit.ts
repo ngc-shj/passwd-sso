@@ -550,26 +550,37 @@ export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
 
 /**
  * Event groups subscribable via team webhooks.
- * Derived from AUDIT_ACTION_GROUPS_TEAM minus groups that are
- * not appropriate for team-level webhook notifications.
+ * Derived from AUDIT_ACTION_GROUPS_TEAM with overrides:
  *
- * Intentionally excluded:
- * - WEBHOOK group (prevents self-referential loops)
- * - ADMIN group (contains tenant-scoped actions: MASTER_KEY_ROTATION,
- *   ADMIN_VAULT_RESET_*, VAULT_KEY_ROTATION, WATCHTOWER_ALERT_SENT)
- * - SCIM group (all tenant-scoped provisioning actions)
+ * - WEBHOOK group excluded (prevents self-referential loops)
+ * - SCIM group excluded (all tenant-scoped provisioning actions)
+ * - ADMIN group replaced with team-scoped subset only:
+ *   Includes: TEAM_E2E_MIGRATION, TEAM_KEY_ROTATION,
+ *     TEAM_MEMBER_KEY_DISTRIBUTE, POLICY_UPDATE, AUDIT_LOG_DOWNLOAD
+ *   Excludes: MASTER_KEY_ROTATION, VAULT_KEY_ROTATION,
+ *     WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_* (all tenant/personal-scoped)
  */
 const TEAM_WEBHOOK_EXCLUDED_GROUPS: ReadonlySet<string> = new Set([
   AUDIT_ACTION_GROUP.WEBHOOK,
-  AUDIT_ACTION_GROUP.ADMIN,
   AUDIT_ACTION_GROUP.SCIM,
+  AUDIT_ACTION_GROUP.ADMIN,
 ]);
 
-export const TEAM_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = Object.fromEntries(
-  Object.entries(AUDIT_ACTION_GROUPS_TEAM).filter(
-    ([key]) => !TEAM_WEBHOOK_EXCLUDED_GROUPS.has(key),
+export const TEAM_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
+  ...Object.fromEntries(
+    Object.entries(AUDIT_ACTION_GROUPS_TEAM).filter(
+      ([key]) => !TEAM_WEBHOOK_EXCLUDED_GROUPS.has(key),
+    ),
   ),
-);
+  // Team-scoped subset of the ADMIN group
+  [AUDIT_ACTION_GROUP.ADMIN]: [
+    AUDIT_ACTION.TEAM_E2E_MIGRATION,
+    AUDIT_ACTION.TEAM_KEY_ROTATION,
+    AUDIT_ACTION.TEAM_MEMBER_KEY_DISTRIBUTE,
+    AUDIT_ACTION.POLICY_UPDATE,
+    AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
+  ],
+};
 
 export const TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
   TEAM_WEBHOOK_EVENT_GROUPS,

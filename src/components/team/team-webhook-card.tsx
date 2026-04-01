@@ -20,6 +20,7 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.HISTORY]: "groupHistory",
   [AUDIT_ACTION_GROUP.TEAM]: "groupTeam",
   [AUDIT_ACTION_GROUP.SHARE]: "groupShare",
+  [AUDIT_ACTION_GROUP.ADMIN]: "groupAdmin",
 };
 
 interface Props {
