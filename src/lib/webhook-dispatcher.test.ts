@@ -207,16 +207,15 @@ describe("dispatchWebhook", () => {
     await vi.advanceTimersByTimeAsync(5_000);
     await vi.advanceTimersByTimeAsync(25_000);
     await vi.advanceTimersByTimeAsync(1_000);
-    // Switch to real timers and flush microtasks from dynamic import("@/lib/audit")
-    vi.useRealTimers();
-    await new Promise((r) => setTimeout(r, 50));
-
-    expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: "WEBHOOK_DELIVERY_FAILED",
-        teamId: "team-1",
-      }),
-    );
+    // Use vi.waitFor to poll for the assertion, avoiding flaky real-timer sleeps
+    await vi.waitFor(() => {
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "WEBHOOK_DELIVERY_FAILED",
+          teamId: "team-1",
+        }),
+      );
+    });
   });
 
   it("skips when no matching webhooks found", async () => {

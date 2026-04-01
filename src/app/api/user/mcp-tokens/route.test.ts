@@ -173,7 +173,7 @@ describe("DELETE /api/user/mcp-tokens", () => {
 
     expect(mockMcpAccessTokenUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: { in: ["token-1", "token-2"] } },
+        where: expect.objectContaining({ id: { in: ["token-1", "token-2"] } }),
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
@@ -189,10 +189,17 @@ describe("DELETE /api/user/mcp-tokens", () => {
 
     expect(mockDelegationSessionUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ userId: "user-1" }),
+        where: expect.objectContaining({
+          mcpTokenId: { in: ["token-1", "token-2"] },
+          userId: "user-1",
+          revokedAt: null,
+        }),
         data: expect.objectContaining({ revokedAt: expect.any(Date) }),
       }),
     );
+
+    // Sibling access token revocation includes userId+tenantId guard
+    expect(mockMcpAccessTokenUpdateMany).toHaveBeenCalledTimes(2);
 
     expect(mockAuditLogCreate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -217,7 +224,8 @@ describe("DELETE /api/user/mcp-tokens", () => {
 
     expect(status).toBe(200);
     expect(json.revokedCount).toBe(0);
-    expect(mockTransaction).not.toHaveBeenCalled();
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(mockMcpAccessTokenUpdateMany).not.toHaveBeenCalled();
   });
 
   it("returns 401 when unauthenticated", async () => {

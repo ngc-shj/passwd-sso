@@ -84,26 +84,26 @@ async function handleDELETE(_req: NextRequest) {
   const { revokedCount, delegationSessionIds } = await withBypassRls(
     prisma,
     async () => {
-      // Find all active tokens for this user
-      const activeTokens = await prisma.mcpAccessToken.findMany({
-        where: { userId, tenantId, revokedAt: null, expiresAt: { gt: now } },
-        select: { id: true },
-      });
+      const result = await prisma.$transaction(async (tx) => {
+        // 1. Find all active tokens for this user (inside transaction for consistency)
+        const activeTokens = await tx.mcpAccessToken.findMany({
+          where: { userId, tenantId, revokedAt: null, expiresAt: { gt: now } },
+          select: { id: true },
+        });
 
-      if (activeTokens.length === 0) {
-        return { revokedCount: 0, delegationSessionIds: [] as string[] };
-      }
+        if (activeTokens.length === 0) {
+          return { revokedCount: 0, delegationSessionIds: [] as string[] };
+        }
 
-      const tokenIds = activeTokens.map((t) => t.id);
+        const tokenIds = activeTokens.map((t) => t.id);
 
-      const allDelegationSessionIds = await prisma.$transaction(async (tx) => {
-        // 1. Revoke all access tokens
+        // 2. Revoke all access tokens
         await tx.mcpAccessToken.updateMany({
-          where: { id: { in: tokenIds } },
+          where: { id: { in: tokenIds }, revokedAt: null },
           data: { revokedAt: now },
         });
 
-        // 2. Revoke refresh token families
+        // 3. Revoke refresh token families
         const refreshTokens = await tx.mcpRefreshToken.findMany({
           where: { accessTokenId: { in: tokenIds } },
           select: { familyId: true },
@@ -127,7 +127,7 @@ async function handleDELETE(_req: NextRequest) {
           ];
           if (relatedIds.length > 0) {
             await tx.mcpAccessToken.updateMany({
-              where: { id: { in: relatedIds }, revokedAt: null },
+              where: { id: { in: relatedIds }, userId, tenantId, revokedAt: null },
               data: { revokedAt: now },
             });
           }
@@ -165,13 +165,13 @@ async function handleDELETE(_req: NextRequest) {
           },
         });
 
-        return sessions.map((s) => s.id);
+        return {
+          revokedCount: tokenIds.length,
+          delegationSessionIds: sessions.map((s) => s.id),
+        };
       });
 
-      return {
-        revokedCount: tokenIds.length,
-        delegationSessionIds: allDelegationSessionIds,
-      };
+      return result;
     },
   );
 
