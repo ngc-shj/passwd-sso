@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations, useLocale } from "next-intl";
-import { Plug, Loader2, Unplug } from "lucide-react";
+import { Plug, Loader2, Unplug, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { API_PATH, apiPath } from "@/lib/constants/api-path";
 import { fetchApi } from "@/lib/url-helpers";
@@ -29,11 +30,14 @@ interface McpClientConnection {
   clientId: string;
   name: string;
   isDcr: boolean;
+  allowedScopes: string;
+  clientCreatedAt: string;
   connection: {
     tokenId: string;
     scope: string;
     createdAt: string;
     expiresAt: string;
+    lastUsedAt: string | null;
   } | null;
 }
 
@@ -42,6 +46,9 @@ export function McpConnectionsCard() {
   const locale = useLocale();
   const [clients, setClients] = useState<McpClientConnection[]>([]);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [revokeAllOpen, setRevokeAllOpen] = useState(false);
+  const [revokingAll, setRevokingAll] = useState(false);
 
   const fetchClients = useCallback(async () => {
     try {
@@ -81,14 +88,84 @@ export function McpConnectionsCard() {
     }
   };
 
+  const handleRevokeAll = async () => {
+    setRevokingAll(true);
+    try {
+      const res = await fetchApi(API_PATH.USER_MCP_TOKENS, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setClients((prev) =>
+          prev.map((c) => ({ ...c, connection: null })),
+        );
+        toast.success(t("revokeAllSuccess", { count: data.revokedCount }));
+      } else {
+        toast.error(t("revokeAllError"));
+      }
+    } catch {
+      toast.error(t("revokeAllError"));
+    } finally {
+      setRevokingAll(false);
+      setRevokeAllOpen(false);
+    }
+  };
+
+  const filteredClients = searchQuery
+    ? clients.filter(
+        (c) =>
+          c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          c.clientId.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : clients;
+
+  const hasConnections = clients.some((c) => c.connection !== null);
+
   return (
     <Card>
       <SectionCardHeader
         icon={Plug}
         title={t("title")}
         description={t("description")}
+        action={
+          hasConnections ? (
+            <AlertDialog open={revokeAllOpen} onOpenChange={setRevokeAllOpen}>
+              <AlertDialogTrigger asChild>
+                <Button variant="destructive" size="sm">
+                  {t("revokeAll")}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>{t("revokeAllTitle")}</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    {t("revokeAllDescription")}
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+                  <AlertDialogAction onClick={handleRevokeAll} disabled={revokingAll}>
+                    {revokingAll && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                    {t("revokeAll")}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          ) : undefined
+        }
       />
       <CardContent>
+        {!loading && clients.length > 0 && (
+          <div className="relative mb-3">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder={t("searchPlaceholder")}
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+        )}
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -103,7 +180,7 @@ export function McpConnectionsCard() {
           </div>
         ) : (
           <div className="space-y-3">
-            {clients.map((client) => (
+            {filteredClients.map((client) => (
               <div
                 key={client.id}
                 className="flex items-start justify-between border rounded-md p-3"
@@ -128,6 +205,12 @@ export function McpConnectionsCard() {
                       {client.connection ? t("connected") : t("notConnected")}
                     </Badge>
                   </div>
+                  <ScopeBadges scopes={client.allowedScopes} separator={/[\s,]+/} />
+                  <div className="flex gap-4 text-xs text-muted-foreground">
+                    <span>
+                      {t("registeredAt", { date: formatDateTime(client.clientCreatedAt, locale) })}
+                    </span>
+                  </div>
                   {client.connection && (
                     <>
                       <ScopeBadges scopes={client.connection.scope} separator={/[\s,]+/} />
@@ -139,6 +222,11 @@ export function McpConnectionsCard() {
                         <span>
                           {t("expires")}:{" "}
                           {formatDateTime(client.connection.expiresAt, locale)}
+                        </span>
+                        <span>
+                          {client.connection.lastUsedAt
+                            ? t("lastUsed", { date: formatDateTime(client.connection.lastUsedAt, locale) })
+                            : t("neverUsed")}
                         </span>
                       </div>
                     </>
@@ -177,6 +265,11 @@ export function McpConnectionsCard() {
                 )}
               </div>
             ))}
+            {filteredClients.length === 0 && searchQuery && (
+              <p className="text-sm text-center text-muted-foreground py-4">
+                {t("noMatchingConnections")}
+              </p>
+            )}
           </div>
         )}
       </CardContent>

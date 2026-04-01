@@ -206,6 +206,7 @@
   "DELEGATION_READ": "Delegated credential accessed",
   "DELEGATION_CHECK": "Delegation authorization checked",
   "MCP_CONNECTION_REVOKE": "MCP connection revoked",
+  "MCP_CONNECTION_REVOKE_ALL": "All MCP connections revoked",
   "groupDelegation": "Delegation",
   "delegationListMeta": "Listed {entryCount} delegated entries",
   "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",
