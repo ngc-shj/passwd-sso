@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.16](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.15...passwd-sso-v0.4.16) (2026-04-02)
+
+
+### Bug Fixes
+
+* improve i18n security terminology and phrasing consistency ([#304](https://github.com/ngc-shj/passwd-sso/issues/304)) ([83bab0c](https://github.com/ngc-shj/passwd-sso/commit/83bab0c6d04fe5eede8104835867c3d3b184f540))
+
 ## [0.4.15](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.14...passwd-sso-v0.4.15) (2026-04-01)
 
 
