@@ -6,6 +6,15 @@ import type { AuditAction } from "@prisma/client";
 /** Pre-built set of all valid audit action strings for O(1) membership checks. */
 export const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
+/** Valid actor type values for audit log filtering. */
+export const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
+
+/** Parses actorType from search params. Returns the value if valid, undefined otherwise. */
+export function parseActorType(searchParams: URLSearchParams): (typeof VALID_ACTOR_TYPES)[number] | undefined {
+  const raw = searchParams.get("actorType");
+  return VALID_ACTOR_TYPES.find((t) => t === raw);
+}
+
 export interface AuditLogParams {
   action: string | null;
   actions: string | null;

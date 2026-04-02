@@ -11,6 +11,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import {
   VALID_ACTIONS,
   parseAuditLogParams,
+  parseActorType,
   buildAuditLogDateFilter,
   buildAuditLogActionFilter,
   paginateResult,
@@ -37,8 +38,7 @@ async function handleGET(req: NextRequest) {
   const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
   const scopeParam = searchParams.get("scope");
   const teamIdParam = searchParams.get("teamId");
-  const actorTypeParam = searchParams.get("actorType");
-  const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
+  const validActorType = parseActorType(searchParams);
 
   const where: Record<string, unknown> = {
     tenantId: actor.tenantId,
@@ -90,10 +90,7 @@ async function handleGET(req: NextRequest) {
   const dateFilter = buildAuditLogDateFilter(from, to);
   if (dateFilter) where.createdAt = dateFilter;
 
-  // actorType filter — allowlist only, silently ignore invalid values
-  if (actorTypeParam && (VALID_ACTOR_TYPES as readonly string[]).includes(actorTypeParam)) {
-    where.actorType = actorTypeParam;
-  }
+  if (validActorType) where.actorType = validActorType;
 
   let logs;
   try {
