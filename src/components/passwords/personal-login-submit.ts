@@ -15,7 +15,7 @@ export interface SubmitPersonalLoginFormArgs {
   mode: "create" | "edit";
   initialData?: PersonalLoginFormInitialData;
   encryptionKey: CryptoKey | null;
-  userId?: string;
+  userId: string | null;
   title: string;
   username: string;
   password: string;
@@ -58,7 +58,7 @@ export async function submitPersonalLoginForm({
   router,
   onSaved,
 }: SubmitPersonalLoginFormArgs): Promise<void> {
-  if (!encryptionKey) return;
+  if (!encryptionKey || !userId) return;
 
   const existingHistory = buildPasswordHistory(
     mode === "edit" && initialData ? initialData.password : "",
@@ -85,7 +85,7 @@ export async function submitPersonalLoginForm({
     mode,
     initialId: initialData?.id,
     encryptionKey,
-    userId: userId ?? undefined,
+    userId,
     fullBlob,
     overviewBlob,
     tagIds: extractTagIds(selectedTags),

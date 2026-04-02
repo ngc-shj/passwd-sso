@@ -14,6 +14,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AAD_VERSION } from "@/lib/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -181,7 +182,7 @@ async function handlePOST(
   const attachmentId = (clientId && UUID_V4_RE.test(clientId)) ? clientId.toLowerCase() : crypto.randomUUID();
   const blobContext = { attachmentId, entryId: id };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
-  const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 0;
+  const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : AAD_VERSION;
   let attachment;
   try {
     attachment = await withUserTenantRls(session.user.id, async () =>

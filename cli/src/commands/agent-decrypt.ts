@@ -300,6 +300,8 @@ async function forkDaemon(socketPath: string): Promise<void> {
 
   // Send secret key bytes (not derived CryptoKey) — child will derive encryption key
   const secretHex = hexEncode(secretBytes);
+  // Zero source bytes immediately — hex string is immutable in V8 but source array can be wiped
+  secretBytes.fill(0);
   const userId = getUserId();
 
   // Reconstruct args for child: remove --eval, add internal daemon flag.
@@ -355,6 +357,8 @@ function runDaemonChild(): Promise<void> {
         const { hexDecode, deriveEncryptionKey } = await import("../lib/crypto.js");
         const secretBytes = hexDecode(msg.secretHex);
         const key = await deriveEncryptionKey(secretBytes);
+        // Zero secret bytes after key derivation — key material no longer needed in raw form
+        secretBytes.fill(0);
         setEncryptionKey(key, msg.userId ?? undefined);
 
         // Acknowledge to parent

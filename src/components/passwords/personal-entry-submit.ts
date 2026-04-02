@@ -9,7 +9,7 @@ interface ExecutePersonalEntrySubmitArgs {
   mode: "create" | "edit";
   initialId?: string;
   encryptionKey: CryptoKey;
-  userId?: string;
+  userId: string;
   fullBlob: string;
   overviewBlob: string;
   tagIds: string[];

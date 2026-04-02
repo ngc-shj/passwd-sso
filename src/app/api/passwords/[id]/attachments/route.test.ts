@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { AAD_VERSION } from "@/lib/crypto-aad";
 
 const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -318,7 +319,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(json.error).toBe("PAYLOAD_TOO_LARGE");
   });
 
-  it("defaults aadVersion to 0 when not provided", async () => {
+  it("defaults aadVersion to AAD_VERSION when not provided", async () => {
     mockPrismaAttachment.create.mockResolvedValue({
       id: "att-legacy",
       filename: "test.pdf",
@@ -341,7 +342,7 @@ describe("POST /api/passwords/[id]/attachments", () => {
     expect(mockPrismaAttachment.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          aadVersion: 0,
+          aadVersion: AAD_VERSION,
         }),
       }),
     );

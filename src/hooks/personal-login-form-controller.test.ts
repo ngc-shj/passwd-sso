@@ -56,7 +56,7 @@ describe("buildPersonalLoginFormController", () => {
     expect(back).toHaveBeenCalledTimes(1);
   });
 
-  it("normalizes null userId to undefined in submit args", async () => {
+  it("passes null userId through to submit args", async () => {
     const controller = buildPersonalLoginFormController({
       mode: "create",
       variant: "page",
@@ -72,7 +72,7 @@ describe("buildPersonalLoginFormController", () => {
     await controller.handleSubmit({ preventDefault: vi.fn() } as unknown as React.FormEvent);
 
     expect(submitPersonalLoginFormMock).toHaveBeenCalledTimes(1);
-    expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]?.userId).toBeUndefined();
+    expect(submitPersonalLoginFormMock.mock.calls[0]?.[0]?.userId).toBeNull();
   });
 
   it("uses router.back for page cancel even when onSaved exists", () => {

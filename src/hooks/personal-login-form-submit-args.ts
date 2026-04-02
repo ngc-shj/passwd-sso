@@ -11,7 +11,7 @@ interface BuildPersonalLoginSubmitArgsParams {
   initialData: Pick<PersonalLoginFormProps, "initialData">["initialData"];
   onSaved: Pick<PersonalLoginFormProps, "onSaved">["onSaved"];
   encryptionKey: CryptoKey | null;
-  userId?: string | null;
+  userId: string | null;
   values: PersonalLoginFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalLoginFormTranslations;
@@ -33,7 +33,7 @@ export function buildPersonalLoginSubmitArgs({
     mode,
     initialData,
     encryptionKey,
-    userId: userId ?? undefined,
+    userId,
     ...values,
     setSubmitting,
     t: translations.t,

@@ -7,7 +7,7 @@ interface SavePersonalEntryParams {
   mode: "create" | "edit";
   initialId?: string;
   encryptionKey: CryptoKey;
-  userId?: string;
+  userId: string;
   fullBlob: string;
   overviewBlob: string;
   tagIds: string[];
@@ -35,7 +35,7 @@ export async function savePersonalEntry({
   }
 
   const entryId = mode === "create" ? crypto.randomUUID() : initialId!;
-  const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+  const aad = buildPersonalEntryAAD(userId, entryId);
 
   const body = await buildEncryptedEntryBody({
     mode,
@@ -48,7 +48,7 @@ export async function savePersonalEntry({
     tagIds,
     extra: {
       keyVersion: 1,
-      aadVersion: aad ? AAD_VERSION : 0,
+      aadVersion: AAD_VERSION,
     },
     optionals: { entryType, requireReprompt, expiresAt, folderId },
   });

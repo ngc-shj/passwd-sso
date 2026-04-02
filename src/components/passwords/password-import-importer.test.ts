@@ -555,4 +555,30 @@ describe("runImportEntries", () => {
     expect(result.successCount).toBe(2);
     expect(result.failedCount).toBe(1);
   });
+
+  it("throws when personal import is missing userId", async () => {
+    await expect(
+      runImportEntries({
+        entries: [makeEntry()],
+        isTeamImport: false,
+        tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
+        sourceFilename: "test.json",
+        encryptionKey: {} as CryptoKey,
+      }),
+    ).rejects.toThrow("userId is required for personal import");
+  });
+
+  it("throws when personal import is missing encryptionKey", async () => {
+    await expect(
+      runImportEntries({
+        entries: [makeEntry()],
+        isTeamImport: false,
+        tagsPath: "/api/tags",
+        foldersPath: "/api/folders",
+        sourceFilename: "test.json",
+        userId: "user-1",
+      }),
+    ).rejects.toThrow("encryptionKey is required for personal import");
+  });
 });

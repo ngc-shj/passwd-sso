@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { AAD_VERSION } from "@/lib/crypto-aad";
 
 // fetchApi has a `typeof window` guard — bypass it so node-env tests work
 vi.mock("@/lib/url-helpers", () => ({
@@ -50,7 +51,7 @@ describe("savePersonalEntry", () => {
     expect(body.tagIds).toEqual(["tag-a"]);
     expect(body.encryptedBlob).toBe("enc:{\"a\":1}");
     expect(body.encryptedOverview).toBe("enc:{\"b\":2}");
-    expect(body.aadVersion).toBeGreaterThan(0);
+    expect(body.aadVersion).toBe(AAD_VERSION);
   });
 
   it("updates personal entry via PUT without create-only fields", async () => {
@@ -60,6 +61,7 @@ describe("savePersonalEntry", () => {
       mode: "edit",
       initialId: "entry-existing",
       encryptionKey: {} as CryptoKey,
+      userId: "user-1",
       fullBlob: "{}",
       overviewBlob: "{}",
       tagIds: [],
@@ -71,7 +73,7 @@ describe("savePersonalEntry", () => {
     expect(init.method).toBe("PUT");
     const body = JSON.parse(String(init.body)) as Record<string, unknown>;
     expect(body.id).toBeUndefined();
-    expect(body.aadVersion).toBe(0);
+    expect(body.aadVersion).toBe(AAD_VERSION);
     expect(body.entryType).toBeUndefined();
     expect(body.folderId).toBeUndefined();
     expect(body.requireReprompt).toBeUndefined();
@@ -82,6 +84,7 @@ describe("savePersonalEntry", () => {
       savePersonalEntry({
         mode: "edit",
         encryptionKey: {} as CryptoKey,
+        userId: "user-1",
         fullBlob: "{}",
         overviewBlob: "{}",
         tagIds: [],

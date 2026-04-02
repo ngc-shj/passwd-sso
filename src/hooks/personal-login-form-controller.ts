@@ -15,7 +15,7 @@ export interface PersonalLoginFormControllerArgs {
   onSaved: Pick<PersonalLoginFormProps, "onSaved">["onSaved"];
   onCancel: Pick<PersonalLoginFormProps, "onCancel">["onCancel"];
   encryptionKey: CryptoKey | null;
-  userId?: string | null;
+  userId: string | null;
   values: PersonalLoginFormEntryValues;
   setSubmitting: (value: boolean) => void;
   translations: PersonalLoginFormTranslations;

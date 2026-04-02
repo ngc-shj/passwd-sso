@@ -324,6 +324,28 @@ describe("usePersonalBaseFormModel", () => {
       expect(mockExecutePersonalEntrySubmit).not.toHaveBeenCalled();
     });
 
+    it("returns early without calling execute when userId is null", async () => {
+      mockUseVault.mockReturnValue({
+        encryptionKey: mockEncryptionKey,
+        userId: null,
+      });
+
+      const { result } = renderHook(() =>
+        usePersonalBaseFormModel({ mode: "create" }),
+      );
+
+      await act(async () => {
+        await result.current.submitEntry({
+          t: makeTranslator(),
+          fullBlob: "blob",
+          overviewBlob: "overview",
+          entryType: "login" as never,
+        });
+      });
+
+      expect(mockExecutePersonalEntrySubmit).not.toHaveBeenCalled();
+    });
+
     it("sends current folderId and requireReprompt state", async () => {
       const { result } = renderHook(() =>
         usePersonalBaseFormModel({
