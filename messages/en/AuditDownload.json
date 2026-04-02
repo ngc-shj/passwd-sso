@@ -12,6 +12,6 @@
   "maxRange": "Maximum range is 90 days",
   "rateLimited": "Too many requests. Please try again later.",
   "exportDisabled": "Export is disabled by team policy",
-  "downloadError": "Download failed",
+  "downloadError": "Failed to download",
   "dateRequired": "Please specify a date range"
 }

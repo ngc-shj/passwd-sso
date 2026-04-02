@@ -24,7 +24,7 @@
   "statusPending": "Pending",
   "statusAccepted": "Accepted",
   "statusIdle": "Ready",
-  "statusStale": "Re-confirm Needed",
+  "statusStale": "Re-confirmation Needed",
   "statusRequested": "Requested",
   "statusActivated": "Activated",
   "statusRevoked": "Revoked",

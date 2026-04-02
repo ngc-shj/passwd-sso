@@ -15,6 +15,6 @@
   "rotateKeyRateLimited": "ローテーションの試行回数が多すぎます。しばらく待ってから再試行してください。",
   "rotateKeyVersionConflict": "キーバージョンの競合が発生しました。別のローテーションが進行中の可能性があります。",
   "rotateKeyEntryMismatch": "エントリ数の不一致が発生しました。ページを更新して再試行してください。",
-  "rotateKeyVaultRequired": "チームキーをローテーションするには、保管庫のロックを解除する必要があります。",
+  "rotateKeyVaultRequired": "チームキーをローテーションするには保管庫をアンロックしてください。",
   "rotateKeyNoMembers": "暗号化キーを持つアクティブなメンバーが見つかりません。"
 }

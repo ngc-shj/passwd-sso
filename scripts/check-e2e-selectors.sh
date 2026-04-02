@@ -263,6 +263,56 @@ if [ -n "$e2e_slots" ]; then
   done
 fi
 
+# ── 8. i18n value change vs E2E regex selectors ─────────────
+#
+# E2E tests use regex patterns like /Revoke|失効/i in getByRole({ name })
+# and filter({ hasText }). When a messages/ja/*.json value changes, these
+# regexes may stop matching.
+#
+# Approach: extract Japanese strings from E2E regex patterns, then check
+# if any appear in the "removed" side of the i18n diff.
+
+printf "${BOLD}▸ Checking i18n value changes vs E2E regex selectors${RESET}\n"
+
+# Get removed Japanese values from messages/ja/ diff (old values that were replaced)
+i18n_removed_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
+  | grep -E '^\-\s*"[^"]+"\s*:\s*"' \
+  | grep -v '^\-\-\-' \
+  | sed -E 's/^\-\s*"[^"]+"\s*:\s*"([^"]+)".*/\1/' \
+  | sort -u || true)
+
+if [ -n "$i18n_removed_ja" ] && [ -d "$E2E_DIR" ]; then
+  # Extract Japanese text fragments from E2E regex patterns
+  # Matches: /English|日本語/i, /English|日本語1|日本語2/i, hasText: /日本語/
+  # Split regex alternatives on '|', keep only those containing Japanese chars
+  e2e_ja_patterns=$(grep -roE '/[^/]+/' "$E2E_DIR/" 2>/dev/null \
+    | sed 's|^[^:]*:||' \
+    | tr '|' '\n' \
+    | sed 's|^/||; s|/$||; s|/[gi]*$||' \
+    | grep '[ぁ-ん]\\|[ァ-ヶ]\\|[一-龠]\\|[Ａ-Ｚ]' \
+    | sed 's/[\^$]//g' \
+    | sort -u || true)
+
+  if [ -n "$e2e_ja_patterns" ]; then
+    for ja_pattern in $e2e_ja_patterns; do
+      # Skip very short patterns (single character) — too noisy
+      [ "$(echo -n "$ja_pattern" | wc -m)" -lt 2 ] && continue
+
+      # Check if this E2E Japanese pattern matches any removed i18n value
+      if echo "$i18n_removed_ja" | grep -qF "$ja_pattern"; then
+        # Verify it's NOT in the added side (i.e. the string was truly removed, not just moved)
+        i18n_added_ja=$(git diff "${BASE}...HEAD" -- 'messages/ja/*.json' \
+          | grep -E '^\+\s*"[^"]+"\s*:\s*"' \
+          | grep -v '^\+\+\+' || true)
+        if ! echo "$i18n_added_ja" | grep -qF "$ja_pattern"; then
+          ref_files=$(grep -rl "$ja_pattern" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+          warn "i18n value '$ja_pattern' was changed in messages/ja/ but is still used in E2E regex: $ref_files"
+        fi
+      fi
+    done
+  fi
+fi
+
 # ── Summary ──────────────────────────────────────────────────
 
 echo ""

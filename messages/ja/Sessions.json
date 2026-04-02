@@ -6,7 +6,7 @@
   "tabDeveloper": "開発者",
   "tabMcp": "MCP",
   "title": "セッション",
-  "description": "アクティブなセッションを管理できます。不要なセッションを取り消すことができます。",
+  "description": "アクティブなセッションを管理できます。不要なセッションを取り消せます。",
   "current": "現在",
   "lastActive": "最終アクティブ",
   "revoke": "取り消し",
