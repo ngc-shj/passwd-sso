@@ -91,7 +91,7 @@
     "eslint": "^9.39.2",
     "eslint-config-next": "^16.1.6",
     "jsdom": "^28.1.0",
-    "prisma": "^7.3.0",
+    "prisma": "^7.6.0",
     "shadcn": "^3.8.4",
     "tailwindcss": "^4.1.18",
     "tsx": "^4.21.0",
