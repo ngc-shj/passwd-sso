@@ -5,7 +5,7 @@ import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
 import { buildPersonalLoginSubmitArgs } from "@/hooks/personal-login-form-submit-args";
 
 describe("buildPersonalLoginSubmitArgs", () => {
-  it("maps personal form values and normalizes null userId", () => {
+  it("maps personal form values and passes null userId through", () => {
     const setSubmitting = vi.fn();
     const onSaved = vi.fn();
     const args = buildPersonalLoginSubmitArgs({
@@ -38,7 +38,7 @@ describe("buildPersonalLoginSubmitArgs", () => {
       router: { push: vi.fn(), refresh: vi.fn(), back: vi.fn() },
     });
 
-    expect(args.userId).toBeUndefined();
+    expect(args.userId).toBeNull();
     expect(args.title).toBe("title");
     expect(args.password).toBe("pass");
     expect(args.setSubmitting).toBe(setSubmitting);

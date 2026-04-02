@@ -210,7 +210,12 @@ export async function deriveEncryptionKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      salt: new ArrayBuffer(32), // empty salt (secret key has sufficient entropy)
+      // Risk-accepted: zero salt. The IKM (secretKey) is a 256-bit random value
+      // wrapped by PBKDF2(600k iterations), providing full entropy. RFC 5869 §3.1
+      // notes that a zero salt defaults to HashLen zeros and is acceptable when
+      // the IKM is already uniformly random. Domain separation relies on the
+      // distinct `info` parameter (HKDF_ENC_INFO vs HKDF_AUTH_INFO).
+      salt: new ArrayBuffer(32),
       info: textEncode(HKDF_ENC_INFO),
     },
     hkdfKey,
@@ -239,6 +244,7 @@ export async function deriveAuthKey(
     {
       name: "HKDF",
       hash: "SHA-256",
+      // See deriveEncryptionKey for zero-salt risk acceptance rationale
       salt: new ArrayBuffer(32),
       info: textEncode(HKDF_AUTH_INFO),
     },

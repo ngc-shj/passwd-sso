@@ -76,13 +76,13 @@ export function usePersonalBaseFormModel({
     overviewBlob,
     entryType,
   }: SubmitEntryArgs): Promise<void> => {
-    if (!encryptionKey) return;
+    if (!encryptionKey || !userId) return;
 
     await executePersonalEntrySubmit({
       mode,
       initialId,
       encryptionKey,
-      userId: userId ?? undefined,
+      userId,
       fullBlob,
       overviewBlob,
       tagIds: toTagIds(selectedTags),

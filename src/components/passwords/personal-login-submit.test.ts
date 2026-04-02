@@ -36,6 +36,36 @@ describe("submitPersonalLoginForm", () => {
     await submitPersonalLoginForm({
       mode: "create",
       encryptionKey: null,
+      userId: null,
+      title: "title",
+      username: "",
+      password: "pw",
+      url: "",
+      notes: "",
+      selectedTags: [],
+      generatorSettings: DEFAULT_GENERATOR_SETTINGS,
+      customFields: [],
+      totp: null,
+      requireReprompt: false,
+      travelSafe: true,
+      expiresAt: null,
+      folderId: null,
+      setSubmitting,
+      t: mockTranslator<PasswordFormTranslator>(),
+      router: { push: vi.fn(), refresh: vi.fn() },
+    });
+
+    expect(setSubmitting).not.toHaveBeenCalled();
+    expect(executePersonalEntrySubmitMock).not.toHaveBeenCalled();
+  });
+
+  it("returns early when userId is null", async () => {
+    const setSubmitting = vi.fn();
+
+    await submitPersonalLoginForm({
+      mode: "create",
+      encryptionKey: {} as CryptoKey,
+      userId: null,
       title: "title",
       username: "",
       password: "pw",

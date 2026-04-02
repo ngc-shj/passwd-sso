@@ -46,17 +46,17 @@ const rotateKeySchema = z.object({
     iv: hexIv,
     authTag: hexAuthTag,
   }),
-  // Entry re-encryption payload
+  // Entry re-encryption payload — aadVersion must be >= 1 (AAD binding required)
   entries: z.array(z.object({
     id: z.string().uuid(),
     encryptedBlob: encryptedFieldSchema,
     encryptedOverview: encryptedFieldSchema,
-    aadVersion: z.number().int().min(0).default(0),
+    aadVersion: z.number().int().min(1),
   })).max(VAULT_ROTATE_ENTRIES_MAX),
   historyEntries: z.array(z.object({
     id: z.string().uuid(),
     encryptedBlob: encryptedFieldSchema,
-    aadVersion: z.number().int().min(0).default(0),
+    aadVersion: z.number().int().min(1),
   })).max(VAULT_ROTATE_HISTORY_MAX),
   // ECDH private key (re-wrapped with new secret key)
   encryptedEcdhPrivateKey: z.string().min(1).max(ECDH_PRIVATE_KEY_CIPHERTEXT_MAX),

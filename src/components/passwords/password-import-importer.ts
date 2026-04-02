@@ -69,6 +69,9 @@ export async function runImportEntries({
   if (!isTeamImport && !encryptionKey) {
     throw new Error("encryptionKey is required for personal import");
   }
+  if (!isTeamImport && !userId) {
+    throw new Error("userId is required for personal import");
+  }
   if (isTeamImport && (!teamEncryptionKey || !teamId)) {
     throw new Error("teamEncryptionKey and teamId are required for team import");
   }
@@ -146,7 +149,7 @@ export async function runImportEntries({
       } else {
         const { fullBlob, overviewBlob } = buildPersonalImportBlobs(entry);
         const entryId = crypto.randomUUID();
-        const aad = userId ? buildPersonalEntryAAD(userId, entryId) : undefined;
+        const aad = buildPersonalEntryAAD(userId!, entryId);
         const encryptedBlob = await encryptData(fullBlob, encryptionKey!, aad);
         const encryptedOverview = await encryptData(overviewBlob, encryptionKey!, aad);
 
@@ -157,7 +160,7 @@ export async function runImportEntries({
           encryptedOverview,
           entryType: entry.entryType,
           keyVersion: 1,
-          aadVersion: aad ? AAD_VERSION : 0,
+          aadVersion: AAD_VERSION,
           tagIds,
           ...(entry.requireReprompt ? { requireReprompt: true } : {}),
           ...(entry.isFavorite ? { isFavorite: true } : {}),
