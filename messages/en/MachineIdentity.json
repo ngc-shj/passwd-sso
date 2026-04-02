@@ -186,7 +186,7 @@
     "revoke": "Revoke",
     "revokeTitle": "Revoke Connection",
     "revokeDescription": "Are you sure you want to revoke this connection? The MCP client will no longer be able to access your account with this token.",
-    "revokeSuccess": "Connection revoked successfully.",
+    "revokeSuccess": "Connection revoked",
     "revokeError": "Failed to revoke connection.",
     "cancel": "Cancel",
     "connected": "Connected",
