@@ -30,9 +30,9 @@ The bug: In step 2, the tenant claim (`profile.hd`) is available but not used. I
 
 | User | Email | Tenant | Type |
 |------|-------|--------|------|
-| User A (1st) | noguchi_sh@oisixradaichi.co.jp | `oisixradaichi.co.jp` (externalId) | SSO |
-| User B (2nd) | hitosugi_yuusuke@oisixradaichi.co.jp | bootstrap (email-named) | Bootstrap |
-| User C (3rd) | kobori_ak@oisixradaichi.co.jp | bootstrap (email-named) | Bootstrap |
+| User A (1st) | test_a@example.co.jp | `example.co.jp` (externalId) | SSO |
+| User B (2nd) | test_b@example.co.jp | bootstrap (email-named) | Bootstrap |
+| User C (3rd) | test_c@example.co.jp | bootstrap (email-named) | Bootstrap |
 
 User A ended up in the SSO tenant only because they signed in a 2nd time, triggering bootstrap→SSO migration. Users B and C have not yet triggered this migration.
 
