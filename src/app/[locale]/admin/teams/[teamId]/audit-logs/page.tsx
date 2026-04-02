@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { SectionLayout } from "@/components/settings/section-layout";
 import { ScrollText } from "lucide-react";
 import {
   AUDIT_ACTION,
@@ -198,6 +199,11 @@ export default function TeamAdminAuditLogsPage({
   );
 
   return (
+    <SectionLayout
+      icon={ScrollText}
+      title={tAdmin("teamSectionAuditLogs")}
+      description={tAdmin("teamSectionAuditLogsDesc")}
+    >
     <Card>
       <SectionCardHeader icon={ScrollText} title={tAdmin("navAuditLogs")} description={tAdmin("teamSectionAuditLogsDesc")} />
       <CardContent className="space-y-4">
@@ -261,5 +267,6 @@ export default function TeamAdminAuditLogsPage({
         />
       </CardContent>
     </Card>
+    </SectionLayout>
   );
 }
