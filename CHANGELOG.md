@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.17](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.16...passwd-sso-v0.4.17) (2026-04-02)
+
+
+### Bug Fixes
+
+* enable bump-patch-for-minor-pre-major in release-please config ([#309](https://github.com/ngc-shj/passwd-sso/issues/309)) ([1fb98f7](https://github.com/ngc-shj/passwd-sso/commit/1fb98f73f9524f04496634aeae6b4b47df34675d))
+
 ## [0.4.16](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.15...passwd-sso-v0.4.16) (2026-04-02)
 
 
