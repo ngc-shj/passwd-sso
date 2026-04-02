@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.19](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.18...passwd-sso-v0.4.19) (2026-04-02)
+
+
+### Bug Fixes
+
+* block aadVersion:0 writes, zero IPC key bytes, document HKDF salt ([#312](https://github.com/ngc-shj/passwd-sso/issues/312)) ([e11d4b8](https://github.com/ngc-shj/passwd-sso/commit/e11d4b875b4b8425465fc855f1295fd1012cbb58))
+
 ## [0.4.18](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.17...passwd-sso-v0.4.18) (2026-04-02)
 
 
