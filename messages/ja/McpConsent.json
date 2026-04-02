@@ -1,12 +1,12 @@
 {
   "title": "アプリケーションの認可",
   "description": "が保管庫へのアクセスを要求しています",
-  "requestedScopes": "要求されている権限",
+  "requestedScopes": "要求された権限",
   "allow": "許可",
   "deny": "拒否",
   "scopeDescriptions": {
     "credentials:list": "エントリ名とユーザー名の閲覧",
-    "credentials:use": "ローカルエージェント経由での認証情報使用",
+    "credentials:use": "ローカルエージェント経由で認証情報を使用",
     "credentials:decrypt": "認証情報の一覧と使用（レガシー）",
     "team:credentials:read": "チーム認証情報の読み取り",
     "vault:status": "保管庫のステータス確認",

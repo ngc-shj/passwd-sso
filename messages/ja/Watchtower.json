@@ -49,6 +49,6 @@
   "expiredDays": "{days} 日前に期限切れ",
   "expiresOn": "{date} に期限切れ",
   "autoMonitorLabel": "自動監視",
-  "autoMonitorDescription": "保管庫がアンロック時に24時間ごとに新しいデータ漏洩を自動チェックします。",
+  "autoMonitorDescription": "保管庫のアンロック中、24時間ごとに新たなデータ漏洩を自動チェックします。",
   "lastAutoCheck": "前回の自動チェック: {time}"
 }
