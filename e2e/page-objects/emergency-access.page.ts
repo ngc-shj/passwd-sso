@@ -20,7 +20,7 @@ export class EmergencyAccessPage {
   get createGrantButton() {
     return this.page
       .locator("[role='dialog']")
-      .getByRole("button", { name: /Create Grant|グラントを作成|作成/i });
+      .getByRole("button", { name: /Create|作成/i });
   }
 
   get grantList() {
