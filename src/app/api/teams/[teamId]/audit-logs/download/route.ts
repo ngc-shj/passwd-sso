@@ -68,6 +68,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const actionsParam = searchParams.get("actions");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const actorType = searchParams.get("actorType");
+  const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
+  const validActorType = VALID_ACTOR_TYPES.find((t) => t === actorType);
 
   // Validate date range
   if (from || to) {
@@ -100,6 +103,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const where: Prisma.AuditLogWhereInput = {
     teamId,
     scope: AUDIT_SCOPE.TEAM,
+    ...(validActorType ? { actorType: validActorType } : {}),
   };
 
   if (actionsParam) {

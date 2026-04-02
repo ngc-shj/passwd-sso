@@ -42,10 +42,14 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
+  const actorType = searchParams.get("actorType");
+  const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
+  const validActorType = VALID_ACTOR_TYPES.find((t) => t === actorType);
 
   const where: Record<string, unknown> = {
     teamId: teamId,
     scope: AUDIT_SCOPE.TEAM,
+    ...(validActorType ? { actorType: validActorType } : {}),
   };
 
   try {
@@ -148,6 +152,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       targetType: log.targetType,
       targetId: log.targetId,
       metadata: log.metadata,
+      actorType: log.actorType,
       ip: log.ip,
       userAgent: log.userAgent,
       createdAt: log.createdAt,
