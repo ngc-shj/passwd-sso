@@ -113,7 +113,7 @@
   "permission_HIDE_PASSWORD_desc": "センシティブなフィールドを非表示（パスワード、鍵、口座番号など）",
   "permission_OVERVIEW_ONLY": "概要のみ",
   "permission_OVERVIEW_ONLY_desc": "タイトルと識別用フィールドのみ",
-  "sharingDisabledByPolicy": "チームポリシーにより共有が無効になっています。チーム管理者に連絡して共有を有効にしてください。",
+  "sharingDisabledByPolicy": "チームポリシーにより共有が無効です。チーム管理者に共有の有効化を依頼してください。",
   "autoHide": "30秒後に自動非表示",
   "fieldTitle": "タイトル",
   "previewTitle": "共有されるフィールド",

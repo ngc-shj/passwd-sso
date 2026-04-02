@@ -3,7 +3,7 @@
   "description": "Checks your saved passwords for breaches, weak strength, reuse, expiration, and more, then calculates an overall security score.",
   "overallScore": "Security Score",
   "refresh": "Re-analyze",
-  "runHint": "Click \"Re-analyze\" to start checks.",
+  "runHint": "Click \"Re-analyze\" to start the scan.",
   "runHintCooldown": "No previous result yet. Please wait {seconds}s before retrying.",
   "cooldown": "Retry in {seconds}s",
   "leaveDuringAnalysis": "Leaving this page during analysis will interrupt the scan.",

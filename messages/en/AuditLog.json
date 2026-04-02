@@ -19,7 +19,7 @@
   "AUTH_LOGIN": "Logged in",
   "AUTH_LOGOUT": "Logged out",
   "ENTRY_CREATE": "Created entry",
-  "ENTRY_IMPORT": "Import run",
+  "ENTRY_IMPORT": "Import executed",
   "ENTRY_BULK_IMPORT": "Bulk imported entries",
   "ENTRY_UPDATE": "Updated entry",
   "ENTRY_DELETE": "Deleted entry",

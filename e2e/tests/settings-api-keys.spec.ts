@@ -77,7 +77,7 @@ test.describe("Settings - API Keys", () => {
       }).first();
 
       await keyRow
-        .getByRole("button", { name: /Revoke|失効/i })
+        .getByRole("button", { name: /Revoke|取り消し/i })
         .click();
 
       // Confirmation alert dialog appears
@@ -86,7 +86,7 @@ test.describe("Settings - API Keys", () => {
       // Confirm revocation
       await page
         .locator("[role='alertdialog']")
-        .getByRole("button", { name: /Revoke|失効/i })
+        .getByRole("button", { name: /Revoke|取り消し/i })
         .click();
 
       // Wait for dialog to close

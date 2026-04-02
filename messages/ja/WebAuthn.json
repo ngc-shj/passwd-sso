@@ -37,7 +37,7 @@
   "unlockSuccess": "パスキーで保管庫をロック解除しました。",
   "unlockError": "パスキーによるロック解除に失敗しました。",
   "serviceUnavailable": "パスキーサービスは一時的に利用できません。",
-  "vaultMustBeUnlocked": "パスキーを登録するには保管庫のロック解除が必要です。",
+  "vaultMustBeUnlocked": "パスキーを登録するには保管庫をアンロックしてください。",
   "prfNotSupportedWarning": "ブラウザまたはデバイスがPRFに対応していません。このパスキーは保管庫のロック解除に使用できません。",
   "lastPrfDeleteWarning": "保管庫のロック解除（PRF）に対応したパスキーが最後の1つです。削除するとパスキーによるロック解除ができなくなります。",
   "alreadyRegistered": "この認証器はすでに登録されています。",

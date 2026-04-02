@@ -67,13 +67,13 @@ export class ShareLinksPage {
 
   /**
    * Revoke button (trash icon) for the nth link row (0-indexed).
-   * The button title corresponds to t("revoked") = "Revoked" / "失効".
+   * The button title corresponds to t("revoked") = "Revoked" / "取り消し済み".
    * Only active, revocable links render this button.
    */
   revokeButtonAt(index: number) {
     return this.linkRows
       .nth(index)
-      .getByRole("button", { name: /Revoked|失効/i });
+      .getByRole("button", { name: /Revoked|取り消し済み/i });
   }
 
   // --- Methods ---
@@ -102,7 +102,7 @@ export class ShareLinksPage {
       all: /All statuses|すべてのステータス/i,
       active: /^Active$|^アクティブ$/i,
       expired: /^Expired$|^期限切れ$/i,
-      revoked: /^Revoked$|^失効$/i,
+      revoked: /^Revoked$|^取り消し済み$/i,
     };
     await this.statusFilterTrigger.click();
     await this.page.getByRole("option", { name: labelMap[status] }).click();
