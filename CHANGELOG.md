@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.18](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.17...passwd-sso-v0.4.18) (2026-04-02)
+
+
+### Bug Fixes
+
+* unify audit log UI consistency across views ([#308](https://github.com/ngc-shj/passwd-sso/issues/308)) ([4f36b44](https://github.com/ngc-shj/passwd-sso/commit/4f36b44a607267cc2b590ffe2a165ffe845491e3))
+
 ## [0.4.17](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.16...passwd-sso-v0.4.17) (2026-04-02)
 
 
