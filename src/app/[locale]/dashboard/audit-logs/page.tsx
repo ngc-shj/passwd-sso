@@ -12,28 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  LogIn,
-  LogOut,
-  Plus,
-  Archive,
-  Pencil,
-  Trash2,
-  RotateCcw,
-  Download,
-  Upload,
-  UserPlus,
-  UserMinus,
-  ShieldCheck,
-  ShieldAlert,
-  ShieldOff,
-  ScrollText,
-  Link as LinkIcon,
-  Link2Off,
-  HeartPulse,
-  KeyRound,
-  Eye,
-} from "lucide-react";
+import { ScrollText } from "lucide-react";
 import { useVault } from "@/lib/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
@@ -57,6 +36,7 @@ import { AuditDownloadButton } from "@/components/audit/audit-download-button";
 import { AuditLogList } from "@/components/audit/audit-log-list";
 import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
 import { AuditActorTypeBadge } from "@/components/audit/audit-actor-type-badge";
+import { ACTION_ICONS, DEFAULT_AUDIT_ICON } from "@/components/audit/audit-action-icons";
 
 type EntryOverviewMap = Record<
   string,
@@ -66,39 +46,6 @@ type UserMap = Record<
   string,
   { id: string; name: string | null; email: string | null; image: string | null }
 >;
-
-const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
-  [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
-  [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_TRASH]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_EMPTY_TRASH]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_ARCHIVE]: <Archive className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_UNARCHIVE]: <RotateCcw className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_RESTORE]: <RotateCcw className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_IMPORT]: <Upload className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_TRASH]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_PERMANENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_RESTORE]: <RotateCcw className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
-  [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
-  [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.TEAM_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
-  [AUDIT_ACTION.TEAM_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
-  [AUDIT_ACTION.TEAM_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
-  [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
-  [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_GRANT_CREATE]: <HeartPulse className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_GRANT_ACCEPT]: <HeartPulse className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_GRANT_REJECT]: <ShieldOff className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_GRANT_CONFIRM]: <KeyRound className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST]: <ShieldAlert className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE]: <ShieldCheck className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE]: <ShieldOff className="h-4 w-4" />,
-  [AUDIT_ACTION.EMERGENCY_VAULT_ACCESS]: <Eye className="h-4 w-4" />,
-};
 
 const ACTION_GROUPS = [
   { label: "groupAuth", value: AUDIT_ACTION_GROUP.AUTH, actions: AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.AUTH] },
@@ -264,7 +211,7 @@ export default function AuditLogsPage() {
       <AuditLogItemRow
         key={log.id}
         id={log.id}
-        icon={ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
+        icon={ACTION_ICONS[log.action as AuditActionValue] ?? DEFAULT_AUDIT_ICON}
         actionLabel={getActionLabel(t as never, log.action, actionLabel)}
         badges={<AuditActorTypeBadge actorType={log.actorType} />}
         detail={
@@ -307,6 +254,7 @@ export default function AuditLogsPage() {
                   <SelectContent>
                     <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
                     <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                    <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
                     <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
                   </SelectContent>
                 </Select>

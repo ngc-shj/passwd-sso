@@ -6,25 +6,17 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { SectionCardHeader } from "@/components/settings/section-card-header";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Label } from "@/components/ui/label";
 import {
-  LogIn,
-  LogOut,
-  Plus,
-  Archive,
-  Pencil,
-  Trash2,
-  RotateCcw,
-  Download,
-  Upload,
-  UserPlus,
-  UserMinus,
-  ShieldCheck,
-  ScrollText,
-  Link as LinkIcon,
-  Link2Off,
-} from "lucide-react";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { SectionLayout } from "@/components/settings/section-layout";
+import { ScrollText } from "lucide-react";
 import {
   AUDIT_ACTION,
   AUDIT_ACTION_GROUP,
@@ -46,31 +38,8 @@ import { AuditDateFilter } from "@/components/audit/audit-date-filter";
 import { AuditDownloadButton } from "@/components/audit/audit-download-button";
 import { AuditLogList } from "@/components/audit/audit-log-list";
 import { AuditLogItemRow } from "@/components/audit/audit-log-item-row";
-
-const ACTION_ICONS: Partial<Record<AuditActionValue, React.ReactNode>> = {
-  [AUDIT_ACTION.AUTH_LOGIN]: <LogIn className="h-4 w-4" />,
-  [AUDIT_ACTION.AUTH_LOGOUT]: <LogOut className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_TRASH]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_EMPTY_TRASH]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_ARCHIVE]: <Archive className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_UNARCHIVE]: <RotateCcw className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_BULK_RESTORE]: <RotateCcw className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_IMPORT]: <Upload className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_CREATE]: <Plus className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_UPDATE]: <Pencil className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_TRASH]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_PERMANENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_RESTORE]: <RotateCcw className="h-4 w-4" />,
-  [AUDIT_ACTION.ENTRY_EXPORT]: <Download className="h-4 w-4" />,
-  [AUDIT_ACTION.ATTACHMENT_UPLOAD]: <Upload className="h-4 w-4" />,
-  [AUDIT_ACTION.ATTACHMENT_DELETE]: <Trash2 className="h-4 w-4" />,
-  [AUDIT_ACTION.TEAM_MEMBER_INVITE]: <UserPlus className="h-4 w-4" />,
-  [AUDIT_ACTION.TEAM_MEMBER_REMOVE]: <UserMinus className="h-4 w-4" />,
-  [AUDIT_ACTION.TEAM_ROLE_UPDATE]: <ShieldCheck className="h-4 w-4" />,
-  [AUDIT_ACTION.SHARE_CREATE]: <LinkIcon className="h-4 w-4" />,
-  [AUDIT_ACTION.SHARE_REVOKE]: <Link2Off className="h-4 w-4" />,
-};
+import { AuditActorTypeBadge } from "@/components/audit/audit-actor-type-badge";
+import { ACTION_ICONS, DEFAULT_AUDIT_ICON } from "@/components/audit/audit-action-icons";
 
 const ACTION_GROUPS = [
   { label: "groupEntry", value: AUDIT_ACTION_GROUP.ENTRY, actions: AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.ENTRY] },
@@ -204,18 +173,9 @@ export default function TeamAdminAuditLogsPage({
         <AuditLogItemRow
           key={log.id}
           id={log.id}
-          icon={ACTION_ICONS[log.action as AuditActionValue] ?? <ScrollText className="h-4 w-4" />}
+          icon={ACTION_ICONS[log.action as AuditActionValue] ?? DEFAULT_AUDIT_ICON}
           actionLabel={getActionLabel(t as Parameters<typeof getActionLabel>[0], log.action, audit.actionLabel)}
-          badges={
-            user ? (
-              <Avatar className="h-6 w-6 shrink-0">
-                <AvatarImage src={user.image ?? undefined} />
-                <AvatarFallback className="text-xs">
-                  {user.name?.[0]?.toUpperCase() ?? "?"}
-                </AvatarFallback>
-              </Avatar>
-            ) : undefined
-          }
+          badges={<AuditActorTypeBadge actorType={log.actorType} />}
           detail={
             <>
               {user && (
@@ -239,33 +199,54 @@ export default function TeamAdminAuditLogsPage({
   );
 
   return (
+    <SectionLayout
+      icon={ScrollText}
+      title={tAdmin("teamSectionAuditLogs")}
+      description={tAdmin("teamSectionAuditLogsDesc")}
+    >
     <Card>
       <SectionCardHeader icon={ScrollText} title={tAdmin("navAuditLogs")} description={tAdmin("teamSectionAuditLogsDesc")} />
       <CardContent className="space-y-4">
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-end gap-3">
-            <AuditDateFilter
-              dateFrom={audit.dateFrom}
-              dateTo={audit.dateTo}
-              setDateFrom={audit.setDateFrom}
-              setDateTo={audit.setDateTo}
+        <div className="rounded-xl border bg-card/80 p-4">
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">{t("actorTypeLabel")}</Label>
+                <Select value={audit.actorTypeFilter} onValueChange={audit.setActorTypeFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ALL">{t("actorTypeAll")}</SelectItem>
+                    <SelectItem value="HUMAN">{t("actorTypeHuman")}</SelectItem>
+                    <SelectItem value="SERVICE_ACCOUNT">{t("actorTypeSa")}</SelectItem>
+                    <SelectItem value="MCP_AGENT">{t("actorTypeMcp")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <AuditDateFilter
+                dateFrom={audit.dateFrom}
+                dateTo={audit.dateTo}
+                setDateFrom={audit.setDateFrom}
+                setDateTo={audit.setDateTo}
+              />
+            </div>
+            <AuditActionFilter
+              actionGroups={ACTION_GROUPS}
+              selectedActions={audit.selectedActions}
+              actionSearch={audit.actionSearch}
+              filterOpen={audit.filterOpen}
+              actionSummary={audit.actionSummary}
+              actionLabel={audit.actionLabel}
+              filteredActions={audit.filteredActions}
+              isActionSelected={audit.isActionSelected}
+              toggleAction={audit.toggleAction}
+              setGroupSelection={audit.setGroupSelection}
+              clearActions={audit.clearActions}
+              setActionSearch={audit.setActionSearch}
+              setFilterOpen={audit.setFilterOpen}
             />
           </div>
-          <AuditActionFilter
-            actionGroups={ACTION_GROUPS}
-            selectedActions={audit.selectedActions}
-            actionSearch={audit.actionSearch}
-            filterOpen={audit.filterOpen}
-            actionSummary={audit.actionSummary}
-            actionLabel={audit.actionLabel}
-            filteredActions={audit.filteredActions}
-            isActionSelected={audit.isActionSelected}
-            toggleAction={audit.toggleAction}
-            setGroupSelection={audit.setGroupSelection}
-            clearActions={audit.clearActions}
-            setActionSearch={audit.setActionSearch}
-            setFilterOpen={audit.setFilterOpen}
-          />
         </div>
 
         <div className="flex justify-end">
@@ -286,5 +267,6 @@ export default function TeamAdminAuditLogsPage({
         />
       </CardContent>
     </Card>
+    </SectionLayout>
   );
 }

@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollText, ShieldAlert, Users } from "lucide-react";
+import { ACTION_ICONS, DEFAULT_AUDIT_ICON } from "@/components/audit/audit-action-icons";
 import {
   AUDIT_ACTION_GROUP,
   AUDIT_ACTION_GROUPS_TENANT,
@@ -160,7 +161,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
     <AuditLogItemRow
       key={log.id}
       id={log.id}
-      icon={<ScrollText className="h-4 w-4" />}
+      icon={ACTION_ICONS[log.action as AuditActionValue] ?? DEFAULT_AUDIT_ICON}
       actionLabel={actionLabel(log.action as AuditActionValue)}
       badges={
         <>

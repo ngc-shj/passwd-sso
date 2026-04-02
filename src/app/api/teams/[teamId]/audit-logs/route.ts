@@ -15,6 +15,7 @@ import { errorResponse, unauthorized } from "@/lib/api-response";
 import {
   VALID_ACTIONS,
   parseAuditLogParams,
+  parseActorType,
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
@@ -42,10 +43,12 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
+  const validActorType = parseActorType(searchParams);
 
   const where: Record<string, unknown> = {
     teamId: teamId,
     scope: AUDIT_SCOPE.TEAM,
+    ...(validActorType ? { actorType: validActorType } : {}),
   };
 
   try {
@@ -148,6 +151,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       targetType: log.targetType,
       targetId: log.targetId,
       metadata: log.metadata,
+      actorType: log.actorType,
       ip: log.ip,
       userAgent: log.userAgent,
       createdAt: log.createdAt,

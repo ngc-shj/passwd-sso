@@ -16,6 +16,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import {
   VALID_ACTIONS,
   parseAuditLogParams,
+  parseActorType,
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
@@ -30,9 +31,7 @@ async function handleGET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
-  const actorType = searchParams.get("actorType");
-  const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
-  const validActorType = VALID_ACTOR_TYPES.find((t) => t === actorType);
+  const validActorType = parseActorType(searchParams);
 
   const where: Prisma.AuditLogWhereInput = {
     scope: AUDIT_SCOPE.PERSONAL,

@@ -16,7 +16,7 @@ import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { VALID_ACTIONS } from "@/lib/audit-query";
+import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
 
@@ -68,6 +68,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const actionsParam = searchParams.get("actions");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const validActorType = parseActorType(searchParams);
 
   // Validate date range
   if (from || to) {
@@ -100,6 +101,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const where: Prisma.AuditLogWhereInput = {
     teamId,
     scope: AUDIT_SCOPE.TEAM,
+    ...(validActorType ? { actorType: validActorType } : {}),
   };
 
   if (actionsParam) {

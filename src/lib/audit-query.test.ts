@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { AuditAction } from "@prisma/client";
 import {
   VALID_ACTIONS,
+  VALID_ACTOR_TYPES,
   parseAuditLogParams,
+  parseActorType,
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
@@ -39,6 +41,29 @@ describe("VALID_ACTIONS", () => {
 
   it("has the same size as AUDIT_ACTION_VALUES", () => {
     expect(VALID_ACTIONS.size).toBe(AUDIT_ACTION_VALUES.length);
+  });
+});
+
+describe("parseActorType", () => {
+  it.each(VALID_ACTOR_TYPES)("returns %s for valid actorType param", (type) => {
+    const params = new URLSearchParams({ actorType: type });
+    expect(parseActorType(params)).toBe(type);
+  });
+
+  it("returns undefined when actorType param is absent", () => {
+    expect(parseActorType(new URLSearchParams())).toBeUndefined();
+  });
+
+  it("returns undefined for invalid actorType value", () => {
+    expect(parseActorType(new URLSearchParams({ actorType: "ADMIN" }))).toBeUndefined();
+  });
+
+  it("returns undefined for lowercase variant", () => {
+    expect(parseActorType(new URLSearchParams({ actorType: "human" }))).toBeUndefined();
+  });
+
+  it("returns undefined for empty string", () => {
+    expect(parseActorType(new URLSearchParams({ actorType: "" }))).toBeUndefined();
   });
 });
 
