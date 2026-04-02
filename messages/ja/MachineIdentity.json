@@ -110,7 +110,6 @@
   "arServiceAccount": "サービスアカウント",
   "arRequestedScope": "要求スコープ",
   "arJustification": "申請理由",
-  "arCreatedAt": "申請日時",
   "arApprove": "承認",
   "arDeny": "拒否",
   "arApproved": "アクセスリクエストを承認しました",
