@@ -64,7 +64,8 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
 
   // Check if context menu is enabled before rebuilding
   if (!(await deps.isContextMenuEnabled())) {
-    await removeChildItems();
+    // removeAll entirely — do NOT use removeChildItems() which recreates the parent
+    await new Promise<void>((resolve) => chrome.contextMenus.removeAll(() => resolve()));
     lastMenuHost = null;
     return;
   }
