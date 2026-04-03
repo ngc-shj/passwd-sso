@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.23](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.22...passwd-sso-v0.4.23) (2026-04-03)
+
+
+### Bug Fixes
+
+* resolve CodeQL alerts [#112](https://github.com/ngc-shj/passwd-sso/issues/112) and [#113](https://github.com/ngc-shj/passwd-sso/issues/113) ([#321](https://github.com/ngc-shj/passwd-sso/issues/321)) ([ce7cf12](https://github.com/ngc-shj/passwd-sso/commit/ce7cf1246bba3174b65b06a596a6e0fae0fbd12b))
+
 ## [0.4.22](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.21...passwd-sso-v0.4.22) (2026-04-03)
 
 
