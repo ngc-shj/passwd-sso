@@ -53,7 +53,7 @@ export async function encryptField(plaintext: string): Promise<EncryptedField | 
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const encoded = new TextEncoder().encode(plaintext);
     const encrypted = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv },
+      { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
       key,
       encoded,
     );
@@ -85,7 +85,7 @@ export async function decryptField(blob: EncryptedField): Promise<string | null>
     combined.set(ciphertext);
     combined.set(authTag, ciphertext.length);
     const decrypted = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv },
+      { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
       key,
       combined,
     );

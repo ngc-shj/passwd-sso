@@ -54,7 +54,7 @@ export async function persistSession(state: SessionState): Promise<void> {
     encryptedToken,
     expiresAt: state.expiresAt,
     userId: state.userId,
-    encryptedVaultSecretKey,
+    encryptedVaultSecretKey: encryptedVaultSecretKey ?? undefined,
     ecdhEncrypted: state.ecdhEncrypted,
   };
   await chrome.storage.session.set({ [SESSION_KEY]: stored });
