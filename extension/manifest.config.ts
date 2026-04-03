@@ -71,16 +71,10 @@ export default defineManifest({
       run_at: "document_idle",
       all_frames: true,
     },
-    {
-      matches: ["https://*/*", "http://localhost/*"],
-      js: ["src/content/token-bridge-relay.js"],
-      run_at: "document_start",
-      world: "MAIN",
-    },
   ],
   web_accessible_resources: [
     {
-      resources: ["src/content/autofill.js", "src/content/autofill-cc.js", "src/content/autofill-identity.js"],
+      resources: ["src/content/autofill.js", "src/content/autofill-cc.js", "src/content/autofill-identity.js", "src/content/token-bridge-relay.js"],
       matches: ["https://*/*", "http://localhost/*"],
     },
   ],

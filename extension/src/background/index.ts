@@ -580,6 +580,8 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
+const TOKEN_BRIDGE_RELAY_SCRIPT_ID = "token-bridge-relay";
+
 async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
   let origin: string;
   try {
@@ -589,7 +591,7 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
   }
   try {
     await chrome.scripting.unregisterContentScripts({
-      ids: [TOKEN_BRIDGE_SCRIPT_ID],
+      ids: [TOKEN_BRIDGE_SCRIPT_ID, TOKEN_BRIDGE_RELAY_SCRIPT_ID],
     });
   } catch {
     // ignore
@@ -604,6 +606,13 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
       matches: [`${origin}/*`],
       js: ["src/content/token-bridge.js"],
       runAt: "document_start",
+    },
+    {
+      id: TOKEN_BRIDGE_RELAY_SCRIPT_ID,
+      matches: [`${origin}/*`],
+      js: ["src/content/token-bridge-relay.js"],
+      runAt: "document_start",
+      world: "MAIN" as chrome.scripting.ExecutionWorld,
     },
   ]);
 }
