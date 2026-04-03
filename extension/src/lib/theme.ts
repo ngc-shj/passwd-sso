@@ -1,17 +1,15 @@
 import { useEffect, useState } from "react";
-import { getSettings, validateSettings, type StorageSchema } from "./storage";
-
-type Theme = StorageSchema["theme"];
+import { getSettings, validateSettings, Theme } from "./storage";
 
 /** Apply the resolved theme class to <html>. */
 export function applyTheme(theme: Theme): void {
   const resolved =
-    theme === "system"
+    theme === Theme.SYSTEM
       ? window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light"
+        ? Theme.DARK
+        : Theme.LIGHT
       : theme;
-  document.documentElement.classList.toggle("dark", resolved === "dark");
+  document.documentElement.classList.toggle("dark", resolved === Theme.DARK);
 }
 
 /**
@@ -25,7 +23,7 @@ export async function initTheme(): Promise<void> {
 
 /** React hook that tracks the current theme and applies it to <html>. */
 export function useTheme(): [Theme, (t: Theme) => void] {
-  const [theme, setThemeState] = useState<Theme>("system");
+  const [theme, setThemeState] = useState<Theme>(Theme.SYSTEM);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -35,11 +33,10 @@ export function useTheme(): [Theme, (t: Theme) => void] {
     });
   }, []);
 
-  // Listen for OS theme changes when in "system" mode
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
     const handler = () => {
-      if (theme === "system") applyTheme("system");
+      if (theme === Theme.SYSTEM) applyTheme(Theme.SYSTEM);
     };
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);

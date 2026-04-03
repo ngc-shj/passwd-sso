@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getSettings, setSettings, type StorageSchema } from "../lib/storage";
+import { getSettings, setSettings, Theme, TimeoutAction, type StorageSchema } from "../lib/storage";
 import { ensureHostPermission } from "../lib/api";
 import { t } from "../lib/i18n";
 import { humanizeError } from "../lib/error-messages";
@@ -98,7 +98,7 @@ export function App() {
   const [showSavePrompt, setShowSavePrompt] = useState(true);
   const [showUpdatePrompt, setShowUpdatePrompt] = useState(true);
   const [clipboardClearSeconds, setClipboardClearSeconds] = useState(30);
-  const [vaultTimeoutAction, setVaultTimeoutAction] = useState<"lock" | "logout">("lock");
+  const [vaultTimeoutAction, setVaultTimeoutAction] = useState<TimeoutAction>(TimeoutAction.LOCK);
 
   const [commands, setCommands] = useState<chrome.commands.Command[]>([]);
   const [version, setVersion] = useState("");
@@ -201,12 +201,12 @@ export function App() {
               <select
                 id="theme-select"
                 value={theme}
-                onChange={(e) => setTheme(e.target.value as "light" | "dark" | "system")}
+                onChange={(e) => setTheme(e.target.value as Theme)}
                 className={selectClass}
               >
-                <option value="light">{t("options.themeLight")}</option>
-                <option value="dark">{t("options.themeDark")}</option>
-                <option value="system">{t("options.themeSystem")}</option>
+                <option value={Theme.LIGHT}>{t("options.themeLight")}</option>
+                <option value={Theme.DARK}>{t("options.themeDark")}</option>
+                <option value={Theme.SYSTEM}>{t("options.themeSystem")}</option>
               </select>
             </SettingRow>
             <SettingRow label={t("options.showBadgeCount")} description={t("options.showBadgeCountHint")} htmlFor="badge-count">
@@ -279,11 +279,11 @@ export function App() {
               <select
                 id="vault-timeout-action"
                 value={vaultTimeoutAction}
-                onChange={(e) => setVaultTimeoutAction(e.target.value as "lock" | "logout")}
+                onChange={(e) => setVaultTimeoutAction(e.target.value as TimeoutAction)}
                 className={selectClass}
               >
-                <option value="lock">{t("options.vaultTimeoutLock")}</option>
-                <option value="logout">{t("options.vaultTimeoutLogout")}</option>
+                <option value={TimeoutAction.LOCK}>{t("options.vaultTimeoutLock")}</option>
+                <option value={TimeoutAction.LOGOUT}>{t("options.vaultTimeoutLogout")}</option>
               </select>
             </SettingRow>
           </>

@@ -27,7 +27,7 @@ import {
   buildItemKeyWrapAAD,
   type TeamKeyWrapContext,
 } from "../lib/crypto-team";
-import { getSettings, validateSettings } from "../lib/storage";
+import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
@@ -119,7 +119,7 @@ let cachedClipboardClearSeconds = 30;
 let cachedAutoCopyTotp = true;
 let cachedShowSavePrompt = true;
 let cachedShowUpdatePrompt = true;
-let cachedVaultTimeoutAction: "lock" | "logout" = "lock";
+let cachedVaultTimeoutAction: TimeoutAction = TimeoutAction.LOCK;
 
 /** Resolve effective auto-lock minutes: tenant policy > local setting */
 async function getEffectiveAutoLockMinutes(): Promise<number> {
@@ -642,7 +642,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === ALARM_VAULT_LOCK) {
     (async () => {
-      if (cachedVaultTimeoutAction === "logout") {
+      if (cachedVaultTimeoutAction === TimeoutAction.LOGOUT) {
         await revokeCurrentTokenOnServer();
         clearToken();
       } else {
@@ -680,7 +680,7 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   if (changes.vaultTimeoutAction) {
     const raw = changes.vaultTimeoutAction.newValue;
-    if (raw === "lock" || raw === "logout") cachedVaultTimeoutAction = raw;
+    if (Object.values(TimeoutAction).includes(raw)) cachedVaultTimeoutAction = raw as TimeoutAction;
   }
   // Context menu toggle
   if (changes.enableContextMenu) {

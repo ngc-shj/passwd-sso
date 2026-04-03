@@ -1,3 +1,11 @@
+export const Theme = { LIGHT: "light", DARK: "dark", SYSTEM: "system" } as const;
+export type Theme = (typeof Theme)[keyof typeof Theme];
+
+export const TimeoutAction = { LOCK: "lock", LOGOUT: "logout" } as const;
+export type TimeoutAction = (typeof TimeoutAction)[keyof typeof TimeoutAction];
+
+export const CLIPBOARD_CLEAR_OPTIONS = [10, 20, 30, 60, 120, 300] as const;
+
 /** Keys stored in chrome.storage.local (settings only — never secrets) */
 export interface StorageSchema {
   /** Base URL of the passwd-sso web app */
@@ -5,7 +13,7 @@ export interface StorageSchema {
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockMinutes: number;
   /** UI theme */
-  theme: "light" | "dark" | "system";
+  theme: Theme;
   /** Show per-tab match count badge on extension icon */
   showBadgeCount: boolean;
   /** Show inline suggestion dropdown on form focus */
@@ -21,13 +29,13 @@ export interface StorageSchema {
   /** Clipboard auto-clear delay in seconds */
   clipboardClearSeconds: number;
   /** What to do when vault timeout fires */
-  vaultTimeoutAction: "lock" | "logout";
+  vaultTimeoutAction: TimeoutAction;
 }
 
 export const DEFAULTS: StorageSchema = {
   serverUrl: "https://localhost:3000",
   autoLockMinutes: 15,
-  theme: "system",
+  theme: Theme.SYSTEM,
   showBadgeCount: true,
   enableInlineSuggestions: true,
   enableContextMenu: true,
@@ -35,12 +43,12 @@ export const DEFAULTS: StorageSchema = {
   showSavePrompt: true,
   showUpdatePrompt: true,
   clipboardClearSeconds: 30,
-  vaultTimeoutAction: "lock",
+  vaultTimeoutAction: TimeoutAction.LOCK,
 };
 
-const VALID_THEMES = ["light", "dark", "system"] as const;
-const VALID_CLIPBOARD_SECONDS = [10, 20, 30, 60, 120, 300] as const;
-const VALID_TIMEOUT_ACTIONS = ["lock", "logout"] as const;
+const VALID_THEMES = Object.values(Theme) as readonly string[];
+const VALID_CLIPBOARD_SECONDS: readonly number[] = CLIPBOARD_CLEAR_OPTIONS;
+const VALID_TIMEOUT_ACTIONS = Object.values(TimeoutAction) as readonly string[];
 
 function ensureBool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
