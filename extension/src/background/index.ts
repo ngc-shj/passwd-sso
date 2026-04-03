@@ -218,7 +218,7 @@ function clearVault(): void {
   ecdhEncryptedData = null;
   teamKeyCache.clear();
   invalidateCache();
-  invalidateContextMenu();
+  invalidateContextMenu(false);
   pendingSavePrompts.clear();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
   void stopKeepalive();
@@ -517,15 +517,20 @@ initLoginSave({
 });
 
 chrome.runtime.onInstalled.addListener(() => {
-  setupContextMenu();
+  getSettings().then((s) => {
+    if (validateSettings(s).enableContextMenu) setupContextMenu();
+  });
 });
 chrome.runtime.onStartup.addListener(() => {
-  setupContextMenu();
+  getSettings().then((s) => {
+    if (validateSettings(s).enableContextMenu) setupContextMenu();
+  });
 });
 
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  chrome.tabs.get(activeInfo.tabId).then((tab) => {
-    updateContextMenuForTab(tab.id!, tab.url);
+  chrome.tabs.get(activeInfo.tabId).then(async (tab) => {
+    const { enableContextMenu } = validateSettings(await getSettings());
+    if (enableContextMenu) updateContextMenuForTab(tab.id!, tab.url);
     void updateBadgeForTab(tab.id!, tab.url);
   }).catch(() => {});
 });
@@ -536,7 +541,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
   }
   if (changeInfo.status === "complete") {
-    updateContextMenuForTab(tabId, tab.url);
+    getSettings().then((s) => {
+      if (validateSettings(s).enableContextMenu) updateContextMenuForTab(tabId, tab.url);
+    });
     void updateBadgeForTab(tabId, tab.url);
 
     // Push pending save prompt to the new page after navigation.
@@ -1730,7 +1737,7 @@ async function handleMessage(
         void startKeepalive();
 
         sendResponse({ type: "UNLOCK_VAULT", ok: true });
-        invalidateContextMenu();
+        getSettings().then((s) => invalidateContextMenu(validateSettings(s).enableContextMenu));
         void updateBadge();
       } catch (err) {
         sendResponse({

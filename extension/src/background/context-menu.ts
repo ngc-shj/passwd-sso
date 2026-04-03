@@ -270,8 +270,9 @@ function parseMenuEntryId(suffix: string): { entryId: string | null; teamId?: st
 }
 
 /** Force menu rebuild (e.g., after vault unlock/lock). */
-export function invalidateContextMenu(): void {
+export function invalidateContextMenu(enabled = true): void {
   lastMenuHost = null;
+  if (!enabled) return;
   // Immediately rebuild menu for the active tab
   chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
     if (tab?.id) {
