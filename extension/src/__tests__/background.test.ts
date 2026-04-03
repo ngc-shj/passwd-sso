@@ -4,7 +4,6 @@ import {
   ALARM_TOKEN_REFRESH,
   CMD_TRIGGER_AUTOFILL,
   EXT_ENTRY_TYPE,
-  SESSION_KEY,
 } from "../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import type { SessionState } from "../lib/session-storage";

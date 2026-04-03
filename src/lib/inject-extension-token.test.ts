@@ -6,7 +6,11 @@ import { injectExtensionToken } from "./inject-extension-token";
 describe("injectExtensionToken", () => {
   it("sends postMessage with token data", async () => {
     const received = new Promise<MessageEvent>((resolve) => {
-      window.addEventListener("message", (e) => resolve(e), { once: true });
+      window.addEventListener("message", (e) => {
+        // jsdom sets event.origin to "" instead of window.location.origin
+        if (e.origin !== window.location.origin && e.origin !== "") return;
+        resolve(e);
+      }, { once: true });
     });
 
     injectExtensionToken("my-token", 1234567890);
