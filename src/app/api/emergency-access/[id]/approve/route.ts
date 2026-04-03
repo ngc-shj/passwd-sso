@@ -9,7 +9,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -68,7 +68,7 @@ async function handlePOST(
         where: { id: granteeId },
         select: { email: true, name: true, locale: true },
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     if (grantee?.email) {
       const ownerName = session.user.name ?? session.user.email ?? "";
       const { subject, html, text } = emergencyAccessApprovedEmail(resolveUserLocale(grantee.locale), ownerName);

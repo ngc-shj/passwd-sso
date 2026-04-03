@@ -24,7 +24,7 @@ import {
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
@@ -82,7 +82,7 @@ async function handlePOST(req: NextRequest) {
       where: { id: operatorId },
       select: { id: true, tenantId: true },
     }),
-  );
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   if (!operator) {
     return NextResponse.json(
       { error: "operatorId does not match an existing user" },
@@ -103,7 +103,7 @@ async function handlePOST(req: NextRequest) {
         },
         data: { revokedAt: new Date() },
       }),
-    );
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
     revokedShares = result.count;
   }
 

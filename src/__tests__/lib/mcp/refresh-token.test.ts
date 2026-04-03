@@ -11,7 +11,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {},
 }));
 
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
 

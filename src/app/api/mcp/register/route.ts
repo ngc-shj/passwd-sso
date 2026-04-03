@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
@@ -148,7 +148,7 @@ export async function POST(req: NextRequest) {
           select: { id: true, clientId: true, createdAt: true },
         });
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   } catch (err) {
     if (err instanceof CapExceededError) {
       return NextResponse.json(

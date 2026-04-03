@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { parseBody } from "@/lib/parse-body";
 import { invitationAcceptSchema } from "@/lib/validations";
@@ -36,7 +36,7 @@ async function handlePOST(req: NextRequest) {
       where: { token },
       include: { team: { select: { id: true, name: true, slug: true, tenantId: true } } },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!invitation) {
     return errorResponse(API_ERROR.INVALID_INVITATION, 404);

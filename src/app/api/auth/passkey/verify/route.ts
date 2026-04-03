@@ -9,7 +9,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
 import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
 
@@ -82,7 +82,7 @@ async function handlePOST(req: NextRequest) {
       where: { email: user.email },
       select: { tenantId: true, tenant: { select: { isBootstrap: true } } },
     }),
-  );
+  BYPASS_PURPOSE.AUTH_FLOW);
   if (!existingUser?.tenantId || !existingUser.tenant || !existingUser.tenant.isBootstrap) {
     return NextResponse.json(
       { error: "AUTHENTICATION_FAILED" },
@@ -117,7 +117,7 @@ async function handlePOST(req: NextRequest) {
       return deleted.count;
     });
     return result;
-  });
+  }, BYPASS_PURPOSE.AUTH_FLOW);
 
   // Audit log
   if (evictedCount > 0) {

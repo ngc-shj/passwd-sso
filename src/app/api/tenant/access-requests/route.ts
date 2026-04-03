@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { withTenantRls, withBypassRls } from "@/lib/tenant-rls";
+import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -138,7 +138,7 @@ async function handlePOST(req: NextRequest) {
         where: { id: serviceAccountId },
         select: { isActive: true, createdById: true },
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     if (!sa || !sa.isActive) {
       return NextResponse.json({ error: API_ERROR.SA_NOT_FOUND }, { status: 404 });
     }
@@ -201,7 +201,7 @@ async function handlePOST(req: NextRequest) {
         createdAt: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   logAudit({
     scope: AUDIT_SCOPE.TENANT,

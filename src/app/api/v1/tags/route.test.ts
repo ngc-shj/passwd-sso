@@ -25,7 +25,7 @@ vi.mock("@/lib/prisma", () => ({
     tag: { findMany: mockTagFindMany },
   },
 }));
-vi.mock("@/lib/tenant-rls", () => ({ withTenantRls: mockWithTenantRls }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
   const child = { info: noop, warn: noop, error: noop };

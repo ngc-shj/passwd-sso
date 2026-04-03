@@ -10,7 +10,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
 import { pinLengthSchema, MAX_CIDRS } from "@/lib/validations/common";
@@ -55,7 +55,7 @@ async function handleGET(_req: NextRequest) {
         requireMinPinLength: true,
       } } },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,
@@ -164,7 +164,7 @@ async function handlePATCH(req: NextRequest) {
           where: { id: membership.tenantId },
           select: { tailscaleTailnet: true },
         }),
-      );
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
       if (!existing?.tailscaleTailnet) {
         return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
       }
@@ -199,7 +199,7 @@ async function handlePATCH(req: NextRequest) {
         where: { id: membership.tenantId },
         select: { allowedCidrs: true, tailscaleEnabled: true, tailscaleTailnet: true },
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     const hypothetical = {
       allowedCidrs: newAllowedCidrs ?? currentTenant?.allowedCidrs ?? [],
       tailscaleEnabled: newTailscaleEnabled ?? currentTenant?.tailscaleEnabled ?? false,
@@ -255,7 +255,7 @@ async function handlePATCH(req: NextRequest) {
         requireMinPinLength: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Bust the tenant policy cache so access restriction picks up new values immediately
   invalidateTenantPolicyCache(membership.tenantId);

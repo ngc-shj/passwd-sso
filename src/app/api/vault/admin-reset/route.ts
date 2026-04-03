@@ -9,7 +9,7 @@ import { assertOrigin } from "@/lib/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
@@ -82,7 +82,7 @@ async function handlePOST(req: NextRequest) {
     prisma.adminVaultReset.findUnique({
       where: { tokenHash },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!resetRecord) {
     return notFound();
@@ -122,7 +122,7 @@ async function handlePOST(req: NextRequest) {
       },
       data: { executedAt: new Date() },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (atomicResult.count === 0) {
     return NextResponse.json(

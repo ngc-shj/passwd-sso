@@ -56,7 +56,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
   withBypassRls: mockWithBypassRls,
 }));

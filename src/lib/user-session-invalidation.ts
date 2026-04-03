@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 /**
  * Invalidate all sessions and tokens for a user.
@@ -34,5 +34,5 @@ export async function invalidateUserSessions(
       extensionTokens: extensionTokensResult.count,
       apiKeys: apiKeysResult.count,
     };
-  });
+  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 }

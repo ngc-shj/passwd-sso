@@ -11,7 +11,7 @@
 import { randomBytes, createHash, randomUUID } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 import {
   MCP_TOKEN_PREFIX,
@@ -97,7 +97,7 @@ export async function createAuthorizationCode(
         expiresAt,
       },
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   return { code: plainCode, expiresAt };
 }
@@ -216,7 +216,7 @@ export async function exchangeCodeForToken(
         serviceAccountId: authCode.serviceAccountId,
       };
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if ("error" in result) {
     return { ok: false, error: result.error as TokenExchangeError };
@@ -271,7 +271,7 @@ export async function createRefreshToken(params: {
         expiresAt,
       },
     });
-  });
+  }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   return { refreshToken: token, expiresAt };
 }
@@ -393,7 +393,7 @@ export async function exchangeRefreshToken(params: {
         userId: rt.userId,
       };
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 }
 
 // ─── Token validation ─────────────────────────────────────────
@@ -423,7 +423,7 @@ export async function validateMcpToken(
         lastUsedAt: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if (!record) return { ok: false, error: "invalid_token" };
   if (record.revokedAt) return { ok: false, error: "token_revoked" };
@@ -439,7 +439,7 @@ export async function validateMcpToken(
         where: { id: record.id },
         data: { lastUsedAt: new Date() },
       }),
-    ).catch((err) => {
+    BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch((err) => {
       getLogger().warn({ err }, "mcp.token.lastUsedAt.update_failed");
     });
   }
@@ -521,5 +521,5 @@ export async function revokeToken(params: {
 
       // Unknown/already revoked token → silent success per RFC 7009
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 }

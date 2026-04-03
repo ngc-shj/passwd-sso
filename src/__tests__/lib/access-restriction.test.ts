@@ -11,7 +11,7 @@ const { mockTenantFindUnique, mockWithBypassRls, mockLogAudit, mockVerifyTailsca
 vi.mock("@/lib/prisma", () => ({
   prisma: { tenant: { findUnique: mockTenantFindUnique } },
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit", () => ({

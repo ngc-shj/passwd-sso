@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
   EXTENSION_TOKEN_SCOPE,
   type ExtensionTokenScope,
@@ -85,7 +85,7 @@ export async function validateExtensionToken(
         revokedAt: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if (!token) {
     return { ok: false, error: "EXTENSION_TOKEN_INVALID" };
@@ -103,7 +103,7 @@ export async function validateExtensionToken(
       where: { id: token.id },
       data: { lastUsedAt: new Date() },
     }),
-  ).catch(() => {});
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
 
   return {
     ok: true,

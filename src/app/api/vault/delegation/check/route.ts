@@ -63,7 +63,7 @@ export async function GET(request: NextRequest) {
 
   // Find active delegation session via MCP client's public clientId
   const { prisma } = await import("@/lib/prisma");
-  const { withBypassRls } = await import("@/lib/tenant-rls");
+  const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
 
   const session = await withBypassRls(prisma, () =>
     prisma.delegationSession.findFirst({
@@ -78,7 +78,7 @@ export async function GET(request: NextRequest) {
       select: { id: true, expiresAt: true, entryIds: true },
       orderBy: { createdAt: "desc" },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!session) {
     return NextResponse.json({ authorized: false, reason: "no_session" }, { status: 403 });

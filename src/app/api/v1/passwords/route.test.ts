@@ -35,7 +35,7 @@ vi.mock("@/lib/prisma", () => ({
     tag: { count: mockTagCount },
   },
 }));
-vi.mock("@/lib/tenant-rls", () => ({ withTenantRls: mockWithTenantRls }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
 vi.mock("@/lib/audit", () => ({
   logAudit: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),

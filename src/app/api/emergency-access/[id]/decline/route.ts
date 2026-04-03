@@ -7,7 +7,7 @@ import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-acc
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -28,7 +28,7 @@ async function handlePOST(
       where: { id },
       select: { status: true, granteeEmail: true, ownerId: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!grant) {
     return notFound();
@@ -47,7 +47,7 @@ async function handlePOST(
       where: { id },
       data: { status: EA_STATUS.REJECTED },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -64,7 +64,7 @@ async function handlePOST(
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = emergencyGrantDeclinedEmail(resolveUserLocale(owner.locale), granteeName);

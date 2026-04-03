@@ -16,7 +16,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 
@@ -54,7 +54,7 @@ async function handlePOST(req: NextRequest) {
       },
       select: { tenantId: true, role: true },
     }),
-  );
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   if (!membership) {
     return NextResponse.json(
       { error: "operatorId is not an active tenant admin" },
@@ -71,7 +71,7 @@ async function handlePOST(req: NextRequest) {
         dcrExpiresAt: { lt: new Date() },
       },
     }),
-  );
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);

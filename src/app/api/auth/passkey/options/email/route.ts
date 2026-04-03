@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getRedis } from "@/lib/redis";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -112,7 +112,7 @@ async function handlePOST(req: NextRequest) {
         tenant: { select: { isBootstrap: true } },
       },
     }),
-  );
+  BYPASS_PURPOSE.AUTH_FLOW);
 
   // SSO tenant users are rejected by the verify route's tenant guard,
   // so treat them the same as "not found" to avoid leaking info.
@@ -122,7 +122,7 @@ async function handlePOST(req: NextRequest) {
         where: { userId: user.id },
         select: { credentialId: true, transports: true },
       }),
-    );
+    BYPASS_PURPOSE.AUTH_FLOW);
     allowCredentials =
       credentials.length > 0 ? credentials : generateDummyCredentials();
   } else {
@@ -135,7 +135,7 @@ async function handlePOST(req: NextRequest) {
         select: { credentialId: true, transports: true },
         take: PASSKEY_DUMMY_CREDENTIALS_MAX,
       }),
-    );
+    BYPASS_PURPOSE.AUTH_FLOW);
     allowCredentials = generateDummyCredentials();
   }
 

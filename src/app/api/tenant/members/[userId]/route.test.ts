@@ -33,7 +33,7 @@ vi.mock("@/lib/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
   withBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()),
 }));

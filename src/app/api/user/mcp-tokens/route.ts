@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { unauthorized, rateLimited } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
@@ -41,7 +41,7 @@ async function handleGET(_req: NextRequest) {
       },
       orderBy: { name: "asc" },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return NextResponse.json({
     clients: clients.map((c) => ({
@@ -173,6 +173,7 @@ async function handleDELETE(_req: NextRequest) {
 
       return result;
     },
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
 
   // Post-commit: evict Redis delegation keys (best-effort)

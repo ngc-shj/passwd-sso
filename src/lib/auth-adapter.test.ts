@@ -62,7 +62,7 @@ vi.mock("@/lib/tenant-claim-storage", () => ({
 vi.mock("@/lib/tenant-management", () => ({
   findOrCreateSsoTenant: mockFindOrCreateSsoTenant,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@auth/prisma-adapter", () => ({

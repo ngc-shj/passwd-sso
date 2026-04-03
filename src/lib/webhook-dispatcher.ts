@@ -7,7 +7,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { getLogger } from "@/lib/logger";
 import {
@@ -293,7 +293,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
           events: { has: event.type },
         },
       }),
-    );
+    BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
     if (webhooks.length === 0) return;
 
@@ -316,7 +316,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               lastError: null,
             },
           }),
-        );
+        BYPASS_PURPOSE.WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
         await withBypassRls(prisma, async () => {
@@ -329,7 +329,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
-        });
+        }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
         // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
         const { logAudit } = await import("@/lib/audit");
@@ -365,7 +365,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
           events: { has: event.type },
         },
       }),
-    );
+    BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
     if (webhooks.length === 0) return;
 
@@ -388,7 +388,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               lastError: null,
             },
           }),
-        );
+        BYPASS_PURPOSE.WEBHOOK_DISPATCH);
       },
       async (id, newFailCount, url) => {
         await withBypassRls(prisma, async () => {
@@ -401,7 +401,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
               isActive: newFailCount >= 10 ? false : undefined,
             },
           });
-        });
+        }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
         const { logAudit } = await import("@/lib/audit");
         logAudit({

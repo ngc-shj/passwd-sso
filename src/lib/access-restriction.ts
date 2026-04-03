@@ -7,7 +7,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/ip-access";
 import { verifyTailscalePeer } from "@/lib/tailscale-client";
 import { logAudit } from "@/lib/audit";
@@ -51,7 +51,7 @@ async function getTenantAccessPolicy(
         tailscaleTailnet: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   const policy: TenantAccessPolicy = {
     allowedCidrs: tenant?.allowedCidrs ?? [],

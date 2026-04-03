@@ -6,7 +6,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 export interface VaultResetResult {
   deletedEntries: number;
@@ -33,6 +33,7 @@ export async function executeVaultReset(
         prisma.passwordEntry.count({ where: { userId: targetUserId } }),
         prisma.attachment.count({ where: { createdById: targetUserId } }),
       ]),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
   );
 
   // Single transaction: delete all vault data
@@ -97,7 +98,7 @@ export async function executeVaultReset(
         },
       }),
     ]),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return { deletedEntries, deletedAttachments };
 }

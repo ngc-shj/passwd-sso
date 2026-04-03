@@ -10,7 +10,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit } from "@/lib/audit";
@@ -103,7 +103,7 @@ async function handlePOST(request: NextRequest) {
       },
       select: { id: true, scope: true, clientId: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!mcpToken) {
     return NextResponse.json({ error: "MCP token not found or expired" }, { status: 404 });
@@ -130,7 +130,7 @@ async function handlePOST(request: NextRequest) {
         delegationMaxTtlSec: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   const maxTtl = tenant?.delegationMaxTtlSec ?? DELEGATION_MAX_TTL_SEC;
   const defaultTtl = tenant?.delegationDefaultTtlSec ?? DELEGATION_DEFAULT_TTL_SEC;
@@ -148,7 +148,7 @@ async function handlePOST(request: NextRequest) {
       },
       select: { id: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   const ownedIds = new Set(ownedEntries.map((e) => e.id));
   const missingIds = entryIds.filter((id) => !ownedIds.has(id));
@@ -170,7 +170,7 @@ async function handlePOST(request: NextRequest) {
       },
       select: { id: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (existingSession) {
     await evictDelegationRedisKeys(userId, existingSession.id).catch(() => {});
@@ -179,7 +179,7 @@ async function handlePOST(request: NextRequest) {
         where: { id: existingSession.id, revokedAt: null },
         data: { revokedAt: new Date() },
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   }
 
   // Create delegation session
@@ -195,7 +195,7 @@ async function handlePOST(request: NextRequest) {
         expiresAt,
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Store metadata entries in Redis — rollback DB session on failure
   try {
@@ -208,7 +208,7 @@ async function handlePOST(request: NextRequest) {
   } catch {
     await withBypassRls(prisma, () =>
       prisma.delegationSession.delete({ where: { id: delegationSession.id } }),
-    ).catch(() => {});
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP).catch(() => {});
     return NextResponse.json(
       { error: "Failed to store delegation entries" },
       { status: 503 },
@@ -272,7 +272,7 @@ async function handleGET(_request: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Also return available MCP tokens with delegation-relevant scopes
   const availableTokens = await withBypassRls(prisma, () =>
@@ -293,7 +293,7 @@ async function handleGET(_request: NextRequest) {
       },
       orderBy: { createdAt: "desc" },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   return NextResponse.json({
     sessions: sessions.map((s) => ({

@@ -8,7 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
@@ -142,7 +142,7 @@ export function logAudit(params: AuditLogParams): void {
           userAgent: safeUserAgent,
         },
       });
-    });
+    }, BYPASS_PURPOSE.AUDIT_WRITE);
 
     // --- Webhook dispatch (after transaction commits) ---
     // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
@@ -251,7 +251,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
           };
         }),
       });
-    });
+    }, BYPASS_PURPOSE.AUDIT_WRITE);
 
     // --- Webhook dispatch per entry (after transaction commits) ---
     // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts

@@ -60,7 +60,7 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit", () => ({
@@ -164,7 +164,7 @@ describe("GET /api/teams/[teamId]/members", () => {
       createParams({ teamId: TEAM_ID }),
     );
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
   });
 });
 

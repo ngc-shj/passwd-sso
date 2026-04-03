@@ -16,7 +16,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 
@@ -56,7 +56,7 @@ async function handlePOST(req: NextRequest) {
       },
       select: { tenantId: true, role: true },
     }),
-  );
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   if (!membership) {
     return NextResponse.json(
       { error: "operatorId is not an active tenant admin" },
@@ -72,14 +72,14 @@ async function handlePOST(req: NextRequest) {
     // Count matching records without deleting
     const matched = await withBypassRls(prisma, async () =>
       prisma.passwordEntryHistory.count({ where: whereClause }),
-    );
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
     return NextResponse.json({ purged: 0, matched, dryRun: true });
   }
 
   // Delete old history entries across all tenants
   const deleted = await withBypassRls(prisma, async () =>
     prisma.passwordEntryHistory.deleteMany({ where: whereClause }),
-  );
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
