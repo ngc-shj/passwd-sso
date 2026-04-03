@@ -2,12 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-const { mockCreate, mockAuditInfo, mockTeamFindUnique, mockUserFindUnique, mockWithBypassRls } = vi.hoisted(() => ({
+const { mockCreate, mockAuditInfo, mockTeamFindUnique, mockUserFindUnique, mockWithBypassRls, mockEnqueue, mockDrainBuffer } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
   mockAuditInfo: vi.fn(),
   mockTeamFindUnique: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockEnqueue: vi.fn(),
+  mockDrainBuffer: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -19,6 +21,11 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
+}));
+
+vi.mock("@/lib/audit-retry", () => ({
+  enqueue: mockEnqueue,
+  drainBuffer: mockDrainBuffer,
 }));
 
 vi.mock("@/lib/audit-logger", () => ({
@@ -147,10 +154,11 @@ describe("logAudit", () => {
     });
   });
 
-  it("does not throw when prisma.create rejects", () => {
-    mockCreate.mockRejectedValue(new Error("DB error"));
+  it("does not throw when prisma.create rejects and enqueues for retry", async () => {
+    // withBypassRls runs the callback (which resolves tenantId) then the create fails
+    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockCreate.mockRejectedValueOnce(new Error("DB error"));
 
-    // Should not throw
     expect(() =>
       logAudit({
         scope: AUDIT_SCOPE.PERSONAL,
@@ -158,6 +166,19 @@ describe("logAudit", () => {
         userId: "user-1",
       })
     ).not.toThrow();
+
+    // Wait for the async IIFE: withBypassRls callback → user lookup → create rejects → catch → enqueue
+    await flushAsyncWork();
+    await flushAsyncWork();
+    await flushAsyncWork();
+
+    expect(mockEnqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: "user-1",
+        retryCount: 0,
+      }),
+    );
   });
 
   it("calls auditLogger.info alongside DB write", async () => {
