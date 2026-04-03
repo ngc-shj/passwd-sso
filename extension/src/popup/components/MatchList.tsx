@@ -230,7 +230,7 @@ export function MatchList({ tabUrl }: Props) {
               {filteredMatched.map((e) => (
                 <li
                   key={`${e.teamId ?? "personal"}-${e.id}`}
-                  className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750 transition-colors px-3 py-2"
+                  className="rounded-md border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors px-3 py-2"
                 >
                   <div className="flex items-center justify-between gap-2 min-w-0">
                     <div className="flex items-center gap-1.5 truncate min-w-0">

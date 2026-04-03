@@ -499,6 +499,7 @@ initContextMenu({
   extractHost,
   isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
+  isContextMenuEnabled: async () => validateSettings(await getSettings()).enableContextMenu,
   performAutofill: async (entryId, tabId, teamId) => {
     await performAutofillForEntry(entryId, tabId, undefined, teamId);
   },

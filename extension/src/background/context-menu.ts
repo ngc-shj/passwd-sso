@@ -21,6 +21,7 @@ export interface ContextMenuDeps {
   extractHost: (url: string) => string | null;
   isConnected: () => boolean;
   isVaultUnlocked: () => boolean;
+  isContextMenuEnabled: () => Promise<boolean>;
   performAutofill: (entryId: string, tabId: number, teamId?: string) => Promise<void>;
 }
 
@@ -60,6 +61,13 @@ export function updateContextMenuForTab(
 
 async function doUpdateMenu(url: string | undefined): Promise<void> {
   if (!deps) return;
+
+  // Check if context menu is enabled before rebuilding
+  if (!(await deps.isContextMenuEnabled())) {
+    await removeChildItems();
+    lastMenuHost = null;
+    return;
+  }
 
   if (!url) {
     await removeChildItems();
