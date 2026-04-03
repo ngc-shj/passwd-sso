@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.21](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.20...passwd-sso-v0.4.21) (2026-04-03)
+
+
+### Features
+
+* harden extension token bridge, encrypt session storage, and add audit retry ([#316](https://github.com/ngc-shj/passwd-sso/issues/316)) ([0c27b66](https://github.com/ngc-shj/passwd-sso/commit/0c27b66f3b630ec39beb79f7e5fd51d22e2998d3))
+
 ## [0.4.20](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.19...passwd-sso-v0.4.20) (2026-04-03)
 
 
