@@ -64,14 +64,6 @@ export function updateContextMenuForTab(
 async function doUpdateMenu(url: string | undefined): Promise<void> {
   if (!deps) return;
 
-  // Check if context menu is enabled before rebuilding
-  if (!(await deps.isContextMenuEnabled())) {
-    // removeAll entirely — do NOT use removeChildItems() which recreates the parent
-    await new Promise<void>((resolve) => chrome.contextMenus.removeAll(() => resolve()));
-    lastMenuHost = null;
-    return;
-  }
-
   if (!url) {
     await removeChildItems();
     lastMenuHost = null;
@@ -280,9 +272,8 @@ function parseMenuEntryId(suffix: string): { entryId: string | null; teamId?: st
 }
 
 /** Force menu rebuild (e.g., after vault unlock/lock). */
-export function invalidateContextMenu(enabled = true): void {
+export function invalidateContextMenu(): void {
   lastMenuHost = null;
-  if (!enabled) return;
   // Immediately rebuild menu for the active tab
   chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
     if (tab?.id) {
