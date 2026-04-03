@@ -9,10 +9,14 @@ const mockGetSettings = vi.fn();
 const mockSetSettings = vi.fn();
 const mockEnsureHostPermission = vi.fn();
 
-vi.mock("../../lib/storage", () => ({
-  getSettings: () => mockGetSettings(),
-  setSettings: (v: unknown) => mockSetSettings(v),
-}));
+vi.mock("../../lib/storage", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/storage")>();
+  return {
+    ...actual,
+    getSettings: () => mockGetSettings(),
+    setSettings: (v: unknown) => mockSetSettings(v),
+  };
+});
 vi.mock("../../lib/api", () => ({
   ensureHostPermission: (v: unknown) => mockEnsureHostPermission(v),
 }));
