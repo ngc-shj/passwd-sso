@@ -2,9 +2,9 @@
 // Service workers cannot access the clipboard directly;
 // this document provides a DOM context for execCommand("copy").
 
-// ── Clipboard ──
+// ── Clipboard + Keepalive ──
 chrome.runtime.onMessage.addListener(function (msg, _sender, sendResponse) {
-  if (msg.target !== "offscreen") return;
+  if (msg.target !== "offscreen") return false;
   if (msg.type === "clipboard-write") {
     // When text is empty (clipboard clear), use a space character.
     // execCommand("copy") is a no-op with empty selection, and
@@ -17,15 +17,19 @@ chrome.runtime.onMessage.addListener(function (msg, _sender, sendResponse) {
     document.execCommand("copy");
     ta.remove();
     sendResponse({ ok: true });
+    return true;
   }
   if (msg.type === "start-keepalive") {
     startKeepalive();
     sendResponse({ ok: true });
+    return true;
   }
   if (msg.type === "stop-keepalive") {
     stopKeepalive();
     sendResponse({ ok: true });
+    return true;
   }
+  return false;
 });
 
 // ── SW Keepalive ──
@@ -36,7 +40,7 @@ var keepaliveInterval = null;
 function startKeepalive() {
   if (keepaliveInterval) return;
   keepaliveInterval = setInterval(function () {
-    chrome.runtime.sendMessage({ type: "KEEPALIVE_PING" });
+    chrome.runtime.sendMessage({ type: "KEEPALIVE_PING" }).catch(function () {});
   }, 25000);
 }
 
