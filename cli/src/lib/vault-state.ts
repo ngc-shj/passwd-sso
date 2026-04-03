@@ -39,5 +39,7 @@ export function isUnlocked(): boolean {
 export function lockVault(): void {
   encryptionKey = null;
   vaultUserId = null;
+  // Zero raw key bytes before releasing reference — don't rely on GC timing
+  secretKeyBytes?.fill(0);
   secretKeyBytes = null;
 }
