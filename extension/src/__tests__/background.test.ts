@@ -71,6 +71,7 @@ function installChromeMock() {
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
+      hasDocument: vi.fn().mockResolvedValue(false),
       Reason: { CLIPBOARD: "CLIPBOARD" },
     },
     alarms: {
@@ -244,6 +245,29 @@ describe("background message flow", () => {
     expect(chromeMock?.alarms.create).toHaveBeenCalledWith(
       ALARM_VAULT_LOCK,
       expect.objectContaining({ delayInMinutes: 15 })
+    );
+
+    // Keepalive: offscreen document ensured + start-keepalive sent
+    expect(chromeMock?.offscreen.hasDocument).toHaveBeenCalled();
+    expect(chromeMock?.offscreen.createDocument).toHaveBeenCalled();
+    expect(chromeMock?.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ target: "offscreen", type: "start-keepalive" })
+    );
+  });
+
+  it("sends stop-keepalive on LOCK_VAULT", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    (chromeMock?.runtime.sendMessage as ReturnType<typeof vi.fn>).mockClear();
+
+    await sendMessage({ type: "LOCK_VAULT" });
+
+    expect(chromeMock?.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ target: "offscreen", type: "stop-keepalive" })
     );
   });
 
