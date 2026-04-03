@@ -88,6 +88,24 @@ export const deadLetterLogger = pino({
     _logType: "audit-dead-letter",
     _app: DEFAULT_APP_NAME,
   },
+  redact: {
+    paths: [
+      "auditEntry.metadata.password",
+      "auditEntry.metadata.passphrase",
+      "auditEntry.metadata.secret",
+      "auditEntry.metadata.secretKey",
+      "auditEntry.metadata.encryptedBlob",
+      "auditEntry.metadata.encryptedOverview",
+      "auditEntry.metadata.encryptedData",
+      "auditEntry.metadata.encryptedSecretKey",
+      "auditEntry.metadata.token",
+      "auditEntry.metadata.tokenHash",
+      "auditEntry.metadata.accessToken",
+      "auditEntry.metadata.refreshToken",
+      "auditEntry.metadata.idToken",
+    ],
+    censor: "[REDACTED]",
+  },
   formatters: {
     level(label: string) {
       return { level: label };

@@ -15,17 +15,18 @@ export interface EncryptedField {
   authTag: string;    // hex
 }
 
-let ephemeralKey: CryptoKey | null = null;
+let ephemeralKeyPromise: Promise<CryptoKey> | null = null;
 
 /** Generate or return the ephemeral wrapping key. */
 async function getOrCreateKey(): Promise<CryptoKey> {
-  if (ephemeralKey) return ephemeralKey;
-  ephemeralKey = await crypto.subtle.generateKey(
-    { name: "AES-GCM", length: 256 },
-    false, // non-extractable
-    ["encrypt", "decrypt"],
-  );
-  return ephemeralKey;
+  if (!ephemeralKeyPromise) {
+    ephemeralKeyPromise = crypto.subtle.generateKey(
+      { name: "AES-GCM", length: 256 },
+      false,
+      ["encrypt", "decrypt"],
+    );
+  }
+  return ephemeralKeyPromise;
 }
 
 function hexEncode(buf: ArrayBuffer | Uint8Array): string {
@@ -34,6 +35,9 @@ function hexEncode(buf: ArrayBuffer | Uint8Array): string {
 }
 
 function hexDecode(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex)) {
+    throw new RangeError("invalid hex string");
+  }
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < bytes.length; i++) {
     bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -74,7 +78,8 @@ export async function encryptField(plaintext: string): Promise<EncryptedField | 
  */
 export async function decryptField(blob: EncryptedField): Promise<string | null> {
   try {
-    if (!ephemeralKey) return null;
+    if (!ephemeralKeyPromise) return null;
+    const key = await ephemeralKeyPromise;
     const ciphertext = hexDecode(blob.ciphertext);
     const iv = hexDecode(blob.iv);
     const authTag = hexDecode(blob.authTag);
@@ -83,7 +88,7 @@ export async function decryptField(blob: EncryptedField): Promise<string | null>
     combined.set(authTag, ciphertext.length);
     const decrypted = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv },
-      ephemeralKey,
+      key,
       combined,
     );
     return new TextDecoder().decode(decrypted);
@@ -94,10 +99,10 @@ export async function decryptField(blob: EncryptedField): Promise<string | null>
 
 /** Check if the ephemeral key is available (for testing). */
 export function hasEphemeralKey(): boolean {
-  return ephemeralKey !== null;
+  return ephemeralKeyPromise !== null;
 }
 
 /** Clear the ephemeral key (for testing). */
 export function clearEphemeralKey(): void {
-  ephemeralKey = null;
+  ephemeralKeyPromise = null;
 }

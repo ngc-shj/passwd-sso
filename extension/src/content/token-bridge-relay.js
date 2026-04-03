@@ -19,6 +19,6 @@
       type: MSG_TYPE,
       token: detail.token,
       expiresAt: detail.expiresAt,
-    }, "*");
+    }, window.location.origin);
   });
 })();

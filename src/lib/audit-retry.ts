@@ -103,7 +103,7 @@ export async function drainBuffer(): Promise<void> {
         );
       } else {
         // Re-enqueue for next piggyback flush
-        buffer.push(entry);
+        enqueue(entry);
       }
       getLogger().warn(
         { err, retryCount: entry.retryCount },

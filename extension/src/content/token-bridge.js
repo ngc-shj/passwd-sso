@@ -15,6 +15,7 @@ function isContextValid() {
 function handlePostMessage(event) {
   // Must come from the same window (not an iframe)
   if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
   if (!event.data || event.data.type !== MSG_TYPE) return;
 
   var token = event.data.token;

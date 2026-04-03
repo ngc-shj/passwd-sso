@@ -25,6 +25,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit.ts", ["team", "user", "auditLog"]],
+  ["src/lib/audit-retry.ts", ["auditLog"]],
   ["src/lib/scim-token.ts", ["scimToken"]],
   ["src/lib/extension-token.ts", ["extensionToken"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],

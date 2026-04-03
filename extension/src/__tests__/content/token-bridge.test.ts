@@ -15,8 +15,8 @@ describe("token bridge (postMessage)", () => {
     });
   });
 
-  function makeEvent(data: unknown, source: unknown = window): MessageEvent {
-    return { data, source, origin: "https://app.example.com" } as unknown as MessageEvent;
+  function makeEvent(data: unknown, source: unknown = window, origin = window.location.origin): MessageEvent {
+    return { data, source, origin } as unknown as MessageEvent;
   }
 
   it("forwards valid relay message to background", () => {
@@ -66,6 +66,14 @@ describe("token bridge (postMessage)", () => {
   it("does not send error response on invalid messages (oracle prevention)", () => {
     handlePostMessage(makeEvent({ type: "WRONG" }, {}));
     // No sendMessage call, no error response — silent rejection
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("rejects message from a different origin", () => {
+    const ok = handlePostMessage(
+      makeEvent({ type: TOKEN_BRIDGE_MSG_TYPE, token: "tkn", expiresAt: 123 }, window, "https://evil.com"),
+    );
+    expect(ok).toBe(false);
     expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
   });
 });

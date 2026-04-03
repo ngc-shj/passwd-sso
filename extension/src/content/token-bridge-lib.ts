@@ -12,6 +12,7 @@ function isContextValid(): boolean {
 export function handlePostMessage(event: MessageEvent): boolean {
   // Origin validation: must come from the same window (not an iframe)
   if (event.source !== window) return false;
+  if (event.origin !== window.location.origin) return false;
 
   // Type discriminator check
   if (!event.data || event.data.type !== TOKEN_BRIDGE_MSG_TYPE) return false;
