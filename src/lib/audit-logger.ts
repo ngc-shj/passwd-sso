@@ -10,6 +10,8 @@
 
 import pino, { type DestinationStream } from "pino";
 
+const DEFAULT_APP_NAME = process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso";
+
 /**
  * Factory to create a pino logger instance for audit events.
  *
@@ -23,7 +25,7 @@ export function createAuditLogger(opts?: {
 }): pino.Logger {
   const enabled = opts?.enabled ?? process.env.AUDIT_LOG_FORWARD === "true";
   const appName =
-    opts?.appName ?? process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso";
+    opts?.appName ?? DEFAULT_APP_NAME;
 
   const pinoOpts: pino.LoggerOptions = {
     name: appName,
@@ -78,13 +80,13 @@ export const auditLogger = createAuditLogger();
  * External alerting should monitor for `_logType: "audit-dead-letter"`.
  */
 export const deadLetterLogger = pino({
-  name: process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso",
+  name: DEFAULT_APP_NAME,
   level: "warn",
   enabled: true,
   timestamp: pino.stdTimeFunctions.isoTime,
   base: {
     _logType: "audit-dead-letter",
-    _app: process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso",
+    _app: DEFAULT_APP_NAME,
   },
   formatters: {
     level(label: string) {
