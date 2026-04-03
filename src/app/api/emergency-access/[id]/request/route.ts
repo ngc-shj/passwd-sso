@@ -9,7 +9,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
 
@@ -37,7 +37,7 @@ async function handlePOST(
       where: { id },
       select: { granteeId: true, status: true, ownerId: true, waitDays: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!grant || grant.granteeId !== session.user.id) {
     return notFound();
@@ -59,7 +59,7 @@ async function handlePOST(
         waitExpiresAt,
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -77,13 +77,13 @@ async function handlePOST(
         where: { id: grant.ownerId },
         select: { email: true, name: true, locale: true },
       }),
-    ),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
     withBypassRls(prisma, async () =>
       prisma.user.findUnique({
         where: { id: session.user.id },
         select: { name: true, email: true },
       }),
-    ),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP),
   ]);
   if (owner?.email) {
     const granteeName = grantee?.name ?? grantee?.email ?? "";

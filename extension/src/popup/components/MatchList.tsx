@@ -147,11 +147,11 @@ export function MatchList({ tabUrl }: Props) {
       })
     : [];
   const unmatchedAll = tabHost ? sorted.filter((e) => !matched.includes(e)) : sorted;
-  // When viewing a specific site, only show non-LOGIN entries (cards, identity)
-  // in the "other" section — unrelated login entries are noise.
+  // On non-web pages (chrome://, extension pages, etc.) no entries are relevant.
+  // On web pages, show non-LOGIN entries (cards, identity) in "other" section.
   const unmatched = tabHost
     ? unmatchedAll.filter((e) => e.entryType !== EXT_ENTRY_TYPE.LOGIN)
-    : unmatchedAll;
+    : [];
 
   const displayHost = (e: DecryptedEntry): string => {
     if (e.urlHost && tabHost && isHostMatch(e.urlHost, tabHost)) return e.urlHost;

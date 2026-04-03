@@ -134,6 +134,42 @@ async function configureSessionStorageAccess(): Promise<void> {
   }
 }
 
+// ── Offscreen keepalive ───────────────────────────────────
+// Prevents SW termination during the 30-second idle timeout
+// by pinging from the existing offscreen document (shared with clipboard).
+
+async function ensureOffscreen(): Promise<void> {
+  try {
+    const exists = await chrome.offscreen.hasDocument?.();
+    if (!exists) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: ["CLIPBOARD" as chrome.offscreen.Reason],
+        justification: "Clipboard access and SW keepalive",
+      });
+    }
+  } catch {
+    // Best effort
+  }
+}
+
+async function startKeepalive(): Promise<void> {
+  await ensureOffscreen();
+  try {
+    await chrome.runtime.sendMessage({ target: "offscreen", type: "start-keepalive" });
+  } catch {
+    // ignore
+  }
+}
+
+async function stopKeepalive(): Promise<void> {
+  try {
+    await chrome.runtime.sendMessage({ target: "offscreen", type: "stop-keepalive" });
+  } catch {
+    // ignore — offscreen document may not exist
+  }
+}
+
 function invalidateCache(): void {
   cachedEntries = null;
   cacheTimestamp = 0;
@@ -186,6 +222,7 @@ function clearVault(): void {
   invalidateContextMenu();
   pendingSavePrompts.clear();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
+  void stopKeepalive();
   persistState();
   void updateBadge();
 }
@@ -322,12 +359,13 @@ async function hydrateFromSession(): Promise<void> {
   // Schedule refresh
   scheduleRefreshAlarm(state.expiresAt);
 
-  // Restore vault auto-lock alarm if vault is unlocked
+  // Restore vault auto-lock alarm and keepalive if vault is unlocked
   if (encryptionKey) {
     const effectiveLock = await getEffectiveAutoLockMinutes();
     if (effectiveLock > 0) {
       chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
     }
+    void startKeepalive();
   }
 
   void updateBadge();
@@ -603,7 +641,7 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
       id: TOKEN_BRIDGE_SCRIPT_ID,
       matches: [`${origin}/*`],
       js: ["src/content/token-bridge.js"],
-      runAt: "document_idle",
+      runAt: "document_start",
     },
   ]);
 }
@@ -1492,6 +1530,10 @@ async function handleMessage(
       return;
     }
 
+    case "KEEPALIVE_PING":
+      // No-op — receiving the message keeps the SW alive
+      return;
+
     case "GET_STATUS": {
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken();
@@ -1604,6 +1646,7 @@ async function handleMessage(
             delayInMinutes: effectiveLock,
           });
         }
+        void startKeepalive();
 
         sendResponse({ type: "UNLOCK_VAULT", ok: true });
         invalidateContextMenu();

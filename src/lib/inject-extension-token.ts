@@ -1,21 +1,23 @@
-import { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT } from "@/lib/constants";
+import { TOKEN_BRIDGE_MSG_TYPE } from "@/lib/constants";
 
 /**
- * Inject an extension token into the DOM for the token-bridge content script to pick up.
- * The element is auto-removed after 10 seconds.
+ * Send the extension token directly to the content script via postMessage.
+ *
+ * The ISOLATED-world content script receives window.postMessage from the
+ * MAIN world (page JS) because they share the same window for messaging.
+ * No MAIN-world relay script is needed.
+ *
+ * The token never appears as a DOM attribute — it exists only as a
+ * single postMessage event, reducing the exposure window from 10 seconds
+ * (old DOM injection) to a single synchronous call.
+ *
+ * Threat model note: any MAIN-world JS can listen for postMessage.
+ * This is a defense-in-depth improvement, not a complete mitigation.
+ * See docs/archive/review/harden-extension-token-bridge-plan.md.
  */
 export function injectExtensionToken(token: string, expiresAt: number): void {
-  const existing = document.getElementById(TOKEN_ELEMENT_ID);
-  if (existing) existing.remove();
-  const el = document.createElement("div");
-  el.id = TOKEN_ELEMENT_ID;
-  el.setAttribute("data-token", token);
-  el.setAttribute("data-expires-at", String(expiresAt));
-  el.style.display = "none";
-  document.body.appendChild(el);
-  // Notify token-bridge even if its MutationObserver has timed out
-  document.dispatchEvent(new CustomEvent(TOKEN_READY_EVENT));
-  setTimeout(() => {
-    el.remove();
-  }, 10_000);
+  window.postMessage(
+    { type: TOKEN_BRIDGE_MSG_TYPE, token, expiresAt },
+    window.location.origin,
+  );
 }

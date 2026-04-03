@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 
@@ -53,7 +53,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
       where: { userId: { in: userIds }, deactivatedAt: null },
       select: { userId: true, tenant: { select: { name: true } } },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   const tenantByUserId = new Map(userTenants.map((t) => [t.userId, t.tenant.name]));
 
   return NextResponse.json(

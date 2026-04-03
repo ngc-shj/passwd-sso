@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { unauthorized } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { evictDelegationRedisKeys } from "@/lib/delegation";
@@ -109,7 +109,7 @@ async function handleDELETE(
     }
 
     return token;
-  });
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!result) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });

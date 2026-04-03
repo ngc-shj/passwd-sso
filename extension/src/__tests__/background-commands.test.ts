@@ -337,8 +337,8 @@ describe("X-4 keyboard shortcut commands", () => {
 
     const clipboardCalls = chromeMock.runtime.sendMessage.mock.calls.filter(
       (call: unknown[]) => {
-        const msg = call[0] as { target?: string };
-        return msg.target === "offscreen";
+        const msg = call[0] as { target?: string; type?: string };
+        return msg.target === "offscreen" && msg.type === "clipboard-write";
       },
     );
     expect(clipboardCalls).toHaveLength(0);
@@ -380,8 +380,8 @@ describe("X-4 keyboard shortcut commands", () => {
 
     const clipboardCalls = chromeMock.runtime.sendMessage.mock.calls.filter(
       (call: unknown[]) => {
-        const msg = call[0] as { target?: string };
-        return msg.target === "offscreen";
+        const msg = call[0] as { target?: string; type?: string };
+        return msg.target === "offscreen" && msg.type === "clipboard-write";
       },
     );
     expect(clipboardCalls).toHaveLength(0);

@@ -43,7 +43,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/tenant-rls", () => ({ withTenantRls: mockWithTenantRls }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
 vi.mock("@/lib/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));

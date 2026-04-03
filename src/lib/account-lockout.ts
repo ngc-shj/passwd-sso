@@ -11,7 +11,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -53,7 +53,7 @@ export async function checkLockout(userId: string): Promise<LockoutStatus> {
       where: { id: userId },
       select: { accountLockedUntil: true },
     }),
-  );
+  BYPASS_PURPOSE.AUTH_FLOW);
 
   if (!user?.accountLockedUntil) {
     return { locked: false, lockedUntil: null };
@@ -176,7 +176,7 @@ export async function recordFailure(
         thresholdCrossed,
       };
     }),
-    );
+    BYPASS_PURPOSE.AUTH_FLOW);
 
     // Async nonblocking audit: VAULT_UNLOCK_FAILED (every failure)
     // NOTE: logAudit() internally swallows exceptions, so this catch is
@@ -284,7 +284,7 @@ export async function resetLockout(userId: string): Promise<void> {
           accountLockedUntil: null,
         },
       }),
-    );
+    BYPASS_PURPOSE.AUTH_FLOW);
   } catch (err) {
     getLogger().error({ err, userId }, "vault.lockout.resetLockout.error");
     // Swallow — do not block successful unlock

@@ -13,3 +13,4 @@ Language policy: English-only (Class B). See [../operations/language-policy.md](
 | [tenant-team-scim-spec.md](tenant-team-scim-spec.md) | SCIM provisioning spec |
 | [entry-field-checklist.md](entry-field-checklist.md) | Entry field addition checklist |
 | [machine-identity.md](machine-identity.md) | AI agent identity & MCP Gateway architecture |
+| [extension-token-bridge.md](extension-token-bridge.md) | Browser extension token bridge & session encryption |

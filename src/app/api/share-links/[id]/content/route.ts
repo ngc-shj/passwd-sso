@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { decryptShareData } from "@/lib/crypto-server";
 import { verifyShareAccessToken } from "@/lib/share-access-token";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
@@ -154,7 +154,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       viewCount: share.viewCount + viewCountDelta,
       maxViews: share.maxViews,
     });
-  });
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 export const GET = withRequestLog(handleGET);

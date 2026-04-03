@@ -38,7 +38,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   resolveUserTenantIdFromClient: mockResolveUserTenantIdFromClient,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/logger", () => ({
@@ -193,7 +193,7 @@ describe("GET /api/teams", () => {
     mockPrismaTeamMember.findMany.mockResolvedValue([]);
     await GET(makeReq());
     expect(mockWithBypassRls).toHaveBeenCalledTimes(1);
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
   });
 
   it("accepts extension Bearer token via checkAuth", async () => {

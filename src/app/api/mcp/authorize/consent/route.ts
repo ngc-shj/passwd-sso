@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPES, MCP_SCOPE, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
   // Validate client (must happen before redirect to prevent open redirect)
   const foundClient = await withBypassRls(prisma, async () =>
     prisma.mcpClient.findFirst({ where: { clientId, isActive: true } }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!foundClient) {
     return NextResponse.json({ error: "invalid_client" }, { status: 400 });
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
       where: { id: session.user.id },
       select: { tenantId: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   const userTenantId = userRecord?.tenantId;
   if (!userTenantId || (foundClient.tenantId && foundClient.tenantId !== userTenantId)) {
     return NextResponse.json({ error: "access_denied" }, { status: 403 });
@@ -128,7 +128,7 @@ export async function POST(req: NextRequest) {
         }
         return { error: null as null };
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
     if (claimResult.error === "tenant_cap") {
       return NextResponse.json(
@@ -139,7 +139,7 @@ export async function POST(req: NextRequest) {
     if (claimResult.error === "already_claimed") {
       const refetched = await withBypassRls(prisma, async () =>
         prisma.mcpClient.findUnique({ where: { id: clientIdDb } }),
-      );
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
       if (!refetched || refetched.tenantId !== userTenantId) {
         return NextResponse.json({ error: "access_denied" }, { status: 403 });
       }

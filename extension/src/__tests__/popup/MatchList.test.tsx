@@ -168,7 +168,7 @@ describe("MatchList", () => {
     expect(await screen.findByText(/no matches for this page/i)).toBeInTheDocument();
   });
 
-  it("shows entries without match header when tabUrl is null", async () => {
+  it("shows no entries when tabUrl is null (non-web page)", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
       entries: [
@@ -183,8 +183,9 @@ describe("MatchList", () => {
     });
 
     render(<MatchList tabUrl={null} />);
-    expect(await screen.findByText("Example")).toBeInTheDocument();
-    expect(screen.queryByText(/matches for/i)).toBeNull();
+    // Search box should appear (entries exist) but no entries listed
+    await screen.findByPlaceholderText("Search...");
+    expect(screen.queryByText("Example")).toBeNull();
   });
 
   it("hides copy/fill buttons for non-login entries", async () => {
@@ -195,13 +196,13 @@ describe("MatchList", () => {
           id: "pw-1",
           title: "Note",
           username: "",
-          urlHost: "",
+          urlHost: "example.com",
           entryType: "SECURE_NOTE",
         },
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://example.com" />);
     await screen.findByText("Note");
     expect(screen.queryByRole("button", { name: "Copy" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Fill" })).toBeNull();
@@ -306,7 +307,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://github.com" />);
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "git" } });
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
@@ -327,7 +328,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://other.com" />);
     const input = await screen.findByPlaceholderText("Search...");
     fireEvent.change(input, { target: { value: "nope" } });
     expect(await screen.findByText(/no results for/i)).toBeInTheDocument();
@@ -359,13 +360,13 @@ describe("MatchList", () => {
           id: "pw-1",
           title: "Note",
           username: "",
-          urlHost: "",
+          urlHost: "example.com",
           entryType: "SECURE_NOTE",
         },
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://example.com" />);
     await screen.findByText("Note");
     expect(screen.queryByRole("button", { name: "TOTP" })).toBeNull();
   });
@@ -483,7 +484,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://example.com" />);
     expect(await screen.findByText("Team Entry")).toBeInTheDocument();
     expect(screen.getByText("Engineering")).toBeInTheDocument();
   });
@@ -502,9 +503,8 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://example.com" />);
     expect(await screen.findByText("Personal Entry")).toBeInTheDocument();
-    // No team badge present
     const badges = document.querySelectorAll(".text-purple-700");
     expect(badges).toHaveLength(0);
   });
@@ -636,7 +636,7 @@ describe("MatchList", () => {
       ],
     });
 
-    render(<MatchList tabUrl={null} />);
+    render(<MatchList tabUrl="https://example.com" />);
     expect(await screen.findByText("Personal")).toBeInTheDocument();
     expect(screen.getByText("Team Copy")).toBeInTheDocument();
   });
@@ -676,7 +676,7 @@ describe("MatchList", () => {
     expect(screen.queryByText("Other Login")).toBeNull();
   });
 
-  it("shows all entries including LOGIN when tabUrl is null", async () => {
+  it("shows no entries when tabUrl is null (non-web page)", async () => {
     mockSendMessage.mockResolvedValueOnce({
       type: "FETCH_PASSWORDS",
       entries: [
@@ -699,7 +699,8 @@ describe("MatchList", () => {
 
     render(<MatchList tabUrl={null} />);
 
-    expect(await screen.findByText("Login Entry")).toBeInTheDocument();
-    expect(screen.getByText("Card Entry")).toBeInTheDocument();
+    await screen.findByPlaceholderText("Search...");
+    expect(screen.queryByText("Login Entry")).toBeNull();
+    expect(screen.queryByText("Card Entry")).toBeNull();
   });
 });

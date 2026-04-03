@@ -7,8 +7,17 @@ import {
   SESSION_KEY,
 } from "../lib/constants";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
+import type { SessionState } from "../lib/session-storage";
 
 const PASSWORD_BY_ID_PREFIX = extApiPath.passwordById("");
+
+const sessionStorageMocks = vi.hoisted(() => ({
+  persistSession: vi.fn().mockResolvedValue(undefined),
+  loadSession: vi.fn().mockResolvedValue(null),
+  clearSession: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("../lib/session-storage", () => sessionStorageMocks);
 
 const cryptoMocks = vi.hoisted(() => ({
   deriveWrappingKey: vi.fn().mockResolvedValue("wrap-key"),
@@ -62,6 +71,7 @@ function installChromeMock() {
     },
     offscreen: {
       createDocument: vi.fn().mockResolvedValue(undefined),
+      hasDocument: vi.fn().mockResolvedValue(false),
       Reason: { CLIPBOARD: "CLIPBOARD" },
     },
     alarms: {
@@ -236,6 +246,29 @@ describe("background message flow", () => {
       ALARM_VAULT_LOCK,
       expect.objectContaining({ delayInMinutes: 15 })
     );
+
+    // Keepalive: offscreen document ensured + start-keepalive sent
+    expect(chromeMock?.offscreen.hasDocument).toHaveBeenCalled();
+    expect(chromeMock?.offscreen.createDocument).toHaveBeenCalled();
+    expect(chromeMock?.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ target: "offscreen", type: "start-keepalive" })
+    );
+  });
+
+  it("sends stop-keepalive on LOCK_VAULT", async () => {
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+    (chromeMock?.runtime.sendMessage as ReturnType<typeof vi.fn>).mockClear();
+
+    await sendMessage({ type: "LOCK_VAULT" });
+
+    expect(chromeMock?.runtime.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ target: "offscreen", type: "stop-keepalive" })
+    );
   });
 
   it("configures storage.session access level to trusted contexts on startup", async () => {
@@ -293,19 +326,13 @@ describe("background message flow", () => {
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
     await sendMessage({ type: "LOCK_VAULT" });
 
-    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
-      authState: expect.objectContaining({
-        token: "t",
-        expiresAt: expect.any(Number),
-      }),
-    });
-    const calls = (chromeMock?.storage.session.set as ReturnType<typeof vi.fn>).mock.calls;
-    const lastState = calls[calls.length - 1]?.[0]?.authState as {
-      userId?: string;
-      vaultSecretKey?: string;
-    };
-    expect(lastState.userId).toBeUndefined();
-    expect(lastState.vaultSecretKey).toBeUndefined();
+    // After LOCK_VAULT, persistSession should have been called with a token but no vault fields
+    const calls = sessionStorageMocks.persistSession.mock.calls;
+    const lastState = calls[calls.length - 1]?.[0] as SessionState | undefined;
+    expect(lastState).toBeDefined();
+    expect(typeof lastState?.token).toBe("string");
+    expect(lastState?.userId).toBeUndefined();
+    expect(lastState?.vaultSecretKey).toBeUndefined();
   });
 
   it("does not create auto-lock alarm when disabled", async () => {
@@ -931,12 +958,12 @@ describe("session persistence", () => {
     // After UNLOCK_VAULT, userId is set and persistState is called.
     await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
 
-    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
-      authState: expect.objectContaining({
+    expect(sessionStorageMocks.persistSession).toHaveBeenCalledWith(
+      expect.objectContaining({
         token: "tok-1",
         userId: "user-1",
       }),
-    });
+    );
   });
 
   it("clears session storage on CLEAR_TOKEN", async () => {
@@ -947,7 +974,7 @@ describe("session persistence", () => {
     });
     await sendMessage({ type: "CLEAR_TOKEN" });
 
-    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
+    expect(sessionStorageMocks.clearSession).toHaveBeenCalled();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/extension/token"),
@@ -986,7 +1013,7 @@ describe("session persistence", () => {
     const res = await sendMessage({ type: "CLEAR_TOKEN" });
 
     expect(res).toEqual({ type: "CLEAR_TOKEN", ok: true });
-    expect(chromeMock?.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
+    expect(sessionStorageMocks.clearSession).toHaveBeenCalled();
     expect(chromeMock?.alarms.clear).toHaveBeenCalledWith(ALARM_TOKEN_REFRESH);
   });
 
@@ -1008,13 +1035,11 @@ describe("session hydration", () => {
     chromeMock = installChromeMock();
 
     const expiresAt = Date.now() + 600_000;
-    chromeMock.storage.session.get.mockResolvedValue({
-      authState: {
-        token: "hydrated-tok",
-        expiresAt,
-        userId: "u-1",
-        vaultSecretKey: "010203",
-      },
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt,
+      userId: "u-1",
+      vaultSecretKey: "010203",
     });
 
     vi.stubGlobal(
@@ -1035,8 +1060,10 @@ describe("session hydration", () => {
     vi.clearAllMocks();
     chromeMock = installChromeMock();
 
-    chromeMock.storage.session.get.mockResolvedValue({
-      authState: { token: "old-tok", expiresAt: Date.now() - 1000, userId: "u-1" },
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "old-tok",
+      expiresAt: Date.now() - 1000,
+      userId: "u-1",
     });
 
     vi.stubGlobal(
@@ -1046,7 +1073,7 @@ describe("session hydration", () => {
 
     await loadBackground();
 
-    expect(chromeMock.storage.session.remove).toHaveBeenCalledWith(SESSION_KEY);
+    expect(sessionStorageMocks.clearSession).toHaveBeenCalled();
 
     const status = await sendMessage({ type: "GET_STATUS" });
     expect(status).toEqual(
@@ -1060,11 +1087,11 @@ describe("session hydration", () => {
     chromeMock = installChromeMock();
 
     const expiresAt = Date.now() + 600_000;
-    let resolveSessionGet!: (value: unknown) => void;
-    const delayedSession = new Promise((resolve) => {
-      resolveSessionGet = resolve;
+    let resolveLoad!: (value: SessionState | null) => void;
+    const delayedLoad = new Promise<SessionState | null>((resolve) => {
+      resolveLoad = resolve;
     });
-    chromeMock.storage.session.get.mockReturnValueOnce(delayedSession as Promise<unknown>);
+    sessionStorageMocks.loadSession.mockReturnValueOnce(delayedLoad);
 
     vi.stubGlobal(
       "fetch",
@@ -1074,13 +1101,11 @@ describe("session hydration", () => {
     await loadBackground();
 
     const statusPromise = sendMessage({ type: "GET_STATUS" });
-    resolveSessionGet({
-      authState: {
-        token: "hydrated-tok",
-        expiresAt,
-        userId: "u-1",
-        vaultSecretKey: "010203",
-      },
+    resolveLoad({
+      token: "hydrated-tok",
+      expiresAt,
+      userId: "u-1",
+      vaultSecretKey: "010203",
     });
     const status = await statusPromise;
 
@@ -1147,13 +1172,13 @@ describe("token refresh alarm", () => {
     // Wait for async refresh to complete
     await new Promise((r) => setTimeout(r, 50));
 
-    // Verify session storage was updated with new token
-    expect(chromeMock?.storage.session.set).toHaveBeenCalledWith({
-      authState: expect.objectContaining({
+    // Verify persistSession was called with the new token
+    expect(sessionStorageMocks.persistSession).toHaveBeenCalledWith(
+      expect.objectContaining({
         token: "refreshed-tok",
         userId: "user-1",
       }),
-    });
+    );
   });
 
   it("clears token when server rejects refresh", async () => {
@@ -1378,13 +1403,11 @@ describe("hydration edge cases", () => {
     chromeMock = installChromeMock();
 
     const expiresAt = Date.now() + 600_000;
-    chromeMock.storage.session.get.mockResolvedValue({
-      authState: {
-        token: "hydrated-tok",
-        expiresAt,
-        userId: "u-1",
-        vaultSecretKey: "010203",
-      },
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt,
+      userId: "u-1",
+      vaultSecretKey: "010203",
     });
 
     vi.stubGlobal(

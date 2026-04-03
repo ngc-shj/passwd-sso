@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
@@ -46,7 +46,7 @@ export function createCustomAdapter(): Adapter {
           where: { id },
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
       if (!user?.email) return null;
       return { id: user.id, name: user.name, email: user.email, image: user.image, emailVerified: user.emailVerified };
     },
@@ -57,7 +57,7 @@ export function createCustomAdapter(): Adapter {
           where: { email },
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
       if (!user?.email) return null;
       return { id: user.id, name: user.name, email: user.email, image: user.image, emailVerified: user.emailVerified };
     },
@@ -87,7 +87,7 @@ export function createCustomAdapter(): Adapter {
             },
           },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
       if (!account?.user?.email) return null;
       return {
         id: account.user.id,
@@ -119,7 +119,7 @@ export function createCustomAdapter(): Adapter {
             },
           },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
       if (!result || !result.user.email) return null;
 
       return {
@@ -190,7 +190,7 @@ export function createCustomAdapter(): Adapter {
 
           return createdUser;
         });
-      });
+      }, BYPASS_PURPOSE.AUTH_FLOW);
       if (!created.email) {
         throw new Error("USER_EMAIL_MISSING");
       }
@@ -229,7 +229,7 @@ export function createCustomAdapter(): Adapter {
           },
           select: { id: true },
         });
-      });
+      }, BYPASS_PURPOSE.AUTH_FLOW);
     },
 
     async createSession(
@@ -296,7 +296,7 @@ export function createCustomAdapter(): Adapter {
             },
           });
         }, { isolationLevel: "Serializable" });
-      });
+      }, BYPASS_PURPOSE.AUTH_FLOW);
 
       // Fire-and-forget: check for new device and notify user
       void checkNewDeviceAndNotify(session.userId, {
@@ -357,7 +357,7 @@ export function createCustomAdapter(): Adapter {
           data: rest,
           select: { id: true, name: true, email: true, image: true, emailVerified: true },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
       if (!updated.email) throw new Error("USER_EMAIL_MISSING");
       return { id: updated.id, name: updated.name, email: updated.email, image: updated.image, emailVerified: updated.emailVerified };
     },
@@ -365,7 +365,7 @@ export function createCustomAdapter(): Adapter {
     async deleteUser(userId: string) {
       await withBypassRls(prisma, async () =>
         prisma.user.delete({ where: { id: userId } }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
     },
 
     async unlinkAccount(providerAccountId: Pick<AdapterAccount, "provider" | "providerAccountId">) {
@@ -378,13 +378,13 @@ export function createCustomAdapter(): Adapter {
             },
           },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
     },
 
     async deleteSession(sessionToken: string) {
       await withBypassRls(prisma, async () =>
         prisma.session.delete({ where: { sessionToken } }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
     },
 
     async getAccount(providerAccountId: string, provider: string): Promise<AdapterAccount | null> {
@@ -405,7 +405,7 @@ export function createCustomAdapter(): Adapter {
             session_state: true,
           },
         }),
-      );
+      BYPASS_PURPOSE.AUTH_FLOW);
       if (!account) return null;
       return {
         userId: account.userId,
@@ -436,7 +436,7 @@ export function createCustomAdapter(): Adapter {
               tenant: { select: { sessionIdleTimeoutMinutes: true } },
             },
           }),
-        );
+        BYPASS_PURPOSE.AUTH_FLOW);
 
         if (!current) return null;
 
@@ -451,7 +451,7 @@ export function createCustomAdapter(): Adapter {
                 prisma.session.delete({
                   where: { sessionToken: session.sessionToken },
                 }),
-              );
+              BYPASS_PURPOSE.AUTH_FLOW);
               return null;
             }
           }
@@ -471,7 +471,7 @@ export function createCustomAdapter(): Adapter {
               expires: true,
             },
           }),
-        );
+        BYPASS_PURPOSE.AUTH_FLOW);
 
         return {
           sessionToken: updated.sessionToken,

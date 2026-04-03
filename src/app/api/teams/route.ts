@@ -9,7 +9,7 @@ import { errorResponse, unauthorized, forbidden } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { getLogger } from "@/lib/logger";
@@ -45,7 +45,7 @@ async function handleGET(req: NextRequest) {
       orderBy: { team: { name: "asc" } },
     });
     return { userTenantId: uid, memberships: data };
-  });
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   const teams = memberships.map((m) => ({
     id: m.team.id,

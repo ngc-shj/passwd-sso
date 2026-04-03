@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import {
   API_KEY_PREFIX,
   API_KEY_SCOPE,
@@ -89,7 +89,7 @@ export async function validateApiKey(
         revokedAt: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if (!key) {
     return { ok: false, error: "API_KEY_INVALID" };
@@ -107,7 +107,7 @@ export async function validateApiKey(
       where: { id: key.id },
       data: { lastUsedAt: new Date() },
     }),
-  ).catch(() => {});
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch(() => {});
 
   return {
     ok: true,

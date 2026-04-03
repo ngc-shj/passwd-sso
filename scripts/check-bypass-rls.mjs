@@ -25,6 +25,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit.ts", ["team", "user", "auditLog"]],
+  ["src/lib/audit-retry.ts", ["auditLog"]],
   ["src/lib/scim-token.ts", ["scimToken"]],
   ["src/lib/extension-token.ts", ["extensionToken"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
@@ -94,6 +95,9 @@ const PRISMA_MODEL_RE = /(?:prisma|tx)\.(\w+)\./g;
 // Regex to find withBypassRls call sites (not imports).
 const BYPASS_CALL_RE = /withBypassRls\s*\(/;
 
+// Regex to verify BYPASS_PURPOSE constant is used (not a string literal).
+const BYPASS_PURPOSE_RE = /BYPASS_PURPOSE\.\w+/;
+
 function getSourceFiles() {
   const files = [];
   for (const entry of readdirSync("src", { recursive: true, withFileTypes: true })) {
@@ -107,6 +111,7 @@ function getSourceFiles() {
 
 const fileViolations = [];
 const modelViolations = [];
+const purposeViolations = [];
 
 for (const file of getSourceFiles()) {
   // Skip test files — they mock withBypassRls, not call it for real
@@ -123,18 +128,24 @@ for (const file of getSourceFiles()) {
     continue;
   }
 
-  // Check 2: wildcard — skip model checking for this file
-  if (allowedModels.includes("*")) continue;
+  // Check 2: file must use BYPASS_PURPOSE constant (not string literals)
+  // The definition file (tenant-rls.ts) is exempt — it defines, not consumes.
+  if (file !== "src/lib/tenant-rls.ts" && !BYPASS_PURPOSE_RE.test(content)) {
+    purposeViolations.push({ file, line: 0 });
+  }
 
-  // Check 3: scan each call site for prisma model references
+  // Check 3: scan each call site for prisma model references and purpose constant
   const lines = content.split("\n");
-  const allowedSet = new Set(allowedModels);
+  const allowedSet = allowedModels.includes("*") ? null : new Set(allowedModels);
 
   for (let i = 0; i < lines.length; i++) {
     if (!BYPASS_CALL_RE.test(lines[i])) continue;
 
     // Scan forward from the call site
     const end = Math.min(i + SCAN_RADIUS, lines.length);
+
+    // Check 3b: model allowlist (skip for wildcard files)
+    if (!allowedSet) continue;
     for (let j = i; j < end; j++) {
       let match;
       while ((match = PRISMA_MODEL_RE.exec(lines[j])) !== null) {
@@ -177,6 +188,21 @@ if (modelViolations.length > 0) {
   console.error("");
   for (const { file, line, model } of modelViolations) {
     console.error(`  ${file}:${line}  prisma.${model}`);
+  }
+}
+
+if (purposeViolations.length > 0) {
+  failed = true;
+  if (fileViolations.length > 0 || modelViolations.length > 0) console.error("");
+  console.error(
+    "withBypassRls call sites missing BYPASS_PURPOSE constant.",
+  );
+  console.error(
+    "Use BYPASS_PURPOSE.* from @/lib/tenant-rls instead of string literals.",
+  );
+  console.error("");
+  for (const { file, line } of purposeViolations) {
+    console.error(`  ${file}:${line}`);
   }
 }
 

@@ -1,63 +1,26 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT } from "@/lib/constants";
+import { describe, expect, it } from "vitest";
+import { TOKEN_BRIDGE_MSG_TYPE } from "@/lib/constants";
 import { injectExtensionToken } from "./inject-extension-token";
 
 describe("injectExtensionToken", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    // Clean up any existing token elements
-    document.getElementById(TOKEN_ELEMENT_ID)?.remove();
-  });
+  it("sends postMessage with token data", async () => {
+    const received = new Promise<MessageEvent>((resolve) => {
+      window.addEventListener("message", (e) => resolve(e), { once: true });
+    });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    document.getElementById(TOKEN_ELEMENT_ID)?.remove();
-  });
-
-  it("creates a hidden div with token data attributes", () => {
     injectExtensionToken("my-token", 1234567890);
 
-    const el = document.getElementById(TOKEN_ELEMENT_ID);
-    expect(el).not.toBeNull();
-    expect(el!.getAttribute("data-token")).toBe("my-token");
-    expect(el!.getAttribute("data-expires-at")).toBe("1234567890");
-    expect(el!.style.display).toBe("none");
+    const event = await received;
+    expect(event.data).toEqual({
+      type: TOKEN_BRIDGE_MSG_TYPE,
+      token: "my-token",
+      expiresAt: 1234567890,
+    });
   });
 
-  it("removes existing element before creating new one", () => {
-    injectExtensionToken("token-1", 100);
-    injectExtensionToken("token-2", 200);
-
-    const els = document.querySelectorAll(`#${TOKEN_ELEMENT_ID}`);
-    expect(els.length).toBe(1);
-    expect(els[0].getAttribute("data-token")).toBe("token-2");
-  });
-
-  it("dispatches TOKEN_READY_EVENT custom event", () => {
-    const handler = vi.fn();
-    document.addEventListener(TOKEN_READY_EVENT, handler);
-
+  it("does not create any DOM element", () => {
     injectExtensionToken("tok", 999);
-
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(handler.mock.calls[0][0]).toBeInstanceOf(CustomEvent);
-
-    document.removeEventListener(TOKEN_READY_EVENT, handler);
-  });
-
-  it("auto-removes element after 10 seconds", () => {
-    injectExtensionToken("tok", 999);
-    expect(document.getElementById(TOKEN_ELEMENT_ID)).not.toBeNull();
-
-    vi.advanceTimersByTime(10_000);
-
-    expect(document.getElementById(TOKEN_ELEMENT_ID)).toBeNull();
-  });
-
-  it("appends element to document.body", () => {
-    injectExtensionToken("tok", 999);
-    const el = document.getElementById(TOKEN_ELEMENT_ID);
-    expect(el!.parentElement).toBe(document.body);
+    expect(document.getElementById("passwd-sso-ext-token")).toBeNull();
   });
 });

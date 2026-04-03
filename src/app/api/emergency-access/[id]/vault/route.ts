@@ -5,7 +5,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
 
@@ -36,7 +36,7 @@ async function handleGET(
         owner: { select: { name: true, email: true } },
       },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!grant || grant.granteeId !== session.user.id) {
     return notFound();
@@ -49,7 +49,7 @@ async function handleGET(
         where: { id },
         data: { status: EA_STATUS.ACTIVATED, activatedAt: new Date() },
       }),
-    );
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     grant.status = EA_STATUS.ACTIVATED;
 
     logAudit({

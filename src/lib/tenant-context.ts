@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { withBypassRls, withTenantRls } from "@/lib/tenant-rls";
+import { withBypassRls, withTenantRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 export async function resolveUserTenantIdFromClient(
   db: Pick<typeof prisma, "tenantMember">,
@@ -22,7 +22,7 @@ export async function resolveUserTenantIdFromClient(
 export async function resolveUserTenantId(userId: string): Promise<string | null> {
   return withBypassRls(prisma, async () =>
     resolveUserTenantIdFromClient(prisma, userId),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 export async function resolveTeamTenantId(teamId: string): Promise<string | null> {
@@ -32,7 +32,7 @@ export async function resolveTeamTenantId(teamId: string): Promise<string | null
       select: { tenantId: true },
     });
     return team?.tenantId ?? null;
-  });
+  }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 export async function withUserTenantRls<T>(

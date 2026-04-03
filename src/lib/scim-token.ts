@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 
 // ─── Constants ────────────────────────────────────────────────
@@ -81,7 +81,7 @@ export async function validateScimToken(
         lastUsedAt: true,
       },
     }),
-  );
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   if (!token) {
     return { ok: false, error: "SCIM_TOKEN_INVALID" };
@@ -105,7 +105,7 @@ export async function validateScimToken(
         where: { id: token.id },
         data: { lastUsedAt: new Date(now) },
       });
-    }).catch((err) => {
+    }, BYPASS_PURPOSE.TOKEN_LIFECYCLE).catch((err) => {
       getLogger().warn({ err }, "scim.token.lastUsedAt.update_failed");
     });
   }

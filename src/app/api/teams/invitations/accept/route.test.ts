@@ -36,7 +36,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/tenant-rls", () => ({
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
 
@@ -221,7 +221,7 @@ describe("POST /api/teams/invitations/accept", () => {
     }));
 
     // Invitation lookup: bypass RLS (invitee not yet in team's tenant)
-    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function));
+    expect(mockWithBypassRls).toHaveBeenCalledWith(expect.anything(), expect.any(Function), expect.any(String));
     // Team data operations: team tenant RLS
     expect(mockWithTeamTenantRls).toHaveBeenCalledWith("team-1", expect.any(Function));
     // User data: user tenant RLS

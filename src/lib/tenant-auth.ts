@@ -10,7 +10,7 @@
 import { prisma } from "@/lib/prisma";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import type { TenantRole } from "@prisma/client";
 
 // ─── Permission Definitions ─────────────────────────────────────
@@ -86,7 +86,7 @@ export async function getTenantMembership(userId: string) {
     prisma.tenantMember.findFirst({
       where: { userId, deactivatedAt: null },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 }
 
 /**

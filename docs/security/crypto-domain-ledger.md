@@ -78,6 +78,31 @@ AAD version: `1` for all scopes.
 | HKDF hash | SHA-256 | All HKDF derivations |
 | HKDF empty salt | 32 zero bytes | When input has sufficient entropy |
 
+### HKDF Empty Salt Rationale
+
+Six of nine HKDF derivations use an empty (32 zero bytes) salt. This is a deliberate
+design choice, not an omission.
+
+**RFC 5869 §3.1** states: "if not available, [the salt] is set to a string of zeros
+(of length HashLen)." The extract step then produces `PRK = HMAC-Hash(salt, IKM)`.
+When the IKM is already uniformly random (which is the case for our `secretKey`,
+`teamKey`, `ItemKey`, and `recoveryKey` — all generated via `crypto.getRandomValues`
+with 256 bits of entropy), a zero salt is cryptographically acceptable because:
+
+1. The IKM provides full entropy input to HMAC — the salt's purpose (to
+   "standardize" weak IKM) is unnecessary.
+2. Domain separation is fully achieved through the unique `info` parameter
+   per derivation (see table above). No two derivations share the same
+   `(info, salt)` pair.
+3. Random salts are used where the IKM derives from a Diffie-Hellman shared
+   secret (team key wrap, emergency access), as the DH output has structure
+   that benefits from salt-based extraction.
+
+**Migration path**: If a future audit requires non-zero salts, the `info` version
+suffix (e.g., `-v1`) serves as the migration hook. A new version (e.g.,
+a v2 info string) can introduce random salts while maintaining backward
+compatibility via version-gated decryption.
+
 ---
 
 ## Key Derivation Chains

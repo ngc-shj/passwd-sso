@@ -1,42 +1,38 @@
-import { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT } from "../lib/constants";
+import { TOKEN_BRIDGE_MSG_TYPE } from "../lib/constants";
 
 function isContextValid(): boolean {
   try { return !!chrome.runtime?.id; }
   catch { return false; }
 }
 
-export function tryReadToken(): boolean {
-  const el = document.getElementById(TOKEN_ELEMENT_ID);
-  if (!el) return false;
-  if (!isContextValid()) return false;
-  const token = el.getAttribute("data-token");
-  const expiresAtRaw = el.getAttribute("data-expires-at");
-  const expiresAt = expiresAtRaw ? Number(expiresAtRaw) : NaN;
-  if (!token || !Number.isFinite(expiresAt)) {
-    el.remove();
+/**
+ * Validate and forward a postMessage token relay to the background script.
+ * Returns true if the message was valid and forwarded.
+ */
+export function handlePostMessage(event: MessageEvent): boolean {
+  // Origin validation: must come from the same window (not an iframe)
+  if (event.source !== window) return false;
+  if (event.origin !== window.location.origin) return false;
+
+  // Type discriminator check
+  if (!event.data || event.data.type !== TOKEN_BRIDGE_MSG_TYPE) return false;
+
+  const { token, expiresAt } = event.data;
+  if (typeof token !== "string" || typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
     return false;
   }
+
+  if (!isContextValid()) return false;
+
   chrome.runtime.sendMessage({
     type: "SET_TOKEN",
     token,
     expiresAt,
   });
-  el.remove();
   return true;
 }
 
-export function startObserver(): void {
-  if (!document?.body) return;
-  const observer = new MutationObserver(() => {
-    if (tryReadToken()) observer.disconnect();
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-  setTimeout(() => observer.disconnect(), 30_000);
-}
-
-/** Listen for custom event dispatched by injectExtensionToken(). Survives after observer timeout. */
-export function listenForTokenEvent(): void {
-  document.addEventListener(TOKEN_READY_EVENT, () => {
-    tryReadToken();
-  });
+/** Start listening for postMessage relay from the MAIN world relay script. */
+export function startPostMessageListener(): void {
+  window.addEventListener("message", handlePostMessage);
 }

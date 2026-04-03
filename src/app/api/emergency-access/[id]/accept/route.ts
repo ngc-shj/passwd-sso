@@ -10,7 +10,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -37,7 +37,7 @@ async function handlePOST(
     prisma.emergencyAccessGrant.findUnique({
       where: { id },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!grant) {
     return notFound();
@@ -84,7 +84,7 @@ async function handlePOST(
         },
       }),
     ]),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
@@ -101,7 +101,7 @@ async function handlePOST(
       where: { id: grant.ownerId },
       select: { email: true, name: true, locale: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   if (owner?.email) {
     const granteeName = session.user.name ?? session.user.email ?? "";
     const { subject, html, text } = emergencyGrantAcceptedEmail(resolveUserLocale(owner.locale), granteeName);

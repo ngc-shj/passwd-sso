@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized, notFound, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -82,7 +82,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       where: { id: actor.tenantId },
       select: { jitTokenDefaultTtlSec: true, jitTokenMaxTtlSec: true },
     }),
-  );
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   const defaultTtlSec = tenant?.jitTokenDefaultTtlSec ?? DEFAULT_JIT_TTL_SEC;
   const maxTtlSec = Math.min(tenant?.jitTokenMaxTtlSec ?? MAX_JIT_TTL_SEC, MAX_JIT_TTL_SEC);

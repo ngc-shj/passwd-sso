@@ -8,7 +8,7 @@ import { extractTenantClaimValue } from "@/lib/tenant-claim";
 import { sessionMetaStorage } from "@/lib/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";
-import { withBypassRls } from "@/lib/tenant-rls";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import authConfig from "./auth.config";
 
@@ -180,7 +180,7 @@ export async function ensureTenantMembershipForSignIn(
     });
 
     return found;
-  });
+  }, BYPASS_PURPOSE.AUTH_FLOW);
 
   return !!tenant;
 }
@@ -223,7 +223,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
               tenant: { select: { isBootstrap: true } },
             },
           }),
-        );
+        BYPASS_PURPOSE.AUTH_FLOW);
         // Existing user in a non-bootstrap (SSO) tenant → reject
         if (existingUser?.tenant && !existingUser.tenant.isBootstrap) {
           return false;
@@ -240,7 +240,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             where: { email: lookupEmail },
             select: { id: true },
           }),
-        );
+        BYPASS_PURPOSE.AUTH_FLOW);
         userId = existing?.id ?? null;
       }
 
