@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.20](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.19...passwd-sso-v0.4.20) (2026-04-03)
+
+
+### Bug Fixes
+
+* zero secretKeyBytes in lockVault() before releasing reference ([#314](https://github.com/ngc-shj/passwd-sso/issues/314)) ([93a284a](https://github.com/ngc-shj/passwd-sso/commit/93a284a427aea827595b02e3ccbb7de921b9f5a3))
+
 ## [0.4.19](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.18...passwd-sso-v0.4.19) (2026-04-02)
 
 
