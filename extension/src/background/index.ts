@@ -27,7 +27,7 @@ import {
   buildItemKeyWrapAAD,
   type TeamKeyWrapContext,
 } from "../lib/crypto-team";
-import { getSettings } from "../lib/storage";
+import { getSettings, validateSettings, TimeoutAction } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
@@ -89,9 +89,37 @@ const MAX_TEAMS = 10;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
-const CLIPBOARD_CLEAR_DELAY_MS = 30_000; // 30 seconds
 
 let lastClipboardCopyTime = 0;
+
+/** Schedule clipboard clear after a copy operation. */
+async function scheduleClipboardClear(clipboardClearSeconds: number): Promise<void> {
+  const clipMs = clipboardClearSeconds * 1000;
+  lastClipboardCopyTime = Date.now();
+  await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
+  setTimeout(async () => {
+    try {
+      if (Date.now() - lastClipboardCopyTime >= clipMs) {
+        await copyToClipboard("");
+      }
+    } catch {
+      // ignore — offscreen document may have been closed
+    }
+  }, clipMs);
+  chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+    delayInMinutes: Math.max((clipboardClearSeconds * 2) / 60, 1),
+  });
+}
+
+// In-memory cache for settings (updated via chrome.storage.onChanged + SW startup)
+let cachedShowBadgeCount = true;
+let cachedEnableContextMenu = true;
+let cachedEnableInlineSuggestions = true;
+let cachedClipboardClearSeconds = 30;
+let cachedAutoCopyTotp = true;
+let cachedShowSavePrompt = true;
+let cachedShowUpdatePrompt = true;
+let cachedVaultTimeoutAction: TimeoutAction = TimeoutAction.LOCK;
 
 /** Resolve effective auto-lock minutes: tenant policy > local setting */
 async function getEffectiveAutoLockMinutes(): Promise<number> {
@@ -244,6 +272,10 @@ async function clearAllTabBadges(): Promise<void> {
 
 async function updateBadgeForTab(tabId: number, url: string | undefined): Promise<void> {
   if (!currentToken || !encryptionKey) return;
+  if (!cachedShowBadgeCount) {
+    await chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
+    return;
+  }
   try {
     if (!url) {
       await chrome.action.setBadgeText({ text: "", tabId });
@@ -487,6 +519,19 @@ void configureSessionStorageAccess();
 // Hydrate on SW startup
 const hydrationPromise = hydrateFromSession().catch(() => {});
 
+// Initialize setting caches on SW startup
+getSettings().then((s) => {
+  const v = validateSettings(s);
+  cachedShowBadgeCount = v.showBadgeCount;
+  cachedEnableContextMenu = v.enableContextMenu;
+  cachedEnableInlineSuggestions = v.enableInlineSuggestions;
+  cachedClipboardClearSeconds = v.clipboardClearSeconds;
+  cachedAutoCopyTotp = v.autoCopyTotp;
+  cachedShowSavePrompt = v.showSavePrompt;
+  cachedShowUpdatePrompt = v.showUpdatePrompt;
+  cachedVaultTimeoutAction = v.vaultTimeoutAction;
+});
+
 // ── Context menu ─────────────────────────────────────────────
 
 initContextMenu({
@@ -495,6 +540,7 @@ initContextMenu({
   extractHost,
   isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
+  isContextMenuEnabled: async () => cachedEnableContextMenu,
   performAutofill: async (entryId, tabId, teamId) => {
     await performAutofillForEntry(entryId, tabId, undefined, teamId);
   },
@@ -552,7 +598,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           pendingSavePrompts.delete(tabId);
           return;
         }
-        setTimeout(() => {
+        setTimeout(async () => {
+          // Re-check prompt preferences at delivery time
+          if (pending.action === "save" && !cachedShowSavePrompt) {
+            pendingSavePrompts.delete(tabId);
+            return;
+          }
+          if (pending.action === "update" && !cachedShowUpdatePrompt) {
+            pendingSavePrompts.delete(tabId);
+            return;
+          }
           chrome.tabs.sendMessage(tabId, {
             type: "PSSO_SHOW_SAVE_BANNER",
             host: pending.host,
@@ -586,16 +641,24 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     clearToken();
   }
   if (alarm.name === ALARM_VAULT_LOCK) {
-    clearVault();
+    (async () => {
+      if (cachedVaultTimeoutAction === TimeoutAction.LOGOUT) {
+        await revokeCurrentTokenOnServer();
+        clearToken();
+      } else {
+        clearVault();
+      }
+    })().catch(() => {});
   }
   if (alarm.name === ALARM_TOKEN_REFRESH) {
     attemptTokenRefresh().catch(() => {});
   }
   if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
-    // Fallback clipboard clear: only clear if 30s+ since last copy
-    if (Date.now() - lastClipboardCopyTime >= CLIPBOARD_CLEAR_DELAY_MS) {
-      copyToClipboard("").catch(() => {});
-    }
+    (async () => {
+      if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * 1000) {
+        await copyToClipboard("");
+      }
+    })().catch(() => {});
   }
 });
 
@@ -604,17 +667,56 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.serverUrl?.newValue) {
     registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
   }
-  if (!changes.autoLockMinutes) return;
-  if (!encryptionKey) return;
-  // Tenant policy takes precedence — ignore local setting changes
-  if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) return;
-
-  const newValue = changes.autoLockMinutes.newValue;
-  if (typeof newValue !== "number" || !Number.isFinite(newValue)) return;
-
-  chrome.alarms.clear(ALARM_VAULT_LOCK);
-  if (newValue > 0) {
-    chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: newValue });
+  // Update in-memory caches
+  if (changes.showBadgeCount) cachedShowBadgeCount = changes.showBadgeCount.newValue !== false;
+  if (changes.enableContextMenu) cachedEnableContextMenu = changes.enableContextMenu.newValue !== false;
+  if (changes.enableInlineSuggestions) cachedEnableInlineSuggestions = changes.enableInlineSuggestions.newValue !== false;
+  if (changes.autoCopyTotp) cachedAutoCopyTotp = changes.autoCopyTotp.newValue !== false;
+  if (changes.showSavePrompt) cachedShowSavePrompt = changes.showSavePrompt.newValue !== false;
+  if (changes.showUpdatePrompt) cachedShowUpdatePrompt = changes.showUpdatePrompt.newValue !== false;
+  if (changes.clipboardClearSeconds) {
+    const raw = changes.clipboardClearSeconds.newValue;
+    if (typeof raw === "number" && raw > 0) cachedClipboardClearSeconds = raw;
+  }
+  if (changes.vaultTimeoutAction) {
+    const raw = changes.vaultTimeoutAction.newValue;
+    if (Object.values(TimeoutAction).includes(raw)) cachedVaultTimeoutAction = raw as TimeoutAction;
+  }
+  // Context menu toggle
+  if (changes.enableContextMenu) {
+    if (!cachedEnableContextMenu) {
+      chrome.contextMenus.removeAll().catch(() => {});
+    } else {
+      setupContextMenu();
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.id) updateContextMenuForTab(tabs[0].id, tabs[0].url);
+      });
+    }
+  }
+  // Badge toggle — refresh active tab badge
+  if (changes.showBadgeCount) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) void updateBadgeForTab(tabs[0].id, tabs[0].url);
+    });
+  }
+  // Clipboard clear delay — reschedule alarm if a copy is pending
+  if (changes.clipboardClearSeconds && lastClipboardCopyTime > 0) {
+    chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
+    chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+      delayInMinutes: Math.max((cachedClipboardClearSeconds * 2) / 60, 1),
+    });
+  }
+  // Auto-lock minutes
+  if (changes.autoLockMinutes) {
+    if (!encryptionKey) return;
+    // Tenant policy takes precedence — ignore local setting changes
+    if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) return;
+    const newValue = changes.autoLockMinutes.newValue;
+    if (typeof newValue !== "number" || !Number.isFinite(newValue)) return;
+    chrome.alarms.clear(ALARM_VAULT_LOCK);
+    if (newValue > 0) {
+      chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: newValue });
+    }
   }
 });
 
@@ -741,17 +843,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       // Copy via offscreen document (no page DOM manipulation, no focus stealing)
       await copyToClipboard(value);
 
-      // Schedule clipboard clear: setTimeout (30s) + alarm fallback (1min)
-      lastClipboardCopyTime = Date.now();
-      await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
-      setTimeout(async () => {
-        try {
-          await copyToClipboard("");
-        } catch {
-          // ignore — offscreen document may have been closed
-        }
-      }, CLIPBOARD_CLEAR_DELAY_MS);
-      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, { delayInMinutes: 1 });
+      await scheduleClipboardClear(cachedClipboardClearSeconds);
     } catch (err) {
       console.warn("[psso] copy command failed:", err);
     }
@@ -1469,6 +1561,15 @@ async function performAutofillForEntry(
       await injectDirectAutofill(null);
     }
   }
+
+  // Auto-copy TOTP to clipboard after successful LOGIN autofill
+  if (totpCode && entryType === EXT_ENTRY_TYPE.LOGIN) {
+    if (cachedAutoCopyTotp) {
+      await copyToClipboard(totpCode);
+      await scheduleClipboardClear(cachedClipboardClearSeconds);
+    }
+  }
+
   return { ok: true };
 }
 
@@ -1949,6 +2050,15 @@ async function handleMessage(
     }
 
     case "GET_MATCHES_FOR_URL": {
+      if (!cachedEnableInlineSuggestions) {
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: [],
+          vaultLocked: false,
+          suppressInline: true,
+        });
+        return;
+      }
       const effectiveUrl = message.topUrl ?? message.url;
       if (await isOwnAppPage(effectiveUrl)) {
         sendResponse({
@@ -2076,6 +2186,18 @@ async function handleMessage(
           message.username,
           message.password,
         );
+
+        // Check prompt preferences at detection time
+        if (result.action !== "none") {
+          if (result.action === "save" && !cachedShowSavePrompt) {
+            sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+            return;
+          }
+          if (result.action === "update" && !cachedShowUpdatePrompt) {
+            sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+            return;
+          }
+        }
 
         // Store pending save for this tab. After form submit the page
         // typically navigates, so the sendResponse callback on the content

@@ -35,6 +35,8 @@ run_step "Static: team-auth-rls"  node scripts/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/check-bypass-rls.mjs
 run_step "Static: crypto-domains" node scripts/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/check-migration-drift.mjs
+# Clear vitest cache to match CI's clean environment
+rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
 run_step "Test"                   npx vitest run
 run_step "Build"                  npx next build
 

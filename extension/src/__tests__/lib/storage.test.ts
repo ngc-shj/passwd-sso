@@ -19,7 +19,7 @@ beforeEach(() => {
   });
 });
 
-import { getSettings, setSettings } from "../../lib/storage";
+import { getSettings, setSettings, validateSettings, DEFAULTS } from "../../lib/storage";
 
 describe("getSettings", () => {
   it("returns defaults when storage is empty", async () => {
@@ -27,6 +27,15 @@ describe("getSettings", () => {
     expect(settings).toEqual({
       serverUrl: "https://localhost:3000",
       autoLockMinutes: 15,
+      theme: "system",
+      showBadgeCount: true,
+      enableInlineSuggestions: true,
+      enableContextMenu: true,
+      autoCopyTotp: true,
+      showSavePrompt: true,
+      showUpdatePrompt: true,
+      clipboardClearSeconds: 30,
+      vaultTimeoutAction: "lock",
     });
   });
 
@@ -45,6 +54,7 @@ describe("getSettings", () => {
     const settings = await getSettings();
     expect(settings.serverUrl).toBe("https://custom.dev");
     expect(settings.autoLockMinutes).toBe(15);
+    expect(settings.theme).toBe("system");
   });
 });
 
@@ -62,5 +72,63 @@ describe("setSettings", () => {
       serverUrl: "https://a.com",
       autoLockMinutes: 30,
     });
+  });
+});
+
+describe("validateSettings", () => {
+  it("returns valid settings unchanged", () => {
+    const result = validateSettings({ ...DEFAULTS });
+    expect(result).toEqual(DEFAULTS);
+  });
+
+  it("falls back invalid theme to default", () => {
+    const result = validateSettings({ ...DEFAULTS, theme: "neon" as any });
+    expect(result.theme).toBe("system");
+  });
+
+  it("falls back invalid clipboardClearSeconds to default", () => {
+    const result = validateSettings({ ...DEFAULTS, clipboardClearSeconds: 999 });
+    expect(result.clipboardClearSeconds).toBe(30);
+  });
+
+  it("falls back zero clipboardClearSeconds to default", () => {
+    const result = validateSettings({ ...DEFAULTS, clipboardClearSeconds: 0 });
+    expect(result.clipboardClearSeconds).toBe(30);
+  });
+
+  it("falls back invalid vaultTimeoutAction to default", () => {
+    const result = validateSettings({ ...DEFAULTS, vaultTimeoutAction: "delete" as any });
+    expect(result.vaultTimeoutAction).toBe("lock");
+  });
+
+  it("falls back non-boolean showBadgeCount to default", () => {
+    const result = validateSettings({ ...DEFAULTS, showBadgeCount: "true" as any });
+    expect(result.showBadgeCount).toBe(true);
+  });
+
+  it("falls back negative autoLockMinutes to default", () => {
+    const result = validateSettings({ ...DEFAULTS, autoLockMinutes: -5 });
+    expect(result.autoLockMinutes).toBe(15);
+  });
+
+  it("falls back NaN autoLockMinutes to default", () => {
+    const result = validateSettings({ ...DEFAULTS, autoLockMinutes: NaN });
+    expect(result.autoLockMinutes).toBe(15);
+  });
+
+  it("falls back empty serverUrl to default", () => {
+    const result = validateSettings({ ...DEFAULTS, serverUrl: "" });
+    expect(result.serverUrl).toBe("https://localhost:3000");
+  });
+
+  it("falls back non-string serverUrl to default", () => {
+    const result = validateSettings({ ...DEFAULTS, serverUrl: 123 as any });
+    expect(result.serverUrl).toBe("https://localhost:3000");
+  });
+
+  it("accepts valid clipboardClearSeconds values", () => {
+    for (const v of [10, 20, 30, 60, 120, 300]) {
+      expect(validateSettings({ ...DEFAULTS, clipboardClearSeconds: v }).clipboardClearSeconds).toBe(v);
+    }
   });
 });

@@ -21,6 +21,7 @@ export interface ContextMenuDeps {
   extractHost: (url: string) => string | null;
   isConnected: () => boolean;
   isVaultUnlocked: () => boolean;
+  isContextMenuEnabled: () => Promise<boolean>;
   performAutofill: (entryId: string, tabId: number, teamId?: string) => Promise<void>;
 }
 
@@ -30,18 +31,32 @@ export function initContextMenu(d: ContextMenuDeps): void {
   deps = d;
 }
 
-/**
- * Create the static parent menu item.
- * Call on `chrome.runtime.onInstalled` and `chrome.runtime.onStartup`.
- */
-export function setupContextMenu(): void {
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({
-      id: PARENT_ID,
-      title: t("contextMenu.title"),
-      contexts: ["editable"],
+let resetInFlight: Promise<void> | null = null;
+
+/** Remove all menu items and recreate parent if enabled. Serialized to prevent duplicate ID errors. */
+function resetMenuWithParent(): Promise<void> {
+  const run = async () => {
+    if (resetInFlight) await resetInFlight;
+    const enabled = deps ? await deps.isContextMenuEnabled() : true;
+    await new Promise<void>((resolve) => {
+      chrome.contextMenus.removeAll(() => {
+        if (enabled) {
+          chrome.contextMenus.create(
+            { id: PARENT_ID, title: t("contextMenu.title"), contexts: ["editable"] },
+            () => { void chrome.runtime.lastError; resolve(); },
+          );
+        } else {
+          resolve();
+        }
+      });
     });
-  });
+  };
+  resetInFlight = run().finally(() => { resetInFlight = null; });
+  return resetInFlight;
+}
+
+export async function setupContextMenu(): Promise<void> {
+  await resetMenuWithParent();
 }
 
 /**
@@ -204,18 +219,8 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
   }
 }
 
-function removeChildItems(): Promise<void> {
-  return new Promise((resolve) => {
-    // Remove all and recreate parent to clear children
-    chrome.contextMenus.removeAll(() => {
-      chrome.contextMenus.create({
-        id: PARENT_ID,
-        title: t("contextMenu.title"),
-        contexts: ["editable"],
-      });
-      resolve();
-    });
-  });
+async function removeChildItems(): Promise<void> {
+  await resetMenuWithParent();
 }
 
 /**

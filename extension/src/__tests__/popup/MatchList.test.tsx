@@ -7,9 +7,13 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 
 const mockSendMessage = vi.fn();
+const mockGetSettings = vi.fn();
 
 vi.mock("../../lib/messaging", () => ({
   sendMessage: (...args: unknown[]) => mockSendMessage(...args),
+}));
+vi.mock("../../lib/storage", () => ({
+  getSettings: () => mockGetSettings(),
 }));
 
 import { MatchList } from "../../popup/components/MatchList";
@@ -17,6 +21,7 @@ import { MatchList } from "../../popup/components/MatchList";
 describe("MatchList", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetSettings.mockResolvedValue({ clipboardClearSeconds: 30 });
     const clipboard = {
       writeText: vi.fn().mockResolvedValue(undefined),
     };

@@ -10,7 +10,7 @@ Object.defineProperty(navigator, "language", { value: "en-US", configurable: tru
 
 const chromeMock = {
   contextMenus: {
-    create: vi.fn(),
+    create: vi.fn((_props: unknown, cb?: () => void) => cb?.()),
     removeAll: vi.fn((cb?: () => void) => cb?.()),
     onClicked: {
       addListener: vi.fn(),
@@ -24,7 +24,10 @@ const chromeMock = {
   },
 };
 
-vi.stubGlobal("chrome", chromeMock);
+vi.stubGlobal("chrome", {
+  ...chromeMock,
+  runtime: { lastError: undefined },
+});
 
 import {
   initContextMenu,
@@ -49,6 +52,7 @@ function createDeps(overrides?: Partial<ContextMenuDeps>): ContextMenuDeps {
     }),
     isConnected: vi.fn().mockReturnValue(true),
     isVaultUnlocked: vi.fn().mockReturnValue(true),
+    isContextMenuEnabled: vi.fn().mockResolvedValue(true),
     performAutofill: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -66,8 +70,8 @@ describe("context-menu", () => {
   });
 
   describe("setupContextMenu", () => {
-    it("creates parent menu item", () => {
-      setupContextMenu();
+    it("creates parent menu item", async () => {
+      await setupContextMenu();
 
       expect(chromeMock.contextMenus.removeAll).toHaveBeenCalled();
       expect(chromeMock.contextMenus.create).toHaveBeenCalledWith(
@@ -76,6 +80,7 @@ describe("context-menu", () => {
           title: "passwd-sso",
           contexts: ["editable"],
         }),
+        expect.any(Function),
       );
     });
   });

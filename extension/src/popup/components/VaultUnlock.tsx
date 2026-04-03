@@ -44,11 +44,11 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
 
   return (
     <form onSubmit={handleSubmit} onKeyDown={(e) => { if (e.key === "Enter" && e.nativeEvent.isComposing) e.preventDefault(); }} className="flex flex-col gap-4 py-4">
-      <p className="text-sm text-gray-600">
+      <p className="text-sm text-gray-600 dark:text-gray-400">
         {t("popup.unlockDescription")}
       </p>
       {tabHost && (
-        <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 bg-gray-100 border border-gray-200 rounded-md">
+        <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md">
           <span className="shrink-0">🌐</span>
           <span>{t("popup.unlockSite", { host: tabHost })}</span>
         </div>
@@ -59,24 +59,24 @@ export function VaultUnlock({ onUnlocked, tabUrl }: Props) {
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           placeholder={t("popup.passphrasePlaceholder")}
-          className="h-10 flex-1 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 transition-shadow"
+          className="h-10 flex-1 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:focus:ring-gray-600 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow"
           autoFocus
         />
         <button
           type="button"
           onClick={() => setShowPassphrase((v) => !v)}
-          className="text-xs text-gray-600 px-2 py-1 rounded hover:bg-gray-100 hover:text-gray-800 active:bg-gray-200 transition-colors"
+          className="text-xs text-gray-600 dark:text-gray-400 px-2 py-1 rounded hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-800 dark:hover:text-gray-200 active:bg-gray-200 dark:active:bg-gray-700 transition-colors"
         >
           {showPassphrase ? t("popup.hide") : t("popup.show")}
         </button>
       </div>
       {error && (
-        <p className="text-sm text-red-600">{humanizeError(error)}</p>
+        <p className="text-sm text-red-600 dark:text-red-400">{humanizeError(error)}</p>
       )}
       <button
         type="submit"
         disabled={loading || !passphrase.trim()}
-        className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        className="px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {loading ? t("popup.unlocking") : t("popup.unlock")}
       </button>
