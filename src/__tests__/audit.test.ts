@@ -26,6 +26,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit-retry", () => ({
   enqueue: mockEnqueue,
   drainBuffer: mockDrainBuffer,
+  bufferSize: () => 0,
 }));
 
 vi.mock("@/lib/audit-logger", () => ({

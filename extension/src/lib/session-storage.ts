@@ -44,14 +44,11 @@ function isEncryptedField(v: unknown): v is EncryptedField {
 }
 
 export async function persistSession(state: SessionState): Promise<void> {
-  const encryptedToken = await encryptField(state.token);
+  const [encryptedToken, encryptedVaultSecretKey] = await Promise.all([
+    encryptField(state.token),
+    state.vaultSecretKey ? encryptField(state.vaultSecretKey) : Promise.resolve(undefined),
+  ]);
   if (!encryptedToken) return; // Encryption failed — don't persist
-
-  let encryptedVaultSecretKey: EncryptedField | undefined;
-  if (state.vaultSecretKey) {
-    const enc = await encryptField(state.vaultSecretKey);
-    if (enc) encryptedVaultSecretKey = enc;
-  }
 
   const stored: StoredSessionState = {
     encryptedToken,

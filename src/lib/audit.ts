@@ -11,11 +11,20 @@ import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
-import { enqueue, drainBuffer, type BufferedAuditEntry } from "@/lib/audit-retry";
+import { enqueue, drainBuffer, bufferSize, type BufferedAuditEntry } from "@/lib/audit-retry";
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+
+/** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
+function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (!metadata) return undefined;
+  const json = JSON.stringify(metadata);
+  return json.length <= METADATA_MAX_BYTES
+    ? metadata
+    : { _truncated: true, _originalSize: json.length };
+}
 
 /**
  * Audit actions that must NOT trigger webhook dispatch.
@@ -91,21 +100,12 @@ export function sanitizeMetadata(value: unknown): unknown {
 export function logAudit(params: AuditLogParams): void {
   const { scope, action, userId, actorType, serviceAccountId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
 
-  // Truncate metadata if too large
-  let safeMetadata: Record<string, unknown> | undefined;
-  if (metadata) {
-    const json = JSON.stringify(metadata);
-    if (json.length <= METADATA_MAX_BYTES) {
-      safeMetadata = metadata;
-    } else {
-      safeMetadata = { _truncated: true, _originalSize: json.length };
-    }
-  }
+  const safeMetadata = truncateMetadata(metadata);
 
   const safeUserAgent = userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
 
   // --- Piggyback flush: drain buffered retry entries (fire-and-forget) ---
-  void drainBuffer().catch(() => {});
+  if (bufferSize() > 0) void drainBuffer().catch(() => {});
 
   // --- DB write + webhook dispatch ---
   void (async () => {
@@ -230,7 +230,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
   if (paramsList.length === 0) return;
 
   // --- Piggyback flush: drain buffered retry entries (fire-and-forget) ---
-  void drainBuffer().catch(() => {});
+  if (bufferSize() > 0) void drainBuffer().catch(() => {});
 
   // --- DB write: resolve tenantId once, then createMany, then dispatch ---
   void (async () => {
@@ -257,28 +257,18 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
         if (!resolvedTenantId) return;
 
         await prisma.auditLog.createMany({
-          data: paramsList.map((p) => {
-            let safeMetadata: Record<string, unknown> | undefined;
-            if (p.metadata) {
-              const json = JSON.stringify(p.metadata);
-              safeMetadata =
-                json.length <= METADATA_MAX_BYTES
-                  ? p.metadata
-                  : { _truncated: true, _originalSize: json.length };
-            }
-            return {
-              scope: p.scope,
-              action: p.action,
-              userId: p.userId,
-              tenantId: resolvedTenantId!,
-              teamId: p.teamId ?? null,
-              targetType: p.targetType ?? null,
-              targetId: p.targetId ?? null,
-              metadata: safeMetadata as never ?? undefined,
-              ip: p.ip ?? null,
-              userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-            };
-          }),
+          data: paramsList.map((p) => ({
+            scope: p.scope,
+            action: p.action,
+            userId: p.userId,
+            tenantId: resolvedTenantId!,
+            teamId: p.teamId ?? null,
+            targetType: p.targetType ?? null,
+            targetId: p.targetId ?? null,
+            metadata: truncateMetadata(p.metadata) as never ?? undefined,
+            ip: p.ip ?? null,
+            userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+          })),
         });
       }, BYPASS_PURPOSE.AUDIT_WRITE);
     } catch (err) {
@@ -286,14 +276,6 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
       // Enqueue each entry individually for retry if tenantId was resolved
       if (resolvedTenantId) {
         for (const p of paramsList) {
-          let safeMetadata: Record<string, unknown> | undefined;
-          if (p.metadata) {
-            const json = JSON.stringify(p.metadata);
-            safeMetadata =
-              json.length <= METADATA_MAX_BYTES
-                ? p.metadata
-                : { _truncated: true, _originalSize: json.length };
-          }
           enqueue({
             scope: p.scope,
             action: p.action,
@@ -304,7 +286,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
             teamId: p.teamId ?? null,
             targetType: p.targetType ?? null,
             targetId: p.targetId ?? null,
-            metadata: safeMetadata,
+            metadata: truncateMetadata(p.metadata),
             ip: p.ip ?? null,
             userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
             retryCount: 0,
@@ -321,13 +303,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
       const timestamp = new Date().toISOString();
       for (const p of paramsList) {
         if (WEBHOOK_DISPATCH_SUPPRESS.has(p.action)) continue;
-        let webhookMeta: Record<string, unknown> = {};
-        if (p.metadata) {
-          const json = JSON.stringify(p.metadata);
-          webhookMeta = json.length <= METADATA_MAX_BYTES
-            ? p.metadata
-            : { _truncated: true, _originalSize: json.length };
-        }
+        const webhookMeta = truncateMetadata(p.metadata) ?? {};
         if (p.scope === "TEAM" && p.teamId) {
           void dispatchWebhook({ type: p.action, teamId: p.teamId, timestamp, data: webhookMeta });
         } else if (p.scope === "TENANT" && resolvedTenantId) {
@@ -339,14 +315,6 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
 
   // --- Structured JSON emit per entry for external forwarding ---
   for (const p of paramsList) {
-    let safeMetadata: Record<string, unknown> | undefined;
-    if (p.metadata) {
-      const json = JSON.stringify(p.metadata);
-      safeMetadata =
-        json.length <= METADATA_MAX_BYTES
-          ? p.metadata
-          : { _truncated: true, _originalSize: json.length };
-    }
     const safeUserAgent = p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
     try {
       auditLogger.info(
@@ -358,7 +326,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
             teamId: p.teamId ?? null,
             targetType: p.targetType ?? null,
             targetId: p.targetId ?? null,
-            metadata: sanitizeMetadata(safeMetadata),
+            metadata: sanitizeMetadata(truncateMetadata(p.metadata)),
             ip: p.ip ?? null,
             userAgent: safeUserAgent,
           },

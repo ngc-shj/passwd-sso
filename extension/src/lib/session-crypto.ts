@@ -7,6 +7,8 @@
  * and the user must re-authenticate.
  */
 
+import { hexEncode } from "./crypto";
+
 const IV_LENGTH = 12;
 
 export interface EncryptedField {
@@ -29,11 +31,7 @@ async function getOrCreateKey(): Promise<CryptoKey> {
   return ephemeralKeyPromise;
 }
 
-function hexEncode(buf: ArrayBuffer | Uint8Array): string {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
+/** Validating hexDecode — throws on malformed input (defense-in-depth for storage tampering). */
 function hexDecode(hex: string): Uint8Array {
   if (hex.length % 2 !== 0 || !/^[0-9a-f]*$/i.test(hex)) {
     throw new RangeError("invalid hex string");
