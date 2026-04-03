@@ -10,8 +10,8 @@ export function LoginPrompt() {
     getSettings().then((s) => setServerUrl(s.serverUrl));
   }, []);
 
-  const handleLogin = async () => {
-    const { serverUrl } = await getSettings();
+  const handleLogin = () => {
+    if (!serverUrl) return;
     chrome.tabs.create({ url: `${serverUrl}/dashboard?${EXT_CONNECT_PARAM}=1` });
   };
 

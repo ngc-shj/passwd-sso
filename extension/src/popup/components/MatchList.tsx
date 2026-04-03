@@ -51,21 +51,19 @@ export function MatchList({ tabUrl }: Props) {
     });
   }, []);
 
+  const copyAndScheduleClear = async (value: string, successMsg: string) => {
+    await navigator.clipboard.writeText(value);
+    setToast({ message: successMsg, type: "success" });
+    setTimeout(() => setToast(null), 2000);
+    const { clipboardClearSeconds } = await getSettings();
+    setTimeout(() => { navigator.clipboard.writeText("").catch(() => {}); }, clipboardClearSeconds * 1000);
+  };
+
   const handleCopy = async (entryId: string, teamId?: string) => {
     const res = await sendMessage({ type: "COPY_PASSWORD", entryId, teamId });
     if (res.password) {
-      try {
-        await navigator.clipboard.writeText(res.password);
-        setToast({ message: t("popup.passwordCopied"), type: "success" });
-        setTimeout(() => setToast(null), 2000);
-        // Best-effort clipboard clear using configured delay
-        const { clipboardClearSeconds } = await getSettings();
-        setTimeout(() => {
-          navigator.clipboard.writeText("").catch(() => {});
-        }, clipboardClearSeconds * 1000);
-      } catch {
-        setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
-      }
+      try { await copyAndScheduleClear(res.password, t("popup.passwordCopied")); }
+      catch { setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" }); }
     } else {
       setToast({ message: humanizeError(res.error || "COPY_FAILED"), type: "error" });
     }
@@ -74,22 +72,10 @@ export function MatchList({ tabUrl }: Props) {
   const handleCopyTotp = async (entryId: string, teamId?: string) => {
     const res = await sendMessage({ type: "COPY_TOTP", entryId, teamId });
     if (res.code) {
-      try {
-        await navigator.clipboard.writeText(res.code);
-        setToast({ message: t("popup.totpCopied"), type: "success" });
-        setTimeout(() => setToast(null), 2000);
-        const { clipboardClearSeconds } = await getSettings();
-        setTimeout(() => {
-          navigator.clipboard.writeText("").catch(() => {});
-        }, clipboardClearSeconds * 1000);
-      } catch {
-        setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
-      }
+      try { await copyAndScheduleClear(res.code, t("popup.totpCopied")); }
+      catch { setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" }); }
     } else {
-      setToast({
-        message: humanizeError(res.error || "COPY_TOTP_FAILED"),
-        type: "error",
-      });
+      setToast({ message: humanizeError(res.error || "COPY_TOTP_FAILED"), type: "error" });
     }
   };
 
@@ -274,9 +260,7 @@ export function MatchList({ tabUrl }: Props) {
                   {e.username && (
                     <div className="text-xs text-gray-600 dark:text-gray-400">{e.username}</div>
                   )}
-                  {displayHost(e) && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{displayHost(e)}</div>
-                  )}
+                  {(() => { const h = displayHost(e); return h ? <div className="text-xs text-gray-500 dark:text-gray-400">{h}</div> : null; })()}
                 </li>
               ))}
             </ul>
@@ -335,9 +319,7 @@ export function MatchList({ tabUrl }: Props) {
                   {e.username && (
                     <div className="text-xs text-gray-600 dark:text-gray-400">{e.username}</div>
                   )}
-                  {displayHost(e) && (
-                    <div className="text-xs text-gray-500 dark:text-gray-400">{displayHost(e)}</div>
-                  )}
+                  {(() => { const h = displayHost(e); return h ? <div className="text-xs text-gray-500 dark:text-gray-400">{h}</div> : null; })()}
                 </li>
               ))}
             </ul>
