@@ -282,8 +282,12 @@ export function App() {
               </p>
             ) : (
               commands.map((cmd) => {
-                const desc = cmd.description?.replace(/__MSG_(\w+)__/g, (_m, key) =>
-                  chrome.i18n?.getMessage(key) || key) || cmd.name;
+                let desc = cmd.description?.replace(/__MSG_(\w+)__/g, (_m, key) =>
+                  chrome.i18n?.getMessage(key) || key) || "";
+                if (!desc && cmd.name === "_execute_action") {
+                  desc = chrome.i18n?.getMessage("cmdOpenPopup") || "Open popup";
+                }
+                if (!desc) desc = cmd.name ?? "Unknown";
                 return (
                   <div key={cmd.name} className="flex items-center justify-between gap-4 py-3">
                     <span className="text-sm text-gray-700 dark:text-gray-200">
