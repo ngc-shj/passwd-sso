@@ -7,6 +7,8 @@ import { initLoginDetector } from "./login-detector-lib";
 // Register AUTOFILL_FILL listener so autofill works without chrome.scripting.executeScript
 // (which requires host permissions or activeTab that may not be available).
 import "./autofill-lib";
+// Register WebAuthn bridge for passkey provider (MAIN world ↔ ISOLATED world)
+import "./webauthn-bridge";
 
 // Guard against double-injection per frame: manifest content_scripts may already be
 // attached, but programmatic executeScript (from popup after permission grant)

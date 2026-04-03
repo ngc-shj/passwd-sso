@@ -34,4 +34,9 @@ export const EXT_ENTRY_TYPE = {
   LOGIN: "LOGIN",
   CREDIT_CARD: "CREDIT_CARD",
   IDENTITY: "IDENTITY",
+  PASSKEY: "PASSKEY",
 } as const;
+
+// ── WebAuthn bridge (MAIN world ↔ content script) ──
+export const WEBAUTHN_BRIDGE_MSG = "PASSWD_SSO_WEBAUTHN";
+export const WEBAUTHN_BRIDGE_RESP = "PASSWD_SSO_WEBAUTHN_RESP";

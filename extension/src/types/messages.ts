@@ -25,7 +25,24 @@ export type ExtensionMessage =
   | { type: "CHECK_PENDING_SAVE" }
   | { type: "AUTOFILL_CREDIT_CARD"; entryId: string; tabId: number; teamId?: string }
   | { type: "AUTOFILL_IDENTITY"; entryId: string; tabId: number; teamId?: string }
-  | { type: "KEEPALIVE_PING" };
+  | { type: "KEEPALIVE_PING" }
+  | { type: "PASSKEY_GET_MATCHES"; rpId: string }
+  | {
+      type: "PASSKEY_SIGN_ASSERTION";
+      entryId: string;
+      clientDataJSON: string;
+      teamId?: string;
+    }
+  | {
+      type: "PASSKEY_CREATE_CREDENTIAL";
+      rpId: string;
+      rpName: string;
+      userId: string;
+      userName: string;
+      userDisplayName: string;
+      challenge: string;
+      excludeCredentialIds: string[];
+    };
 
 export interface DecryptedEntry {
   id: string;
@@ -36,6 +53,35 @@ export interface DecryptedEntry {
   entryType: string;
   teamId?: string;
   teamName?: string;
+  // Passkey provider fields (populated for PASSKEY entries)
+  relyingPartyId?: string;
+  credentialId?: string;
+}
+
+// ── Passkey provider types ──
+
+export interface PasskeyMatchEntry {
+  id: string;
+  title: string;
+  username: string;
+  relyingPartyId: string;
+  credentialId: string;
+  teamId?: string;
+}
+
+export interface SerializedAssertionResponse {
+  credentialId: string;
+  authenticatorData: string;
+  signature: string;
+  userHandle: string | null;
+  clientDataJSON: string;
+}
+
+export interface SerializedAttestationResponse {
+  credentialId: string;
+  attestationObject: string;
+  clientDataJSON: string;
+  transports: string[];
 }
 
 export type ExtensionResponse =
@@ -71,7 +117,24 @@ export type ExtensionResponse =
       existingTitle?: string;
     }
   | { type: "AUTOFILL_CREDIT_CARD"; ok: boolean; error?: string }
-  | { type: "AUTOFILL_IDENTITY"; ok: boolean; error?: string };
+  | { type: "AUTOFILL_IDENTITY"; ok: boolean; error?: string }
+  | {
+      type: "PASSKEY_GET_MATCHES";
+      entries: PasskeyMatchEntry[];
+      vaultLocked: boolean;
+    }
+  | {
+      type: "PASSKEY_SIGN_ASSERTION";
+      ok: boolean;
+      response?: SerializedAssertionResponse;
+      error?: string;
+    }
+  | {
+      type: "PASSKEY_CREATE_CREDENTIAL";
+      ok: boolean;
+      response?: SerializedAttestationResponse;
+      error?: string;
+    };
 
 export interface AutofillPayload {
   type: "AUTOFILL_FILL";

@@ -41,6 +41,14 @@ export interface PersonalPasswordEditData {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  // Passkey provider fields (opaque, preserved on round-trip)
+  passkeyPrivateKeyJwk?: string | null;
+  passkeyPublicKeyCose?: string | null;
+  passkeyUserHandle?: string | null;
+  passkeyUserDisplayName?: string | null;
+  passkeySignCount?: number | null;
+  passkeyAlgorithm?: number | null;
+  passkeyTransports?: string[] | null;
   bankName?: string | null;
   accountType?: string | null;
   accountHolderName?: string | null;

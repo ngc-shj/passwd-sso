@@ -61,6 +61,12 @@ import {
   handleSaveLogin,
   handleUpdateLogin,
 } from "./login-save";
+import {
+  initPasskeyProvider,
+  handlePasskeyGetMatches,
+  handlePasskeySignAssertion,
+  handlePasskeyCreateCredential,
+} from "./passkey-provider";
 import { copyToClipboard } from "./clipboard";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
@@ -558,8 +564,31 @@ initLoginSave({
   invalidateCache,
 });
 
-chrome.runtime.onInstalled.addListener(() => {
+initPasskeyProvider({
+  getEncryptionKey: () => encryptionKey,
+  getCurrentUserId: () => currentUserId,
+  getCachedEntries,
+  swFetch,
+  invalidateCache,
+});
+
+chrome.runtime.onInstalled.addListener(async () => {
   setupContextMenu();
+
+  // Register MAIN world WebAuthn interceptor for passkey provider
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: ["webauthn-interceptor"] }).catch(() => {});
+    await chrome.scripting.registerContentScripts([{
+      id: "webauthn-interceptor",
+      matches: ["https://*/*", "http://localhost/*"],
+      js: ["src/content/webauthn-interceptor.js"],
+      runAt: "document_start",
+      world: "MAIN" as chrome.scripting.ExecutionWorld,
+      allFrames: true,
+    }]);
+  } catch {
+    // Silently fail if scripting API is unavailable
+  }
 });
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenu();
@@ -891,7 +920,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   if (!encryptionKey || !currentUserId) return [];
   // Defense-in-depth: API should already filter these, but exclude
   // trashed/archived entries client-side in case of stale cache or API bug.
-  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY]);
+  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY]);
   const active = raw.filter((item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType));
   const entries: DecryptedEntry[] = [];
   for (const item of active) {
@@ -912,6 +941,8 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         additionalUrlHosts?: string[];
         cardholderName?: string;
         fullName?: string;
+        relyingPartyId?: string;
+        credentialId?: string;
       };
       const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
         ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
@@ -927,6 +958,8 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         urlHost: overview.urlHost ?? "",
         ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
         entryType: item.entryType,
+        ...(overview.relyingPartyId && { relyingPartyId: overview.relyingPartyId }),
+        ...(overview.credentialId && { credentialId: overview.credentialId }),
       });
     } catch {
       // Skip entries that fail to decrypt/parse
@@ -1045,7 +1078,7 @@ async function decryptTeamOverviews(
   teamName: string,
   raw: RawTeamEntry[],
 ): Promise<DecryptedEntry[]> {
-  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY]);
+  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY]);
   const active = raw.filter(
     (item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType),
   );
@@ -2302,6 +2335,44 @@ async function handleMessage(
       return;
     }
 
+    case "PASSKEY_GET_MATCHES": {
+      const result = await handlePasskeyGetMatches(message.rpId);
+      sendResponse({ type: "PASSKEY_GET_MATCHES", ...result } as ExtensionResponse);
+      return;
+    }
+
+    case "PASSKEY_SIGN_ASSERTION": {
+      try {
+        const result = await handlePasskeySignAssertion(
+          message.entryId,
+          message.clientDataJSON,
+          message.teamId,
+        );
+        sendResponse({ type: "PASSKEY_SIGN_ASSERTION", ...result } as ExtensionResponse);
+      } catch {
+        sendResponse({ type: "PASSKEY_SIGN_ASSERTION", ok: false, error: "SIGN_FAILED" } as ExtensionResponse);
+      }
+      return;
+    }
+
+    case "PASSKEY_CREATE_CREDENTIAL": {
+      try {
+        const result = await handlePasskeyCreateCredential(
+          message.rpId,
+          message.rpName,
+          message.userId,
+          message.userName,
+          message.userDisplayName,
+          message.challenge,
+          message.excludeCredentialIds,
+        );
+        sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ...result } as ExtensionResponse);
+      } catch {
+        sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false, error: "CREATE_FAILED" } as ExtensionResponse);
+      }
+      return;
+    }
+
     case "CHECK_PENDING_SAVE": {
       const tabId = _sender.tab?.id;
       if (!tabId) {
@@ -2384,6 +2455,15 @@ chrome.runtime.onMessage.addListener(
             break;
           case "AUTOFILL_IDENTITY":
             sendResponse({ type: "AUTOFILL_IDENTITY", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "PASSKEY_GET_MATCHES":
+            sendResponse({ type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true } as ExtensionResponse);
+            break;
+          case "PASSKEY_SIGN_ASSERTION":
+            sendResponse({ type: "PASSKEY_SIGN_ASSERTION", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case "PASSKEY_CREATE_CREDENTIAL":
+            sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
           default:
             sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

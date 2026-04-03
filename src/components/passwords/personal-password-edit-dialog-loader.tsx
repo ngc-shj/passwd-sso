@@ -60,6 +60,13 @@ interface VaultEntryFull {
   credentialId?: string | null;
   creationDate?: string | null;
   deviceInfo?: string | null;
+  passkeyPrivateKeyJwk?: string | null;
+  passkeyPublicKeyCose?: string | null;
+  passkeyUserHandle?: string | null;
+  passkeyUserDisplayName?: string | null;
+  passkeySignCount?: number | null;
+  passkeyAlgorithm?: number | null;
+  passkeyTransports?: string[] | null;
   bankName?: string | null;
   accountType?: string | null;
   accountHolderName?: string | null;
@@ -171,6 +178,13 @@ export function PasswordEditDialogLoader({
           credentialId: entry.credentialId,
           creationDate: entry.creationDate,
           deviceInfo: entry.deviceInfo,
+          passkeyPrivateKeyJwk: entry.passkeyPrivateKeyJwk,
+          passkeyPublicKeyCose: entry.passkeyPublicKeyCose,
+          passkeyUserHandle: entry.passkeyUserHandle,
+          passkeyUserDisplayName: entry.passkeyUserDisplayName,
+          passkeySignCount: entry.passkeySignCount,
+          passkeyAlgorithm: entry.passkeyAlgorithm,
+          passkeyTransports: entry.passkeyTransports,
           bankName: entry.bankName,
           accountType: entry.accountType,
           accountHolderName: entry.accountHolderName,
