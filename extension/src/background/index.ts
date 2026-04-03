@@ -111,9 +111,15 @@ async function scheduleClipboardClear(clipboardClearSeconds: number): Promise<vo
   });
 }
 
-// In-memory cache for hot-path settings (updated via chrome.storage.onChanged)
+// In-memory cache for settings (updated via chrome.storage.onChanged + SW startup)
 let cachedShowBadgeCount = true;
 let cachedEnableContextMenu = true;
+let cachedEnableInlineSuggestions = true;
+let cachedClipboardClearSeconds = 30;
+let cachedAutoCopyTotp = true;
+let cachedShowSavePrompt = true;
+let cachedShowUpdatePrompt = true;
+let cachedVaultTimeoutAction: "lock" | "logout" = "lock";
 
 /** Resolve effective auto-lock minutes: tenant policy > local setting */
 async function getEffectiveAutoLockMinutes(): Promise<number> {
@@ -518,6 +524,12 @@ getSettings().then((s) => {
   const v = validateSettings(s);
   cachedShowBadgeCount = v.showBadgeCount;
   cachedEnableContextMenu = v.enableContextMenu;
+  cachedEnableInlineSuggestions = v.enableInlineSuggestions;
+  cachedClipboardClearSeconds = v.clipboardClearSeconds;
+  cachedAutoCopyTotp = v.autoCopyTotp;
+  cachedShowSavePrompt = v.showSavePrompt;
+  cachedShowUpdatePrompt = v.showUpdatePrompt;
+  cachedVaultTimeoutAction = v.vaultTimeoutAction;
 });
 
 // ── Context menu ─────────────────────────────────────────────
@@ -588,12 +600,11 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         }
         setTimeout(async () => {
           // Re-check prompt preferences at delivery time
-          const deliverySettings = validateSettings(await getSettings());
-          if (pending.action === "save" && !deliverySettings.showSavePrompt) {
+          if (pending.action === "save" && !cachedShowSavePrompt) {
             pendingSavePrompts.delete(tabId);
             return;
           }
-          if (pending.action === "update" && !deliverySettings.showUpdatePrompt) {
+          if (pending.action === "update" && !cachedShowUpdatePrompt) {
             pendingSavePrompts.delete(tabId);
             return;
           }
@@ -631,8 +642,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === ALARM_VAULT_LOCK) {
     (async () => {
-      const { vaultTimeoutAction } = validateSettings(await getSettings());
-      if (vaultTimeoutAction === "logout") {
+      if (cachedVaultTimeoutAction === "logout") {
         await revokeCurrentTokenOnServer();
         clearToken();
       } else {
@@ -645,8 +655,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
     (async () => {
-      const { clipboardClearSeconds } = validateSettings(await getSettings());
-      if (Date.now() - lastClipboardCopyTime >= clipboardClearSeconds * 1000) {
+      if (Date.now() - lastClipboardCopyTime >= cachedClipboardClearSeconds * 1000) {
         await copyToClipboard("");
       }
     })().catch(() => {});
@@ -659,11 +668,19 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
     registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
   }
   // Update in-memory caches
-  if (changes.showBadgeCount) {
-    cachedShowBadgeCount = changes.showBadgeCount.newValue !== false;
+  if (changes.showBadgeCount) cachedShowBadgeCount = changes.showBadgeCount.newValue !== false;
+  if (changes.enableContextMenu) cachedEnableContextMenu = changes.enableContextMenu.newValue !== false;
+  if (changes.enableInlineSuggestions) cachedEnableInlineSuggestions = changes.enableInlineSuggestions.newValue !== false;
+  if (changes.autoCopyTotp) cachedAutoCopyTotp = changes.autoCopyTotp.newValue !== false;
+  if (changes.showSavePrompt) cachedShowSavePrompt = changes.showSavePrompt.newValue !== false;
+  if (changes.showUpdatePrompt) cachedShowUpdatePrompt = changes.showUpdatePrompt.newValue !== false;
+  if (changes.clipboardClearSeconds) {
+    const raw = changes.clipboardClearSeconds.newValue;
+    if (typeof raw === "number" && raw > 0) cachedClipboardClearSeconds = raw;
   }
-  if (changes.enableContextMenu) {
-    cachedEnableContextMenu = changes.enableContextMenu.newValue !== false;
+  if (changes.vaultTimeoutAction) {
+    const raw = changes.vaultTimeoutAction.newValue;
+    if (raw === "lock" || raw === "logout") cachedVaultTimeoutAction = raw;
   }
   // Context menu toggle
   if (changes.enableContextMenu) {
@@ -684,13 +701,10 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
   // Clipboard clear delay — reschedule alarm if a copy is pending
   if (changes.clipboardClearSeconds && lastClipboardCopyTime > 0) {
-    const raw = changes.clipboardClearSeconds.newValue;
-    if (typeof raw === "number" && raw > 0) {
-      chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
-      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
-        delayInMinutes: Math.max((raw * 2) / 60, 1),
-      });
-    }
+    chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
+    chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+      delayInMinutes: Math.max((cachedClipboardClearSeconds * 2) / 60, 1),
+    });
   }
   // Auto-lock minutes
   if (changes.autoLockMinutes) {
@@ -829,9 +843,7 @@ chrome.commands.onCommand.addListener(async (command) => {
       // Copy via offscreen document (no page DOM manipulation, no focus stealing)
       await copyToClipboard(value);
 
-      // Schedule clipboard clear
-      const { clipboardClearSeconds } = validateSettings(await getSettings());
-      await scheduleClipboardClear(clipboardClearSeconds);
+      await scheduleClipboardClear(cachedClipboardClearSeconds);
     } catch (err) {
       console.warn("[psso] copy command failed:", err);
     }
@@ -1552,10 +1564,9 @@ async function performAutofillForEntry(
 
   // Auto-copy TOTP to clipboard after successful LOGIN autofill
   if (totpCode && entryType === EXT_ENTRY_TYPE.LOGIN) {
-    const { autoCopyTotp, clipboardClearSeconds } = validateSettings(await getSettings());
-    if (autoCopyTotp) {
+    if (cachedAutoCopyTotp) {
       await copyToClipboard(totpCode);
-      await scheduleClipboardClear(clipboardClearSeconds);
+      await scheduleClipboardClear(cachedClipboardClearSeconds);
     }
   }
 
@@ -2039,8 +2050,7 @@ async function handleMessage(
     }
 
     case "GET_MATCHES_FOR_URL": {
-      const { enableInlineSuggestions } = validateSettings(await getSettings());
-      if (!enableInlineSuggestions) {
+      if (!cachedEnableInlineSuggestions) {
         sendResponse({
           type: "GET_MATCHES_FOR_URL",
           entries: [],
@@ -2179,12 +2189,11 @@ async function handleMessage(
 
         // Check prompt preferences at detection time
         if (result.action !== "none") {
-          const promptSettings = validateSettings(await getSettings());
-          if (result.action === "save" && !promptSettings.showSavePrompt) {
+          if (result.action === "save" && !cachedShowSavePrompt) {
             sendResponse({ type: "LOGIN_DETECTED", action: "none" });
             return;
           }
-          if (result.action === "update" && !promptSettings.showUpdatePrompt) {
+          if (result.action === "update" && !cachedShowUpdatePrompt) {
             sendResponse({ type: "LOGIN_DETECTED", action: "none" });
             return;
           }
