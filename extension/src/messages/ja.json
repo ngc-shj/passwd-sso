@@ -71,7 +71,7 @@
     "vaultTimeoutLock": "ロック",
     "vaultTimeoutLogout": "ログアウト",
     "vaultTimeoutLogoutHint": "ログアウトするとセッションが失効し、再認証が必要になります。",
-    "shortcutsHint": "ショートカットはブラウザで設定します。",
+    "shortcutsHint": "ショートカットはブラウザで設定します。「未設定」と表示されていても実際には有効な場合があります。",
     "customizeShortcuts": "ブラウザの設定で変更",
     "noShortcut": "未設定",
     "version": "バージョン",

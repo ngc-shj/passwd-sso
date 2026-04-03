@@ -304,11 +304,12 @@ export function App() {
                 );
               })
             )}
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col gap-2">
+              <p className="text-xs text-gray-400 dark:text-gray-500">{t("options.shortcutsHint")}</p>
               <button
                 type="button"
                 onClick={() => chrome.tabs.create({ url: "chrome://extensions/shortcuts" })}
-                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                className="text-sm text-blue-600 dark:text-blue-400 hover:underline text-left"
               >
                 {t("options.customizeShortcuts")}
               </button>

@@ -71,7 +71,7 @@
     "vaultTimeoutLock": "Lock",
     "vaultTimeoutLogout": "Log out",
     "vaultTimeoutLogoutHint": "Logging out revokes the session and requires re-authentication.",
-    "shortcutsHint": "Shortcuts are configured in the browser.",
+    "shortcutsHint": "Shortcuts are configured in the browser. Some shortcuts may be active even if shown as \"Not set\" here.",
     "customizeShortcuts": "Customize in browser settings",
     "noShortcut": "Not set",
     "version": "Version",
