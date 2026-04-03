@@ -17,17 +17,17 @@ export function LoginPrompt() {
 
   return (
     <div className="flex flex-col items-center justify-center gap-4 py-8">
-      <p className="text-sm text-gray-600 text-center">
+      <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
         {t("popup.signIn")}
       </p>
       {serverUrl && (
-        <p className="text-xs text-gray-500 break-all text-center">
+        <p className="text-xs text-gray-500 dark:text-gray-400 break-all text-center">
           {serverUrl}
         </p>
       )}
       <button
         onClick={handleLogin}
-        className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 active:bg-gray-950 transition-colors"
+        className="px-4 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-md hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors"
       >
         {t("popup.openApp")}
       </button>

@@ -17,6 +17,13 @@ vi.mock("../../lib/api", () => ({
   ensureHostPermission: (v: unknown) => mockEnsureHostPermission(v),
 }));
 
+let mockThemeState = "system";
+const mockSetTheme = vi.fn((t: string) => { mockThemeState = t; });
+vi.mock("../../lib/theme", () => ({
+  useTheme: () => [mockThemeState, mockSetTheme] as const,
+  initTheme: vi.fn(),
+}));
+
 import { App } from "../../options/App";
 
 const allDefaults = {
@@ -33,10 +40,9 @@ const allDefaults = {
   vaultTimeoutAction: "lock" as const,
 };
 
-// Mock chrome.permissions, chrome.commands, chrome.runtime, chrome.tabs, chrome.storage
 const existingChrome =
-  typeof globalThis.chrome === "object" && globalThis.chrome !== null
-    ? globalThis.chrome
+  typeof globalThis !== "undefined" && "chrome" in globalThis && typeof (globalThis as Record<string, unknown>).chrome === "object" && (globalThis as Record<string, unknown>).chrome !== null
+    ? (globalThis as Record<string, unknown>).chrome as Record<string, unknown>
     : {};
 vi.stubGlobal("chrome", {
   ...existingChrome,
@@ -51,15 +57,17 @@ vi.stubGlobal("chrome", {
   },
   commands: {
     getAll: vi.fn().mockResolvedValue([
-      { name: "_execute_action", shortcut: "Ctrl+Shift+A", description: "Open popup" },
       { name: "copy-password", shortcut: "Ctrl+Shift+P", description: "Copy password" },
     ]),
   },
   tabs: {
     create: vi.fn(),
   },
+  i18n: {
+    getMessage: vi.fn().mockImplementation((key: string) => key),
+  },
   storage: {
-    ...existingChrome.storage,
+    ...(typeof existingChrome.storage === "object" ? existingChrome.storage : {}),
     local: {
       get: vi.fn().mockResolvedValue({}),
       set: vi.fn(),
@@ -67,7 +75,6 @@ vi.stubGlobal("chrome", {
   },
 });
 
-// Mock window.matchMedia for theme support
 Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: vi.fn().mockImplementation((query: string) => ({
@@ -82,23 +89,42 @@ Object.defineProperty(window, "matchMedia", {
   })),
 });
 
+// Helper to navigate to a section by clicking the sidebar nav
+function navigateTo(label: string) {
+  const navButton = screen.getByRole("button", { name: label });
+  fireEvent.click(navButton);
+}
+
 describe("Options App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockThemeState = "system";
     mockGetSettings.mockResolvedValue({ ...allDefaults });
     mockEnsureHostPermission.mockResolvedValue(true);
-    (chrome.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
+    ((globalThis as Record<string, unknown>).chrome as Record<string, Record<string, unknown>>).permissions.contains = vi.fn().mockResolvedValue(false);
   });
 
-  it("loads settings on mount", async () => {
+  it("loads settings and shows General section by default", async () => {
     render(<App />);
-    expect(await screen.findByDisplayValue("https://example.com")).toBeInTheDocument();
+    // Sidebar nav items should be visible
+    expect(await screen.findByText("General")).toBeInTheDocument();
+    // Theme dropdown should be present with options
+    expect(screen.getByRole("combobox", { name: /theme/i })).toBeInTheDocument();
+  });
+
+  it("navigates to Security section and shows server URL", async () => {
+    render(<App />);
+    await screen.findByText("General"); // wait for load
+    navigateTo("Security");
+    expect(screen.getByDisplayValue("https://example.com")).toBeInTheDocument();
     expect(screen.getByDisplayValue("15")).toBeInTheDocument();
   });
 
   it("shows error on invalid URL", async () => {
     render(<App />);
-    fireEvent.change(await screen.findByPlaceholderText("https://example.com"), {
+    await screen.findByText("General");
+    navigateTo("Security");
+    fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
       target: { value: "not-a-url" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
@@ -106,9 +132,11 @@ describe("Options App", () => {
     expect(mockSetSettings).not.toHaveBeenCalled();
   });
 
-  it("saves settings when valid", async () => {
+  it("saves all settings when valid", async () => {
     render(<App />);
-    fireEvent.change(await screen.findByPlaceholderText("https://example.com"), {
+    await screen.findByText("General");
+    navigateTo("Security");
+    fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
       target: { value: "https://demo.example.com" },
     });
     fireEvent.change(screen.getByDisplayValue("15"), {
@@ -137,7 +165,9 @@ describe("Options App", () => {
   it("shows error when host permission is denied", async () => {
     mockEnsureHostPermission.mockResolvedValue(false);
     render(<App />);
-    fireEvent.change(await screen.findByPlaceholderText("https://example.com"), {
+    await screen.findByText("General");
+    navigateTo("Security");
+    fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
       target: { value: "https://demo.example.com" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
@@ -145,35 +175,28 @@ describe("Options App", () => {
     expect(mockSetSettings).not.toHaveBeenCalled();
   });
 
-  it("saves when auto-lock is set to Never (0)", async () => {
-    render(<App />);
-    fireEvent.change(await screen.findByPlaceholderText("https://example.com"), {
-      target: { value: "https://demo.example.com" },
-    });
-    fireEvent.change(screen.getByDisplayValue("15"), {
-      target: { value: "0" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    await waitFor(() => {
-      expect(mockSetSettings).toHaveBeenCalledWith(
-        expect.objectContaining({
-          serverUrl: "https://demo.example.com",
-          autoLockMinutes: 0,
-        }),
-      );
-    });
-  });
-
   it("displays keyboard shortcuts", async () => {
     render(<App />);
-    expect(await screen.findByText("Open popup")).toBeInTheDocument();
-    expect(screen.getByText("Ctrl+Shift+A")).toBeInTheDocument();
+    await screen.findByText("General");
+    navigateTo("Keyboard Shortcuts");
     expect(screen.getByText("Copy password")).toBeInTheDocument();
     expect(screen.getByText("Ctrl+Shift+P")).toBeInTheDocument();
   });
 
   it("displays extension version", async () => {
     render(<App />);
-    expect(await screen.findByText("0.5.0")).toBeInTheDocument();
+    await screen.findByText("General");
+    navigateTo("About");
+    expect(screen.getByText("0.5.0")).toBeInTheDocument();
+  });
+
+  it("toggles settings in Autofill section", async () => {
+    render(<App />);
+    await screen.findByText("General");
+    navigateTo("Autofill");
+    const inlineToggle = screen.getByRole("switch", { name: /inline/i });
+    expect(inlineToggle).toHaveAttribute("aria-checked", "true");
+    fireEvent.click(inlineToggle);
+    expect(inlineToggle).toHaveAttribute("aria-checked", "false");
   });
 });

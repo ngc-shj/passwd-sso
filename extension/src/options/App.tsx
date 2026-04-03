@@ -40,7 +40,7 @@ function Toggle({
       id={id}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
-        checked ? "bg-gray-900 dark:bg-gray-200" : "bg-gray-300 dark:bg-gray-600"
+        checked ? "bg-blue-600 dark:bg-blue-500" : "bg-gray-300 dark:bg-gray-600"
       }`}
     >
       <span
@@ -52,19 +52,6 @@ function Toggle({
   );
 }
 
-function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
-      <h2 className="px-4 pt-4 pb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-        {title}
-      </h2>
-      <div className="divide-y divide-gray-100 dark:divide-gray-700">
-        {children}
-      </div>
-    </section>
-  );
-}
-
 function SettingRow({ label, description, children, htmlFor }: {
   label: string;
   description?: string;
@@ -72,7 +59,7 @@ function SettingRow({ label, description, children, htmlFor }: {
   htmlFor?: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-4 px-4 py-3">
+    <div className="flex items-center justify-between gap-4 py-3">
       <label htmlFor={htmlFor} className="flex flex-col gap-0.5 cursor-pointer">
         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</span>
         {description && (
@@ -87,8 +74,20 @@ function SettingRow({ label, description, children, htmlFor }: {
 const selectClass =
   "h-8 px-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow";
 
+type SectionId = "general" | "autofill" | "notifications" | "security" | "shortcuts" | "about";
+
+const SECTIONS: { id: SectionId; labelKey: string }[] = [
+  { id: "general", labelKey: "options.sectionGeneral" },
+  { id: "autofill", labelKey: "options.sectionAutofill" },
+  { id: "notifications", labelKey: "options.sectionNotifications" },
+  { id: "security", labelKey: "options.sectionSecurity" },
+  { id: "shortcuts", labelKey: "options.sectionShortcuts" },
+  { id: "about", labelKey: "options.sectionAbout" },
+];
+
 export function App() {
   const [theme, setTheme] = useTheme();
+  const [activeSection, setActiveSection] = useState<SectionId>("general");
 
   const [serverUrl, setServerUrl] = useState("");
   const [autoLockMinutes, setAutoLockMinutes] = useState(15);
@@ -163,30 +162,11 @@ export function App() {
     setTimeout(() => setSaved(false), 2000);
   };
 
-  return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
-      <div className="max-w-lg mx-auto px-6 py-10">
-        <header className="flex items-start justify-between mb-6">
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">{t("options.title")}</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t("options.description")}</p>
-          </div>
-          <button
-            type="button"
-            onClick={() => window.close()}
-            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
-            aria-label={t("options.close")}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-            </svg>
-          </button>
-        </header>
-
-        <div className="flex flex-col gap-4">
-
-          {/* Section 1: General */}
-          <SectionCard title={t("options.sectionGeneral")}>
+  const renderSection = () => {
+    switch (activeSection) {
+      case "general":
+        return (
+          <>
             <SettingRow label={t("options.theme")} htmlFor="theme-select">
               <select
                 id="theme-select"
@@ -199,37 +179,43 @@ export function App() {
                 <option value="system">{t("options.themeSystem")}</option>
               </select>
             </SettingRow>
-            <SettingRow label={t("options.showBadgeCount")} htmlFor="badge-count">
+            <SettingRow label={t("options.showBadgeCount")} description={t("options.showBadgeCountHint")} htmlFor="badge-count">
               <Toggle id="badge-count" checked={showBadgeCount} onChange={setShowBadgeCount} />
             </SettingRow>
-          </SectionCard>
+          </>
+        );
 
-          {/* Section 2: Autofill */}
-          <SectionCard title={t("options.sectionAutofill")}>
-            <SettingRow label={t("options.enableInlineSuggestions")} htmlFor="inline-suggestions">
+      case "autofill":
+        return (
+          <>
+            <SettingRow label={t("options.enableInlineSuggestions")} description={t("options.enableInlineSuggestionsHint")} htmlFor="inline-suggestions">
               <Toggle id="inline-suggestions" checked={enableInlineSuggestions} onChange={setEnableInlineSuggestions} />
             </SettingRow>
-            <SettingRow label={t("options.enableContextMenu")} htmlFor="context-menu">
+            <SettingRow label={t("options.enableContextMenu")} description={t("options.enableContextMenuHint")} htmlFor="context-menu">
               <Toggle id="context-menu" checked={enableContextMenu} onChange={setEnableContextMenu} />
             </SettingRow>
-            <SettingRow label={t("options.autoCopyTotp")} htmlFor="auto-copy-totp">
+            <SettingRow label={t("options.autoCopyTotp")} description={t("options.autoCopyTotpHint")} htmlFor="auto-copy-totp">
               <Toggle id="auto-copy-totp" checked={autoCopyTotp} onChange={setAutoCopyTotp} />
             </SettingRow>
-          </SectionCard>
+          </>
+        );
 
-          {/* Section 3: Notifications */}
-          <SectionCard title={t("options.sectionNotifications")}>
-            <SettingRow label={t("options.showSavePrompt")} htmlFor="save-prompt">
+      case "notifications":
+        return (
+          <>
+            <SettingRow label={t("options.showSavePrompt")} description={t("options.showSavePromptHint")} htmlFor="save-prompt">
               <Toggle id="save-prompt" checked={showSavePrompt} onChange={setShowSavePrompt} />
             </SettingRow>
-            <SettingRow label={t("options.showUpdatePrompt")} htmlFor="update-prompt">
+            <SettingRow label={t("options.showUpdatePrompt")} description={t("options.showUpdatePromptHint")} htmlFor="update-prompt">
               <Toggle id="update-prompt" checked={showUpdatePrompt} onChange={setShowUpdatePrompt} />
             </SettingRow>
-          </SectionCard>
+          </>
+        );
 
-          {/* Section 4: Security */}
-          <SectionCard title={t("options.sectionSecurity")}>
-            <div className="px-4 py-3 flex flex-col gap-1.5">
+      case "security":
+        return (
+          <>
+            <div className="py-3 flex flex-col gap-1.5">
               <label htmlFor="server-url" className="text-sm font-medium text-gray-700 dark:text-gray-200">
                 {t("options.serverUrl")}
               </label>
@@ -258,22 +244,22 @@ export function App() {
                 <option value={60}>60</option>
               </select>
             </SettingRow>
-            <SettingRow label={t("options.clipboardClear")} htmlFor="clipboard-clear">
+            <SettingRow label={t("options.clipboardClear")} description={t("options.clipboardClearHint")} htmlFor="clipboard-clear">
               <select
                 id="clipboard-clear"
                 value={clipboardClearSeconds}
                 onChange={(e) => setClipboardClearSeconds(Number(e.target.value))}
                 className={selectClass}
               >
-                <option value={10}>10s</option>
-                <option value={20}>20s</option>
-                <option value={30}>30s</option>
-                <option value={60}>1m</option>
-                <option value={120}>2m</option>
-                <option value={300}>5m</option>
+                <option value={10}>{t("options.seconds", { n: "10" })}</option>
+                <option value={20}>{t("options.seconds", { n: "20" })}</option>
+                <option value={30}>{t("options.seconds", { n: "30" })}</option>
+                <option value={60}>{t("options.minutes", { n: "1" })}</option>
+                <option value={120}>{t("options.minutes", { n: "2" })}</option>
+                <option value={300}>{t("options.minutes", { n: "5" })}</option>
               </select>
             </SettingRow>
-            <SettingRow label={t("options.vaultTimeoutAction")} htmlFor="vault-timeout-action">
+            <SettingRow label={t("options.vaultTimeoutAction")} description={t("options.vaultTimeoutLogoutHint")} htmlFor="vault-timeout-action">
               <select
                 id="vault-timeout-action"
                 value={vaultTimeoutAction}
@@ -284,31 +270,37 @@ export function App() {
                 <option value="logout">{t("options.vaultTimeoutLogout")}</option>
               </select>
             </SettingRow>
-          </SectionCard>
+          </>
+        );
 
-          {/* Section 5: Keyboard Shortcuts */}
-          <SectionCard title={t("options.sectionShortcuts")}>
+      case "shortcuts":
+        return (
+          <>
             {commands.length === 0 ? (
-              <p className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
+              <p className="py-3 text-sm text-gray-400 dark:text-gray-500">
                 {t("options.shortcutsHint")}
               </p>
             ) : (
-              commands.map((cmd) => (
-                <div key={cmd.name} className="flex items-center justify-between gap-4 px-4 py-3">
-                  <span className="text-sm text-gray-700 dark:text-gray-200">
-                    {cmd.description || cmd.name}
-                  </span>
-                  {cmd.shortcut ? (
-                    <kbd className="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-0.5 text-xs font-mono text-gray-600 dark:text-gray-300">
-                      {cmd.shortcut}
-                    </kbd>
-                  ) : (
-                    <span className="text-xs text-gray-400 dark:text-gray-500">{t("options.noShortcut")}</span>
-                  )}
-                </div>
-              ))
+              commands.filter((cmd) => cmd.name !== "_execute_action").map((cmd) => {
+                const desc = cmd.description?.replace(/__MSG_(\w+)__/g, (_m, key) =>
+                  chrome.i18n?.getMessage(key) || key) || cmd.name;
+                return (
+                  <div key={cmd.name} className="flex items-center justify-between gap-4 py-3">
+                    <span className="text-sm text-gray-700 dark:text-gray-200">
+                      {desc}
+                    </span>
+                    {cmd.shortcut ? (
+                      <kbd className="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-0.5 text-xs font-mono text-gray-600 dark:text-gray-300">
+                        {cmd.shortcut}
+                      </kbd>
+                    ) : (
+                      <span className="text-xs text-gray-400 dark:text-gray-500">{t("options.noShortcut")}</span>
+                    )}
+                  </div>
+                );
+              })
             )}
-            <div className="px-4 py-3">
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={() => chrome.tabs.create({ url: "chrome://extensions/shortcuts" })}
@@ -317,15 +309,17 @@ export function App() {
                 {t("options.customizeShortcuts")}
               </button>
             </div>
-          </SectionCard>
+          </>
+        );
 
-          {/* Section 6: About */}
-          <SectionCard title={t("options.sectionAbout")}>
-            <div className="flex items-center justify-between gap-4 px-4 py-3">
+      case "about":
+        return (
+          <>
+            <div className="flex items-center justify-between gap-4 py-3">
               <span className="text-sm text-gray-700 dark:text-gray-200">{t("options.version")}</span>
               <span className="text-sm text-gray-500 dark:text-gray-400">{version}</span>
             </div>
-            <div className="px-4 py-3">
+            <div className="py-3">
               <a
                 href={validateServerUrl(serverUrl).ok ? validateServerUrl(serverUrl).value : DEFAULT_SERVER_URL}
                 target="_blank"
@@ -335,21 +329,74 @@ export function App() {
                 {t("options.openWebApp")}
               </a>
             </div>
-          </SectionCard>
+          </>
+        );
+    }
+  };
 
-          {/* Save */}
-          <div className="flex items-center gap-3 pt-2">
-            <button
-              type="button"
-              onClick={handleSave}
-              className="px-5 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors shadow-sm"
-            >
-              {t("options.save")}
-            </button>
-            {error && <span className="text-sm text-red-600 dark:text-red-400">{humanizeError(error)}</span>}
-            {saved && <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t("options.saved")}</span>}
+  return (
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <header className="flex items-start justify-between mb-8">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">{t("options.title")}</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t("options.description")}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => window.close()}
+            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
+            aria-label={t("options.close")}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+            </svg>
+          </button>
+        </header>
 
+        <div className="flex gap-8">
+          {/* Left sidebar navigation */}
+          <nav className="w-44 shrink-0">
+            <ul className="flex flex-col gap-0.5 sticky top-10">
+              {SECTIONS.map((s) => (
+                <li key={s.id}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSection(s.id)}
+                    className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors ${
+                      activeSection === s.id
+                        ? "bg-gray-200 dark:bg-gray-700 font-medium text-gray-900 dark:text-gray-100"
+                        : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-200"
+                    }`}
+                  >
+                    {t(s.labelKey)}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {/* Right content area */}
+          <main className="flex-1 min-w-0">
+            <div className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm px-5 py-1">
+              <div className="divide-y divide-gray-100 dark:divide-gray-700">
+                {renderSection()}
+              </div>
+            </div>
+
+            {/* Save button — always visible */}
+            <div className="flex items-center gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleSave}
+                className="px-5 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors shadow-sm"
+              >
+                {t("options.save")}
+              </button>
+              {error && <span className="text-sm text-red-600 dark:text-red-400">{humanizeError(error)}</span>}
+              {saved && <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t("options.saved")}</span>}
+            </div>
+          </main>
         </div>
       </div>
     </div>
