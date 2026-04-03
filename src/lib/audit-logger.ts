@@ -71,6 +71,29 @@ export function createAuditLogger(opts?: {
 export const auditLogger = createAuditLogger();
 
 /**
+ * Dead-letter logger for audit entries that failed after max retries
+ * or were dropped due to buffer overflow.
+ *
+ * Always enabled (unlike auditLogger which depends on AUDIT_LOG_FORWARD).
+ * External alerting should monitor for `_logType: "audit-dead-letter"`.
+ */
+export const deadLetterLogger = pino({
+  name: process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso",
+  level: "warn",
+  enabled: true,
+  timestamp: pino.stdTimeFunctions.isoTime,
+  base: {
+    _logType: "audit-dead-letter",
+    _app: process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso",
+  },
+  formatters: {
+    level(label: string) {
+      return { level: label };
+    },
+  },
+});
+
+/**
  * Key names to strip from metadata during recursive sanitization.
  * Defense-in-depth: even if a caller accidentally passes sensitive data,
  * sanitizeMetadata() in audit.ts will remove these keys before pino sees them.

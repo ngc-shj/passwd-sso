@@ -11,6 +11,7 @@ import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
+import { enqueue, drainBuffer, type BufferedAuditEntry } from "@/lib/audit-retry";
 import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
@@ -103,31 +104,55 @@ export function logAudit(params: AuditLogParams): void {
 
   const safeUserAgent = userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
 
+  // --- Piggyback flush: drain buffered retry entries (fire-and-forget) ---
+  void drainBuffer().catch(() => {});
+
   // --- DB write + webhook dispatch ---
   void (async () => {
     // Resolve tenantId inside transaction, then dispatch webhook after commit
     let resolvedTenantId: string | null = null;
 
-    await withBypassRls(prisma, async () => {
-      resolvedTenantId = tenantId ?? null;
-      if (!resolvedTenantId && teamId) {
-        const team = await prisma.team.findUnique({
-          where: { id: teamId },
-          select: { tenantId: true },
-        });
-        resolvedTenantId = team?.tenantId ?? null;
-      }
-      if (!resolvedTenantId) {
-        const user = await prisma.user.findUnique({
-          where: { id: userId },
-          select: { tenantId: true },
-        });
-        resolvedTenantId = user?.tenantId ?? null;
-      }
-      if (!resolvedTenantId) return;
+    try {
+      await withBypassRls(prisma, async () => {
+        resolvedTenantId = tenantId ?? null;
+        if (!resolvedTenantId && teamId) {
+          const team = await prisma.team.findUnique({
+            where: { id: teamId },
+            select: { tenantId: true },
+          });
+          resolvedTenantId = team?.tenantId ?? null;
+        }
+        if (!resolvedTenantId) {
+          const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { tenantId: true },
+          });
+          resolvedTenantId = user?.tenantId ?? null;
+        }
+        if (!resolvedTenantId) return;
 
-      await prisma.auditLog.create({
-        data: {
+        await prisma.auditLog.create({
+          data: {
+            scope,
+            action,
+            userId,
+            actorType: actorType ?? "HUMAN",
+            serviceAccountId: serviceAccountId ?? null,
+            tenantId: resolvedTenantId,
+            teamId: teamId ?? null,
+            targetType: targetType ?? null,
+            targetId: targetId ?? null,
+            metadata: safeMetadata as never ?? undefined,
+            ip: ip ?? null,
+            userAgent: safeUserAgent,
+          },
+        });
+      }, BYPASS_PURPOSE.AUDIT_WRITE);
+    } catch (err) {
+      getLogger().error({ err }, "audit log write failed — enqueuing for retry");
+      // Enqueue for retry if tenantId was resolved; otherwise cannot retry
+      if (resolvedTenantId) {
+        enqueue({
           scope,
           action,
           userId,
@@ -137,12 +162,14 @@ export function logAudit(params: AuditLogParams): void {
           teamId: teamId ?? null,
           targetType: targetType ?? null,
           targetId: targetId ?? null,
-          metadata: safeMetadata as never ?? undefined,
+          metadata: safeMetadata,
           ip: ip ?? null,
           userAgent: safeUserAgent,
-        },
-      });
-    }, BYPASS_PURPOSE.AUDIT_WRITE);
+          retryCount: 0,
+        });
+      }
+      return; // Skip webhook dispatch on DB failure
+    }
 
     // --- Webhook dispatch (after transaction commits) ---
     // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
@@ -156,9 +183,7 @@ export function logAudit(params: AuditLogParams): void {
         void dispatchTenantWebhook({ type: action, tenantId: resolvedTenantId, timestamp, data: webhookData });
       }
     }
-  })().catch((err) => {
-    getLogger().error({ err }, "audit log write failed");
-  });
+  })();
 
   // --- Structured JSON emit for external forwarding ---
   // auditLogger.enabled is false when AUDIT_LOG_FORWARD !== "true",
@@ -204,31 +229,63 @@ export function logAudit(params: AuditLogParams): void {
 export function logAuditBatch(paramsList: AuditLogParams[]): void {
   if (paramsList.length === 0) return;
 
+  // --- Piggyback flush: drain buffered retry entries (fire-and-forget) ---
+  void drainBuffer().catch(() => {});
+
   // --- DB write: resolve tenantId once, then createMany, then dispatch ---
   void (async () => {
     let resolvedTenantId: string | null = null;
 
-    await withBypassRls(prisma, async () => {
-      const first = paramsList[0];
-      resolvedTenantId = first.tenantId ?? null;
-      if (!resolvedTenantId && first.teamId) {
-        const team = await prisma.team.findUnique({
-          where: { id: first.teamId },
-          select: { tenantId: true },
-        });
-        resolvedTenantId = team?.tenantId ?? null;
-      }
-      if (!resolvedTenantId) {
-        const user = await prisma.user.findUnique({
-          where: { id: first.userId },
-          select: { tenantId: true },
-        });
-        resolvedTenantId = user?.tenantId ?? null;
-      }
-      if (!resolvedTenantId) return;
+    try {
+      await withBypassRls(prisma, async () => {
+        const first = paramsList[0];
+        resolvedTenantId = first.tenantId ?? null;
+        if (!resolvedTenantId && first.teamId) {
+          const team = await prisma.team.findUnique({
+            where: { id: first.teamId },
+            select: { tenantId: true },
+          });
+          resolvedTenantId = team?.tenantId ?? null;
+        }
+        if (!resolvedTenantId) {
+          const user = await prisma.user.findUnique({
+            where: { id: first.userId },
+            select: { tenantId: true },
+          });
+          resolvedTenantId = user?.tenantId ?? null;
+        }
+        if (!resolvedTenantId) return;
 
-      await prisma.auditLog.createMany({
-        data: paramsList.map((p) => {
+        await prisma.auditLog.createMany({
+          data: paramsList.map((p) => {
+            let safeMetadata: Record<string, unknown> | undefined;
+            if (p.metadata) {
+              const json = JSON.stringify(p.metadata);
+              safeMetadata =
+                json.length <= METADATA_MAX_BYTES
+                  ? p.metadata
+                  : { _truncated: true, _originalSize: json.length };
+            }
+            return {
+              scope: p.scope,
+              action: p.action,
+              userId: p.userId,
+              tenantId: resolvedTenantId!,
+              teamId: p.teamId ?? null,
+              targetType: p.targetType ?? null,
+              targetId: p.targetId ?? null,
+              metadata: safeMetadata as never ?? undefined,
+              ip: p.ip ?? null,
+              userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+            };
+          }),
+        });
+      }, BYPASS_PURPOSE.AUDIT_WRITE);
+    } catch (err) {
+      getLogger().error({ err }, "audit log batch write failed — enqueuing for retry");
+      // Enqueue each entry individually for retry if tenantId was resolved
+      if (resolvedTenantId) {
+        for (const p of paramsList) {
           let safeMetadata: Record<string, unknown> | undefined;
           if (p.metadata) {
             const json = JSON.stringify(p.metadata);
@@ -237,21 +294,25 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
                 ? p.metadata
                 : { _truncated: true, _originalSize: json.length };
           }
-          return {
+          enqueue({
             scope: p.scope,
             action: p.action,
             userId: p.userId,
-            tenantId: resolvedTenantId!,
+            actorType: p.actorType ?? "HUMAN",
+            serviceAccountId: p.serviceAccountId ?? null,
+            tenantId: resolvedTenantId,
             teamId: p.teamId ?? null,
             targetType: p.targetType ?? null,
             targetId: p.targetId ?? null,
-            metadata: safeMetadata as never ?? undefined,
+            metadata: safeMetadata,
             ip: p.ip ?? null,
             userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-          };
-        }),
-      });
-    }, BYPASS_PURPOSE.AUDIT_WRITE);
+            retryCount: 0,
+          } satisfies BufferedAuditEntry);
+        }
+      }
+      return; // Skip webhook dispatch on DB failure
+    }
 
     // --- Webhook dispatch per entry (after transaction commits) ---
     // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
@@ -274,9 +335,7 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
         }
       }
     }
-  })().catch((err) => {
-    getLogger().error({ err }, "audit log write failed");
-  });
+  })();
 
   // --- Structured JSON emit per entry for external forwarding ---
   for (const p of paramsList) {
