@@ -74,7 +74,7 @@ export default defineManifest({
   ],
   web_accessible_resources: [
     {
-      resources: ["src/content/autofill.js", "src/content/autofill-cc.js", "src/content/autofill-identity.js", "src/content/token-bridge-relay.js"],
+      resources: ["src/content/autofill.js", "src/content/autofill-cc.js", "src/content/autofill-identity.js"],
       matches: ["https://*/*", "http://localhost/*"],
     },
   ],
