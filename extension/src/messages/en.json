@@ -60,7 +60,7 @@
     "serverUrl": "Server URL",
     "serverUrlPlaceholder": "https://example.com",
     "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
-    "autoLock": "Auto-lock (minutes)",
+    "autoLock": "Auto-lock",
     "autoLockTenantNote": "Tenant admin may override this setting.",
     "never": "Never",
     "clipboardClear": "Clear clipboard after",

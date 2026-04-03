@@ -237,11 +237,11 @@ export function App() {
                 className={selectClass}
               >
                 <option value={0}>{t("options.never")}</option>
-                <option value={1}>1</option>
-                <option value={5}>5</option>
-                <option value={15}>15</option>
-                <option value={30}>30</option>
-                <option value={60}>60</option>
+                <option value={1}>{t("options.minutes", { n: "1" })}</option>
+                <option value={5}>{t("options.minutes", { n: "5" })}</option>
+                <option value={15}>{t("options.minutes", { n: "15" })}</option>
+                <option value={30}>{t("options.minutes", { n: "30" })}</option>
+                <option value={60}>{t("options.minutes", { n: "60" })}</option>
               </select>
             </SettingRow>
             <SettingRow label={t("options.clipboardClear")} description={t("options.clipboardClearHint")} htmlFor="clipboard-clear">
