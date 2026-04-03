@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.22](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.21...passwd-sso-v0.4.22) (2026-04-03)
+
+
+### Features
+
+* enhance extension options page with 14 settings across 6 sections ([#318](https://github.com/ngc-shj/passwd-sso/issues/318)) ([71dfc88](https://github.com/ngc-shj/passwd-sso/commit/71dfc88ded72425fb2f46c8482073e688682af03))
+
 ## [0.4.21](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.20...passwd-sso-v0.4.21) (2026-04-03)
 
 
