@@ -105,6 +105,7 @@ export function App() {
 
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
+  const [savedSnapshot, setSavedSnapshot] = useState("");
 
   useEffect(() => {
     getSettings().then((s: StorageSchema) => {
@@ -118,11 +119,26 @@ export function App() {
       setShowUpdatePrompt(s.showUpdatePrompt);
       setClipboardClearSeconds(s.clipboardClearSeconds);
       setVaultTimeoutAction(s.vaultTimeoutAction);
+      setSavedSnapshot(JSON.stringify({
+        serverUrl: s.serverUrl, autoLockMinutes: s.autoLockMinutes,
+        theme: s.theme, showBadgeCount: s.showBadgeCount,
+        enableInlineSuggestions: s.enableInlineSuggestions, enableContextMenu: s.enableContextMenu,
+        autoCopyTotp: s.autoCopyTotp, showSavePrompt: s.showSavePrompt,
+        showUpdatePrompt: s.showUpdatePrompt, clipboardClearSeconds: s.clipboardClearSeconds,
+        vaultTimeoutAction: s.vaultTimeoutAction,
+      }));
     });
 
     chrome.commands.getAll().then(setCommands);
     setVersion(chrome.runtime.getManifest().version);
   }, []);
+
+  const currentSnapshot = JSON.stringify({
+    serverUrl, autoLockMinutes, theme, showBadgeCount,
+    enableInlineSuggestions, enableContextMenu, autoCopyTotp,
+    showSavePrompt, showUpdatePrompt, clipboardClearSeconds, vaultTimeoutAction,
+  });
+  const dirty = savedSnapshot !== "" && currentSnapshot !== savedSnapshot;
 
   const handleSave = async () => {
     setSaved(false);
@@ -158,6 +174,11 @@ export function App() {
       clipboardClearSeconds,
       vaultTimeoutAction,
     });
+    setSavedSnapshot(JSON.stringify({
+      serverUrl: validated.value, autoLockMinutes, theme, showBadgeCount,
+      enableInlineSuggestions, enableContextMenu, autoCopyTotp,
+      showSavePrompt, showUpdatePrompt, clipboardClearSeconds, vaultTimeoutAction,
+    }));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -403,6 +424,7 @@ export function App() {
               </button>
               {error && <span className="text-sm text-red-600 dark:text-red-400">{humanizeError(error)}</span>}
               {saved && <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t("options.saved")}</span>}
+              {!error && !saved && dirty && <span className="text-sm text-amber-600 dark:text-amber-400">{t("options.unsavedChanges")}</span>}
             </div>
           </main>
         </div>

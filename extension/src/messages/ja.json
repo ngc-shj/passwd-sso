@@ -76,6 +76,7 @@
     "noShortcut": "未設定",
     "version": "バージョン",
     "openWebApp": "ウェブアプリを開く",
+    "unsavedChanges": "未保存の変更があります。",
     "save": "保存",
     "saved": "保存しました",
     "close": "閉じる"

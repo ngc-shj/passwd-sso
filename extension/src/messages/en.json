@@ -76,6 +76,7 @@
     "noShortcut": "Not set",
     "version": "Version",
     "openWebApp": "Open web app",
+    "unsavedChanges": "You have unsaved changes.",
     "save": "Save",
     "saved": "Saved!",
     "close": "Close"
