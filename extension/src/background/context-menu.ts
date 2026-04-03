@@ -35,14 +35,16 @@ export function initContextMenu(d: ContextMenuDeps): void {
  * Create the static parent menu item.
  * Call on `chrome.runtime.onInstalled` and `chrome.runtime.onStartup`.
  */
-export function setupContextMenu(): void {
-  chrome.contextMenus.removeAll(() => {
+export async function setupContextMenu(): Promise<void> {
+  const enabled = deps ? await deps.isContextMenuEnabled() : true;
+  await new Promise<void>((resolve) => chrome.contextMenus.removeAll(() => resolve()));
+  if (enabled) {
     chrome.contextMenus.create({
       id: PARENT_ID,
       title: t("contextMenu.title"),
       contexts: ["editable"],
     });
-  });
+  }
 }
 
 /**
@@ -213,18 +215,17 @@ async function doUpdateMenu(url: string | undefined): Promise<void> {
   }
 }
 
-function removeChildItems(): Promise<void> {
-  return new Promise((resolve) => {
-    // Remove all and recreate parent to clear children
-    chrome.contextMenus.removeAll(() => {
-      chrome.contextMenus.create({
-        id: PARENT_ID,
-        title: t("contextMenu.title"),
-        contexts: ["editable"],
-      });
-      resolve();
+async function removeChildItems(): Promise<void> {
+  await new Promise<void>((resolve) => chrome.contextMenus.removeAll(() => resolve()));
+  // Only recreate parent if context menu is enabled
+  const enabled = deps ? await deps.isContextMenuEnabled() : true;
+  if (enabled) {
+    chrome.contextMenus.create({
+      id: PARENT_ID,
+      title: t("contextMenu.title"),
+      contexts: ["editable"],
     });
-  });
+  }
 }
 
 /**
