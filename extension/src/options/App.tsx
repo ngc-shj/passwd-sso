@@ -361,16 +361,16 @@ export function App() {
 
         <div className="flex gap-8">
           {/* Left sidebar navigation */}
-          <nav className="shrink-0">
-            <ul className="flex flex-col gap-1 sticky top-10">
+          <nav className="w-56 shrink-0">
+            <ul className="flex flex-col gap-0.5 sticky top-10">
               {SECTIONS.map((s) => (
                 <li key={s.id}>
                   <button
                     type="button"
                     onClick={() => setActiveSection(s.id)}
-                    className={`w-full text-left px-3 py-2.5 text-sm rounded-lg transition-colors whitespace-nowrap flex items-center gap-2.5 ${
+                    className={`w-full text-left px-3 py-2 text-sm rounded-md transition-colors whitespace-nowrap flex items-center gap-2 ${
                       activeSection === s.id
-                        ? "bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 font-medium"
+                        ? "bg-gray-200 dark:bg-gray-700 font-medium text-gray-900 dark:text-gray-100"
                         : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 hover:text-gray-900 dark:hover:text-gray-200"
                     }`}
                   >
