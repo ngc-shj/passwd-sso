@@ -136,30 +136,37 @@ async function configureSessionStorageAccess(): Promise<void> {
 
 // ── Offscreen keepalive ───────────────────────────────────
 // Prevents SW termination during the 30-second idle timeout
-// by sending a ping every 25 seconds from an offscreen document.
+// by pinging from the existing offscreen document (shared with clipboard).
 
-const OFFSCREEN_URL = "src/offscreen.html";
-
-async function startKeepalive(): Promise<void> {
+async function ensureOffscreen(): Promise<void> {
   try {
     const exists = await chrome.offscreen.hasDocument?.();
-    if (exists) return;
-    await chrome.offscreen.createDocument({
-      url: OFFSCREEN_URL,
-      reasons: ["WORKERS" as chrome.offscreen.Reason],
-      justification: "Keep service worker alive while vault is unlocked",
-    });
+    if (!exists) {
+      await chrome.offscreen.createDocument({
+        url: "offscreen.html",
+        reasons: ["CLIPBOARD" as chrome.offscreen.Reason],
+        justification: "Clipboard access and SW keepalive",
+      });
+    }
   } catch {
-    // Best effort — older Chrome versions may not support offscreen
+    // Best effort
+  }
+}
+
+async function startKeepalive(): Promise<void> {
+  await ensureOffscreen();
+  try {
+    await chrome.runtime.sendMessage({ target: "offscreen", type: "start-keepalive" });
+  } catch {
+    // ignore
   }
 }
 
 async function stopKeepalive(): Promise<void> {
   try {
-    const exists = await chrome.offscreen.hasDocument?.();
-    if (exists) await chrome.offscreen.closeDocument();
+    await chrome.runtime.sendMessage({ target: "offscreen", type: "stop-keepalive" });
   } catch {
-    // ignore
+    // ignore — offscreen document may not exist
   }
 }
 
