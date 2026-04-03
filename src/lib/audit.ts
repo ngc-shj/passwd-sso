@@ -261,6 +261,8 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
             scope: p.scope,
             action: p.action,
             userId: p.userId,
+            actorType: p.actorType ?? "HUMAN",
+            serviceAccountId: p.serviceAccountId ?? null,
             tenantId: resolvedTenantId!,
             teamId: p.teamId ?? null,
             targetType: p.targetType ?? null,

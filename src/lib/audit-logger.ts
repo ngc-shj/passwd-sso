@@ -13,6 +13,34 @@ import pino, { type DestinationStream } from "pino";
 const DEFAULT_APP_NAME = process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso";
 
 /**
+ * Key names to strip from metadata during recursive sanitization.
+ * Defense-in-depth: even if a caller accidentally passes sensitive data,
+ * sanitizeMetadata() in audit.ts will remove these keys before pino sees them.
+ *
+ * Also used to generate pino redact paths for both auditLogger and deadLetterLogger.
+ */
+export const METADATA_BLOCKLIST = new Set([
+  "password",
+  "passphrase",
+  "secret",
+  "secretKey",
+  "encryptedBlob",
+  "encryptedOverview",
+  "encryptedData",
+  "encryptedSecretKey",
+  "encryptedTeamKey",
+  "masterPasswordServerHash",
+  "token",
+  "tokenHash",
+  "accessToken",
+  "refreshToken",
+  "idToken",
+  "accountSalt",
+  "passphraseVerifierHmac",
+  "entries",
+]);
+
+/**
  * Factory to create a pino logger instance for audit events.
  *
  * In production, use the `auditLogger` singleton exported below.
@@ -37,24 +65,8 @@ export function createAuditLogger(opts?: {
       _app: appName,
       _version: "1",
     },
-    // Redact paths match the object structure passed to pino.info():
-    //   { audit: { metadata: { ... } } }
     redact: {
-      paths: [
-        "audit.metadata.password",
-        "audit.metadata.passphrase",
-        "audit.metadata.secret",
-        "audit.metadata.secretKey",
-        "audit.metadata.encryptedBlob",
-        "audit.metadata.encryptedOverview",
-        "audit.metadata.encryptedData",
-        "audit.metadata.encryptedSecretKey",
-        "audit.metadata.token",
-        "audit.metadata.tokenHash",
-        "audit.metadata.accessToken",
-        "audit.metadata.refreshToken",
-        "audit.metadata.idToken",
-      ],
+      paths: [...METADATA_BLOCKLIST].map((k) => `audit.metadata.${k}`),
       censor: "[REDACTED]",
     },
     formatters: {
@@ -89,21 +101,7 @@ export const deadLetterLogger = pino({
     _app: DEFAULT_APP_NAME,
   },
   redact: {
-    paths: [
-      "auditEntry.metadata.password",
-      "auditEntry.metadata.passphrase",
-      "auditEntry.metadata.secret",
-      "auditEntry.metadata.secretKey",
-      "auditEntry.metadata.encryptedBlob",
-      "auditEntry.metadata.encryptedOverview",
-      "auditEntry.metadata.encryptedData",
-      "auditEntry.metadata.encryptedSecretKey",
-      "auditEntry.metadata.token",
-      "auditEntry.metadata.tokenHash",
-      "auditEntry.metadata.accessToken",
-      "auditEntry.metadata.refreshToken",
-      "auditEntry.metadata.idToken",
-    ],
+    paths: [...METADATA_BLOCKLIST].map((k) => `auditEntry.metadata.${k}`),
     censor: "[REDACTED]",
   },
   formatters: {
@@ -112,29 +110,3 @@ export const deadLetterLogger = pino({
     },
   },
 });
-
-/**
- * Key names to strip from metadata during recursive sanitization.
- * Defense-in-depth: even if a caller accidentally passes sensitive data,
- * sanitizeMetadata() in audit.ts will remove these keys before pino sees them.
- */
-export const METADATA_BLOCKLIST = new Set([
-  "password",
-  "passphrase",
-  "secret",
-  "secretKey",
-  "encryptedBlob",
-  "encryptedOverview",
-  "encryptedData",
-  "encryptedSecretKey",
-  "encryptedTeamKey",
-  "masterPasswordServerHash",
-  "token",
-  "tokenHash",
-  "accessToken",
-  "refreshToken",
-  "idToken",
-  "accountSalt",
-  "passphraseVerifierHmac",
-  "entries",
-]);
