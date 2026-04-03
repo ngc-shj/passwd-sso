@@ -228,6 +228,45 @@ Each setting needs a consumer in `extension/src/background/index.ts`:
 - **No breaking changes**: All new settings have defaults matching current behavior. Existing users see no change until they modify settings.
 - **F5 is a new feature**: `autoCopyTotp` requires new logic in `performAutofillForEntry()` — TOTP detection → clipboard copy → timer scheduling. This is NOT toggling an existing behavior.
 
+## Implementation Checklist
+
+### Files to modify
+- [ ] `extension/src/lib/storage.ts` — extend StorageSchema, DEFAULTS, add validateSettings()
+- [ ] `extension/src/lib/theme.ts` — **new file** for applyTheme() + useTheme() hook
+- [ ] `extension/src/options/App.tsx` — redesign with 6 sections
+- [ ] `extension/src/options/main.tsx` — apply theme init before render
+- [ ] `extension/src/messages/en.json` — add all new options.* keys
+- [ ] `extension/src/messages/ja.json` — add all new options.* keys
+- [ ] `extension/src/background/index.ts` — wire all setting consumers (lines 92, 245, 538, 584, 602, 753, 1294, 2061)
+- [ ] `extension/src/popup/App.tsx` — apply theme
+- [ ] `extension/src/popup/main.tsx` — apply theme init before render
+
+### Shared utilities to reuse
+- `extension/src/lib/storage.ts:14` — `getSettings()` / `setSettings()` (extend, don't replace)
+- `extension/src/lib/i18n.ts` — `t()` function (existing i18n, NOT chrome.i18n)
+- `extension/src/background/context-menu.ts:37` — `setupContextMenu()` (call for re-enable)
+- `extension/src/background/context-menu.ts:51` — `updateContextMenuForTab()` (call after re-enable)
+- `extension/src/background/index.ts:435` — `revokeCurrentTokenOnServer()` (call for logout path)
+- `extension/src/background/index.ts:196` — `clearToken()` (includes clearVault())
+- `extension/src/background/index.ts:1294` — existing `totpCode` variable (reuse for autoCopyTotp)
+- `extension/src/lib/constants.ts` — `ALARM_CLEAR_CLIPBOARD`, `ALARM_VAULT_LOCK`, `EXT_ENTRY_TYPE`
+
+### Test files to update
+- [ ] `extension/src/__tests__/lib/storage.test.ts` — update defaults assertions for all 11 fields + validateSettings tests
+- [ ] `extension/src/__tests__/options/App.test.tsx` — add chrome.commands.getAll mock, update mockGetSettings, update save assertion
+- [ ] `extension/src/__tests__/background.test.ts` — update installChromeMock storage mock
+- [ ] `extension/src/__tests__/background-commands.test.ts` — update storage mock, fix alarm assertion, add offscreen.hasDocument mock
+- [ ] `extension/src/__tests__/background/team-entries.test.ts` — update installChromeMock storage mock
+- [ ] `extension/src/__tests__/background/totp-handlers.test.ts` — update installChromeMock storage mock
+- [ ] `extension/src/__tests__/lib/theme.test.ts` — **new file** with jsdom env, matchMedia mock, 5 cases
+- [ ] `extension/src/__tests__/popup/VaultUnlock.test.tsx` — update mockGetSettings
+
+### Patterns to follow consistently
+- All setting reads: `validateSettings(await getSettings())` (never raw `getSettings()`)
+- Boolean toggles: read setting → early return if disabled
+- clipboardClearSeconds: read dynamically at each copy operation, not from module-scope constant
+- Theme: `classList.add/remove("dark")`, never direct className assignment
+
 ## User Operation Scenarios
 
 ### Scenario 1: User wants to disable autofill suggestions on banking sites

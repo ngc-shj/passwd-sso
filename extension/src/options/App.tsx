@@ -3,6 +3,7 @@ import { getSettings, setSettings, type StorageSchema } from "../lib/storage";
 import { ensureHostPermission } from "../lib/api";
 import { t } from "../lib/i18n";
 import { humanizeError } from "../lib/error-messages";
+import { useTheme } from "../lib/theme";
 
 const DEFAULT_SERVER_URL = "https://localhost:3000";
 
@@ -22,9 +23,87 @@ function validateServerUrl(raw: string): { ok: boolean; value: string; error?: s
   }
 }
 
+function Toggle({
+  checked,
+  onChange,
+  id,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  id: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      id={id}
+      onClick={() => onChange(!checked)}
+      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-offset-2 dark:focus:ring-offset-gray-800 ${
+        checked ? "bg-gray-900 dark:bg-gray-200" : "bg-gray-300 dark:bg-gray-600"
+      }`}
+    >
+      <span
+        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-transform ${
+          checked ? "translate-x-4" : "translate-x-0"
+        }`}
+      />
+    </button>
+  );
+}
+
+function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+      <h2 className="px-4 pt-4 pb-2 text-xs font-semibold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+        {title}
+      </h2>
+      <div className="divide-y divide-gray-100 dark:divide-gray-700">
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function SettingRow({ label, description, children, htmlFor }: {
+  label: string;
+  description?: string;
+  children: React.ReactNode;
+  htmlFor?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 px-4 py-3">
+      <label htmlFor={htmlFor} className="flex flex-col gap-0.5 cursor-pointer">
+        <span className="text-sm font-medium text-gray-700 dark:text-gray-200">{label}</span>
+        {description && (
+          <span className="text-xs text-gray-400 dark:text-gray-500">{description}</span>
+        )}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+const selectClass =
+  "h-8 px-2 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow";
+
 export function App() {
+  const [theme, setTheme] = useTheme();
+
   const [serverUrl, setServerUrl] = useState("");
   const [autoLockMinutes, setAutoLockMinutes] = useState(15);
+  const [showBadgeCount, setShowBadgeCount] = useState(true);
+  const [enableInlineSuggestions, setEnableInlineSuggestions] = useState(true);
+  const [enableContextMenu, setEnableContextMenu] = useState(true);
+  const [autoCopyTotp, setAutoCopyTotp] = useState(true);
+  const [showSavePrompt, setShowSavePrompt] = useState(true);
+  const [showUpdatePrompt, setShowUpdatePrompt] = useState(true);
+  const [clipboardClearSeconds, setClipboardClearSeconds] = useState(30);
+  const [vaultTimeoutAction, setVaultTimeoutAction] = useState<"lock" | "logout">("lock");
+
+  const [commands, setCommands] = useState<chrome.commands.Command[]>([]);
+  const [version, setVersion] = useState("");
+
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState("");
 
@@ -32,12 +111,24 @@ export function App() {
     getSettings().then((s: StorageSchema) => {
       setServerUrl(s.serverUrl);
       setAutoLockMinutes(s.autoLockMinutes);
+      setShowBadgeCount(s.showBadgeCount);
+      setEnableInlineSuggestions(s.enableInlineSuggestions);
+      setEnableContextMenu(s.enableContextMenu);
+      setAutoCopyTotp(s.autoCopyTotp);
+      setShowSavePrompt(s.showSavePrompt);
+      setShowUpdatePrompt(s.showUpdatePrompt);
+      setClipboardClearSeconds(s.clipboardClearSeconds);
+      setVaultTimeoutAction(s.vaultTimeoutAction);
     });
+
+    chrome.commands.getAll().then(setCommands);
+    setVersion(chrome.runtime.getManifest().version);
   }, []);
 
   const handleSave = async () => {
     setSaved(false);
     setError("");
+
     const validated = validateServerUrl(serverUrl);
     if (!validated.ok) {
       setError(validated.error || "INVALID_URL");
@@ -58,83 +149,207 @@ export function App() {
     await setSettings({
       serverUrl: validated.value,
       autoLockMinutes,
+      theme,
+      showBadgeCount,
+      enableInlineSuggestions,
+      enableContextMenu,
+      autoCopyTotp,
+      showSavePrompt,
+      showUpdatePrompt,
+      clipboardClearSeconds,
+      vaultTimeoutAction,
     });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
   return (
-    <div className="max-w-lg mx-auto text-gray-900 px-6 py-10">
-      <header className="flex items-start justify-between mb-5">
-        <div>
-          <h1 className="text-lg font-semibold tracking-tight">{t("options.title")}</h1>
-          <p className="text-sm text-gray-500 mt-1">{t("options.description")}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => window.close()}
-          className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-200 rounded-md transition-colors"
-          aria-label={t("options.close")}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
-            <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
-          </svg>
-        </button>
-      </header>
-
-      <div className="flex flex-col gap-4">
-        {/* Server URL */}
-        <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-gray-700">{t("options.serverUrl")}</span>
-            <input
-              type="text"
-              value={serverUrl}
-              onChange={(e) => setServerUrl(e.target.value)}
-              placeholder={t("options.serverUrlPlaceholder")}
-              className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 transition-shadow"
-            />
-            <span className="text-xs text-gray-400">
-              {t("options.httpsRequired")}
-            </span>
-          </label>
-        </div>
-
-        {/* Auto-lock */}
-        <div className="rounded-lg border border-gray-200 bg-white px-4 py-4 shadow-sm">
-          <label className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium text-gray-700">
-              {t("options.autoLock")}
-            </span>
-            <select
-              value={autoLockMinutes}
-              onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
-              className="h-9 px-3 rounded-md border border-gray-300 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 transition-shadow"
-            >
-              <option value={0}>{t("options.never")}</option>
-              <option value={1}>1</option>
-              <option value={5}>5</option>
-              <option value={15}>15</option>
-              <option value={30}>30</option>
-              <option value={60}>60</option>
-            </select>
-            <span className="text-xs text-gray-400">
-              {t("options.autoLockTenantNote")}
-            </span>
-          </label>
-        </div>
-
-        {/* Save */}
-        <div className="flex items-center gap-3 pt-2">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      <div className="max-w-lg mx-auto px-6 py-10">
+        <header className="flex items-start justify-between mb-6">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight">{t("options.title")}</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t("options.description")}</p>
+          </div>
           <button
             type="button"
-            onClick={handleSave}
-            className="px-5 py-2 bg-gray-900 text-white text-sm font-medium rounded-lg hover:bg-gray-800 active:bg-gray-950 transition-colors shadow-sm"
+            onClick={() => window.close()}
+            className="p-1.5 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md transition-colors"
+            aria-label={t("options.close")}
           >
-            {t("options.save")}
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5">
+              <path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
+            </svg>
           </button>
-          {error && <span className="text-sm text-red-600">{humanizeError(error)}</span>}
-          {saved && <span className="text-sm text-green-600 font-medium">{t("options.saved")}</span>}
+        </header>
+
+        <div className="flex flex-col gap-4">
+
+          {/* Section 1: General */}
+          <SectionCard title={t("options.sectionGeneral")}>
+            <SettingRow label={t("options.theme")} htmlFor="theme-select">
+              <select
+                id="theme-select"
+                value={theme}
+                onChange={(e) => setTheme(e.target.value as "light" | "dark" | "system")}
+                className={selectClass}
+              >
+                <option value="light">{t("options.themeLight")}</option>
+                <option value="dark">{t("options.themeDark")}</option>
+                <option value="system">{t("options.themeSystem")}</option>
+              </select>
+            </SettingRow>
+            <SettingRow label={t("options.showBadgeCount")} htmlFor="badge-count">
+              <Toggle id="badge-count" checked={showBadgeCount} onChange={setShowBadgeCount} />
+            </SettingRow>
+          </SectionCard>
+
+          {/* Section 2: Autofill */}
+          <SectionCard title={t("options.sectionAutofill")}>
+            <SettingRow label={t("options.enableInlineSuggestions")} htmlFor="inline-suggestions">
+              <Toggle id="inline-suggestions" checked={enableInlineSuggestions} onChange={setEnableInlineSuggestions} />
+            </SettingRow>
+            <SettingRow label={t("options.enableContextMenu")} htmlFor="context-menu">
+              <Toggle id="context-menu" checked={enableContextMenu} onChange={setEnableContextMenu} />
+            </SettingRow>
+            <SettingRow label={t("options.autoCopyTotp")} htmlFor="auto-copy-totp">
+              <Toggle id="auto-copy-totp" checked={autoCopyTotp} onChange={setAutoCopyTotp} />
+            </SettingRow>
+          </SectionCard>
+
+          {/* Section 3: Notifications */}
+          <SectionCard title={t("options.sectionNotifications")}>
+            <SettingRow label={t("options.showSavePrompt")} htmlFor="save-prompt">
+              <Toggle id="save-prompt" checked={showSavePrompt} onChange={setShowSavePrompt} />
+            </SettingRow>
+            <SettingRow label={t("options.showUpdatePrompt")} htmlFor="update-prompt">
+              <Toggle id="update-prompt" checked={showUpdatePrompt} onChange={setShowUpdatePrompt} />
+            </SettingRow>
+          </SectionCard>
+
+          {/* Section 4: Security */}
+          <SectionCard title={t("options.sectionSecurity")}>
+            <div className="px-4 py-3 flex flex-col gap-1.5">
+              <label htmlFor="server-url" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                {t("options.serverUrl")}
+              </label>
+              <input
+                id="server-url"
+                type="text"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder={t("options.serverUrlPlaceholder")}
+                className="h-9 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow"
+              />
+              <span className="text-xs text-gray-400 dark:text-gray-500">{t("options.httpsRequired")}</span>
+            </div>
+            <SettingRow label={t("options.autoLock")} description={t("options.autoLockTenantNote")} htmlFor="auto-lock">
+              <select
+                id="auto-lock"
+                value={autoLockMinutes}
+                onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
+                className={selectClass}
+              >
+                <option value={0}>{t("options.never")}</option>
+                <option value={1}>1</option>
+                <option value={5}>5</option>
+                <option value={15}>15</option>
+                <option value={30}>30</option>
+                <option value={60}>60</option>
+              </select>
+            </SettingRow>
+            <SettingRow label={t("options.clipboardClear")} htmlFor="clipboard-clear">
+              <select
+                id="clipboard-clear"
+                value={clipboardClearSeconds}
+                onChange={(e) => setClipboardClearSeconds(Number(e.target.value))}
+                className={selectClass}
+              >
+                <option value={10}>10s</option>
+                <option value={20}>20s</option>
+                <option value={30}>30s</option>
+                <option value={60}>1m</option>
+                <option value={120}>2m</option>
+                <option value={300}>5m</option>
+              </select>
+            </SettingRow>
+            <SettingRow label={t("options.vaultTimeoutAction")} htmlFor="vault-timeout-action">
+              <select
+                id="vault-timeout-action"
+                value={vaultTimeoutAction}
+                onChange={(e) => setVaultTimeoutAction(e.target.value as "lock" | "logout")}
+                className={selectClass}
+              >
+                <option value="lock">{t("options.vaultTimeoutLock")}</option>
+                <option value="logout">{t("options.vaultTimeoutLogout")}</option>
+              </select>
+            </SettingRow>
+          </SectionCard>
+
+          {/* Section 5: Keyboard Shortcuts */}
+          <SectionCard title={t("options.sectionShortcuts")}>
+            {commands.length === 0 ? (
+              <p className="px-4 py-3 text-sm text-gray-400 dark:text-gray-500">
+                {t("options.shortcutsHint")}
+              </p>
+            ) : (
+              commands.map((cmd) => (
+                <div key={cmd.name} className="flex items-center justify-between gap-4 px-4 py-3">
+                  <span className="text-sm text-gray-700 dark:text-gray-200">
+                    {cmd.description || cmd.name}
+                  </span>
+                  {cmd.shortcut ? (
+                    <kbd className="inline-flex items-center rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-0.5 text-xs font-mono text-gray-600 dark:text-gray-300">
+                      {cmd.shortcut}
+                    </kbd>
+                  ) : (
+                    <span className="text-xs text-gray-400 dark:text-gray-500">{t("options.noShortcut")}</span>
+                  )}
+                </div>
+              ))
+            )}
+            <div className="px-4 py-3">
+              <button
+                type="button"
+                onClick={() => chrome.tabs.create({ url: "chrome://extensions/shortcuts" })}
+                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                {t("options.customizeShortcuts")}
+              </button>
+            </div>
+          </SectionCard>
+
+          {/* Section 6: About */}
+          <SectionCard title={t("options.sectionAbout")}>
+            <div className="flex items-center justify-between gap-4 px-4 py-3">
+              <span className="text-sm text-gray-700 dark:text-gray-200">{t("options.version")}</span>
+              <span className="text-sm text-gray-500 dark:text-gray-400">{version}</span>
+            </div>
+            <div className="px-4 py-3">
+              <a
+                href={validateServerUrl(serverUrl).ok ? validateServerUrl(serverUrl).value : DEFAULT_SERVER_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                {t("options.openWebApp")}
+              </a>
+            </div>
+          </SectionCard>
+
+          {/* Save */}
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleSave}
+              className="px-5 py-2 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 active:bg-gray-950 transition-colors shadow-sm"
+            >
+              {t("options.save")}
+            </button>
+            {error && <span className="text-sm text-red-600 dark:text-red-400">{humanizeError(error)}</span>}
+            {saved && <span className="text-sm text-green-600 dark:text-green-400 font-medium">{t("options.saved")}</span>}
+          </div>
+
         </div>
       </div>
     </div>

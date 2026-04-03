@@ -7,6 +7,7 @@ import {
 } from "../../lib/url-matching";
 import type { DecryptedEntry } from "../../types/messages";
 import { humanizeError } from "../../lib/error-messages";
+import { getSettings } from "../../lib/storage";
 import { t } from "../../lib/i18n";
 import { EXT_ENTRY_TYPE } from "../../lib/constants";
 import { Toast } from "./Toast";
@@ -57,10 +58,11 @@ export function MatchList({ tabUrl }: Props) {
         await navigator.clipboard.writeText(res.password);
         setToast({ message: t("popup.passwordCopied"), type: "success" });
         setTimeout(() => setToast(null), 2000);
-        // Best-effort clipboard clear
+        // Best-effort clipboard clear using configured delay
+        const { clipboardClearSeconds } = await getSettings();
         setTimeout(() => {
           navigator.clipboard.writeText("").catch(() => {});
-        }, 30_000);
+        }, clipboardClearSeconds * 1000);
       } catch {
         setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
       }
@@ -76,9 +78,10 @@ export function MatchList({ tabUrl }: Props) {
         await navigator.clipboard.writeText(res.code);
         setToast({ message: t("popup.totpCopied"), type: "success" });
         setTimeout(() => setToast(null), 2000);
+        const { clipboardClearSeconds } = await getSettings();
         setTimeout(() => {
           navigator.clipboard.writeText("").catch(() => {});
-        }, 30_000);
+        }, clipboardClearSeconds * 1000);
       } catch {
         setToast({ message: humanizeError("CLIPBOARD_FAILED"), type: "error" });
       }

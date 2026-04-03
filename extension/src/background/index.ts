@@ -27,7 +27,7 @@ import {
   buildItemKeyWrapAAD,
   type TeamKeyWrapContext,
 } from "../lib/crypto-team";
-import { getSettings } from "../lib/storage";
+import { getSettings, validateSettings } from "../lib/storage";
 import { normalizeErrorCode } from "../lib/error-utils";
 import { extractHost, isHostMatch } from "../lib/url-matching";
 import {
@@ -89,7 +89,6 @@ const MAX_TEAMS = 10;
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
-const CLIPBOARD_CLEAR_DELAY_MS = 30_000; // 30 seconds
 
 let lastClipboardCopyTime = 0;
 
@@ -244,6 +243,11 @@ async function clearAllTabBadges(): Promise<void> {
 
 async function updateBadgeForTab(tabId: number, url: string | undefined): Promise<void> {
   if (!currentToken || !encryptionKey) return;
+  const { showBadgeCount } = validateSettings(await getSettings());
+  if (!showBadgeCount) {
+    await chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
+    return;
+  }
   try {
     if (!url) {
       await chrome.action.setBadgeText({ text: "", tabId });
@@ -552,7 +556,17 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           pendingSavePrompts.delete(tabId);
           return;
         }
-        setTimeout(() => {
+        setTimeout(async () => {
+          // Re-check prompt preferences at delivery time
+          const deliverySettings = validateSettings(await getSettings());
+          if (pending.action === "save" && !deliverySettings.showSavePrompt) {
+            pendingSavePrompts.delete(tabId);
+            return;
+          }
+          if (pending.action === "update" && !deliverySettings.showUpdatePrompt) {
+            pendingSavePrompts.delete(tabId);
+            return;
+          }
           chrome.tabs.sendMessage(tabId, {
             type: "PSSO_SHOW_SAVE_BANNER",
             host: pending.host,
@@ -586,16 +600,26 @@ chrome.alarms.onAlarm.addListener((alarm) => {
     clearToken();
   }
   if (alarm.name === ALARM_VAULT_LOCK) {
-    clearVault();
+    (async () => {
+      const { vaultTimeoutAction } = validateSettings(await getSettings());
+      if (vaultTimeoutAction === "logout") {
+        await revokeCurrentTokenOnServer();
+        clearToken();
+      } else {
+        clearVault();
+      }
+    })().catch(() => {});
   }
   if (alarm.name === ALARM_TOKEN_REFRESH) {
     attemptTokenRefresh().catch(() => {});
   }
   if (alarm.name === ALARM_CLEAR_CLIPBOARD) {
-    // Fallback clipboard clear: only clear if 30s+ since last copy
-    if (Date.now() - lastClipboardCopyTime >= CLIPBOARD_CLEAR_DELAY_MS) {
-      copyToClipboard("").catch(() => {});
-    }
+    (async () => {
+      const { clipboardClearSeconds } = validateSettings(await getSettings());
+      if (Date.now() - lastClipboardCopyTime >= clipboardClearSeconds * 1000) {
+        await copyToClipboard("");
+      }
+    })().catch(() => {});
   }
 });
 
@@ -604,17 +628,44 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.serverUrl?.newValue) {
     registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
   }
-  if (!changes.autoLockMinutes) return;
-  if (!encryptionKey) return;
-  // Tenant policy takes precedence — ignore local setting changes
-  if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) return;
-
-  const newValue = changes.autoLockMinutes.newValue;
-  if (typeof newValue !== "number" || !Number.isFinite(newValue)) return;
-
-  chrome.alarms.clear(ALARM_VAULT_LOCK);
-  if (newValue > 0) {
-    chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: newValue });
+  // Context menu toggle
+  if (changes.enableContextMenu) {
+    if (changes.enableContextMenu.newValue === false) {
+      chrome.contextMenus.removeAll().catch(() => {});
+    } else {
+      setupContextMenu();
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs[0]?.id) updateContextMenuForTab(tabs[0].id, tabs[0].url);
+      });
+    }
+  }
+  // Badge toggle — refresh active tab badge
+  if (changes.showBadgeCount) {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) void updateBadgeForTab(tabs[0].id, tabs[0].url);
+    });
+  }
+  // Clipboard clear delay — reschedule alarm if a copy is pending
+  if (changes.clipboardClearSeconds && lastClipboardCopyTime > 0) {
+    const raw = changes.clipboardClearSeconds.newValue;
+    if (typeof raw === "number" && raw > 0) {
+      chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
+      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+        delayInMinutes: Math.max((raw * 2) / 60, 1),
+      });
+    }
+  }
+  // Auto-lock minutes
+  if (changes.autoLockMinutes) {
+    if (!encryptionKey) return;
+    // Tenant policy takes precedence — ignore local setting changes
+    if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) return;
+    const newValue = changes.autoLockMinutes.newValue;
+    if (typeof newValue !== "number" || !Number.isFinite(newValue)) return;
+    chrome.alarms.clear(ALARM_VAULT_LOCK);
+    if (newValue > 0) {
+      chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: newValue });
+    }
   }
 });
 
@@ -741,17 +792,23 @@ chrome.commands.onCommand.addListener(async (command) => {
       // Copy via offscreen document (no page DOM manipulation, no focus stealing)
       await copyToClipboard(value);
 
-      // Schedule clipboard clear: setTimeout (30s) + alarm fallback (1min)
+      // Schedule clipboard clear: dynamic delay from settings + alarm fallback
+      const { clipboardClearSeconds } = validateSettings(await getSettings());
+      const clipMs = clipboardClearSeconds * 1000;
       lastClipboardCopyTime = Date.now();
       await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
       setTimeout(async () => {
         try {
-          await copyToClipboard("");
+          if (Date.now() - lastClipboardCopyTime >= clipMs) {
+            await copyToClipboard("");
+          }
         } catch {
           // ignore — offscreen document may have been closed
         }
-      }, CLIPBOARD_CLEAR_DELAY_MS);
-      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, { delayInMinutes: 1 });
+      }, clipMs);
+      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+        delayInMinutes: Math.max((clipboardClearSeconds * 2) / 60, 1),
+      });
     } catch (err) {
       console.warn("[psso] copy command failed:", err);
     }
@@ -1469,6 +1526,30 @@ async function performAutofillForEntry(
       await injectDirectAutofill(null);
     }
   }
+
+  // Auto-copy TOTP to clipboard after successful LOGIN autofill
+  if (totpCode && entryType === EXT_ENTRY_TYPE.LOGIN) {
+    const { autoCopyTotp, clipboardClearSeconds } = validateSettings(await getSettings());
+    if (autoCopyTotp) {
+      const clipMs = clipboardClearSeconds * 1000;
+      await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
+      await copyToClipboard(totpCode);
+      lastClipboardCopyTime = Date.now();
+      setTimeout(async () => {
+        try {
+          if (Date.now() - lastClipboardCopyTime >= clipMs) {
+            await copyToClipboard("");
+          }
+        } catch {
+          // ignore
+        }
+      }, clipMs);
+      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+        delayInMinutes: Math.max((clipboardClearSeconds * 2) / 60, 1),
+      });
+    }
+  }
+
   return { ok: true };
 }
 
@@ -1949,6 +2030,16 @@ async function handleMessage(
     }
 
     case "GET_MATCHES_FOR_URL": {
+      const { enableInlineSuggestions } = validateSettings(await getSettings());
+      if (!enableInlineSuggestions) {
+        sendResponse({
+          type: "GET_MATCHES_FOR_URL",
+          entries: [],
+          vaultLocked: false,
+          suppressInline: true,
+        });
+        return;
+      }
       const effectiveUrl = message.topUrl ?? message.url;
       if (await isOwnAppPage(effectiveUrl)) {
         sendResponse({
@@ -2076,6 +2167,19 @@ async function handleMessage(
           message.username,
           message.password,
         );
+
+        // Check prompt preferences at detection time
+        if (result.action !== "none") {
+          const promptSettings = validateSettings(await getSettings());
+          if (result.action === "save" && !promptSettings.showSavePrompt) {
+            sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+            return;
+          }
+          if (result.action === "update" && !promptSettings.showUpdatePrompt) {
+            sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+            return;
+          }
+        }
 
         // Store pending save for this tab. After form submit the page
         // typically navigates, so the sendResponse callback on the content

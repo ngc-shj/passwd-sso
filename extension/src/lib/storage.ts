@@ -4,12 +4,93 @@ export interface StorageSchema {
   serverUrl: string;
   /** Auto-lock timeout in minutes (0 = disabled) */
   autoLockMinutes: number;
+  /** UI theme */
+  theme: "light" | "dark" | "system";
+  /** Show per-tab match count badge on extension icon */
+  showBadgeCount: boolean;
+  /** Show inline suggestion dropdown on form focus */
+  enableInlineSuggestions: boolean;
+  /** Show right-click context menu autofill entries */
+  enableContextMenu: boolean;
+  /** Auto-copy TOTP code to clipboard after autofilling a login */
+  autoCopyTotp: boolean;
+  /** Show save login banner on new credential detection */
+  showSavePrompt: boolean;
+  /** Show update password banner on password change detection */
+  showUpdatePrompt: boolean;
+  /** Clipboard auto-clear delay in seconds */
+  clipboardClearSeconds: number;
+  /** What to do when vault timeout fires */
+  vaultTimeoutAction: "lock" | "logout";
 }
 
-const DEFAULTS: StorageSchema = {
+export const DEFAULTS: StorageSchema = {
   serverUrl: "https://localhost:3000",
   autoLockMinutes: 15,
+  theme: "system",
+  showBadgeCount: true,
+  enableInlineSuggestions: true,
+  enableContextMenu: true,
+  autoCopyTotp: true,
+  showSavePrompt: true,
+  showUpdatePrompt: true,
+  clipboardClearSeconds: 30,
+  vaultTimeoutAction: "lock",
 };
+
+const VALID_THEMES = ["light", "dark", "system"] as const;
+const VALID_CLIPBOARD_SECONDS = [10, 20, 30, 60, 120, 300] as const;
+const VALID_TIMEOUT_ACTIONS = ["lock", "logout"] as const;
+
+function ensureBool(v: unknown, fallback: boolean): boolean {
+  return typeof v === "boolean" ? v : fallback;
+}
+
+function ensureFiniteNonNeg(v: unknown, fallback: number): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
+}
+
+/** Validate all settings with defense-in-depth — never trust raw storage values */
+export function validateSettings(raw: StorageSchema): StorageSchema {
+  return {
+    serverUrl:
+      typeof raw.serverUrl === "string" && raw.serverUrl.length > 0
+        ? raw.serverUrl
+        : DEFAULTS.serverUrl,
+    autoLockMinutes: ensureFiniteNonNeg(
+      raw.autoLockMinutes,
+      DEFAULTS.autoLockMinutes,
+    ),
+    theme: (VALID_THEMES as readonly string[]).includes(raw.theme)
+      ? raw.theme
+      : DEFAULTS.theme,
+    showBadgeCount: ensureBool(raw.showBadgeCount, DEFAULTS.showBadgeCount),
+    enableInlineSuggestions: ensureBool(
+      raw.enableInlineSuggestions,
+      DEFAULTS.enableInlineSuggestions,
+    ),
+    enableContextMenu: ensureBool(
+      raw.enableContextMenu,
+      DEFAULTS.enableContextMenu,
+    ),
+    autoCopyTotp: ensureBool(raw.autoCopyTotp, DEFAULTS.autoCopyTotp),
+    showSavePrompt: ensureBool(raw.showSavePrompt, DEFAULTS.showSavePrompt),
+    showUpdatePrompt: ensureBool(
+      raw.showUpdatePrompt,
+      DEFAULTS.showUpdatePrompt,
+    ),
+    clipboardClearSeconds: (
+      VALID_CLIPBOARD_SECONDS as readonly number[]
+    ).includes(raw.clipboardClearSeconds)
+      ? raw.clipboardClearSeconds
+      : DEFAULTS.clipboardClearSeconds,
+    vaultTimeoutAction: (VALID_TIMEOUT_ACTIONS as readonly string[]).includes(
+      raw.vaultTimeoutAction,
+    )
+      ? raw.vaultTimeoutAction
+      : DEFAULTS.vaultTimeoutAction,
+  };
+}
 
 export async function getSettings(): Promise<StorageSchema> {
   const result = await chrome.storage.local.get(DEFAULTS);

@@ -19,7 +19,21 @@ vi.mock("../../lib/api", () => ({
 
 import { App } from "../../options/App";
 
-// Mock chrome.permissions for autofill toggle
+const allDefaults = {
+  serverUrl: "https://example.com",
+  autoLockMinutes: 15,
+  theme: "system" as const,
+  showBadgeCount: true,
+  enableInlineSuggestions: true,
+  enableContextMenu: true,
+  autoCopyTotp: true,
+  showSavePrompt: true,
+  showUpdatePrompt: true,
+  clipboardClearSeconds: 30,
+  vaultTimeoutAction: "lock" as const,
+};
+
+// Mock chrome.permissions, chrome.commands, chrome.runtime, chrome.tabs, chrome.storage
 const existingChrome =
   typeof globalThis.chrome === "object" && globalThis.chrome !== null
     ? globalThis.chrome
@@ -33,16 +47,45 @@ vi.stubGlobal("chrome", {
   },
   runtime: {
     openOptionsPage: vi.fn(),
+    getManifest: vi.fn().mockReturnValue({ version: "0.5.0" }),
   },
+  commands: {
+    getAll: vi.fn().mockResolvedValue([
+      { name: "_execute_action", shortcut: "Ctrl+Shift+A", description: "Open popup" },
+      { name: "copy-password", shortcut: "Ctrl+Shift+P", description: "Copy password" },
+    ]),
+  },
+  tabs: {
+    create: vi.fn(),
+  },
+  storage: {
+    ...existingChrome.storage,
+    local: {
+      get: vi.fn().mockResolvedValue({}),
+      set: vi.fn(),
+    },
+  },
+});
+
+// Mock window.matchMedia for theme support
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
 });
 
 describe("Options App", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockGetSettings.mockResolvedValue({
-      serverUrl: "https://example.com",
-      autoLockMinutes: 15,
-    });
+    mockGetSettings.mockResolvedValue({ ...allDefaults });
     mockEnsureHostPermission.mockResolvedValue(true);
     (chrome.permissions.contains as ReturnType<typeof vi.fn>).mockResolvedValue(false);
   });
@@ -77,6 +120,15 @@ describe("Options App", () => {
       expect(mockSetSettings).toHaveBeenCalledWith({
         serverUrl: "https://demo.example.com",
         autoLockMinutes: 30,
+        theme: "system",
+        showBadgeCount: true,
+        enableInlineSuggestions: true,
+        enableContextMenu: true,
+        autoCopyTotp: true,
+        showSavePrompt: true,
+        showUpdatePrompt: true,
+        clipboardClearSeconds: 30,
+        vaultTimeoutAction: "lock",
       });
     });
     expect(await screen.findByText(/saved!/i)).toBeInTheDocument();
@@ -103,10 +155,25 @@ describe("Options App", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     await waitFor(() => {
-      expect(mockSetSettings).toHaveBeenCalledWith({
-        serverUrl: "https://demo.example.com",
-        autoLockMinutes: 0,
-      });
+      expect(mockSetSettings).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serverUrl: "https://demo.example.com",
+          autoLockMinutes: 0,
+        }),
+      );
     });
+  });
+
+  it("displays keyboard shortcuts", async () => {
+    render(<App />);
+    expect(await screen.findByText("Open popup")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl+Shift+A")).toBeInTheDocument();
+    expect(screen.getByText("Copy password")).toBeInTheDocument();
+    expect(screen.getByText("Ctrl+Shift+P")).toBeInTheDocument();
+  });
+
+  it("displays extension version", async () => {
+    render(<App />);
+    expect(await screen.findByText("0.5.0")).toBeInTheDocument();
   });
 });
