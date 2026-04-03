@@ -4,10 +4,10 @@ import { App } from "./App";
 import { initTheme } from "../lib/theme";
 import "./styles.css";
 
-initTheme();
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+initTheme().then(() => {
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+});

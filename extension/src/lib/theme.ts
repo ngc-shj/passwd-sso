@@ -4,7 +4,7 @@ import { getSettings } from "./storage";
 type Theme = "light" | "dark" | "system";
 const VALID = new Set<string>(["light", "dark", "system"]);
 
-/** Apply the resolved theme class to <html>. Safe to call before React render. */
+/** Apply the resolved theme class to <html>. */
 export function applyTheme(theme: Theme): void {
   const resolved =
     theme === "system"
@@ -16,15 +16,15 @@ export function applyTheme(theme: Theme): void {
 }
 
 /**
- * Synchronously apply theme from chrome.storage.local before React hydration.
- * Call this at the top of main.tsx to prevent flash.
+ * Apply theme from chrome.storage.local before React render.
+ * Returns a promise that resolves after the theme class is set.
+ * Call with `await` before createRoot().render().
  */
-export function initTheme(): void {
-  chrome.storage.local.get({ theme: "system" }, (result) => {
-    const raw = result.theme;
-    const theme: Theme = typeof raw === "string" && VALID.has(raw) ? (raw as Theme) : "system";
-    applyTheme(theme);
-  });
+export async function initTheme(): Promise<void> {
+  const result = await chrome.storage.local.get({ theme: "system" });
+  const raw = result.theme;
+  const theme: Theme = typeof raw === "string" && VALID.has(raw) ? (raw as Theme) : "system";
+  applyTheme(theme);
 }
 
 /** React hook that tracks the current theme and applies it to <html>. */
