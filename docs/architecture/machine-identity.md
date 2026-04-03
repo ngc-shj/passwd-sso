@@ -10,22 +10,18 @@ Inspired by [1Password's Unified Identity](https://1password.com/product/unified
 
 ### Identity Model
 
-```
-┌──────────────────────────────────────────┐
-│                 Tenant                    │
-│                                          │
-│  ┌─────────┐  ┌──────────────────┐       │
-│  │  Human   │  │ Service Account  │       │
-│  │  Users   │  │  (Non-human ID)  │       │
-│  └────┬─────┘  └───────┬──────────┘       │
-│       │                │                  │
-│  Session / API Key  SA Token (sa_)        │
-│  Extension Token    MCP Token (mcp_)      │
-│       │                │                  │
-│       └────────┬───────┘                  │
-│           authOrToken()                   │
-│           Unified Audit                   │
-└──────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Tenant
+        Human["Human Users"]
+        SA["Service Account<br/>(Non-human ID)"]
+
+        Human --> HumanTokens["Session / API Key<br/>Extension Token"]
+        SA --> SATokens["SA Token (sa_)<br/>MCP Token (mcp_)"]
+
+        HumanTokens --> Auth["authOrToken()<br/>Unified Audit"]
+        SATokens --> Auth
+    end
 ```
 
 ### Authentication Pipeline
@@ -80,23 +76,15 @@ SA tokens authenticate on `/api/v1/*` endpoints but cannot access personal vault
 
 ### Workflow
 
-```
-SA (sa_ token)                    Admin (browser session)
-     │                                    │
-     │ POST /api/tenant/access-requests   │
-     │ scope: access-request:create       │
-     │ body: { requestedScope, justification }
-     │──────────────────────────────────►  │
-     │                                    │
-     │                           Reviews request in UI
-     │                           Machine Identity → Access Requests
-     │                                    │
-     │                     POST /approve  │
-     │  ◄─────────────────────────────────│
-     │  JIT token (sa_ prefix, short TTL) │
-     │                                    │
-     │ Uses JIT token for expanded access │
-     │ Token auto-expires after TTL       │
+```mermaid
+sequenceDiagram
+    participant SA as SA (sa_ token)
+    participant Admin as Admin (browser session)
+
+    SA ->> Admin: POST /api/tenant/access-requests<br/>scope: access-request:create<br/>body: {requestedScope, justification}
+    Note over Admin: Reviews request in UI<br/>Machine Identity → Access Requests
+    Admin ->> SA: POST /approve<br/>JIT token (sa_ prefix, short TTL)
+    Note over SA: Uses JIT token for expanded access<br/>Token auto-expires after TTL
 ```
 
 ### Atomicity
@@ -199,24 +187,17 @@ Rate limited: 60 requests/minute per `client_id`.
 
 ### OAuth 2.1 Flow
 
-```
-MCP Client                    passwd-sso                      User
-    │                              │                            │
-    │ GET /api/mcp/authorize       │                            │
-    │ + client_id, redirect_uri    │                            │
-    │ + code_challenge (S256)      │       Login if needed      │
-    │ + scope, state               │ ◄──────────────────────── │
-    │──────────────────────────►   │                            │
-    │                              │ Redirect with ?code=       │
-    │ ◄───────────────────────────────────────────────────────  │
-    │                              │                            │
-    │ POST /api/mcp/token          │                            │
-    │ + code, code_verifier        │                            │
-    │ + client_id, client_secret   │                            │
-    │──────────────────────────►   │                            │
-    │                              │                            │
-    │ { access_token: mcp_... }    │                            │
-    │ ◄──────────────────────────  │                            │
+```mermaid
+sequenceDiagram
+    participant Client as MCP Client
+    participant Server as passwd-sso
+    actor User
+
+    Client ->> Server: GET /api/mcp/authorize<br/>+ client_id, redirect_uri<br/>+ code_challenge (S256)<br/>+ scope, state
+    User ->> Server: Login if needed
+    Server -->> Client: Redirect with ?code=
+    Client ->> Server: POST /api/mcp/token<br/>+ code, code_verifier<br/>+ client_id, client_secret
+    Server -->> Client: { access_token: mcp_... }
 ```
 
 - PKCE S256 required (no plain)
@@ -238,89 +219,49 @@ All tools require an **active delegation session**. The human user selects entri
 
 ### Zero-Knowledge Architecture (Phase 7)
 
+```mermaid
+sequenceDiagram
+    participant Human as Human (Browser)
+    participant Server as Server (Next.js)
+    participant Agent as Agent daemon (CLI)
+    participant AI as Claude Code (AI)
+
+    Note over Human,AI: Zero-Knowledge MCP Flow
+
+    Human ->> Server: 1. Delegation UI: select entries + TTL<br/>(metadata only, NO passwords sent)
+    Human ->> Agent: 2. passwd-sso agent --decrypt<br/>(passphrase via TTY, key held in memory)
+
+    AI ->> Server: 3. MCP: whoami
+    Server -->> AI: { mcpClientId }
+
+    AI ->> Server: 4. MCP: list_credentials
+    Server -->> AI: metadata only (title, username, urlHost, tags)
+
+    AI ->> Agent: 5. Skill/hook: Bash (subshell)<br/>passwd-sso decrypt <id> --mcp-client mcpc_xxx
+
+    Agent ->> Server: 6. GET /delegation/check?clientId=mcpc_xxx&entryId=..
+    Server -->> Agent: 200 OK / 403
+
+    Agent ->> Server: 7. GET /api/passwords/<id> (encrypted)
+    Server -->> Agent: encrypted blob
+
+    Note over Agent: 8. Decrypt locally<br/>vault key + AAD → plaintext
+
+    Agent ->> AI: 9. Credential consumed in pipe (pipe to curl)
+
+    Note over AI: 10. Only result reaches AI<br/>"HTTP 200" (no password)
+
+    Note over Human: Sees: everything (owner)
+    Note over Server: Sees: metadata, entryIds<br/>NO passwords, NO vault key
+    Note over Agent: Sees: plaintext<br/>(in memory only)
+    Note over AI: Sees: metadata, HTTP results<br/>NO passwords
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Zero-Knowledge MCP Flow                           │
-│                                                                             │
-│  ┌───────────┐     ┌───────────────┐     ┌──────────────┐    ┌───────────┐ │
-│  │   Human    │     │    Server     │     │ Agent daemon │    │ Claude    │ │
-│  │ (Browser)  │     │  (Next.js)    │     │   (CLI)      │    │ Code (AI) │ │
-│  └─────┬─────┘     └───────┬───────┘     └──────┬───────┘    └─────┬─────┘ │
-│        │                   │                     │                  │       │
-│   1. Delegation UI         │                     │                  │       │
-│   ─────────────────────────>                     │                  │       │
-│   select entries + TTL     │                     │                  │       │
-│   (metadata only,          │                     │                  │       │
-│    NO passwords sent)      │                     │                  │       │
-│        │                   │                     │                  │       │
-│   2. passwd-sso agent      │                     │                  │       │
-│      --decrypt             │                     │                  │       │
-│   ─────────────────────────────────────────────> │                  │       │
-│   (passphrase via TTY,     │                     │ vault key        │       │
-│    key held in memory)     │                     │ in memory        │       │
-│        │                   │                     │                  │       │
-│        │              3. MCP: whoami             │                  │       │
-│        │                   <──────────────────────────────────────── │       │
-│        │                   │ { mcpClientId }     │                  │       │
-│        │                   ────────────────────────────────────────> │       │
-│        │                   │                     │                  │       │
-│        │              4. MCP: list_credentials   │                  │       │
-│        │                   <──────────────────────────────────────── │       │
-│        │                   │ metadata only       │                  │       │
-│        │                   │ (title, username,    │                  │       │
-│        │                   │  urlHost, tags)      │                  │       │
-│        │                   ────────────────────────────────────────> │       │
-│        │                   │                     │                  │       │
-│        │              5. Skill/hook: Bash (subshell)                │       │
-│        │                   │                     │  <───────────────│       │
-│        │                   │                     │  passwd-sso      │       │
-│        │                   │                     │  decrypt <id>    │       │
-│        │                   │                     │  --mcp-client    │       │
-│        │                   │                     │  mcpc_xxx        │       │
-│        │                   │                     │                  │       │
-│        │              6. Authorization check     │                  │       │
-│        │                   <──────────────────── │                  │       │
-│        │                   │ GET /delegation/    │                  │       │
-│        │                   │ check?clientId=     │                  │       │
-│        │                   │ mcpc_xxx&entryId=.. │                  │       │
-│        │                   │                     │                  │       │
-│        │                   │ 200 OK / 403        │                  │       │
-│        │                   ────────────────────> │                  │       │
-│        │                   │                     │                  │       │
-│        │              7. Fetch encrypted blob    │                  │       │
-│        │                   <──────────────────── │                  │       │
-│        │                   │ GET /api/passwords/ │                  │       │
-│        │                   │ <id> (encrypted)    │                  │       │
-│        │                   ────────────────────> │                  │       │
-│        │                   │                     │                  │       │
-│        │                   │               8. Decrypt locally       │       │
-│        │                   │                     │ vault key + AAD  │       │
-│        │                   │                     │ → plaintext      │       │
-│        │                   │                     │                  │       │
-│        │              9. Credential consumed in pipe                │       │
-│        │                   │                     │ ────────────────>│       │
-│        │                   │                     │ (pipe to curl)   │       │
-│        │                   │                     │                  │       │
-│        │             10. Only result reaches AI  │                  │       │
-│        │                   │                     │   "HTTP 200"  ──>│       │
-│        │                   │                     │   (no password)  │       │
-│        │                   │                     │                  │       │
-│  ┌─────┴─────┐     ┌───────┴───────┐     ┌──────┴───────┐    ┌─────┴─────┐ │
-│  │  Sees:     │     │  Sees:        │     │  Sees:       │    │  Sees:    │ │
-│  │  everything│     │  metadata     │     │  plaintext   │    │  metadata │ │
-│  │  (owner)   │     │  entryIds     │     │  (in memory  │    │  HTTP     │ │
-│  │            │     │  NO passwords │     │   only)      │    │  results  │ │
-│  │            │     │  NO vault key │     │              │    │  NO       │ │
-│  │            │     │               │     │              │    │  passwords│ │
-│  └───────────┘     └───────────────┘     └──────────────┘    └───────────┘ │
-│                                                                             │
-│  Security boundaries:                                                       │
-│  ├─ Server ↔ AI: HTTPS + MCP OAuth 2.1 (metadata only)                     │
-│  ├─ Agent ↔ Server: HTTPS + Bearer token (auth check, encrypted blob)      │
-│  ├─ Agent ↔ Hook: Unix socket 0600 (plaintext, same-user only)             │
-│  └─ Hook ↔ AI: stdout pipe (result only, credential consumed in subshell)  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+
+> **Security boundaries:**
+> - Server ↔ AI: HTTPS + MCP OAuth 2.1 (metadata only)
+> - Agent ↔ Server: HTTPS + Bearer token (auth check, encrypted blob)
+> - Agent ↔ Hook: Unix socket 0600 (plaintext, same-user only)
+> - Hook ↔ AI: stdout pipe (result only, credential consumed in subshell)
 
 #### Actor Responsibility Matrix
 

@@ -107,26 +107,32 @@ compatibility via version-gated decryption.
 
 ## Key Derivation Chains
 
-```
-Personal Vault:
-  passphrase + accountSalt -> PBKDF2(600k) -> wrappingKey   [kdfType=0]
-  passphrase + accountSalt -> Argon2id(t=3,m=64M,p=4) -> wrappingKey  [kdfType=1]
-  secretKey -> HKDF("passwd-sso-enc-v1", salt=empty) -> encryptionKey
-  secretKey -> HKDF("passwd-sso-auth-v1", salt=empty) -> authKey
+```mermaid
+flowchart LR
+    subgraph PV["Personal Vault"]
+        PP["passphrase +<br/>accountSalt"]
+        PP -- "PBKDF2(600k) [kdfType=0]" --> WK["wrappingKey"]
+        PP -- "Argon2id(t=3,m=64M,p=4) [kdfType=1]" --> WK
+        SK["secretKey"] -- "HKDF('passwd-sso-enc-v1', salt=empty)" --> EK["encryptionKey"]
+        SK -- "HKDF('passwd-sso-auth-v1', salt=empty)" --> AK["authKey"]
+    end
 
-Team Vault:
-  teamKey -> HKDF("passwd-sso-team-enc-v1", salt=empty) -> teamEncryptionKey (legacy, itemKeyVersion=0)
-  teamKey -> AES-GCM-wrap(ItemKey, AAD="IK") -> encryptedItemKey (itemKeyVersion>=1)
-  ItemKey -> HKDF("passwd-sso-item-enc-v1", salt=empty) -> itemEncryptionKey (itemKeyVersion>=1)
-  ECDH(ephemeral, member) -> HKDF("passwd-sso-team-v1", salt=random) -> teamWrappingKey
-  secretKey -> HKDF("passwd-sso-ecdh-v1", salt=empty) -> ecdhWrappingKey
+    subgraph TV["Team Vault"]
+        TK["teamKey"] -- "HKDF('passwd-sso-team-enc-v1', salt=empty)" --> TEK["teamEncryptionKey<br/>(legacy, itemKeyVersion=0)"]
+        TK -- "AES-GCM-wrap(AAD='IK')" --> EIK["encryptedItemKey<br/>(itemKeyVersion≥1)"]
+        IK["ItemKey"] -- "HKDF('passwd-sso-item-enc-v1', salt=empty)" --> IEK["itemEncryptionKey<br/>(itemKeyVersion≥1)"]
+        ECDH1["ECDH(ephemeral, member)"] -- "HKDF('passwd-sso-team-v1', salt=random)" --> TWK["teamWrappingKey"]
+        SK2["secretKey"] -- "HKDF('passwd-sso-ecdh-v1', salt=empty)" --> EWK["ecdhWrappingKey"]
+    end
 
-Emergency Access:
-  ECDH(ephemeral, grantee) -> HKDF("passwd-sso-emergency-v1", salt=random) -> sharedKey
+    subgraph EA["Emergency Access"]
+        ECDH2["ECDH(ephemeral, grantee)"] -- "HKDF('passwd-sso-emergency-v1', salt=random)" --> SHK["sharedKey"]
+    end
 
-Recovery Key:
-  recoveryKey -> HKDF("passwd-sso-recovery-wrap-v1", salt=random) -> wrappingKey
-  recoveryKey -> HKDF("passwd-sso-recovery-verifier-v1", salt=empty) -> verifierKey
+    subgraph RK["Recovery Key"]
+        RKey["recoveryKey"] -- "HKDF('passwd-sso-recovery-wrap-v1', salt=random)" --> RWK["wrappingKey"]
+        RKey -- "HKDF('passwd-sso-recovery-verifier-v1', salt=empty)" --> VK["verifierKey"]
+    end
 ```
 
 ---

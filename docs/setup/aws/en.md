@@ -16,42 +16,18 @@ This guide describes a production-oriented AWS deployment:
 
 ## System Architecture (ASCII)
 
-```
-              +----------------------+
-              |   Users / Clients    |
-              +----------+-----------+
-                         |
-                         v
-                 +---------------+
-                 |  ALB (HTTPS)  |
-                 +-------+-------+
-                         |
-            +------------+-------------+
-            |                          |
-            v                          v
-   +-----------------+       +-----------------+
-   |  app (Next.js)  |       | jackson (SAML)  |
-   |  ECS/Fargate    |       | ECS/Fargate     |
-   +--------+--------+       +--------+--------+
-            |                         |
-            |                         |
-            v                         v
-   +-----------------+       +-----------------+
-   | RDS (Postgres)  |<------+ RDS (Postgres)  |
-   +-----------------+       +-----------------+
-            |
-            v
-   +-----------------+
-   | ElastiCache     |
-   | (Redis)         |
-   +-----------------+
+```mermaid
+flowchart TB
+    Users["Users / Clients"] --> ALB["ALB (HTTPS)"]
+    ALB --> App["app (Next.js)<br/>ECS/Fargate"]
+    ALB --> Jackson["jackson (SAML)<br/>ECS/Fargate"]
 
-   +-----------------+
-   | Secrets Manager |
-   +--------+--------+
-            |
-            v
-     (Task env vars)
+    App --> RDS["RDS (PostgreSQL)"]
+    Jackson --> RDS
+    App --> Redis["ElastiCache (Redis)"]
+
+    Secrets["Secrets Manager"] -.-> |Task env vars| App
+    Secrets -.-> |Task env vars| Jackson
 ```
 
 ## Prerequisites

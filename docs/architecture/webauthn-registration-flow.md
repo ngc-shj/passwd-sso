@@ -10,153 +10,44 @@ PRF extension for vault auto-unlock key wrapping.
 
 ## Sequence Diagram
 
-```
-Browser (Client)                    Server (Next.js)                  Redis              PostgreSQL
-    │                                    │                              │                    │
-    │  User is already signed in (SSO, Magic Link, etc.)               │                    │
-    │                                    │                              │                    │
-    ├─── Click "Register new passkey" in settings                      │                    │
-    │                                    │                              │                    │
-    │  POST /api/webauthn/register/options                             │                    │
-    ├───────────────────────────────────►│                              │                    │
-    │                                    │  auth() — verify session     │                    │
-    │                                    │  Extract userId              │                    │
-    │                                    │                              │                    │
-    │                                    │  Rate limit check            │                    │
-    │                                    │  (10 req/min per userId)     │                    │
-    │                                    │                              │                    │
-    │                                    │  Fetch existing credentials  │                    │
-    │                                    │  (withUserTenantRls)         │                    │
-    │                                    ├─────────────────────────────────────────────────►│
-    │                                    │◄────────────────────────────────────────────────┤
-    │                                    │  [{credentialId, transports}]                    │
-    │                                    │                              │                    │
-    │                                    │  generateRegistrationOpts()  │                    │
-    │                                    │  ├─ rpId, rpName             │                    │
-    │                                    │  ├─ user: {id, name}         │                    │
-    │                                    │  ├─ challenge (random)       │                    │
-    │                                    │  ├─ excludeCredentials       │                    │
-    │                                    │  └─ residentKey: "preferred" │                    │
-    │                                    │                              │                    │
-    │                                    │  Store challenge in Redis    │                    │
-    │                                    │  (TTL 300s, consume-once)    │                    │
-    │                                    ├────────────────────────────►│                    │
-    │                                    │  SET webauthn:challenge:     │                    │
-    │                                    │    register:{userId}         │                    │
-    │                                    │                              │                    │
-    │                                    │  derivePrfSalt()             │                    │
-    │                                    │  ├─ HKDF-SHA256              │                    │
-    │                                    │  │  ikm = WEBAUTHN_PRF_SECRET│                    │
-    │                                    │  │  salt = rpId (RP-global)  │                    │
-    │                                    │  │  info = "prf-vault-       │                    │
-    │                                    │  │    unlock-v1"             │                    │
-    │                                    │  └─ → 64-char hex salt       │                    │
-    │                                    │                              │                    │
-    │   { options, prfSupported, prfSalt }                             │                    │
-    │◄───────────────────────────────────┤                              │                    │
-    │                                    │                              │                    │
-    │  toCreationOptions(options)        │                              │                    │
-    │  ├─ challenge: base64url → Buffer  │                              │                    │
-    │  ├─ user.id: base64url → Buffer   │                              │                    │
-    │  └─ extensions.prf.eval.first      │                              │                    │
-    │      = hexDecode(prfSalt)          │                              │                    │
-    │                                    │                              │                    │
-    │  navigator.credentials.create()    │                              │                    │
-    │         │                          │                              │                    │
-    │         ▼                          │                              │                    │
-    │  ┌─────────────────┐              │                              │                    │
-    │  │  Authenticator    │              │                              │                    │
-    │  │  (Touch ID,       │              │                              │                    │
-    │  │   YubiKey,        │              │                              │                    │
-    │  │   QR scan)        │              │                              │                    │
-    │  │                   │              │                              │                    │
-    │  │ 1. Generate key pair            │                              │                    │
-    │  │    private key + public key     │                              │                    │
-    │  │                   │              │                              │                    │
-    │  │ 2. Generate credentialId        │                              │                    │
-    │  │    Discoverable:  │              │                              │                    │
-    │  │      Store {id, private key,    │                              │                    │
-    │  │        rpId} internally         │                              │                    │
-    │  │    Non-discoverable:            │                              │                    │
-    │  │      Encrypt private key        │                              │                    │
-    │  │      → embed in id itself       │                              │                    │
-    │  │                   │              │                              │                    │
-    │  │ 3. PRF computation (if supported)                             │                    │
-    │  │    HMAC(internal secret, salt)  │                              │                    │
-    │  │    → prfOutput (32 bytes)       │                              │                    │
-    │  │                   │              │                              │                    │
-    │  │ Returns:          │              │                              │                    │
-    │  │  attestationObject (pubkey+sig) │                              │                    │
-    │  │  clientDataJSON   │              │                              │                    │
-    │  │  transports ["internal" etc]    │                              │                    │
-    │  │  prf.results.first (PRF output) │                              │                    │
-    │  └────────┬──────────┘              │                              │                    │
-    │           │                          │                              │                    │
-    │◄──────────┘                          │                              │                    │
-    │                                    │                              │                    │
-    │  If PRF output present & vault unlocked:                         │                    │
-    │  ├─ getSecretKey() → vault secret key                            │                    │
-    │  ├─ derivePrfWrappingKey(prfOutput)│                              │                    │
-    │  │  └─ HKDF-SHA256                 │                              │                    │
-    │  │     salt = "passwd-sso:prf-     │                              │                    │
-    │  │       wrapping:v1"              │                              │                    │
-    │  │     info = "vault-secret-       │                              │                    │
-    │  │       key-wrap"                 │                              │                    │
-    │  └─ AES-256-GCM encrypt(secretKey) │                              │                    │
-    │     → {ciphertext, iv, authTag}    │                              │                    │
-    │                                    │                              │                    │
-    │  POST /api/webauthn/register/verify│                              │                    │
-    │  { response,                       │                              │                    │
-    │    nickname,                        │                              │                    │
-    │    prfEncryptedSecretKey,           │                              │                    │
-    │    prfSecretKeyIv,                  │                              │                    │
-    │    prfSecretKeyAuthTag }            │                              │                    │
-    ├───────────────────────────────────►│                              │                    │
-    │                                    │  auth() — verify session     │                    │
-    │                                    │  Rate limit + Zod validation │                    │
-    │                                    │                              │                    │
-    │                                    │  Consume challenge from Redis│                    │
-    │                                    ├────────────────────────────►│                    │
-    │                                    │◄────────────────────────────┤                    │
-    │                                    │  GETDEL webauthn:challenge:  │                    │
-    │                                    │    register:{userId}         │                    │
-    │                                    │                              │                    │
-    │                                    │  verifyRegistration()        │                    │
-    │                                    │  ├─ Challenge comparison     │                    │
-    │                                    │  ├─ Origin validation        │                    │
-    │                                    │  ├─ Attestation sig verify   │                    │
-    │                                    │  └─ Extract public key       │                    │
-    │                                    │                              │                    │
-    │                                    │  Save credential to DB       │                    │
-    │                                    │  (withUserTenantRls)         │                    │
-    │                                    ├─────────────────────────────────────────────────►│
-    │                                    │  INSERT webauthn_credentials │                    │
-    │                                    │  ├─ credentialId (base64url) │                    │
-    │                                    │  ├─ publicKey (base64url)    │                    │
-    │                                    │  ├─ counter: 0 (BigInt)      │                    │
-    │                                    │  ├─ transports: ["internal"] │                    │
-    │                                    │  ├─ deviceType               │                    │
-    │                                    │  │  "singleDevice"|"multiDevice"                 │
-    │                                    │  ├─ backedUp: true|false     │                    │
-    │                                    │  ├─ nickname                 │                    │
-    │                                    │  ├─ tenantId                 │                    │
-    │                                    │  ├─ registeredDevice (UA)    │                    │
-    │                                    │  ├─ prfSupported: true|false │                    │
-    │                                    │  ├─ prfEncryptedSecretKey    │  ← PRF only       │
-    │                                    │  ├─ prfSecretKeyIv           │                    │
-    │                                    │  └─ prfSecretKeyAuthTag      │                    │
-    │                                    │◄────────────────────────────────────────────────┤
-    │                                    │                              │                    │
-    │                                    │  Audit log + notification    │                    │
-    │                                    │  email (non-blocking)        │                    │
-    │                                    │                              │                    │
-    │   201 { id, credentialId,          │                              │                    │
-    │         nickname, deviceType,      │                              │                    │
-    │         backedUp, prfSupported,    │                              │                    │
-    │         createdAt }                │                              │                    │
-    │◄───────────────────────────────────┤                              │                    │
-    │                                    │                              │                    │
-    ▼                                    ▼                              ▼                    ▼
+```mermaid
+sequenceDiagram
+    participant Browser as Browser (Client)
+    participant Server as Server (Next.js)
+    participant Redis
+    participant DB as PostgreSQL
+
+    Note over Browser: User is already signed in (SSO, Magic Link, etc.)
+    Note over Browser: Click "Register new passkey" in settings
+
+    Browser ->> Server: POST /api/webauthn/register/options
+    Note over Server: auth() — verify session, extract userId<br/>Rate limit check (10 req/min per userId)
+    Server ->> DB: Fetch existing credentials (withUserTenantRls)
+    DB -->> Server: [{credentialId, transports}]
+    Note over Server: generateRegistrationOpts()<br/>rpId, rpName, user: {id, name}<br/>challenge (random), excludeCredentials<br/>residentKey: "preferred"
+    Server ->> Redis: SET webauthn:challenge:register:{userId}<br/>(TTL 300s, consume-once)
+    Note over Server: derivePrfSalt()<br/>HKDF-SHA256(ikm=WEBAUTHN_PRF_SECRET,<br/>salt=rpId, info="prf-vault-unlock-v1")<br/>→ 64-char hex salt
+    Server -->> Browser: { options, prfSupported, prfSalt }
+
+    Note over Browser: toCreationOptions(options)<br/>challenge: base64url → Buffer<br/>user.id: base64url → Buffer<br/>extensions.prf.eval.first = hexDecode(prfSalt)
+
+    Note over Browser: navigator.credentials.create()
+
+    rect rgb(240, 240, 255)
+        Note over Browser: Authenticator (Touch ID, YubiKey, QR scan)<br/>1. Generate key pair (private + public)<br/>2. Generate credentialId<br/>   Discoverable: store internally<br/>   Non-discoverable: encrypt privkey in id<br/>3. PRF computation (if supported)<br/>   HMAC(internal secret, salt) → prfOutput (32 bytes)<br/><br/>Returns: attestationObject, clientDataJSON,<br/>transports, prf.results.first
+    end
+
+    Note over Browser: If PRF output present & vault unlocked:<br/>getSecretKey() → vault secret key<br/>derivePrfWrappingKey(prfOutput) via HKDF-SHA256<br/>salt="passwd-sso:prf-wrapping:v1"<br/>info="vault-secret-key-wrap"<br/>AES-256-GCM encrypt(secretKey)<br/>→ {ciphertext, iv, authTag}
+
+    Browser ->> Server: POST /api/webauthn/register/verify<br/>{response, nickname, prfEncryptedSecretKey,<br/>prfSecretKeyIv, prfSecretKeyAuthTag}
+    Note over Server: auth() — verify session<br/>Rate limit + Zod validation
+    Server ->> Redis: GETDEL webauthn:challenge:register:{userId}
+    Redis -->> Server: challenge (consumed)
+    Note over Server: verifyRegistration()<br/>Challenge comparison, Origin validation<br/>Attestation sig verify, Extract public key
+    Server ->> DB: INSERT webauthn_credentials<br/>credentialId, publicKey, counter: 0<br/>transports, deviceType, backedUp<br/>nickname, tenantId, registeredDevice<br/>prfSupported, prfEncryptedSecretKey (PRF only)<br/>prfSecretKeyIv, prfSecretKeyAuthTag
+    DB -->> Server: OK
+    Note over Server: Audit log + notification email (non-blocking)
+    Server -->> Browser: 201 { id, credentialId, nickname,<br/>deviceType, backedUp, prfSupported, createdAt }
 ```
 
 ## Key Implementation Files
