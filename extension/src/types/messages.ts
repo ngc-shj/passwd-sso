@@ -24,7 +24,8 @@ export type ExtensionMessage =
   | { type: "DISMISS_SAVE_PROMPT" }
   | { type: "CHECK_PENDING_SAVE" }
   | { type: "AUTOFILL_CREDIT_CARD"; entryId: string; tabId: number; teamId?: string }
-  | { type: "AUTOFILL_IDENTITY"; entryId: string; tabId: number; teamId?: string };
+  | { type: "AUTOFILL_IDENTITY"; entryId: string; tabId: number; teamId?: string }
+  | { type: "KEEPALIVE_PING" };
 
 export interface DecryptedEntry {
   id: string;

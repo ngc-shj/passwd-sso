@@ -134,6 +134,35 @@ async function configureSessionStorageAccess(): Promise<void> {
   }
 }
 
+// ── Offscreen keepalive ───────────────────────────────────
+// Prevents SW termination during the 30-second idle timeout
+// by sending a ping every 25 seconds from an offscreen document.
+
+const OFFSCREEN_URL = "src/offscreen.html";
+
+async function startKeepalive(): Promise<void> {
+  try {
+    const exists = await chrome.offscreen.hasDocument?.();
+    if (exists) return;
+    await chrome.offscreen.createDocument({
+      url: OFFSCREEN_URL,
+      reasons: ["WORKERS" as chrome.offscreen.Reason],
+      justification: "Keep service worker alive while vault is unlocked",
+    });
+  } catch {
+    // Best effort — older Chrome versions may not support offscreen
+  }
+}
+
+async function stopKeepalive(): Promise<void> {
+  try {
+    const exists = await chrome.offscreen.hasDocument?.();
+    if (exists) await chrome.offscreen.closeDocument();
+  } catch {
+    // ignore
+  }
+}
+
 function invalidateCache(): void {
   cachedEntries = null;
   cacheTimestamp = 0;
@@ -186,6 +215,7 @@ function clearVault(): void {
   invalidateContextMenu();
   pendingSavePrompts.clear();
   chrome.alarms.clear(ALARM_VAULT_LOCK);
+  void stopKeepalive();
   persistState();
   void updateBadge();
 }
@@ -322,12 +352,13 @@ async function hydrateFromSession(): Promise<void> {
   // Schedule refresh
   scheduleRefreshAlarm(state.expiresAt);
 
-  // Restore vault auto-lock alarm if vault is unlocked
+  // Restore vault auto-lock alarm and keepalive if vault is unlocked
   if (encryptionKey) {
     const effectiveLock = await getEffectiveAutoLockMinutes();
     if (effectiveLock > 0) {
       chrome.alarms.create(ALARM_VAULT_LOCK, { delayInMinutes: effectiveLock });
     }
+    void startKeepalive();
   }
 
   void updateBadge();
@@ -1492,6 +1523,10 @@ async function handleMessage(
       return;
     }
 
+    case "KEEPALIVE_PING":
+      // No-op — receiving the message keeps the SW alive
+      return;
+
     case "GET_STATUS": {
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken();
@@ -1604,6 +1639,7 @@ async function handleMessage(
             delayInMinutes: effectiveLock,
           });
         }
+        void startKeepalive();
 
         sendResponse({ type: "UNLOCK_VAULT", ok: true });
         invalidateContextMenu();
