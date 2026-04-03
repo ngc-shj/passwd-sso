@@ -281,7 +281,7 @@ export function App() {
                 {t("options.shortcutsHint")}
               </p>
             ) : (
-              commands.filter((cmd) => cmd.name !== "_execute_action").map((cmd) => {
+              commands.map((cmd) => {
                 const desc = cmd.description?.replace(/__MSG_(\w+)__/g, (_m, key) =>
                   chrome.i18n?.getMessage(key) || key) || cmd.name;
                 return (
