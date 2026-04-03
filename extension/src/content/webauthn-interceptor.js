@@ -15,6 +15,8 @@
   var TIMEOUT_MS = 120000; // 2 minute timeout for user interaction
 
   if (window[GUARD]) return;
+  // Skip on pages without WebAuthn support (e.g. HTTP, non-secure contexts)
+  if (!navigator.credentials || !navigator.credentials.get || !navigator.credentials.create) return;
   window[GUARD] = true;
 
   var origGet = navigator.credentials.get.bind(navigator.credentials);

@@ -145,6 +145,7 @@ function handleCreateCredential(
       userDisplayName: payload.userDisplayName,
       challenge: payload.challenge,
       excludeCredentialIds: payload.excludeCredentialIds,
+      clientDataJSON: payload.clientDataJSON,
     },
     (response) => {
       respond(requestId, response);

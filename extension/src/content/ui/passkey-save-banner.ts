@@ -2,6 +2,7 @@
 // Asks user if they want to save the new passkey in passwd-sso.
 
 import { getShadowHost } from "./shadow-host";
+import { t } from "../../lib/i18n";
 
 const BANNER_ID = "psso-passkey-save-banner";
 const STYLE_ID = "psso-passkey-save-style";
@@ -32,7 +33,7 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
 
   const message = document.createElement("div");
   message.className = "psso-pk-banner-message";
-  message.textContent = `Save passkey for ${options.rpName}?`;
+  message.textContent = t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
 
   if (options.userName) {
     const user = document.createElement("div");
@@ -45,7 +46,7 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   actions.className = "psso-pk-banner-actions";
 
   const saveBtn = document.createElement("button");
-  saveBtn.textContent = "Save in passwd-sso";
+  saveBtn.textContent = t("passkeySaveBanner.save");
   saveBtn.className = "psso-pk-btn-primary";
   saveBtn.addEventListener("click", () => {
     options.onSave();
@@ -54,7 +55,7 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   actions.appendChild(saveBtn);
 
   const dismissBtn = document.createElement("button");
-  dismissBtn.textContent = "Use device";
+  dismissBtn.textContent = t("passkeySaveBanner.useDevice");
   dismissBtn.className = "psso-pk-btn-secondary";
   dismissBtn.addEventListener("click", () => {
     options.onDismiss();

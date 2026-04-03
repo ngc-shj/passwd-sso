@@ -9,7 +9,6 @@ import type { CborMap } from "./cbor";
 export interface PasskeyKeypair {
   privateKeyJwk: JsonWebKey;
   publicKeyCose: Uint8Array;
-  publicKeyRaw: Uint8Array;
 }
 
 /**
@@ -29,7 +28,7 @@ export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
   );
   const publicKeyCose = encodeCoseEC2Key(publicKeyRaw);
 
-  return { privateKeyJwk, publicKeyCose, publicKeyRaw };
+  return { privateKeyJwk, publicKeyCose };
 }
 
 /**

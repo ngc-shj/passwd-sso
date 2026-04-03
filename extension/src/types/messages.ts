@@ -42,6 +42,7 @@ export type ExtensionMessage =
       userDisplayName: string;
       challenge: string;
       excludeCredentialIds: string[];
+      clientDataJSON: string;
     };
 
 export interface DecryptedEntry {

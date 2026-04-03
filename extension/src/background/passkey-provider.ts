@@ -143,36 +143,26 @@ export async function handlePasskeySignAssertion(
       clientDataJSON,
     );
 
-    // Update counter in blob and persist
+    // Update counter in blob and persist (overview unchanged, omit from PUT)
     blob.passkeySignCount = signCount;
     const encryptedBlob = await encryptData(
       JSON.stringify(blob),
       encKey,
       aad,
     );
-    const overviewPlain = await decryptData(
-      data.encryptedOverview,
-      encKey,
-      aad,
-    );
-    const encryptedOverview = await encryptData(overviewPlain, encKey, aad);
 
     const putRes = await deps.swFetch(path, {
       method: "PUT",
       body: JSON.stringify({
         encryptedBlob,
-        encryptedOverview,
         aadVersion: data.aadVersion ?? 1,
         keyVersion: 1,
       }),
     });
 
     if (!putRes.ok) {
-      // Assertion still succeeds even if counter update fails;
-      // counter is a best-effort defense
+      // Assertion still succeeds even if counter update fails
     }
-
-    deps.invalidateCache();
 
     return {
       ok: true,
@@ -193,14 +183,19 @@ export async function handlePasskeySignAssertion(
 
 // ── PASSKEY_CREATE_CREDENTIAL ──
 
+export interface CreateCredentialParams {
+  rpId: string;
+  rpName: string;
+  userId: string;
+  userName: string;
+  userDisplayName: string;
+  challenge: string;
+  excludeCredentialIds: string[];
+  clientDataJSON: string;
+}
+
 export async function handlePasskeyCreateCredential(
-  rpId: string,
-  rpName: string,
-  userId: string,
-  userName: string,
-  userDisplayName: string,
-  challenge: string,
-  excludeCredentialIds: string[],
+  params: CreateCredentialParams,
 ): Promise<{
   ok: boolean;
   response?: SerializedAttestationResponse;
@@ -214,8 +209,12 @@ export async function handlePasskeyCreateCredential(
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
+  const {
+    rpId, rpName, userId, userName, userDisplayName,
+    challenge, excludeCredentialIds, clientDataJSON,
+  } = params;
+
   try {
-    // Check for duplicate registrations
     const entries = await deps.getCachedEntries();
     const isDuplicate = entries.some(
       (e) =>
@@ -228,14 +227,12 @@ export async function handlePasskeyCreateCredential(
       return { ok: false, error: "CREDENTIAL_EXCLUDED" };
     }
 
-    // Generate key pair and credential ID
     const { privateKeyJwk, publicKeyCose } = await generatePasskeyKeypair();
     const credentialIdBytes = generateCredentialId();
     const credentialIdB64 = base64urlEncode(credentialIdBytes);
 
     const signCount = 0;
 
-    // Build attestation
     const authData = await buildAttestationAuthData(
       rpId,
       signCount,
@@ -244,15 +241,6 @@ export async function handlePasskeyCreateCredential(
     );
     const attestationObject = buildAttestationObject(authData);
 
-    // Build clientDataJSON
-    const clientData = JSON.stringify({
-      type: "webauthn.create",
-      challenge,
-      origin: "", // Filled by MAIN world interceptor
-      crossOrigin: false,
-    });
-
-    // Build entry and save
     const entryId = crypto.randomUUID();
     const aad = buildPersonalEntryAAD(currentUserId, entryId);
     const title = `${rpName} (${userName})`;
@@ -314,7 +302,7 @@ export async function handlePasskeyCreateCredential(
         credentialId: credentialIdB64,
         attestationObject: base64urlEncode(attestationObject),
         clientDataJSON: base64urlEncode(
-          new TextEncoder().encode(clientData),
+          new TextEncoder().encode(clientDataJSON),
         ),
         transports: ["internal", "hybrid"],
       },

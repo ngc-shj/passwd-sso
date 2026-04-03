@@ -93,6 +93,10 @@ const TEAM_KEY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_TEAM_KEY_CACHE = 50;
 const MAX_TEAMS = 10;
 
+const ACTIONABLE_TYPES: Set<string> = new Set([
+  EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD,
+  EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY,
+]);
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 
@@ -918,9 +922,6 @@ type RawEntry = {
 
 async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   if (!encryptionKey || !currentUserId) return [];
-  // Defense-in-depth: API should already filter these, but exclude
-  // trashed/archived entries client-side in case of stale cache or API bug.
-  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY]);
   const active = raw.filter((item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType));
   const entries: DecryptedEntry[] = [];
   for (const item of active) {
@@ -1078,7 +1079,6 @@ async function decryptTeamOverviews(
   teamName: string,
   raw: RawTeamEntry[],
 ): Promise<DecryptedEntry[]> {
-  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY]);
   const active = raw.filter(
     (item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType),
   );
@@ -2357,15 +2357,16 @@ async function handleMessage(
 
     case "PASSKEY_CREATE_CREDENTIAL": {
       try {
-        const result = await handlePasskeyCreateCredential(
-          message.rpId,
-          message.rpName,
-          message.userId,
-          message.userName,
-          message.userDisplayName,
-          message.challenge,
-          message.excludeCredentialIds,
-        );
+        const result = await handlePasskeyCreateCredential({
+          rpId: message.rpId,
+          rpName: message.rpName,
+          userId: message.userId,
+          userName: message.userName,
+          userDisplayName: message.userDisplayName,
+          challenge: message.challenge,
+          excludeCredentialIds: message.excludeCredentialIds,
+          clientDataJSON: message.clientDataJSON,
+        });
         sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ...result } as ExtensionResponse);
       } catch {
         sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false, error: "CREATE_FAILED" } as ExtensionResponse);
