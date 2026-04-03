@@ -13,76 +13,43 @@ through a `postMessage` bridge — the web app's JavaScript sends the token
 via `window.postMessage`, and an ISOLATED-world content script receives it
 and forwards it to the background service worker.
 
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│ Browser Tab (web app page)                                         │
-│                                                                    │
-│  ┌──────────────────────┐     window.postMessage      ┌──────────┐ │
-│  │ Web App JS           │ ──────────────────────────▶  │ Content  │ │
-│  │ (MAIN world)         │  {type, token, expiresAt}    │ Script   │ │
-│  │                      │  targetOrigin: same-origin   │ (ISOLATED│ │
-│  │ injectExtensionToken │                              │  world)  │ │
-│  └──────────────────────┘                              └────┬─────┘ │
-│                                                             │       │
-└─────────────────────────────────────────────────────────────┼───────┘
-                                                              │
-                                          chrome.runtime.sendMessage
-                                            {type: "SET_TOKEN"}
-                                                              │
-                                                              ▼
-                                                   ┌──────────────────┐
-                                                   │ Background       │
-                                                   │ Service Worker   │
-                                                   │                  │
-                                                   │ • stores token   │
-                                                   │ • schedules      │
-                                                   │   refresh alarm  │
-                                                   │ • persists to    │
-                                                   │   encrypted      │
-                                                   │   session storage│
-                                                   └──────────────────┘
+```mermaid
+flowchart TB
+    subgraph BrowserTab["Browser Tab (web app page)"]
+        WebApp["Web App JS<br/>(MAIN world)<br/>injectExtensionToken"]
+        ContentScript["Content Script<br/>(ISOLATED world)"]
+        WebApp -- "window.postMessage<br/>{type, token, expiresAt}<br/>targetOrigin: same-origin" --> ContentScript
+    end
+
+    ContentScript -- "chrome.runtime.sendMessage<br/>{type: SET_TOKEN}" --> BgWorker
+
+    BgWorker["Background Service Worker<br/>• stores token<br/>• schedules refresh alarm<br/>• persists to encrypted session storage"]
 ```
 
 ## Connection Flow
 
-```
-User                Extension Popup         Web App              API Server
- │                       │                    │                      │
- ├─ click "Connect" ────▶│                    │                      │
- │                       ├─ open tab ────────▶│                      │
- │                       │  ?ext_connect=1    │                      │
- │                       │                    │                      │
- ├─ login ──────────────────────────────────▶ │                      │
- │                       │                    │                      │
- │                       │                    ├─ POST /api/extension/token ─▶│
- │                       │                    │◀─ {token, expiresAt} ────────│
- │                       │                    │                      │
- │                       │         ◀──────────┤                      │
- │                       │  window.postMessage│                      │
- │                       │  (PASSWD_SSO_      │                      │
- │                       │   TOKEN_RELAY)     │                      │
- │                       │                    │                      │
- │               content script               │                      │
- │               validates:                   │                      │
- │               • event.source === window    │                      │
- │               • event.origin match         │                      │
- │               • event.data.type match      │                      │
- │                       │                    │                      │
- │               background receives          │                      │
- │               SET_TOKEN message             │                      │
- │                       │                    │                      │
- │               ┌───────┴───────┐            │                      │
- │               │ store token   │            │                      │
- │               │ encrypt &     │            │                      │
- │               │ persist to    │            │                      │
- │               │ session store │            │                      │
- │               │ schedule      │            │                      │
- │               │ refresh alarm │            │                      │
- │               └───────┬───────┘            │                      │
- │                       │                    │                      │
- │  "Connected" badge ◀──┤                    │                      │
- │                       │                    │  "Connected" UI      │
- │  ◀─────────────────────────────────────────┤                      │
+```mermaid
+sequenceDiagram
+    actor User
+    participant Popup as Extension Popup
+    participant WebApp as Web App
+    participant API as API Server
+
+    User ->> Popup: click "Connect"
+    Popup ->> WebApp: open tab (?ext_connect=1)
+    User ->> WebApp: login
+    WebApp ->> API: POST /api/extension/token
+    API -->> WebApp: {token, expiresAt}
+    WebApp ->> Popup: window.postMessage (PASSWD_SSO_TOKEN_RELAY)
+
+    Note over Popup: Content script validates:<br/>• event.source === window<br/>• event.origin match<br/>• event.data.type match
+
+    Note over Popup: Background receives SET_TOKEN
+
+    Note over Popup: Store token, encrypt &<br/>persist to session store,<br/>schedule refresh alarm
+
+    Popup -->> User: "Connected" badge
+    WebApp -->> User: "Connected" UI
 ```
 
 ## Token Lifecycle
@@ -102,30 +69,12 @@ User                Extension Popup         Web App              API Server
 Sensitive fields (`token`, `vaultSecretKey`) are encrypted before persisting
 to `chrome.storage.session`:
 
-```
-┌─────────────────────┐
-│ In-memory            │
-│ (service worker)     │
-│                      │
-│ ephemeralKey         │──── AES-256-GCM, non-extractable
-│ (CryptoKey)          │     generated on SW startup
-│                      │     lost on SW termination
-└─────────┬───────────┘
-          │ encrypt
-          ▼
-┌─────────────────────┐
-│ chrome.storage       │
-│ .session             │
-│                      │
-│ encryptedToken:      │ ← {ciphertext, iv, authTag} (hex)
-│   {ct, iv, tag}      │
-│ encryptedVaultKey:   │ ← {ciphertext, iv, authTag} (hex)
-│   {ct, iv, tag}      │
-│ expiresAt: number    │ ← plaintext (not sensitive)
-│ userId: string       │ ← plaintext (not sensitive)
-│ ecdhEncrypted:       │ ← already encrypted by vault key
-│   {ct, iv, tag}      │
-└──────────────────────┘
+```mermaid
+flowchart TB
+    InMem["<b>In-memory (service worker)</b><br/><br/>ephemeralKey (CryptoKey)<br/>AES-256-GCM, non-extractable<br/>generated on SW startup<br/>lost on SW termination"]
+    InMem -- "encrypt" --> Session
+
+    Session["<b>chrome.storage.session</b><br/><br/>encryptedToken: {ct, iv, tag} ← hex<br/>encryptedVaultKey: {ct, iv, tag} ← hex<br/>expiresAt: number ← plaintext<br/>userId: string ← plaintext<br/>ecdhEncrypted: {ct, iv, tag} ← vault key encrypted"]
 ```
 
 On service worker restart:
