@@ -603,7 +603,7 @@ async function registerTokenBridgeScript(serverUrl: string): Promise<void> {
       id: TOKEN_BRIDGE_SCRIPT_ID,
       matches: [`${origin}/*`],
       js: ["src/content/token-bridge.js"],
-      runAt: "document_idle",
+      runAt: "document_start",
     },
   ]);
 }

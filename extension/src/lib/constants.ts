@@ -1,6 +1,11 @@
 // ── Token bridge (shared contract with web app's inject-extension-token.ts) ──
+/** @deprecated Use TOKEN_BRIDGE_EVENT for new code. */
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
+
+// New token bridge: CustomEvent (web app) → postMessage relay (MAIN world) → content script (ISOLATED world)
+export const TOKEN_BRIDGE_EVENT = "passwd-sso-token-bridge";
+export const TOKEN_BRIDGE_MSG_TYPE = "PASSWD_SSO_TOKEN_RELAY";
 
 // ── Session storage ──
 export const SESSION_KEY = "authState";
