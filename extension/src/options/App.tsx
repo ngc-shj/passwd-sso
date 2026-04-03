@@ -107,6 +107,12 @@ export function App() {
   const [error, setError] = useState("");
   const [savedSnapshot, setSavedSnapshot] = useState("");
 
+  const snapshot = (urlOverride?: string) => JSON.stringify({
+    serverUrl: urlOverride ?? serverUrl, autoLockMinutes, theme, showBadgeCount,
+    enableInlineSuggestions, enableContextMenu, autoCopyTotp,
+    showSavePrompt, showUpdatePrompt, clipboardClearSeconds, vaultTimeoutAction,
+  });
+
   useEffect(() => {
     getSettings().then((s: StorageSchema) => {
       setServerUrl(s.serverUrl);
@@ -119,26 +125,18 @@ export function App() {
       setShowUpdatePrompt(s.showUpdatePrompt);
       setClipboardClearSeconds(s.clipboardClearSeconds);
       setVaultTimeoutAction(s.vaultTimeoutAction);
-      setSavedSnapshot(JSON.stringify({
-        serverUrl: s.serverUrl, autoLockMinutes: s.autoLockMinutes,
-        theme: s.theme, showBadgeCount: s.showBadgeCount,
-        enableInlineSuggestions: s.enableInlineSuggestions, enableContextMenu: s.enableContextMenu,
-        autoCopyTotp: s.autoCopyTotp, showSavePrompt: s.showSavePrompt,
-        showUpdatePrompt: s.showUpdatePrompt, clipboardClearSeconds: s.clipboardClearSeconds,
-        vaultTimeoutAction: s.vaultTimeoutAction,
-      }));
     });
 
     chrome.commands.getAll().then(setCommands);
     setVersion(chrome.runtime.getManifest().version);
   }, []);
 
-  const currentSnapshot = JSON.stringify({
-    serverUrl, autoLockMinutes, theme, showBadgeCount,
-    enableInlineSuggestions, enableContextMenu, autoCopyTotp,
-    showSavePrompt, showUpdatePrompt, clipboardClearSeconds, vaultTimeoutAction,
+  // Set initial snapshot after first render with loaded settings
+  useEffect(() => {
+    if (serverUrl && !savedSnapshot) setSavedSnapshot(snapshot());
   });
-  const dirty = savedSnapshot !== "" && currentSnapshot !== savedSnapshot;
+
+  const dirty = savedSnapshot !== "" && snapshot() !== savedSnapshot;
 
   const handleSave = async () => {
     setSaved(false);
@@ -174,11 +172,8 @@ export function App() {
       clipboardClearSeconds,
       vaultTimeoutAction,
     });
-    setSavedSnapshot(JSON.stringify({
-      serverUrl: validated.value, autoLockMinutes, theme, showBadgeCount,
-      enableInlineSuggestions, enableContextMenu, autoCopyTotp,
-      showSavePrompt, showUpdatePrompt, clipboardClearSeconds, vaultTimeoutAction,
-    }));
+    setServerUrl(validated.value);
+    setSavedSnapshot(snapshot(validated.value));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -338,7 +333,8 @@ export function App() {
           </>
         );
 
-      case "about":
+      case "about": {
+        const parsed = validateServerUrl(serverUrl);
         return (
           <>
             <div className="flex items-center justify-between gap-4 py-3">
@@ -347,7 +343,7 @@ export function App() {
             </div>
             <div className="py-3">
               <a
-                href={validateServerUrl(serverUrl).ok ? validateServerUrl(serverUrl).value : DEFAULT_SERVER_URL}
+                href={parsed.ok ? parsed.value : DEFAULT_SERVER_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
@@ -357,6 +353,7 @@ export function App() {
             </div>
           </>
         );
+      }
     }
   };
 

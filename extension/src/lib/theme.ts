@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { getSettings } from "./storage";
+import { getSettings, validateSettings, type StorageSchema } from "./storage";
 
-type Theme = "light" | "dark" | "system";
-const VALID = new Set<string>(["light", "dark", "system"]);
+type Theme = StorageSchema["theme"];
 
 /** Apply the resolved theme class to <html>. */
 export function applyTheme(theme: Theme): void {
@@ -17,14 +16,11 @@ export function applyTheme(theme: Theme): void {
 
 /**
  * Apply theme from chrome.storage.local before React render.
- * Returns a promise that resolves after the theme class is set.
- * Call with `await` before createRoot().render().
+ * Uses validateSettings to ensure the stored value is valid.
  */
 export async function initTheme(): Promise<void> {
-  const result = await chrome.storage.local.get({ theme: "system" });
-  const raw = result.theme;
-  const theme: Theme = typeof raw === "string" && VALID.has(raw) ? (raw as Theme) : "system";
-  applyTheme(theme);
+  const s = await getSettings();
+  applyTheme(validateSettings(s).theme);
 }
 
 /** React hook that tracks the current theme and applies it to <html>. */
@@ -33,7 +29,7 @@ export function useTheme(): [Theme, (t: Theme) => void] {
 
   useEffect(() => {
     getSettings().then((s) => {
-      const t: Theme = VALID.has(s.theme) ? s.theme : "system";
+      const t = validateSettings(s).theme;
       setThemeState(t);
       applyTheme(t);
     });

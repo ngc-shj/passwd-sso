@@ -92,6 +92,29 @@ const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 
 let lastClipboardCopyTime = 0;
 
+/** Schedule clipboard clear after a copy operation. */
+async function scheduleClipboardClear(clipboardClearSeconds: number): Promise<void> {
+  const clipMs = clipboardClearSeconds * 1000;
+  lastClipboardCopyTime = Date.now();
+  await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
+  setTimeout(async () => {
+    try {
+      if (Date.now() - lastClipboardCopyTime >= clipMs) {
+        await copyToClipboard("");
+      }
+    } catch {
+      // ignore — offscreen document may have been closed
+    }
+  }, clipMs);
+  chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
+    delayInMinutes: Math.max((clipboardClearSeconds * 2) / 60, 1),
+  });
+}
+
+// In-memory cache for hot-path settings (updated via chrome.storage.onChanged)
+let cachedShowBadgeCount = true;
+let cachedEnableContextMenu = true;
+
 /** Resolve effective auto-lock minutes: tenant policy > local setting */
 async function getEffectiveAutoLockMinutes(): Promise<number> {
   if (tenantAutoLockMinutes != null && tenantAutoLockMinutes > 0) {
@@ -243,8 +266,7 @@ async function clearAllTabBadges(): Promise<void> {
 
 async function updateBadgeForTab(tabId: number, url: string | undefined): Promise<void> {
   if (!currentToken || !encryptionKey) return;
-  const { showBadgeCount } = validateSettings(await getSettings());
-  if (!showBadgeCount) {
+  if (!cachedShowBadgeCount) {
     await chrome.action.setBadgeText({ text: "", tabId }).catch(() => {});
     return;
   }
@@ -491,6 +513,13 @@ void configureSessionStorageAccess();
 // Hydrate on SW startup
 const hydrationPromise = hydrateFromSession().catch(() => {});
 
+// Initialize setting caches on SW startup
+getSettings().then((s) => {
+  const v = validateSettings(s);
+  cachedShowBadgeCount = v.showBadgeCount;
+  cachedEnableContextMenu = v.enableContextMenu;
+});
+
 // ── Context menu ─────────────────────────────────────────────
 
 initContextMenu({
@@ -499,7 +528,7 @@ initContextMenu({
   extractHost,
   isConnected: () => currentToken !== null,
   isVaultUnlocked: () => encryptionKey !== null,
-  isContextMenuEnabled: async () => validateSettings(await getSettings()).enableContextMenu,
+  isContextMenuEnabled: async () => cachedEnableContextMenu,
   performAutofill: async (entryId, tabId, teamId) => {
     await performAutofillForEntry(entryId, tabId, undefined, teamId);
   },
@@ -629,9 +658,16 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   if (changes.serverUrl?.newValue) {
     registerTokenBridgeScript(String(changes.serverUrl.newValue)).catch(() => {});
   }
+  // Update in-memory caches
+  if (changes.showBadgeCount) {
+    cachedShowBadgeCount = changes.showBadgeCount.newValue !== false;
+  }
+  if (changes.enableContextMenu) {
+    cachedEnableContextMenu = changes.enableContextMenu.newValue !== false;
+  }
   // Context menu toggle
   if (changes.enableContextMenu) {
-    if (changes.enableContextMenu.newValue === false) {
+    if (!cachedEnableContextMenu) {
       chrome.contextMenus.removeAll().catch(() => {});
     } else {
       setupContextMenu();
@@ -793,23 +829,9 @@ chrome.commands.onCommand.addListener(async (command) => {
       // Copy via offscreen document (no page DOM manipulation, no focus stealing)
       await copyToClipboard(value);
 
-      // Schedule clipboard clear: dynamic delay from settings + alarm fallback
+      // Schedule clipboard clear
       const { clipboardClearSeconds } = validateSettings(await getSettings());
-      const clipMs = clipboardClearSeconds * 1000;
-      lastClipboardCopyTime = Date.now();
-      await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
-      setTimeout(async () => {
-        try {
-          if (Date.now() - lastClipboardCopyTime >= clipMs) {
-            await copyToClipboard("");
-          }
-        } catch {
-          // ignore — offscreen document may have been closed
-        }
-      }, clipMs);
-      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
-        delayInMinutes: Math.max((clipboardClearSeconds * 2) / 60, 1),
-      });
+      await scheduleClipboardClear(clipboardClearSeconds);
     } catch (err) {
       console.warn("[psso] copy command failed:", err);
     }
@@ -1532,22 +1554,8 @@ async function performAutofillForEntry(
   if (totpCode && entryType === EXT_ENTRY_TYPE.LOGIN) {
     const { autoCopyTotp, clipboardClearSeconds } = validateSettings(await getSettings());
     if (autoCopyTotp) {
-      const clipMs = clipboardClearSeconds * 1000;
-      await chrome.alarms.clear(ALARM_CLEAR_CLIPBOARD).catch(() => {});
       await copyToClipboard(totpCode);
-      lastClipboardCopyTime = Date.now();
-      setTimeout(async () => {
-        try {
-          if (Date.now() - lastClipboardCopyTime >= clipMs) {
-            await copyToClipboard("");
-          }
-        } catch {
-          // ignore
-        }
-      }, clipMs);
-      chrome.alarms.create(ALARM_CLEAR_CLIPBOARD, {
-        delayInMinutes: Math.max((clipboardClearSeconds * 2) / 60, 1),
-      });
+      await scheduleClipboardClear(clipboardClearSeconds);
     }
   }
 
