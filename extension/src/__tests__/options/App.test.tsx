@@ -112,18 +112,15 @@ describe("Options App", () => {
     expect(screen.getByRole("combobox", { name: /theme/i })).toBeInTheDocument();
   });
 
-  it("navigates to Security section and shows server URL", async () => {
+  it("shows server URL in General section", async () => {
     render(<App />);
     await screen.findByText("General"); // wait for load
-    navigateTo("Security");
     expect(screen.getByDisplayValue("https://example.com")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("15")).toBeInTheDocument();
   });
 
   it("shows error on invalid URL", async () => {
     render(<App />);
     await screen.findByText("General");
-    navigateTo("Security");
     fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
       target: { value: "not-a-url" },
     });
@@ -135,19 +132,15 @@ describe("Options App", () => {
   it("saves all settings when valid", async () => {
     render(<App />);
     await screen.findByText("General");
-    navigateTo("Security");
     fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
       target: { value: "https://demo.example.com" },
-    });
-    fireEvent.change(screen.getByDisplayValue("15"), {
-      target: { value: "30" },
     });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
 
     await waitFor(() => {
       expect(mockSetSettings).toHaveBeenCalledWith({
         serverUrl: "https://demo.example.com",
-        autoLockMinutes: 30,
+        autoLockMinutes: 15,
         theme: "system",
         showBadgeCount: true,
         enableInlineSuggestions: true,
@@ -166,7 +159,6 @@ describe("Options App", () => {
     mockEnsureHostPermission.mockResolvedValue(false);
     render(<App />);
     await screen.findByText("General");
-    navigateTo("Security");
     fireEvent.change(screen.getByPlaceholderText("https://example.com"), {
       target: { value: "https://demo.example.com" },
     });

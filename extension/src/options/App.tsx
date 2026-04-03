@@ -167,6 +167,20 @@ export function App() {
       case "general":
         return (
           <>
+            <div className="py-3 flex flex-col gap-1.5">
+              <label htmlFor="server-url" className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                {t("options.serverUrl")}
+              </label>
+              <input
+                id="server-url"
+                type="text"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder={t("options.serverUrlPlaceholder")}
+                className="h-9 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow"
+              />
+              <span className="text-xs text-gray-400 dark:text-gray-500">{t("options.httpsRequired")}</span>
+            </div>
             <SettingRow label={t("options.theme")} htmlFor="theme-select">
               <select
                 id="theme-select"
@@ -215,20 +229,6 @@ export function App() {
       case "security":
         return (
           <>
-            <div className="py-3 flex flex-col gap-1.5">
-              <label htmlFor="server-url" className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                {t("options.serverUrl")}
-              </label>
-              <input
-                id="server-url"
-                type="text"
-                value={serverUrl}
-                onChange={(e) => setServerUrl(e.target.value)}
-                placeholder={t("options.serverUrlPlaceholder")}
-                className="h-9 px-3 rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-gray-300 focus:border-gray-900 dark:focus:border-gray-400 transition-shadow"
-              />
-              <span className="text-xs text-gray-400 dark:text-gray-500">{t("options.httpsRequired")}</span>
-            </div>
             <SettingRow label={t("options.autoLock")} description={t("options.autoLockTenantNote")} htmlFor="auto-lock">
               <select
                 id="auto-lock"
