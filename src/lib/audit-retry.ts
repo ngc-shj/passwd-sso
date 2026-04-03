@@ -44,6 +44,11 @@ export function bufferSize(): number {
   return buffer.length;
 }
 
+/** Clear all buffered entries (for testing only). */
+export function clearBuffer(): void {
+  buffer.length = 0;
+}
+
 /**
  * Enqueue a failed audit entry for retry.
  * If buffer is full, oldest entry is sent to dead-letter log.

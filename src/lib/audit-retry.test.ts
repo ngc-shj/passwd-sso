@@ -31,6 +31,7 @@ import {
   enqueue,
   drainBuffer,
   bufferSize,
+  clearBuffer,
   type BufferedAuditEntry,
 } from "@/lib/audit-retry";
 
@@ -56,10 +57,7 @@ function makeEntry(overrides: Partial<BufferedAuditEntry> = {}): BufferedAuditEn
 describe("audit-retry", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Drain any leftover entries from previous tests
-    while (bufferSize() > 0) {
-      // Direct splice to reset internal buffer
-    }
+    clearBuffer();
   });
 
   describe("enqueue", () => {
