@@ -1561,8 +1561,12 @@ describe("failsafe responses", () => {
     );
 
     await loadBackground();
-    // Vault is locked (no SET_TOKEN / UNLOCK_VAULT) — handler returns the locked-state response
-    const res = await sendMessage({ type: "PASSKEY_GET_MATCHES", rpId: "example.com" });
+    // Vault is locked (no SET_TOKEN / UNLOCK_VAULT) — handler returns the locked-state response.
+    // senderUrl must match rpId for the auth check to pass and reach the vault-locked path.
+    const res = await sendMessageWithSender(
+      { type: "PASSKEY_GET_MATCHES", rpId: "example.com" },
+      { tab: { url: "https://example.com/login" } },
+    );
 
     expect(res).toEqual({ type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true });
   });
@@ -1628,10 +1632,11 @@ describe("failsafe responses", () => {
 
     const handler = messageHandlers[0];
 
+    // senderUrl must match rpId for the auth check to pass and reach the vault-locked path
     const res = await new Promise((resolve) => {
       handler(
         { type: "PASSKEY_GET_MATCHES", rpId: "example.com" },
-        {},
+        { tab: { url: "https://example.com/login" } },
         (resp) => resolve(resp),
       );
     });

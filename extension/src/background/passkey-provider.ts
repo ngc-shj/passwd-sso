@@ -6,7 +6,7 @@ import {
 } from "../lib/crypto";
 import { EXT_API_PATH, extApiPath } from "../lib/api-paths";
 import { normalizeErrorCode } from "../lib/error-utils";
-import { EXT_ENTRY_TYPE } from "../lib/constants";
+import { EXT_ENTRY_TYPE, WEBAUTHN_TYPE_GET, WEBAUTHN_TYPE_CREATE } from "../lib/constants";
 import type {
   DecryptedEntry,
   PasskeyMatchEntry,
@@ -37,18 +37,18 @@ export function initPasskeyProvider(d: PasskeyProviderDeps): void {
   deps = d;
 }
 
-const WEBAUTHN_TYPE_GET = "webauthn.get";
-const WEBAUTHN_TYPE_CREATE = "webauthn.create";
 
 function validateClientDataJSON(
   raw: string,
   expectedType: string,
+  expectedOrigin?: string,
 ): boolean {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed.type === expectedType
-      && typeof parsed.challenge === "string"
-      && parsed.challenge.length > 0;
+    if (parsed.type !== expectedType) return false;
+    if (typeof parsed.challenge !== "string" || parsed.challenge.length === 0) return false;
+    if (expectedOrigin !== undefined && parsed.origin !== expectedOrigin) return false;
+    return true;
   } catch {
     return false;
   }
@@ -87,10 +87,15 @@ async function withSigningLock<T>(entryId: string, fn: () => Promise<T>): Promis
 
 export async function handlePasskeyGetMatches(
   rpId: string,
+  senderUrl?: string,
 ): Promise<{
   entries: PasskeyMatchEntry[];
   vaultLocked: boolean;
 }> {
+  if (!isSenderAuthorizedForRpId(rpId, senderUrl)) {
+    return { entries: [], vaultLocked: false };
+  }
+
   if (!deps) return { entries: [], vaultLocked: true };
 
   const encKey = deps.getEncryptionKey();
@@ -127,7 +132,12 @@ export async function handlePasskeyGetMatches(
 export async function handlePasskeyCheckDuplicate(
   rpId: string,
   userName: string,
+  senderUrl?: string,
 ): Promise<{ entries: PasskeyMatchEntry[]; vaultLocked?: boolean }> {
+  if (!isSenderAuthorizedForRpId(rpId, senderUrl)) {
+    return { entries: [], vaultLocked: false };
+  }
+
   if (!deps) return { entries: [], vaultLocked: true };
   const encKey = deps.getEncryptionKey();
   if (!encKey) return { entries: [], vaultLocked: true };
@@ -189,10 +199,6 @@ async function doSignAssertion(
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
-  if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_GET)) {
-    return { ok: false, error: "INVALID_CLIENT_DATA" };
-  }
-
   if (teamId) {
     return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" };
   }
@@ -202,6 +208,12 @@ async function doSignAssertion(
   // The stored rpId is validated again after decrypt for defense-in-depth.
   if (!senderUrl) {
     return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
+  }
+
+  // Validate clientDataJSON structure and origin binding (origin from trusted sender tab URL)
+  const senderOrigin = new URL(senderUrl).origin;
+  if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_GET, senderOrigin)) {
+    return { ok: false, error: "INVALID_CLIENT_DATA" };
   }
 
   try {
@@ -216,10 +228,11 @@ async function doSignAssertion(
       id: string;
     };
 
-    const aad =
-      (data.aadVersion ?? 0) >= 1
-        ? buildPersonalEntryAAD(userId, data.id)
-        : undefined;
+    // PASSKEY entries are always created with aadVersion: 1; reject server downgrades
+    if ((data.aadVersion ?? 0) < 1) {
+      return { ok: false, error: "INVALID_ENTRY" };
+    }
+    const aad = buildPersonalEntryAAD(userId, data.id);
 
     const blobPlain = await decryptData(data.encryptedBlob, encKey, aad);
     const blob = JSON.parse(blobPlain) as Record<string, unknown>;
@@ -266,8 +279,8 @@ async function doSignAssertion(
       }),
     });
 
-    if (!putRes.ok) {
-      // Assertion still succeeds even if counter update fails
+    if (putRes.ok) {
+      deps.invalidateCache();
     }
 
     return {
@@ -326,7 +339,9 @@ export async function handlePasskeyCreateCredential(
     return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
   }
 
-  if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_CREATE)) {
+  // Validate clientDataJSON structure and origin binding (origin from trusted sender tab URL)
+  const senderOrigin = params.senderUrl ? new URL(params.senderUrl).origin : undefined;
+  if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_CREATE, senderOrigin)) {
     return { ok: false, error: "INVALID_CLIENT_DATA" };
   }
 
@@ -398,7 +413,7 @@ export async function handlePasskeyCreateCredential(
     }
 
     // Delete old entry after successful creation (best-effort, non-fatal).
-    // Validate the target is a PASSKEY entry belonging to the same rpId before deleting.
+    // Validate the target is a PASSKEY entry belonging to the same rpId and userName before deleting.
     if (params.replaceEntryId) {
       const targetRes = await deps.swFetch(extApiPath.passwordById(params.replaceEntryId)).catch(() => null);
       if (targetRes?.ok) {
@@ -412,7 +427,8 @@ export async function handlePasskeyCreateCredential(
             .catch(() => null);
           if (
             targetBlob?.entryType === EXT_ENTRY_TYPE.PASSKEY &&
-            targetBlob?.relyingPartyId === rpId
+            targetBlob?.relyingPartyId === rpId &&
+            targetBlob?.username === userName
           ) {
             await deps.swFetch(extApiPath.passwordById(params.replaceEntryId), {
               method: "DELETE",

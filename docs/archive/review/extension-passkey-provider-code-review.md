@@ -1,150 +1,120 @@
 # Code Review: extension-passkey-provider
-Date: 2026-04-04T17:50:00+09:00
-Review round: 3
+Date: 2026-04-05T00:00:00+09:00
+Review round: 6 (post-merge, new multi-agent round)
 
 ## Changes from Previous Round
-- constants.ts: EXT_MSG + PASSKEY_ACTION 定数追加
-- messages.ts: typeof EXT_MSG.XXX / typeof PASSKEY_ACTION.XXX 使用
-- passkey-provider.ts: senderUrl && バイパス除去 (R2-F-01)
-- index.ts: 全 message type を EXT_MSG / PASSKEY_ACTION 定数に統一
-- webauthn-bridge-lib.ts: PASSKEY_ACTION 定数使用
-- tests: SENDER_ORIGIN_MISMATCH テスト、replaceEntryId 検証テスト追加
+Round 5 (pre-merge) returned "No findings". This round reviews the merged code (#323)
+with three new findings from a manual v9 diff review, plus a fresh multi-agent pass.
 
 ## Functionality Findings
 
-### F-1 [Major]: PASSKEY_ACTION 二重用途
-- File: extension/src/lib/constants.ts, extension/src/content/webauthn-bridge-lib.ts
-- Problem: PASSKEY_ACTION が bridge action と SW message type の2つの目的で流用されている。SELECT/CONFIRM_CREATE は bridge のみ、CHECK_DUPLICATE は SW のみ、GET_MATCHES 等は両方で同一文字列。
-- Impact: 型システムでは防げるが、メンテナーへの誤誘導リスク。webauthn-bridge-lib.ts が bridge switch と sendMessage の両方に同一定数を使うため意図が不明確。
-- Fix: PASSKEY_BRIDGE_ACTION (bridge 専用) と EXT_MSG への PASSKEY_ SW メッセージ追加で分離。
+### [F-1] Major: Sign assertion mutates server state but never invalidates local cache
+- File: `passkey-provider.ts:253-267`
+- Evidence: After the PUT that persists the updated `passkeySignCount`, there is no `deps.invalidateCache()` call. In contrast, `handlePasskeyCreateCredential` calls `deps.invalidateCache()` at line 425. All other mutation handlers (`login-save.ts:173, 243`) call `invalidateCache`.
+- Problem: Cache content becomes stale after sign assertion. The overview does not include `passkeySignCount`, so display data is not immediately stale, but a future code path reading `passkeySignCount` from cached data would get a stale value. Breaks cache contract established by every other mutating operation.
+- Impact: Inconsistency; low for sign count specifically but breaks pattern contract.
+- Fix: Call `deps.invalidateCache()` after successful sign assertion PUT.
 
-### F-2 [Minor]: isSenderAuthorizedForRpId の末尾ドット未チェック
-- File: extension/src/background/passkey-provider.ts:65
-- Problem: `rpId.split(".").length < 2` で "example." (["example",""]) が通過する。
-- Fix: `rpId.split(".").filter(Boolean).length < 2` に変更。
+### [F-2] Major: `replaceEntryId` delete does not verify `userName` match
+- File: `passkey-provider.ts:413-416`
+- Evidence: Guard condition is `targetBlob?.entryType === PASSKEY && targetBlob?.relyingPartyId === rpId`. Does not check `targetBlob?.username === params.userName`.
+- Problem: A user with two passkeys for the same RP but different usernames could have the wrong credential deleted if `replaceEntryId` points to a different-username entry. The content script (untrusted) supplies `replaceEntryId`.
+- Impact: Wrong passkey entry deleted, data loss without recovery.
+- Fix: Add `targetBlob?.username === params.userName` to the deletion guard.
 
-### F-3 [Minor]: PUT の aadVersion コメント不足
-- File: extension/src/background/passkey-provider.ts:253
-- Problem: レガシーエントリ (aadVersion=0) のカウンタ更新時は aadVersion=0 のまま PUT する意図かどうか不明確。
-- Fix: 意図を明確化するコメント追加。
+### [F-3] Minor: `excludeCredentialIds` accepted in `CreateCredentialParams` but silently ignored
+- File: `passkey-provider.ts:298, 319-322`
+- Evidence: `excludeCredentialIds` is declared and passed through the pipeline but never referenced in `handlePasskeyCreateCredential`.
+- Problem: WebAuthn spec requires authenticator to reject requests if existing credential matches `excludeCredentials`. Extension creates duplicate entries ignoring this.
+- Impact: Non-compliant with spec; can create duplicate passkey entries.
+- Fix: Before generating keypair, check if `excludeCredentialIds` intersects vault entries and return `CREDENTIAL_EXCLUDED` error.
+- Status: **Deferred** — non-trivial feature addition, consulted user.
+
+### [F-4] Minor: WebAuthn type constants duplicated outside shared module
+- File: `passkey-provider.ts:40-41`, `webauthn-interceptor.js:121,206`
+- Evidence: `WEBAUTHN_TYPE_GET = "webauthn.get"` and `WEBAUTHN_TYPE_CREATE = "webauthn.create"` not in `constants.ts`.
+- Problem: Future refactor risk — no single source of truth.
+- Fix: Add to `constants.ts`, import in `passkey-provider.ts`. Document in interceptor comment.
 
 ## Security Findings
 
-### S-1 [Minor]: senderUrl をメッセージ型に含めないことの明示
-- File: extension/src/types/messages.ts
-- Problem: PASSKEY_SIGN_ASSERTION と PASSKEY_CREATE_CREDENTIAL の型定義に senderUrl がなく、SW が _sender から取得することが型から読み取れない。
-- Fix: コメントで設計意図を明示。
+### [S-1] Major: `PASSKEY_GET_MATCHES` has no sender-rpId authorization
+- File: `passkey-provider.ts:88-123`, `index.ts:2346-2350`
+- Evidence: `handlePasskeyGetMatches(rpId)` receives `rpId` from message payload but SW handler does not pass `_sender.tab?.url`. No `isSenderAuthorizedForRpId()` call in this function. In contrast, sign/create both validate sender.
+- Problem: Any content script can send `PASSKEY_GET_MATCHES` with arbitrary `rpId` (e.g., `"google.com"`) from any page. SW returns `PasskeyMatchEntry` list including `credentialId`, `username`, `relyingPartyId` for that rpId regardless of sender hostname.
+- Impact: Cross-origin credential enumeration. Attacker page learns which accounts user has passkeys for at any domain.
+- Fix: Pass `_sender.tab?.url` to `handlePasskeyGetMatches` and call `isSenderAuthorizedForRpId` as first check.
 
-### S-2 [Minor]: fetch-before-auth-check
-- File: extension/src/background/passkey-provider.ts:201
-- Problem: senderUrl 検証前にエントリフェッチが実行される。認証バイパスなし、ただし不要なサーバーアクセスを誘発可能。
-- Fix: senderUrl が undefined の場合の早期リターンを追加。
+### [S-2] Major: `PASSKEY_CHECK_DUPLICATE` has no sender-rpId authorization
+- File: `passkey-provider.ts:127-157`, `index.ts:2352-2355`
+- Evidence: `handlePasskeyCheckDuplicate(rpId, userName)` has no `isSenderAuthorizedForRpId` call. SW handler does not pass `_sender.tab?.url`.
+- Problem: Targeted credential existence oracle. Attacker can confirm whether user has passkey for specific account at target domain.
+- Impact: Credential enumeration, privacy violation.
+- Fix: Same as S-1 — thread `_sender.tab?.url` and call `isSenderAuthorizedForRpId`.
 
-### S-3 [Minor]: rpId fallback 後の isValidRpId 未適用
-- File: extension/src/content/webauthn-interceptor.js:67
-- Problem: rpId が省略された場合に hostname を採用するが isValidRpId をスキップ。SW 側のラベル数チェックが防衛線となっているが二重チェックが望ましい。
-- Fix: rpId fallback 後にも isValidRpId を適用。
+### [S-3] Minor: `validateClientDataJSON` does not verify `origin` field
+- File: `passkey-provider.ts:43-55`
+- Evidence: Only checks `type` and `challenge`. Does not verify `parsed.origin` against sender origin.
+- Problem: Compromised page can craft `clientDataJSON` with `origin: "legitimate-site.com"` while at `attacker.com`. `isSenderAuthorizedForRpId` still gates sign/create, so not a full bypass, but signed assertion carries misleading origin.
+- Impact: Minor — rpId auth check still gates operation. Signed `clientDataJSON` may have mismatched origin.
+- Fix: Optionally verify `parsed.origin === new URL(senderUrl).origin` in `validateClientDataJSON`.
+
+### [S-4] Minor: `aadVersion=0` server downgrade forces GCM auth failure on PASSKEY entries
+- File: `passkey-provider.ts:219-222`
+- Evidence: `(data.aadVersion ?? 0) >= 1` check is reachable by server response with `aadVersion:0`. AES-GCM tag mismatch causes decryption failure.
+- Problem: Malicious server can block passkey use by returning `aadVersion:0`. Not exploitable for data read.
+- Impact: Minor DoS. No plaintext exposure.
+- Fix: Assert `data.aadVersion >= 1` for PASSKEY entries; return `INVALID_ENTRY` if not.
+
+### [S-5] Minor (residual): postMessage origin design acceptable
+- Assessment: ISOLATED world `event.origin` check correct. Assertion payload is same as what WebAuthn API would return to page anyway. UUID randomness (122 bits) sufficient.
+- Fix: No fix required.
+
+### [S-6] Safe: `p1363ToDer` 1-byte DER length confirmed safe for P-256
+- Assessment: Max SEQUENCE length for P-256 is 70 bytes (≤ 127). `sig.length !== 64` guard locks to P-256. No issue.
 
 ## Testing Findings
 
-### T-1 [Major]: swFetch 総呼び出し回数未検証（DELETE スキップテスト）
-- File: extension/src/__tests__/background-passkey-provider.test.ts:738-806
-- Problem: DELETE をスキップするテストで swFetch の総呼び出し回数を検証していないため、意図しない 3 回目の呼び出しを検出できない。
-- Fix: `expect(swFetch).toHaveBeenCalledTimes(2)` を追加。
+### [T-1] Major: `aadVersion:0` / no-AAD decrypt path untested
+- File: `background-passkey-provider.test.ts` (no such test)
+- Evidence: All mocks use `aadVersion:1`. Production code has backward compat at lines 220-222 and 407.
+- Problem: Backward compat path where blob encrypted without AAD is untested.
+- Impact: Regression gap for legacy entries.
+- Fix: Add test with blob encrypted via `encryptData(blob, testKey, undefined)` and mock omitting `aadVersion`.
 
-### T-2 [Major]: vi.stubGlobal(chrome) の lastError リーク
-- File: extension/src/__tests__/webauthn-bridge-lib.test.ts:279-308
-- Problem: vi.restoreAllMocks() は vi.stubGlobal を元に戻さない。beforeEach の vi.stubGlobal が上書きするため現時点では無害だが、将来のテスト追加で汚染リスクがある。
-- Fix: afterEach に vi.unstubAllGlobals() を追加。
+### [T-2] Major: Counter increment value not verified in PUT body
+- File: `background-passkey-provider.test.ts:379-382`
+- Evidence: `expect(putCalls).toHaveLength(1)` — only call count checked, body not inspected.
+- Problem: Regression that re-persists count=0 instead of count=1 would pass test.
+- Impact: Counter is security-critical (replay prevention).
+- Fix: Parse PUT body, decrypt `encryptedBlob` with `testKey`+AAD, assert `passkeySignCount === 1`.
 
-### T-3 [Minor]: バナーテストで postMessage 未呼出の検証なし
-- File: extension/src/__tests__/webauthn-bridge-lib.test.ts:310-354
-- Problem: バナー表示時に respond() が即座に呼ばれないことを検証していない。
-- Fix: postedMessages spy を追加して WEBAUTHN_BRIDGE_RESP が送られないことを検証。
+### [T-3] Minor: Spurious `type` field in `PASSKEY_CHECK_DUPLICATE` mock responses
+- File: `webauthn-bridge-lib.test.ts:258, 314, 353`
+- Evidence: `cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [], ... })` — production response has no `type` field.
+- Fix: Remove `type` field from mock cb calls.
 
-### T-4 [Minor]: handlePasskeyGetMatches 最初のテストが重複
-- File: extension/src/__tests__/background-passkey-provider.test.ts:106-117
-- Problem: deps=null パスをテストしようとしているが実際は vault-locked テストと同じ。
-- Fix: 削除して vault-locked テストに統合。
+### [T-4] Major: SW sleep / 2000ms timeout fallback path untested
+- File: `webauthn-bridge-lib.test.ts` (no such test)
+- Evidence: `webauthn-bridge-lib.ts:139` sets `setTimeout(fallthrough, 2000)`. No fake timers test exists.
+- Problem: Fallback for MV3 SW termination entirely untested.
+- Fix: Add test with `vi.useFakeTimers()`, advance 2000ms without sendMessage callback firing.
 
-### T-5 [Minor]: カウンタ更新 PUT の検証なし
-- File: extension/src/__tests__/background-passkey-provider.test.ts:348-387
-- Problem: 成功テストで PUT が実際に呼ばれたことを検証していない。
-- Fix: PUT 呼び出しのアサーション追加。
+### [T-5] Minor: Vacuous assertion `not.toBe("CREDENTIAL_EXCLUDED")`
+- File: `background-passkey-provider.test.ts:632`
+- Evidence: Error code `CREDENTIAL_EXCLUDED` is never emitted by production code.
+- Fix: Replace with `expect(result.ok).toBe(true)`.
+
+### [R2] Minor: `EXT_MSG` string values hardcoded in bridge test assertions
+- File: `webauthn-bridge-lib.test.ts:135, 210, 243`
+- Evidence: `"PASSKEY_GET_MATCHES"`, `"PASSKEY_SIGN_ASSERTION"`, `"PASSKEY_CREATE_CREDENTIAL"` hardcoded.
+- Fix: Import `EXT_MSG` and use `EXT_MSG.PASSKEY_GET_MATCHES` etc.
 
 ## Adjacent Findings
-なし
+- [Adjacent] R1: `base64urlEncode`/`Decode` duplicated in `webauthn-crypto.ts` and `webauthn-interceptor.js`. Architecturally unavoidable (MAIN world cannot import TS modules).
 
 ## Quality Warnings
-なし
+No findings triggered quality-gate warnings.
 
 ## Resolution Status
-(記入予定)
-
-## Round 3 Resolution
-
-### F-1 [Major] PASSKEY_ACTION 二重用途
-- Action: PASSKEY_BRIDGE_ACTION（bridge 専用）と EXT_MSG への PASSKEY_ SW メッセージ追加で分離。webauthn-bridge-lib.ts は switch に PASSKEY_BRIDGE_ACTION、sendMessage に EXT_MSG を使用。index.ts は EXT_MSG のみ。messages.ts は EXT_MSG のみに統一。
-- Modified: constants.ts, messages.ts, webauthn-bridge-lib.ts, index.ts
-
-### F-2 [Minor] isSenderAuthorizedForRpId 末尾ドット対応
-- Action: `rpId.split(".").filter(Boolean).length < 2` に変更
-- Modified: passkey-provider.ts:65
-
-### F-3 [Minor] PUT aadVersion コメント
-- 現在のコードは aadVersion を保持して PUT しており意図通り。コードレビューにて確認済み。
-
-### S-1 [Minor] senderUrl 型レベル明示
-- Action: messages.ts に設計コメントを追加（senderUrl は _sender から取得するため型に含めない）
-
-### S-2 [Minor] fetch-before-auth-check
-- Action: doSignAssertion に senderUrl early return を追加（teamId チェック後、fetch 前）
-- Modified: passkey-provider.ts
-
-### S-3 [Minor] rpId fallback 後の isValidRpId
-- Action: 現状の SW 側 isSenderAuthorizedForRpId でラベル数チェック済み。変更せず。
-
-### T-1 [Major] swFetch 総呼び出し回数未検証
-- Action: DELETE スキップ 2 テストに `expect(swFetch).toHaveBeenCalledTimes(2)` 追加
-- Modified: background-passkey-provider.test.ts
-
-### T-2 [Major] vi.stubGlobal lastError リーク
-- Action: afterEach に `vi.unstubAllGlobals()` 追加
-- Modified: webauthn-bridge-lib.test.ts
-
-### T-3 [Minor] バナーテスト respond() 未呼出検証
-- Action: 両バナーテストに postMessage spy + WEBAUTHN_BRIDGE_RESP 未送信アサーション追加
-- Modified: webauthn-bridge-lib.test.ts
-
-### T-4 [Minor] handlePasskeyGetMatches 重複テスト削除
-- Action: deps=null を正しくテストできない旨コメント付きの重複テストを削除
-- Modified: background-passkey-provider.test.ts
-
-### T-5 [Minor] カウンタ更新 PUT 検証
-- Action: sign assertion 成功テストに PUT 呼び出しアサーション追加
-- Modified: background-passkey-provider.test.ts
-
-## Round 4 Resolution
-
-### F-1 [Minor] failsafe PASSKEY_CHECK_DUPLICATE の vaultLocked 欠落
-- Action: `vaultLocked: true` 追加
-- Modified: index.ts
-
-### F-2 [Minor] isValidRpId ラベルカウント非対称
-- Action: filter(Boolean) に統一
-- Modified: webauthn-interceptor.js
-
-### T-1 [Minor] SENDER_ORIGIN_MISMATCH early-return/post-decrypt 区別なし
-- Action: swFetch 呼び出し回数アサーション追加
-- Modified: background-passkey-provider.test.ts
-
-### T-2 [Minor] handlePasskeySignAssertion senderUrl=undefined テスト欠落
-- Action: early-return テスト追加
-- Modified: background-passkey-provider.test.ts
-
-### T-3 [Minor] バナーテストのコールバック未検証
-- Action: onSave/onDismiss/onCancel 存在検証 + 呼び出し後 respond() 検証追加
-- Modified: webauthn-bridge-lib.test.ts
-
-## Round 5 Result
-Functionality: No findings / Security: No findings / Testing: No findings
+(to be filled after fixes)
