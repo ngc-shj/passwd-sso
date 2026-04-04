@@ -64,6 +64,7 @@ import {
 import {
   initPasskeyProvider,
   handlePasskeyGetMatches,
+  handlePasskeyCheckDuplicate,
   handlePasskeySignAssertion,
   handlePasskeyCreateCredential,
 } from "./passkey-provider";
@@ -948,6 +949,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         fullName?: string;
         relyingPartyId?: string;
         credentialId?: string;
+        creationDate?: string;
       };
       const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
         ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
@@ -965,6 +967,7 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         entryType: item.entryType,
         ...(overview.relyingPartyId && { relyingPartyId: overview.relyingPartyId }),
         ...(overview.credentialId && { credentialId: overview.credentialId }),
+        ...(overview.creationDate && { creationDate: overview.creationDate }),
       });
     } catch {
       // Skip entries that fail to decrypt/parse
@@ -2345,6 +2348,12 @@ async function handleMessage(
       return;
     }
 
+    case "PASSKEY_CHECK_DUPLICATE": {
+      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName);
+      sendResponse({ type: "PASSKEY_CHECK_DUPLICATE", ...result } as ExtensionResponse);
+      return;
+    }
+
     case "PASSKEY_SIGN_ASSERTION": {
       try {
         const result = await handlePasskeySignAssertion(
@@ -2369,6 +2378,7 @@ async function handleMessage(
           userDisplayName: message.userDisplayName,
           excludeCredentialIds: message.excludeCredentialIds,
           clientDataJSON: message.clientDataJSON,
+          replaceEntryId: message.replaceEntryId,
         });
         sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ...result } as ExtensionResponse);
       } catch {
@@ -2462,6 +2472,9 @@ chrome.runtime.onMessage.addListener(
             break;
           case "PASSKEY_GET_MATCHES":
             sendResponse({ type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true } as ExtensionResponse);
+            break;
+          case "PASSKEY_CHECK_DUPLICATE":
+            sendResponse({ type: "PASSKEY_CHECK_DUPLICATE", entries: [] } as ExtensionResponse);
             break;
           case "PASSKEY_SIGN_ASSERTION":
             sendResponse({ type: "PASSKEY_SIGN_ASSERTION", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

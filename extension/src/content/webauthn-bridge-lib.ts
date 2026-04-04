@@ -108,18 +108,28 @@ function handleSignAssertion(
 
 function handleConfirmCreate(
   requestId: string,
-  payload: { rpId: string; rpName: string; userName: string; userDisplayName: string },
+  payload: { rpId: string; rpName: string; userName: string; userDisplayName: string; userId?: string },
 ): void {
-  showPasskeySaveBanner({
-    rpName: payload.rpName,
-    userName: payload.userName,
-    onSave: () => {
-      respond(requestId, { action: "save" });
+  chrome.runtime.sendMessage(
+    { type: "PASSKEY_CHECK_DUPLICATE", rpId: payload.rpId, userName: payload.userName },
+    (dupResponse) => {
+      if (chrome.runtime.lastError) {
+        // Proceed as save-only on error
+      }
+      const existingEntries = dupResponse?.entries ?? [];
+      showPasskeySaveBanner({
+        rpName: payload.rpName,
+        userName: payload.userName,
+        existingEntries,
+        onSave: (replaceEntryId?: string) => {
+          respond(requestId, { action: "save", replaceEntryId });
+        },
+        onDismiss: () => {
+          respond(requestId, { action: "platform" });
+        },
+      });
     },
-    onDismiss: () => {
-      respond(requestId, { action: "platform" });
-    },
-  });
+  );
 }
 
 function handleCreateCredential(
@@ -132,6 +142,7 @@ function handleCreateCredential(
     userDisplayName: string;
     excludeCredentialIds: string[];
     clientDataJSON: string;
+    replaceEntryId?: string;
   },
 ): void {
   chrome.runtime.sendMessage(
@@ -144,6 +155,7 @@ function handleCreateCredential(
       userDisplayName: payload.userDisplayName,
       excludeCredentialIds: payload.excludeCredentialIds,
       clientDataJSON: payload.clientDataJSON,
+      replaceEntryId: payload.replaceEntryId,
     },
     (response) => {
       if (chrome.runtime.lastError) { respond(requestId, null); return; }

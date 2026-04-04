@@ -1,6 +1,7 @@
 import { getShadowHost } from "./shadow-host";
 import { bannerStyles } from "./styles";
 import { t } from "../../lib/i18n";
+import type { PasskeyMatchEntry } from "../../types/messages";
 
 const BANNER_ID = "psso-passkey-save-banner";
 const STYLE_ID = "psso-passkey-save-style";
@@ -9,7 +10,8 @@ const AUTO_DISMISS_MS = 15_000;
 export interface PasskeySaveBannerOptions {
   rpName: string;
   userName: string;
-  onSave: () => void;
+  existingEntries?: PasskeyMatchEntry[];
+  onSave: (replaceEntryId?: string) => void;
   onDismiss: () => void;
 }
 
@@ -29,9 +31,14 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   banner.id = BANNER_ID;
   banner.setAttribute("role", "alert");
 
+  const existing = options.existingEntries ?? [];
+  const hasExisting = existing.length > 0;
+
   const message = document.createElement("div");
   message.className = "psso-banner-message";
-  message.textContent = t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
+  message.textContent = hasExisting
+    ? t("passkeySaveBanner.duplicateFound", { rpName: options.rpName })
+    : t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
 
   if (options.userName) {
     const user = document.createElement("div");
@@ -43,14 +50,36 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   const actions = document.createElement("div");
   actions.className = "psso-banner-actions";
 
-  const saveBtn = document.createElement("button");
-  saveBtn.textContent = t("passkeySaveBanner.save");
-  saveBtn.className = "psso-btn-primary";
-  saveBtn.addEventListener("click", () => {
-    options.onSave();
-    hidePasskeySaveBanner();
-  });
-  actions.appendChild(saveBtn);
+  if (hasExisting && existing.length === 1) {
+    const replaceBtn = document.createElement("button");
+    replaceBtn.textContent = t("passkeySaveBanner.replace");
+    replaceBtn.className = "psso-btn-primary";
+    replaceBtn.addEventListener("click", () => {
+      options.onSave(existing[0].id);
+      hidePasskeySaveBanner();
+    });
+    actions.appendChild(replaceBtn);
+
+    const keepBothBtn = document.createElement("button");
+    keepBothBtn.textContent = t("passkeySaveBanner.keepBoth");
+    keepBothBtn.className = "psso-btn-secondary";
+    keepBothBtn.addEventListener("click", () => {
+      options.onSave();
+      hidePasskeySaveBanner();
+    });
+    actions.appendChild(keepBothBtn);
+  } else {
+    const saveBtn = document.createElement("button");
+    saveBtn.textContent = hasExisting
+      ? t("passkeySaveBanner.keepBoth")
+      : t("passkeySaveBanner.save");
+    saveBtn.className = "psso-btn-primary";
+    saveBtn.addEventListener("click", () => {
+      options.onSave();
+      hidePasskeySaveBanner();
+    });
+    actions.appendChild(saveBtn);
+  }
 
   const dismissBtn = document.createElement("button");
   dismissBtn.textContent = t("passkeySaveBanner.useDevice");

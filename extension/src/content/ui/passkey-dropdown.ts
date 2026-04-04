@@ -87,6 +87,13 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
 
     text.appendChild(title);
     text.appendChild(username);
+
+    if (entry.creationDate) {
+      const date = document.createElement("div");
+      date.className = "psso-pk-item-date";
+      date.textContent = formatCreationDate(entry.creationDate);
+      text.appendChild(date);
+    }
     item.appendChild(icon);
     item.appendChild(text);
 
@@ -152,6 +159,18 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
     }
   };
   document.addEventListener("keydown", keyHandler, true);
+}
+
+function formatCreationDate(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
 }
 
 function updateActive(): void {
@@ -267,6 +286,13 @@ const PASSKEY_DROPDOWN_STYLES = `
   .psso-pk-item-username {
     font-size: 12px;
     color: #6b7280;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .psso-pk-item-date {
+    font-size: 11px;
+    color: #9ca3af;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;

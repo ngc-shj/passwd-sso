@@ -190,6 +190,7 @@
       rpName: rpName,
       userName: userName,
       userDisplayName: userDisplayName,
+      userId: userId,
     }).then(function (confirmResp) {
       if (!confirmResp || !confirmResp.response || confirmResp.response.action !== "save") {
         return origCreate(options);
@@ -210,6 +211,7 @@
         userDisplayName: userDisplayName,
         excludeCredentialIds: excludeIds,
         clientDataJSON: clientDataJSON,
+        replaceEntryId: confirmResp.response.replaceEntryId || undefined,
       }).then(function (createResp) {
         if (!createResp || !createResp.response || !createResp.response.ok) {
           return origCreate(options);

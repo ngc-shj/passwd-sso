@@ -98,11 +98,46 @@ export async function handlePasskeyGetMatches(
         username: e.username,
         relyingPartyId: e.relyingPartyId!,
         credentialId: e.credentialId!,
+        ...(e.creationDate && { creationDate: e.creationDate }),
         ...(e.teamId && { teamId: e.teamId }),
       }));
     return { entries: matches, vaultLocked: false };
   } catch {
     return { entries: [], vaultLocked: false };
+  }
+}
+
+// ── PASSKEY_CHECK_DUPLICATE ──
+
+export async function handlePasskeyCheckDuplicate(
+  rpId: string,
+  userName: string,
+): Promise<{ entries: PasskeyMatchEntry[] }> {
+  if (!deps) return { entries: [] };
+  const encKey = deps.getEncryptionKey();
+  if (!encKey) return { entries: [] };
+
+  try {
+    const allEntries = await deps.getCachedEntries();
+    const entries = allEntries
+      .filter(
+        (e) =>
+          e.entryType === EXT_ENTRY_TYPE.PASSKEY &&
+          e.relyingPartyId === rpId &&
+          e.username === userName &&
+          e.credentialId,
+      )
+      .map((e) => ({
+        id: e.id,
+        title: e.title,
+        username: e.username,
+        relyingPartyId: e.relyingPartyId!,
+        credentialId: e.credentialId!,
+        ...(e.creationDate && { creationDate: e.creationDate }),
+      }));
+    return { entries };
+  } catch {
+    return { entries: [] };
   }
 }
 
@@ -233,6 +268,7 @@ export interface CreateCredentialParams {
   userDisplayName: string;
   excludeCredentialIds: string[];
   clientDataJSON: string;
+  replaceEntryId?: string;
 }
 
 export async function handlePasskeyCreateCredential(
@@ -311,6 +347,7 @@ export async function handlePasskeyCreateCredential(
       relyingPartyId: rpId,
       credentialId: credentialIdB64,
       username: userName,
+      creationDate: new Date().toISOString(),
       tags: [],
     });
 
@@ -335,6 +372,13 @@ export async function handlePasskeyCreateCredential(
         ok: false,
         error: (json as { error?: string }).error ?? "SAVE_FAILED",
       };
+    }
+
+    // Delete old entry after successful creation (best-effort, non-fatal)
+    if (params.replaceEntryId) {
+      await deps.swFetch(extApiPath.passwordById(params.replaceEntryId), {
+        method: "DELETE",
+      }).catch(() => {});
     }
 
     deps.invalidateCache();

@@ -114,7 +114,10 @@
   },
   "passkeySaveBanner": {
     "savePasskey": "Save passkey for {rpName}?",
+    "duplicateFound": "A passkey for {rpName} is already saved.",
     "save": "Save in passwd-sso",
+    "replace": "Replace",
+    "keepBoth": "Keep both",
     "useDevice": "Use device"
   },
   "commands": {

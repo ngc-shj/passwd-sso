@@ -34,6 +34,11 @@ export type ExtensionMessage =
       teamId?: string;
     }
   | {
+      type: "PASSKEY_CHECK_DUPLICATE";
+      rpId: string;
+      userName: string;
+    }
+  | {
       type: "PASSKEY_CREATE_CREDENTIAL";
       rpId: string;
       rpName: string;
@@ -42,6 +47,7 @@ export type ExtensionMessage =
       userDisplayName: string;
       excludeCredentialIds: string[];
       clientDataJSON: string;
+      replaceEntryId?: string;
     };
 
 export interface DecryptedEntry {
@@ -56,6 +62,7 @@ export interface DecryptedEntry {
   // Passkey provider fields (populated for PASSKEY entries)
   relyingPartyId?: string;
   credentialId?: string;
+  creationDate?: string;
 }
 
 // ── Passkey provider types ──
@@ -66,6 +73,7 @@ export interface PasskeyMatchEntry {
   username: string;
   relyingPartyId: string;
   credentialId: string;
+  creationDate?: string;
   teamId?: string;
 }
 
@@ -130,6 +138,10 @@ export type ExtensionResponse =
       ok: boolean;
       response?: SerializedAssertionResponse;
       error?: string;
+    }
+  | {
+      type: "PASSKEY_CHECK_DUPLICATE";
+      entries: PasskeyMatchEntry[];
     }
   | {
       type: "PASSKEY_CREATE_CREDENTIAL";
