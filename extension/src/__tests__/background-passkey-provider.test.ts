@@ -399,7 +399,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      // Sender is evil.com but stored rpId is example.com
+      // Sender is evil.com but stored rpId is example.com — post-decrypt path
       const result = await handlePasskeySignAssertion(
         TEST_ENTRY_ID,
         validClientDataJSON,
@@ -407,6 +407,22 @@ describe("passkey-provider", () => {
         "https://evil.com/path",
       );
       expect(result).toEqual({ ok: false, error: "SENDER_ORIGIN_MISMATCH" });
+      // Verify fetch was called (post-decrypt path, not early return)
+      expect(deps.swFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns SENDER_ORIGIN_MISMATCH when senderUrl is undefined (early return, no fetch)", async () => {
+      const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey) });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        undefined,
+      );
+      expect(result).toEqual({ ok: false, error: "SENDER_ORIGIN_MISMATCH" });
+      expect(deps.swFetch).not.toHaveBeenCalled();
     });
   });
 

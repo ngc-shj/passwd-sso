@@ -2477,7 +2477,7 @@ chrome.runtime.onMessage.addListener(
             sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], vaultLocked: true } as ExtensionResponse);
             break;
           case EXT_MSG.PASSKEY_CHECK_DUPLICATE:
-            sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, entries: [] } as ExtensionResponse);
+            sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, entries: [], vaultLocked: true } as ExtensionResponse);
             break;
           case EXT_MSG.PASSKEY_SIGN_ASSERTION:
             sendResponse({ type: EXT_MSG.PASSKEY_SIGN_ASSERTION, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);

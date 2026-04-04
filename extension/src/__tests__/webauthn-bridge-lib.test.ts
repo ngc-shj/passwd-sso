@@ -332,10 +332,19 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
         rpName: "Example",
         userName: "alice",
         existingEntries: expect.arrayContaining([expect.objectContaining({ credentialId: "cred-1" })]),
+        onSave: expect.any(Function),
+        onDismiss: expect.any(Function),
+        onCancel: expect.any(Function),
       }),
     );
     // respond() must not be called immediately — it fires on user action (onSave/onDismiss/onCancel)
     expect(postedMessages.filter((m) => (m as { type?: string }).type === WEBAUTHN_BRIDGE_RESP)).toHaveLength(0);
+    // Verify onSave triggers respond() with { action: "save" }
+    const bannerOptions = (showPasskeySaveBanner as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    bannerOptions.onSave();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({ type: WEBAUTHN_BRIDGE_RESP, response: expect.objectContaining({ action: "save" }) }),
+    );
   });
 
   it("shows save banner with empty entries when PASSKEY_CHECK_DUPLICATE returns empty", async () => {
@@ -358,9 +367,20 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     handleWebAuthnMessage(event);
 
     expect(showPasskeySaveBanner).toHaveBeenCalledWith(
-      expect.objectContaining({ existingEntries: [] }),
+      expect.objectContaining({
+        existingEntries: [],
+        onSave: expect.any(Function),
+        onDismiss: expect.any(Function),
+        onCancel: expect.any(Function),
+      }),
     );
     expect(postedMessages.filter((m) => (m as { type?: string }).type === WEBAUTHN_BRIDGE_RESP)).toHaveLength(0);
+    // Verify onCancel triggers respond() with { action: "cancel" }
+    const bannerOptions = (showPasskeySaveBanner as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    bannerOptions.onCancel();
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({ type: WEBAUTHN_BRIDGE_RESP, response: { action: "cancel" } }),
+    );
   });
 
   it("responds with platform action when PASSKEY_SELECT receives empty entries list", () => {

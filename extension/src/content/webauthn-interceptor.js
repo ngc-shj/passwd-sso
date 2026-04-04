@@ -245,7 +245,7 @@
    */
   function isValidRpId(rpId, hostname) {
     if (!rpId || rpId.length === 0) return false;
-    if (rpId.split(".").length < 2) return false;
+    if (rpId.split(".").filter(function(p) { return p.length > 0; }).length < 2) return false;
     if (rpId === hostname) return true;
     return hostname.endsWith("." + rpId);
   }
