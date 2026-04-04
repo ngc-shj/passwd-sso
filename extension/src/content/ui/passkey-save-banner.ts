@@ -32,16 +32,14 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   banner.setAttribute("role", "alert");
 
   const existing = options.existingEntries ?? [];
-  const upgradeCandidate = existing.find((e) => e.isUpgradeCandidate);
+  const replaceCandidate = existing.find((e) => e.isUpgradeCandidate);
   const hasExisting = existing.length > 0;
 
   const message = document.createElement("div");
   message.className = "psso-banner-message";
-  message.textContent = upgradeCandidate
-    ? t("passkeySaveBanner.upgradeFound", { rpName: options.rpName })
-    : hasExisting
-      ? t("passkeySaveBanner.duplicateFound", { rpName: options.rpName })
-      : t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
+  message.textContent = hasExisting
+    ? t("passkeySaveBanner.duplicateFound", { rpName: options.rpName })
+    : t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
 
   if (options.userName) {
     const user = document.createElement("div");
@@ -53,16 +51,17 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   const actions = document.createElement("div");
   actions.className = "psso-banner-actions";
 
-  if (upgradeCandidate) {
-    // Upgrade flow: old credential is in excludeCredentials — auto-replace
-    const upgradeBtn = document.createElement("button");
-    upgradeBtn.textContent = t("passkeySaveBanner.upgrade");
-    upgradeBtn.className = "psso-btn-primary";
-    upgradeBtn.addEventListener("click", () => {
-      options.onSave(upgradeCandidate.id);
+  if (replaceCandidate) {
+    // The site's excludeCredentials signals this entry should be superseded.
+    // Offer replace as the primary action, keep both as the alternative.
+    const replaceBtn = document.createElement("button");
+    replaceBtn.textContent = t("passkeySaveBanner.replace");
+    replaceBtn.className = "psso-btn-primary";
+    replaceBtn.addEventListener("click", () => {
+      options.onSave(replaceCandidate.id);
       hidePasskeySaveBanner();
     });
-    actions.appendChild(upgradeBtn);
+    actions.appendChild(replaceBtn);
 
     const keepBothBtn = document.createElement("button");
     keepBothBtn.textContent = t("passkeySaveBanner.keepBoth");
