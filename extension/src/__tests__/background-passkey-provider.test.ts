@@ -401,6 +401,46 @@ describe("passkey-provider", () => {
       expect(deps.invalidateCache).toHaveBeenCalledOnce();
     });
 
+    it("still returns ok:true with signature when counter-update PUT fails (non-fatal)", async () => {
+      const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
+      const { privateKeyJwk } = await generatePasskeyKeypair();
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const blob = JSON.stringify({
+        credentialId: TEST_CRED_ID,
+        relyingPartyId: TEST_RP_ID,
+        passkeyPrivateKeyJwk: JSON.stringify(privateKeyJwk),
+        passkeySignCount: 0,
+      });
+      const encryptedBlob = await encryptData(blob, testKey, aad);
+
+      const invalidateCache = vi.fn();
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn()
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 1 }),
+              { status: 200 },
+            ),
+          )
+          .mockResolvedValueOnce(new Response("Server Error", { status: 500 })), // counter PUT fails
+        invalidateCache,
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://example.com/auth",
+      );
+      // Assertion still succeeds despite PUT failure — RP validates counter independently
+      expect(result.ok).toBe(true);
+      expect(result.response).toBeDefined();
+      // invalidateCache must NOT be called when PUT fails
+      expect(invalidateCache).not.toHaveBeenCalled();
+    });
+
     it("returns SENDER_ORIGIN_MISMATCH when senderUrl hostname does not match stored rpId", async () => {
       const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
       const { privateKeyJwk } = await generatePasskeyKeypair();

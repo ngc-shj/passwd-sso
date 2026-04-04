@@ -282,6 +282,9 @@ async function doSignAssertion(
     if (putRes.ok) {
       deps.invalidateCache();
     }
+    // Assertion succeeds even if counter-update PUT fails: the signed authenticatorData
+    // already contains the incremented counter and the RP validates it independently.
+    // A transient server failure should not block the user from signing in.
 
     return {
       ok: true,
@@ -340,7 +343,7 @@ export async function handlePasskeyCreateCredential(
   }
 
   // Validate clientDataJSON structure and origin binding (origin from trusted sender tab URL)
-  const senderOrigin = params.senderUrl ? new URL(params.senderUrl).origin : undefined;
+  const senderOrigin = new URL(params.senderUrl!).origin;
   if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_CREATE, senderOrigin)) {
     return { ok: false, error: "INVALID_CLIENT_DATA" };
   }

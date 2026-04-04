@@ -208,6 +208,9 @@ export function p1363ToDer(sig: Uint8Array): Uint8Array {
   const s = derInteger(sig.slice(32, 64));
 
   // SEQUENCE tag (0x30) + length + r + s
+  // seqLen ≤ 70 bytes for P-256 (r/s each at most 33 bytes + 2-byte INTEGER header),
+  // so a single-byte DER length is always sufficient here. Extend to long-form
+  // (0x81, len) before adding support for larger curves (P-384+).
   const seqLen = r.length + s.length;
   const der = new Uint8Array(2 + seqLen);
   der[0] = 0x30; // SEQUENCE
