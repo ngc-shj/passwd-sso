@@ -108,10 +108,10 @@ function handleSignAssertion(
 
 function handleConfirmCreate(
   requestId: string,
-  payload: { rpId: string; rpName: string; userName: string; userDisplayName: string; userId?: string; excludeCredentialIds?: string[] },
+  payload: { rpId: string; rpName: string; userName: string; userDisplayName: string; userId?: string },
 ): void {
   chrome.runtime.sendMessage(
-    { type: "PASSKEY_CHECK_DUPLICATE", rpId: payload.rpId, userName: payload.userName, excludeCredentialIds: payload.excludeCredentialIds ?? [] },
+    { type: "PASSKEY_CHECK_DUPLICATE", rpId: payload.rpId, userName: payload.userName },
     (dupResponse) => {
       if (chrome.runtime.lastError) {
         // Proceed as save-only on error

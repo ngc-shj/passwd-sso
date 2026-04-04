@@ -32,7 +32,6 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   banner.setAttribute("role", "alert");
 
   const existing = options.existingEntries ?? [];
-  const replaceCandidate = existing.find((e) => e.isUpgradeCandidate);
   const hasExisting = existing.length > 0;
 
   const message = document.createElement("div");
@@ -51,50 +50,31 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   const actions = document.createElement("div");
   actions.className = "psso-banner-actions";
 
-  if (replaceCandidate) {
-    // The site's excludeCredentials signals this entry should be superseded.
-    // Offer replace as the primary action, keep both as the alternative.
-    const replaceBtn = document.createElement("button");
-    replaceBtn.textContent = t("passkeySaveBanner.replace");
-    replaceBtn.className = "psso-btn-primary";
-    replaceBtn.addEventListener("click", () => {
-      options.onSave(replaceCandidate.id);
-      hidePasskeySaveBanner();
-    });
-    actions.appendChild(replaceBtn);
-
+  if (hasExisting) {
+    // Keep both is the safe default — we cannot distinguish upgrade from
+    // new registration based on WebAuthn params alone.
     const keepBothBtn = document.createElement("button");
     keepBothBtn.textContent = t("passkeySaveBanner.keepBoth");
-    keepBothBtn.className = "psso-btn-secondary";
+    keepBothBtn.className = "psso-btn-primary";
     keepBothBtn.addEventListener("click", () => {
       options.onSave();
       hidePasskeySaveBanner();
     });
     actions.appendChild(keepBothBtn);
-  } else if (hasExisting && existing.length === 1) {
-    // Duplicate exists but not an upgrade — let user decide
-    const replaceBtn = document.createElement("button");
-    replaceBtn.textContent = t("passkeySaveBanner.replace");
-    replaceBtn.className = "psso-btn-primary";
-    replaceBtn.addEventListener("click", () => {
-      options.onSave(existing[0].id);
-      hidePasskeySaveBanner();
-    });
-    actions.appendChild(replaceBtn);
 
-    const keepBothBtn = document.createElement("button");
-    keepBothBtn.textContent = t("passkeySaveBanner.keepBoth");
-    keepBothBtn.className = "psso-btn-secondary";
-    keepBothBtn.addEventListener("click", () => {
-      options.onSave();
-      hidePasskeySaveBanner();
-    });
-    actions.appendChild(keepBothBtn);
+    if (existing.length === 1) {
+      const replaceBtn = document.createElement("button");
+      replaceBtn.textContent = t("passkeySaveBanner.replace");
+      replaceBtn.className = "psso-btn-secondary";
+      replaceBtn.addEventListener("click", () => {
+        options.onSave(existing[0].id);
+        hidePasskeySaveBanner();
+      });
+      actions.appendChild(replaceBtn);
+    }
   } else {
     const saveBtn = document.createElement("button");
-    saveBtn.textContent = hasExisting
-      ? t("passkeySaveBanner.keepBoth")
-      : t("passkeySaveBanner.save");
+    saveBtn.textContent = t("passkeySaveBanner.save");
     saveBtn.className = "psso-btn-primary";
     saveBtn.addEventListener("click", () => {
       options.onSave();

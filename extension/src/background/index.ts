@@ -2349,7 +2349,7 @@ async function handleMessage(
     }
 
     case "PASSKEY_CHECK_DUPLICATE": {
-      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName, message.excludeCredentialIds);
+      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName);
       sendResponse({ type: "PASSKEY_CHECK_DUPLICATE", ...result } as ExtensionResponse);
       return;
     }

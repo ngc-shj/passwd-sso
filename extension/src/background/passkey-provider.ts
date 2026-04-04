@@ -112,7 +112,6 @@ export async function handlePasskeyGetMatches(
 export async function handlePasskeyCheckDuplicate(
   rpId: string,
   userName: string,
-  excludeCredentialIds: string[],
 ): Promise<{ entries: PasskeyMatchEntry[] }> {
   if (!deps) return { entries: [] };
   const encKey = deps.getEncryptionKey();
@@ -135,7 +134,6 @@ export async function handlePasskeyCheckDuplicate(
         relyingPartyId: e.relyingPartyId!,
         credentialId: e.credentialId!,
         ...(e.creationDate && { creationDate: e.creationDate }),
-        isUpgradeCandidate: excludeCredentialIds.includes(e.credentialId!),
       }));
     return { entries };
   } catch {
