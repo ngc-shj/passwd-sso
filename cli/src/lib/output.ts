@@ -14,7 +14,7 @@ export function error(message: string): void {
 }
 
 export function warn(message: string): void {
-  console.log(chalk.yellow(`! ${message}`));
+  console.error(chalk.yellow(`! ${message}`));
 }
 
 export function info(message: string): void {

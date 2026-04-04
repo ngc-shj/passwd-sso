@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withSentryConfig } from "@sentry/nextjs";
+import { PERMISSIONS_POLICY } from "./src/lib/security-headers";
 
 // Build metadata for reproducible build tracking
 function getGitSha(): string {
@@ -29,7 +30,11 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_BUILD_TIME: new Date().toISOString(),
   },
 
-  // Security headers
+  // Security headers (static, applied to all routes by Next.js framework layer).
+  // CSP is intentionally absent here: nonce-based CSP requires per-request generation
+  // and is applied exclusively by the middleware (proxy.ts → src/proxy.ts).
+  // Headers set here are overridden by middleware for routes the middleware handles;
+  // they serve as a fallback for any paths that bypass the middleware matcher.
   async headers() {
     const isProd = process.env.NODE_ENV === "production";
 
@@ -48,8 +53,7 @@ const nextConfig: NextConfig = {
       },
       {
         key: "Permissions-Policy",
-        value:
-          "camera=(), microphone=(), geolocation=(), browsing-topics=()",
+        value: PERMISSIONS_POLICY,
       },
       {
         key: "Strict-Transport-Security",

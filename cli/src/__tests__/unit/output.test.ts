@@ -1,7 +1,17 @@
-import { describe, it, expect } from "vitest";
-import { masked } from "../../lib/output.js";
+import { describe, it, expect, vi } from "vitest";
+import { masked, warn } from "../../lib/output.js";
 
 describe("output", () => {
+  describe("warn", () => {
+    it("writes to stderr via console.error", () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      warn("test warning");
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("test warning"));
+      spy.mockRestore();
+    });
+  });
+
   describe("masked", () => {
     it("masks passwords showing last 4 chars", () => {
       const result = masked("mysecretpassword");

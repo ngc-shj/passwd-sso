@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
+import { PERMISSIONS_POLICY } from "./lib/security-headers";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";
 import { isHttps } from "./lib/url-helpers";
 import { extractClientIp } from "./lib/ip-access";
@@ -26,6 +27,13 @@ interface SessionInfo {
   tenantId?: string;
 }
 
+// In-process session cache: keyed by the raw session token value (not hashed, to avoid
+// per-request SHA-256 overhead). Known trade-offs:
+//   - Multi-worker gap: each Node.js worker process holds an independent cache instance.
+//     Session revocation on one worker takes up to SESSION_CACHE_TTL_MS (30 s) to propagate
+//     to other workers. For single-process deployments this is not an issue.
+//   - Plaintext keys: the session token is stored as-is in process memory. A heap snapshot
+//     would expose tokens. Future improvement: migrate to a shared Redis cache with hashed keys.
 const sessionCache = new Map<string, { expiresAt: number } & SessionInfo>();
 
 export async function proxy(request: NextRequest, options: ProxyOptions) {
@@ -334,10 +342,7 @@ function applySecurityHeaders(
       "max-age=63072000; includeSubDomains; preload"
     );
   }
-  response.headers.set(
-    "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=()"
-  );
+  response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
 
   response.cookies.set("csp-nonce", nonce, {
     httpOnly: true,
