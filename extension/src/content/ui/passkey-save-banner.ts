@@ -32,13 +32,16 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   banner.setAttribute("role", "alert");
 
   const existing = options.existingEntries ?? [];
+  const upgradeCandidate = existing.find((e) => e.isUpgradeCandidate);
   const hasExisting = existing.length > 0;
 
   const message = document.createElement("div");
   message.className = "psso-banner-message";
-  message.textContent = hasExisting
-    ? t("passkeySaveBanner.duplicateFound", { rpName: options.rpName })
-    : t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
+  message.textContent = upgradeCandidate
+    ? t("passkeySaveBanner.upgradeFound", { rpName: options.rpName })
+    : hasExisting
+      ? t("passkeySaveBanner.duplicateFound", { rpName: options.rpName })
+      : t("passkeySaveBanner.savePasskey", { rpName: options.rpName });
 
   if (options.userName) {
     const user = document.createElement("div");
@@ -50,7 +53,27 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
   const actions = document.createElement("div");
   actions.className = "psso-banner-actions";
 
-  if (hasExisting && existing.length === 1) {
+  if (upgradeCandidate) {
+    // Upgrade flow: old credential is in excludeCredentials — auto-replace
+    const upgradeBtn = document.createElement("button");
+    upgradeBtn.textContent = t("passkeySaveBanner.upgrade");
+    upgradeBtn.className = "psso-btn-primary";
+    upgradeBtn.addEventListener("click", () => {
+      options.onSave(upgradeCandidate.id);
+      hidePasskeySaveBanner();
+    });
+    actions.appendChild(upgradeBtn);
+
+    const keepBothBtn = document.createElement("button");
+    keepBothBtn.textContent = t("passkeySaveBanner.keepBoth");
+    keepBothBtn.className = "psso-btn-secondary";
+    keepBothBtn.addEventListener("click", () => {
+      options.onSave();
+      hidePasskeySaveBanner();
+    });
+    actions.appendChild(keepBothBtn);
+  } else if (hasExisting && existing.length === 1) {
+    // Duplicate exists but not an upgrade — let user decide
     const replaceBtn = document.createElement("button");
     replaceBtn.textContent = t("passkeySaveBanner.replace");
     replaceBtn.className = "psso-btn-primary";

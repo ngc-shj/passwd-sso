@@ -191,6 +191,7 @@
       userName: userName,
       userDisplayName: userDisplayName,
       userId: userId,
+      excludeCredentialIds: excludeIds,
     }).then(function (confirmResp) {
       if (!confirmResp || !confirmResp.response || confirmResp.response.action !== "save") {
         return origCreate(options);

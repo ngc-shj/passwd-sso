@@ -115,7 +115,9 @@
   "passkeySaveBanner": {
     "savePasskey": "Save passkey for {rpName}?",
     "duplicateFound": "A passkey for {rpName} is already saved.",
+    "upgradeFound": "Upgrading passkey for {rpName}.",
     "save": "Save in passwd-sso",
+    "upgrade": "Upgrade (replace old)",
     "replace": "Replace",
     "keepBoth": "Keep both",
     "useDevice": "Use device"

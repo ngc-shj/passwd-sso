@@ -419,10 +419,14 @@ describe("passkey-provider", () => {
       expect(result).toEqual({ ok: false, error: "INVALID_CLIENT_DATA" });
     });
 
-    it("returns CREDENTIAL_EXCLUDED when excludeCredentialIds matches existing entry", async () => {
+    it("proceeds when excludeCredentialIds matches existing entry (upgrade flow)", async () => {
+      // Upgrade scenario: old credential ID is in excludeCredentials, but we still create
+      // a new credential. Duplicate detection and replace logic is handled upstream via
+      // PASSKEY_CHECK_DUPLICATE + banner, not by blocking creation here.
       const deps = createDeps({
         getEncryptionKey: vi.fn().mockReturnValue(testKey),
         getCachedEntries: vi.fn().mockResolvedValue([mockPasskeyEntry]),
+        swFetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200 })),
       });
       initPasskeyProvider(deps);
 
@@ -430,7 +434,7 @@ describe("passkey-provider", () => {
         ...validCreateParams,
         excludeCredentialIds: [TEST_CRED_ID],
       });
-      expect(result).toEqual({ ok: false, error: "CREDENTIAL_EXCLUDED" });
+      expect(result.ok).toBe(true);
     });
 
     it("does not exclude when credentialId is in list but entry has different rpId", async () => {

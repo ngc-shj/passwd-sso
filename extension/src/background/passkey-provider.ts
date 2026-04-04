@@ -112,6 +112,7 @@ export async function handlePasskeyGetMatches(
 export async function handlePasskeyCheckDuplicate(
   rpId: string,
   userName: string,
+  excludeCredentialIds: string[],
 ): Promise<{ entries: PasskeyMatchEntry[] }> {
   if (!deps) return { entries: [] };
   const encKey = deps.getEncryptionKey();
@@ -134,6 +135,7 @@ export async function handlePasskeyCheckDuplicate(
         relyingPartyId: e.relyingPartyId!,
         credentialId: e.credentialId!,
         ...(e.creationDate && { creationDate: e.creationDate }),
+        isUpgradeCandidate: excludeCredentialIds.includes(e.credentialId!),
       }));
     return { entries };
   } catch {
@@ -288,7 +290,7 @@ export async function handlePasskeyCreateCredential(
 
   const {
     rpId, rpName, userId, userName, userDisplayName,
-    excludeCredentialIds, clientDataJSON,
+    clientDataJSON,
   } = params;
 
   if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_CREATE)) {
@@ -296,18 +298,6 @@ export async function handlePasskeyCreateCredential(
   }
 
   try {
-    const entries = await deps.getCachedEntries();
-    const isDuplicate = entries.some(
-      (e) =>
-        e.entryType === EXT_ENTRY_TYPE.PASSKEY &&
-        e.relyingPartyId === rpId &&
-        e.credentialId &&
-        excludeCredentialIds.includes(e.credentialId),
-    );
-    if (isDuplicate) {
-      return { ok: false, error: "CREDENTIAL_EXCLUDED" };
-    }
-
     const { privateKeyJwk, publicKeyCose, publicKeyDer } = await generatePasskeyKeypair();
     const credentialIdBytes = generateCredentialId();
     const credentialIdB64 = base64urlEncode(credentialIdBytes);

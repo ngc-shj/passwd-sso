@@ -37,6 +37,7 @@ export type ExtensionMessage =
       type: "PASSKEY_CHECK_DUPLICATE";
       rpId: string;
       userName: string;
+      excludeCredentialIds: string[];
     }
   | {
       type: "PASSKEY_CREATE_CREDENTIAL";
@@ -74,6 +75,7 @@ export interface PasskeyMatchEntry {
   relyingPartyId: string;
   credentialId: string;
   creationDate?: string;
+  isUpgradeCandidate?: boolean;
   teamId?: string;
 }
 

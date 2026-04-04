@@ -115,7 +115,9 @@
   "passkeySaveBanner": {
     "savePasskey": "{rpName} のパスキーを保存しますか？",
     "duplicateFound": "{rpName} のパスキーはすでに保存されています。",
+    "upgradeFound": "{rpName} のパスキーをアップグレードします。",
     "save": "passwd-sso に保存",
+    "upgrade": "アップグレード（旧エントリーを置き換え）",
     "replace": "置き換える",
     "keepBoth": "両方保存",
     "useDevice": "デバイスを使用"
