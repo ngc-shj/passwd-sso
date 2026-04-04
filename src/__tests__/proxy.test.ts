@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
+import { PERMISSIONS_POLICY } from "../lib/security-headers";
 
 const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
@@ -408,9 +409,7 @@ describe("proxy — applySecurityHeaders basePath", () => {
     const response = new NextResponse();
     _applySecurityHeaders(response, dummyOptions);
 
-    expect(response.headers.get("Permissions-Policy")).toBe(
-      "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
-    );
+    expect(response.headers.get("Permissions-Policy")).toBe(PERMISSIONS_POLICY);
   });
 });
 

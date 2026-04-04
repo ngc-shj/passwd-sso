@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withSentryConfig } from "@sentry/nextjs";
+import { PERMISSIONS_POLICY } from "./src/lib/security-headers";
 
 // Build metadata for reproducible build tracking
 function getGitSha(): string {
@@ -52,8 +53,7 @@ const nextConfig: NextConfig = {
       },
       {
         key: "Permissions-Policy",
-        value:
-          "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
+        value: PERMISSIONS_POLICY,
       },
       {
         key: "Strict-Transport-Security",

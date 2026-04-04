@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
+import { PERMISSIONS_POLICY } from "./lib/security-headers";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";
 import { isHttps } from "./lib/url-helpers";
 import { extractClientIp } from "./lib/ip-access";
@@ -341,10 +342,7 @@ function applySecurityHeaders(
       "max-age=63072000; includeSubDomains; preload"
     );
   }
-  response.headers.set(
-    "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()"
-  );
+  response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
 
   response.cookies.set("csp-nonce", nonce, {
     httpOnly: true,
