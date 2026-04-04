@@ -1,6 +1,6 @@
 # Code Review: extension-passkey-provider
-Date: 2026-04-04T03:30:00+09:00
-Review round: 1
+Date: 2026-04-04T13:36:00+09:00
+Review round: 2
 
 ## Changes from Previous Round
 Initial review
@@ -153,3 +153,24 @@ None
 
 ### T-F5 [Major] No bridge-lib tests
 - Action: Created extension/src/__tests__/webauthn-bridge-lib.test.ts (12 tests, jsdom environment)
+
+## Round 2 Resolution
+
+### S2-C1 [Critical] PSL entry bypass in isValidRpId
+- Action: Added label count heuristic (reject single-label and empty rpId)
+- Modified file: extension/src/content/webauthn-interceptor.js:235-240
+
+### S2-M1 [Major] Empty rpId not rejected
+- Action: Covered by S2-C1 fix (early return for empty/falsy rpId)
+
+### S2-m1/m2 [Minor] validateClientDataJSON gaps
+- Action: Added non-empty challenge check
+- Modified file: extension/src/background/passkey-provider.ts:49-51
+
+### F-M3 [Minor] Redundant hidePasskeySaveBanner in bridge
+- Action: Removed redundant calls, removed unused import
+- Modified file: extension/src/content/webauthn-bridge-lib.ts:116-121
+
+### T2-M2 [Major] Mislabeled crash failsafe tests
+- Action: Renamed tests and removed alarms.create crash (not in PASSKEY call chain)
+- Modified file: extension/src/__tests__/background.test.ts
