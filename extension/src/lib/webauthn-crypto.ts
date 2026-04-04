@@ -6,6 +6,7 @@ import type { CborMap } from "./cbor";
 export interface PasskeyKeypair {
   privateKeyJwk: JsonWebKey;
   publicKeyCose: Uint8Array;
+  publicKeyDer: Uint8Array;
 }
 
 /**
@@ -24,8 +25,11 @@ export async function generatePasskeyKeypair(): Promise<PasskeyKeypair> {
     await crypto.subtle.exportKey("raw", keyPair.publicKey),
   );
   const publicKeyCose = encodeCoseEC2Key(publicKeyRaw);
+  const publicKeyDer = new Uint8Array(
+    await crypto.subtle.exportKey("spki", keyPair.publicKey),
+  );
 
-  return { privateKeyJwk, publicKeyCose };
+  return { privateKeyJwk, publicKeyCose, publicKeyDer };
 }
 
 /**

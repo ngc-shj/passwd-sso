@@ -272,7 +272,7 @@ export async function handlePasskeyCreateCredential(
       return { ok: false, error: "CREDENTIAL_EXCLUDED" };
     }
 
-    const { privateKeyJwk, publicKeyCose } = await generatePasskeyKeypair();
+    const { privateKeyJwk, publicKeyCose, publicKeyDer } = await generatePasskeyKeypair();
     const credentialIdBytes = generateCredentialId();
     const credentialIdB64 = base64urlEncode(credentialIdBytes);
 
@@ -347,6 +347,8 @@ export async function handlePasskeyCreateCredential(
         clientDataJSON: base64urlEncode(
           new TextEncoder().encode(clientDataJSON),
         ),
+        authData: base64urlEncode(authData),
+        publicKeyDer: base64urlEncode(publicKeyDer),
         transports: ["internal", "hybrid"],
       },
     };

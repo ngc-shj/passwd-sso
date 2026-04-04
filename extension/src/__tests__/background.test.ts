@@ -400,7 +400,12 @@ describe("background message flow", () => {
     chromeMock = installChromeMock();
     chromeMock?.permissions.contains.mockResolvedValueOnce(false);
     await loadBackground();
-    expect(chromeMock?.scripting.registerContentScripts).not.toHaveBeenCalled();
+    // WebAuthn interceptor is always registered, but token bridge should not be
+    const calls = chromeMock?.scripting.registerContentScripts.mock.calls ?? [];
+    const tokenBridgeCalls = calls.filter((c: unknown[]) =>
+      JSON.stringify(c).includes("token-bridge"),
+    );
+    expect(tokenBridgeCalls).toHaveLength(0);
   });
 
   it("updates badge when token is set and vault unlocked", async () => {

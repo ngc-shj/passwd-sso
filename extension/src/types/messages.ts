@@ -81,6 +81,8 @@ export interface SerializedAttestationResponse {
   credentialId: string;
   attestationObject: string;
   clientDataJSON: string;
+  authData: string;
+  publicKeyDer: string;
   transports: string[];
 }
 

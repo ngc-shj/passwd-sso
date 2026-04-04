@@ -221,6 +221,8 @@
           base64urlToUint8(attestation.attestationObject),
           new TextEncoder().encode(clientDataJSON),
           attestation.transports || [],
+          attestation.authData ? base64urlToUint8(attestation.authData) : null,
+          attestation.publicKeyDer ? base64urlToUint8(attestation.publicKeyDer) : null,
         );
       });
     }).catch(function () {
@@ -286,16 +288,16 @@
   /**
    * Build a synthetic PublicKeyCredential for attestation (create).
    */
-  function buildPublicKeyCredentialAttestation(credentialIdB64, attestationObject, clientDataJSON, transports) {
+  function buildPublicKeyCredentialAttestation(credentialIdB64, attestationObject, clientDataJSON, transports, authData, publicKeyDer) {
     var rawId = base64urlToUint8(credentialIdB64);
 
     var response = {
       attestationObject: attestationObject.buffer,
       clientDataJSON: clientDataJSON.buffer,
       getTransports: function () { return transports; },
-      getPublicKey: function () { return null; },
+      getPublicKey: function () { return publicKeyDer ? publicKeyDer.buffer : null; },
       getPublicKeyAlgorithm: function () { return -7; },
-      getAuthenticatorData: function () { return null; },
+      getAuthenticatorData: function () { return authData ? authData.buffer : null; },
     };
 
     return {
