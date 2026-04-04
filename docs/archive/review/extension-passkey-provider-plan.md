@@ -63,11 +63,13 @@ Add a passkey provider to the passwd-sso browser extension. When a website calls
 - `navigator.credentials` override must run at `document_start` before page JS
 - Counter update requires full blob decrypt/encrypt (counter is inside E2E-encrypted blob)
 - `PublicKeyCredential` objects are plain objects (no prototype chain), which means `instanceof` checks by websites will fail
+- **Ghost entry on RP server error**: The vault saves the entry as soon as `PASSKEY_CREATE_CREDENTIAL` succeeds. If the RP server subsequently rejects the attestation (e.g., validation error, duplicate), the vault retains the entry but the RP has no record of the credential. The extension has no way to observe the RP server's response after returning the attestation — the interceptor's `create()` promise resolves before the page sends the attestation to the server. These ghost entries are effectively inert: they will be filtered out by `allowCredentials` during `get()` because the RP will not include their credential IDs. Users can delete ghost entries manually from the vault. A proper fix (e.g., pending-entry state or fetch interception) is deferred.
 
 ## User Operation Scenarios
 
 1. **Authentication flow**: User visits GitHub → GitHub calls `navigator.credentials.get()` → Extension shows modal with matching passkeys → User selects one → Extension signs challenge → GitHub receives assertion → Login succeeds
-2. **Registration flow**: User visits GitHub → GitHub calls `navigator.credentials.create()` → Extension shows save banner → User clicks "Save in passwd-sso" → Extension generates key pair → Saves as PASSKEY entry → Returns attestation to GitHub
+2. **Registration flow**: User visits GitHub → GitHub calls `navigator.credentials.create()` → Extension shows save banner → User clicks "Save in passwd-sso" → Extension generates key pair → Saves as PASSKEY entry → Returns attestation to GitHub → GitHub server validates attestation (result not observable by extension)
+   - **Known limitation**: If GitHub server rejects the attestation after this point, the vault entry persists as a ghost entry. It will not appear in future `get()` selections because the RP will not include its credential ID in `allowCredentials`. See "Ghost entry on RP server error" in Considerations.
 3. **Fallback flow**: User visits site → Extension has no matching passkeys → Falls through to platform authenticator transparently
 4. **Cancel flow**: User sees selection modal → Clicks "Cancel" → Website receives NotAllowedError
 5. **Platform fallback**: User sees selection modal → Clicks "Use device passkey" → Falls through to platform authenticator
