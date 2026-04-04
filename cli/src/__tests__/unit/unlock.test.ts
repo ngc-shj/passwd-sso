@@ -215,6 +215,16 @@ describe("autoUnlockIfNeeded", () => {
     expect(output.warn).not.toHaveBeenCalled();
   });
 
+  it("does not warn when vault is already unlocked even if PSSO_PASSPHRASE is set", async () => {
+    vi.mocked(isUnlocked).mockReturnValue(true);
+    process.env.PSSO_PASSPHRASE = "env-passphrase";
+
+    const result = await autoUnlockIfNeeded();
+
+    expect(result).toBe(true);
+    expect(output.warn).not.toHaveBeenCalled();
+  });
+
   it("returns false when vault is locked and no PSSO_PASSPHRASE env", async () => {
     vi.mocked(isUnlocked).mockReturnValue(false);
     delete process.env.PSSO_PASSPHRASE;
@@ -254,6 +264,9 @@ describe("autoUnlockIfNeeded", () => {
     expect(apiRequest).toHaveBeenCalledWith("/api/vault/unlock/data");
     expect(output.warn).toHaveBeenCalledTimes(1);
     expect(output.warn).toHaveBeenCalledWith(expect.stringContaining("PSSO_PASSPHRASE"));
+    expect(output.warn).toHaveBeenCalledWith(expect.stringContaining("CI/automation"));
+    // Verify passphrase value is NOT leaked in the warning message
+    expect(output.warn).not.toHaveBeenCalledWith(expect.stringContaining("env-passphrase"));
   });
 
   it("returns false when PSSO_PASSPHRASE is set but unlock fails", async () => {
@@ -267,6 +280,8 @@ describe("autoUnlockIfNeeded", () => {
     expect(result).toBe(false);
     expect(output.warn).toHaveBeenCalledTimes(1);
     expect(output.warn).toHaveBeenCalledWith(expect.stringContaining("PSSO_PASSPHRASE"));
+    // Verify passphrase value is NOT leaked in the warning message
+    expect(output.warn).not.toHaveBeenCalledWith(expect.stringContaining("wrong-passphrase"));
   });
 });
 
