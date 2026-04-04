@@ -4,5 +4,8 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    environmentMatchGlobs: [
+      ["**/__tests__/webauthn-bridge-lib.test.ts", "jsdom"],
+    ],
   },
 });

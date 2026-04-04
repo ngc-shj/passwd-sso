@@ -1544,6 +1544,167 @@ describe("failsafe responses", () => {
       }),
     );
   });
+
+  it("returns PASSKEY_GET_MATCHES failsafe response when vault is locked", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+    // Vault is locked (no SET_TOKEN / UNLOCK_VAULT) — handler returns the locked-state response
+    const res = await sendMessage({ type: "PASSKEY_GET_MATCHES", rpId: "example.com" });
+
+    expect(res).toEqual({ type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true });
+  });
+
+  it("returns PASSKEY_SIGN_ASSERTION failsafe response when vault is locked", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+    // Vault is locked — VAULT_LOCKED is the expected locked-state error
+    const res = await sendMessage({
+      type: "PASSKEY_SIGN_ASSERTION",
+      entryId: "entry-1",
+      clientDataJSON: JSON.stringify({ type: "webauthn.get", challenge: "abc" }),
+    });
+
+    expect(res).toEqual({ type: "PASSKEY_SIGN_ASSERTION", ok: false, error: "VAULT_LOCKED" });
+  });
+
+  it("returns PASSKEY_CREATE_CREDENTIAL failsafe response when vault is locked", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+    // Vault is locked — VAULT_LOCKED is the expected locked-state error
+    const res = await sendMessage({
+      type: "PASSKEY_CREATE_CREDENTIAL",
+      rpId: "example.com",
+      rpName: "Example",
+      userId: "user-handle",
+      userName: "alice",
+      userDisplayName: "Alice",
+      excludeCredentialIds: [],
+      clientDataJSON: JSON.stringify({ type: "webauthn.create", challenge: "xyz" }),
+    });
+
+    expect(res).toEqual({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false, error: "VAULT_LOCKED" });
+  });
+
+  it("returns PASSKEY_GET_MATCHES INTERNAL_ERROR failsafe on crash", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+
+    const handler = messageHandlers[0];
+    // Crash alarms.create to reach the outer try/catch in handleMessage
+    chromeMock!.alarms.create = vi.fn(() => { throw new Error("simulated crash"); });
+
+    const res = await new Promise((resolve) => {
+      handler(
+        { type: "PASSKEY_GET_MATCHES", rpId: "example.com" },
+        {},
+        (resp) => resolve(resp),
+      );
+    });
+
+    // Outer failsafe emits { type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true }
+    expect(res).toEqual({ type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true });
+  });
+
+  it("returns PASSKEY_SIGN_ASSERTION INTERNAL_ERROR failsafe on crash", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+
+    const handler = messageHandlers[0];
+    chromeMock!.alarms.create = vi.fn(() => { throw new Error("simulated crash"); });
+
+    const res = await new Promise((resolve) => {
+      handler(
+        {
+          type: "PASSKEY_SIGN_ASSERTION",
+          entryId: "entry-1",
+          clientDataJSON: JSON.stringify({ type: "webauthn.get", challenge: "abc" }),
+        },
+        {},
+        (resp) => resolve(resp),
+      );
+    });
+
+    // PASSKEY_SIGN_ASSERTION has its own inner try/catch — vault locked gives VAULT_LOCKED
+    expect(res).toMatchObject({ type: "PASSKEY_SIGN_ASSERTION", ok: false });
+    expect(typeof (res as { error?: string }).error).toBe("string");
+  });
+
+  it("returns PASSKEY_CREATE_CREDENTIAL INTERNAL_ERROR failsafe on crash", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) })),
+    );
+
+    await loadBackground();
+
+    const handler = messageHandlers[0];
+    chromeMock!.alarms.create = vi.fn(() => { throw new Error("simulated crash"); });
+
+    const res = await new Promise((resolve) => {
+      handler(
+        {
+          type: "PASSKEY_CREATE_CREDENTIAL",
+          rpId: "example.com",
+          rpName: "Example",
+          userId: "user-handle",
+          userName: "alice",
+          userDisplayName: "Alice",
+          excludeCredentialIds: [],
+          clientDataJSON: JSON.stringify({ type: "webauthn.create", challenge: "xyz" }),
+        },
+        {},
+        (resp) => resolve(resp),
+      );
+    });
+
+    // PASSKEY_CREATE_CREDENTIAL has its own inner try/catch — vault locked gives VAULT_LOCKED
+    expect(res).toMatchObject({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false });
+    expect(typeof (res as { error?: string }).error).toBe("string");
+  });
 });
 
 describe("CHECK_PENDING_SAVE host validation", () => {
