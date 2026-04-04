@@ -57,7 +57,7 @@ const signingLocks = new Map<string, Promise<unknown>>();
 
 async function withSigningLock<T>(entryId: string, fn: () => Promise<T>): Promise<T> {
   const prev = signingLocks.get(entryId) ?? Promise.resolve();
-  const next = prev.then(fn, fn);
+  const next = prev.then(() => fn(), () => fn());
   signingLocks.set(entryId, next);
   try {
     return await next;
