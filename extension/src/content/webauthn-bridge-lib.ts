@@ -55,6 +55,7 @@ function handleGetMatches(requestId: string, payload: { rpId: string }): void {
   chrome.runtime.sendMessage(
     { type: "PASSKEY_GET_MATCHES", rpId: payload.rpId },
     (response) => {
+      if (chrome.runtime.lastError) { respond(requestId, null); return; }
       respond(requestId, response);
     },
   );
@@ -99,6 +100,7 @@ function handleSignAssertion(
       teamId: payload.teamId,
     },
     (response) => {
+      if (chrome.runtime.lastError) { respond(requestId, null); return; }
       respond(requestId, response);
     },
   );
@@ -130,7 +132,6 @@ function handleCreateCredential(
     userId: string;
     userName: string;
     userDisplayName: string;
-    challenge: string;
     excludeCredentialIds: string[];
     clientDataJSON: string;
   },
@@ -143,11 +144,11 @@ function handleCreateCredential(
       userId: payload.userId,
       userName: payload.userName,
       userDisplayName: payload.userDisplayName,
-      challenge: payload.challenge,
       excludeCredentialIds: payload.excludeCredentialIds,
       clientDataJSON: payload.clientDataJSON,
     },
     (response) => {
+      if (chrome.runtime.lastError) { respond(requestId, null); return; }
       respond(requestId, response);
     },
   );

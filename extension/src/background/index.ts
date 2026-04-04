@@ -2363,7 +2363,6 @@ async function handleMessage(
           userId: message.userId,
           userName: message.userName,
           userDisplayName: message.userDisplayName,
-          challenge: message.challenge,
           excludeCredentialIds: message.excludeCredentialIds,
           clientDataJSON: message.clientDataJSON,
         });

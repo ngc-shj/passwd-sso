@@ -66,8 +66,12 @@
     var pk = options.publicKey;
     var rpId = pk.rpId || window.location.hostname;
 
+    // Validate rpId is a registrable domain suffix of the page hostname
+    if (pk.rpId && !isValidRpId(pk.rpId, window.location.hostname)) {
+      return origGet(options);
+    }
+
     return sendBridgeMessage("PASSKEY_GET_MATCHES", { rpId: rpId }).then(function (resp) {
-      // No response or no matches or vault locked — fall through
       if (
         !resp ||
         !resp.response ||
@@ -78,8 +82,23 @@
         return origGet(options);
       }
 
-      // Ask user to select a passkey via content script UI
       var entries = resp.response.entries;
+
+      // Filter by allowCredentials if the RP specified a list
+      if (pk.allowCredentials && pk.allowCredentials.length > 0) {
+        var allowIds = pk.allowCredentials.map(function (c) {
+          var idBytes = c.id instanceof ArrayBuffer
+            ? new Uint8Array(c.id)
+            : new Uint8Array(c.id.buffer || c.id);
+          return uint8ToBase64url(idBytes);
+        });
+        entries = entries.filter(function (e) {
+          return allowIds.indexOf(e.credentialId) !== -1;
+        });
+        if (entries.length === 0) {
+          return origGet(options);
+        }
+      }
       return sendBridgeMessage("PASSKEY_SELECT", {
         entries: entries,
         rpId: rpId,
@@ -147,6 +166,11 @@
     var rpId = (pk.rp && pk.rp.id) || window.location.hostname;
     var rpName = (pk.rp && pk.rp.name) || rpId;
 
+    // Validate rpId is a registrable domain suffix of the page hostname
+    if (pk.rp && pk.rp.id && !isValidRpId(pk.rp.id, window.location.hostname)) {
+      return origCreate(options);
+    }
+
     var userIdBytes = pk.user && pk.user.id
       ? (pk.user.id instanceof ArrayBuffer
           ? new Uint8Array(pk.user.id)
@@ -193,7 +217,6 @@
         userId: userId,
         userName: userName,
         userDisplayName: userDisplayName,
-        challenge: challengeB64,
         excludeCredentialIds: excludeIds,
         clientDataJSON: clientDataJSON,
       }).then(function (createResp) {
@@ -215,6 +238,15 @@
   };
 
   // ── Helpers ──
+
+  /**
+   * Validate that rpId is the hostname itself or a registrable domain suffix.
+   * Prevents RP confusion attacks where a malicious page specifies a foreign rpId.
+   */
+  function isValidRpId(rpId, hostname) {
+    if (rpId === hostname) return true;
+    return hostname.endsWith("." + rpId);
+  }
 
   function uint8ToBase64url(bytes) {
     var binary = "";

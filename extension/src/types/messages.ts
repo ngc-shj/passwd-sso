@@ -40,7 +40,6 @@ export type ExtensionMessage =
       userId: string;
       userName: string;
       userDisplayName: string;
-      challenge: string;
       excludeCredentialIds: string[];
       clientDataJSON: string;
     };

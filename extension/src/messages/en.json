@@ -106,6 +106,12 @@
     "updated": "Password updated",
     "failed": "Failed to save"
   },
+  "passkeyDropdown": {
+    "signInTo": "Sign in to {rpId}",
+    "choosePasskey": "Choose a passkey from passwd-sso",
+    "useDevicePasskey": "Use device passkey",
+    "cancel": "Cancel"
+  },
   "passkeySaveBanner": {
     "savePasskey": "Save passkey for {rpName}?",
     "save": "Save in passwd-sso",

@@ -25,7 +25,6 @@ import {
   buildAttestationObject,
   signAssertion,
   base64urlEncode,
-  base64urlDecode,
 } from "../lib/webauthn-crypto";
 
 // ── Dependencies injected from background/index.ts ──────────
@@ -42,6 +41,20 @@ let deps: PasskeyProviderDeps | null = null;
 
 export function initPasskeyProvider(d: PasskeyProviderDeps): void {
   deps = d;
+}
+
+// Per-credential signing mutex to prevent counter collision from concurrent assertions.
+const signingLocks = new Map<string, Promise<unknown>>();
+
+async function withSigningLock<T>(entryId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = signingLocks.get(entryId) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  signingLocks.set(entryId, next);
+  try {
+    return await next;
+  } finally {
+    if (signingLocks.get(entryId) === next) signingLocks.delete(entryId);
+  }
 }
 
 // ── PASSKEY_GET_MATCHES ──
@@ -84,7 +97,19 @@ export async function handlePasskeyGetMatches(
 
 // ── PASSKEY_SIGN_ASSERTION ──
 
-export async function handlePasskeySignAssertion(
+export function handlePasskeySignAssertion(
+  entryId: string,
+  clientDataJSON: string,
+  teamId?: string,
+): Promise<{
+  ok: boolean;
+  response?: SerializedAssertionResponse;
+  error?: string;
+}> {
+  return withSigningLock(entryId, () => doSignAssertion(entryId, clientDataJSON, teamId));
+}
+
+async function doSignAssertion(
   entryId: string,
   clientDataJSON: string,
   teamId?: string,
@@ -101,10 +126,22 @@ export async function handlePasskeySignAssertion(
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
+  // Validate clientDataJSON structure (constructed in untrusted MAIN world)
   try {
-    const path = teamId
-      ? extApiPath.teamPasswordById(teamId, entryId)
-      : extApiPath.passwordById(entryId);
+    const parsed = JSON.parse(clientDataJSON) as Record<string, unknown>;
+    if (parsed.type !== "webauthn.get" || typeof parsed.challenge !== "string") {
+      return { ok: false, error: "INVALID_CLIENT_DATA" };
+    }
+  } catch {
+    return { ok: false, error: "INVALID_CLIENT_DATA" };
+  }
+
+  if (teamId) {
+    return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" };
+  }
+
+  try {
+    const path = extApiPath.passwordById(entryId);
     const res = await deps.swFetch(path);
     if (!res.ok) return { ok: false, error: "FETCH_FAILED" };
 
@@ -189,7 +226,6 @@ export interface CreateCredentialParams {
   userId: string;
   userName: string;
   userDisplayName: string;
-  challenge: string;
   excludeCredentialIds: string[];
   clientDataJSON: string;
 }
@@ -211,8 +247,18 @@ export async function handlePasskeyCreateCredential(
 
   const {
     rpId, rpName, userId, userName, userDisplayName,
-    challenge, excludeCredentialIds, clientDataJSON,
+    excludeCredentialIds, clientDataJSON,
   } = params;
+
+  // Validate clientDataJSON structure (constructed in untrusted MAIN world)
+  try {
+    const parsed = JSON.parse(clientDataJSON) as Record<string, unknown>;
+    if (parsed.type !== "webauthn.create" || typeof parsed.challenge !== "string") {
+      return { ok: false, error: "INVALID_CLIENT_DATA" };
+    }
+  } catch {
+    return { ok: false, error: "INVALID_CLIENT_DATA" };
+  }
 
   try {
     const entries = await deps.getCachedEntries();

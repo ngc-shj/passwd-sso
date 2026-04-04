@@ -3,6 +3,7 @@
 
 import type { PasskeyMatchEntry } from "../../types/messages";
 import { getShadowHost } from "./shadow-host";
+import { t } from "../../lib/i18n";
 
 const DROPDOWN_ID = "psso-passkey-dropdown";
 const STYLE_ID = "psso-passkey-dropdown-style";
@@ -50,13 +51,13 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
   // Header
   const header = document.createElement("div");
   header.className = "psso-pk-header";
-  header.textContent = `Sign in to ${opts.rpId}`;
+  header.textContent = t("passkeyDropdown.signInTo", { rpId: opts.rpId });
   dropdown.appendChild(header);
 
   // Subtitle
   const subtitle = document.createElement("div");
   subtitle.className = "psso-pk-subtitle";
-  subtitle.textContent = "Choose a passkey from passwd-sso";
+  subtitle.textContent = t("passkeyDropdown.choosePasskey");
   dropdown.appendChild(subtitle);
 
   // Entry list
@@ -112,7 +113,7 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
   platformText.className = "psso-pk-item-text";
   const platformTitle = document.createElement("div");
   platformTitle.className = "psso-pk-item-title";
-  platformTitle.textContent = "Use device passkey";
+  platformTitle.textContent = t("passkeyDropdown.useDevicePasskey");
   platformText.appendChild(platformTitle);
 
   platformItem.appendChild(platformIcon);
@@ -124,7 +125,7 @@ export function showPasskeyDropdown(opts: PasskeyDropdownOptions): void {
   // Cancel button
   const cancelBtn = document.createElement("button");
   cancelBtn.className = "psso-pk-cancel";
-  cancelBtn.textContent = "Cancel";
+  cancelBtn.textContent = t("passkeyDropdown.cancel");
   cancelBtn.addEventListener("click", () => opts.onCancel());
   dropdown.appendChild(cancelBtn);
 
