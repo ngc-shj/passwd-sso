@@ -288,6 +288,8 @@ describe("passkey-provider", () => {
       const result = await handlePasskeySignAssertion(
         TEST_ENTRY_ID,
         validClientDataJSON,
+        undefined,
+        "https://example.com",
       );
       expect(result).toEqual({ ok: false, error: "FETCH_FAILED" });
     });
@@ -302,6 +304,8 @@ describe("passkey-provider", () => {
       const result = await handlePasskeySignAssertion(
         TEST_ENTRY_ID,
         validClientDataJSON,
+        undefined,
+        "https://example.com",
       );
       // normalizeErrorCode converts unknown errors
       expect(result.ok).toBe(false);
@@ -327,6 +331,8 @@ describe("passkey-provider", () => {
       const result = await handlePasskeySignAssertion(
         TEST_ENTRY_ID,
         validClientDataJSON,
+        undefined,
+        "https://example.com",
       );
       expect(result).toEqual({ ok: false, error: "MISSING_KEY_MATERIAL" });
     });
