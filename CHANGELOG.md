@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.25](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.24...passwd-sso-v0.4.25) (2026-04-04)
+
+
+### Bug Fixes
+
+* **extension:** harden passkey provider with sender-origin validation and security fixes ([#326](https://github.com/ngc-shj/passwd-sso/issues/326)) ([d10e4a7](https://github.com/ngc-shj/passwd-sso/commit/d10e4a79728714e7513baf2952cc874a7b1631d0))
+
 ## [0.4.24](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.23...passwd-sso-v0.4.24) (2026-04-04)
 
 

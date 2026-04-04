@@ -1,6 +1,6 @@
 {
   "name": "passwd-sso-cli",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "description": "CLI for passwd-sso password manager",
   "type": "module",
   "license": "MIT",
