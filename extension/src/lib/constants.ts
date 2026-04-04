@@ -71,8 +71,8 @@ export const EXT_MSG = {
 } as const;
 
 // ── WebAuthn clientDataJSON type strings ──
-// Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module
-// and must duplicate these as inline string literals — keep both in sync.
+// Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module.
+// It declares matching local vars at the top of the IIFE — keep both in sync.
 export const WEBAUTHN_TYPE_GET = "webauthn.get";
 export const WEBAUTHN_TYPE_CREATE = "webauthn.create";
 

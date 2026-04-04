@@ -26,6 +26,13 @@ interface SessionInfo {
   tenantId?: string;
 }
 
+// In-process session cache: keyed by the raw session token value (not hashed, to avoid
+// per-request SHA-256 overhead). Known trade-offs:
+//   - Multi-worker gap: each Node.js worker process holds an independent cache instance.
+//     Session revocation on one worker takes up to SESSION_CACHE_TTL_MS (30 s) to propagate
+//     to other workers. For single-process deployments this is not an issue.
+//   - Plaintext keys: the session token is stored as-is in process memory. A heap snapshot
+//     would expose tokens. Future improvement: migrate to a shared Redis cache with hashed keys.
 const sessionCache = new Map<string, { expiresAt: number } & SessionInfo>();
 
 export async function proxy(request: NextRequest, options: ProxyOptions) {
@@ -336,7 +343,7 @@ function applySecurityHeaders(
   }
   response.headers.set(
     "Permissions-Policy",
-    "camera=(), microphone=(), geolocation=(), payment=()"
+    "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()"
   );
 
   response.cookies.set("csp-nonce", nonce, {

@@ -13,6 +13,9 @@
   var BRIDGE_MSG = "PASSWD_SSO_WEBAUTHN";
   var BRIDGE_RESP = "PASSWD_SSO_WEBAUTHN_RESP";
   var GUARD = "__pssoWebAuthnInterceptor";
+  // Must match WEBAUTHN_TYPE_GET / WEBAUTHN_TYPE_CREATE in constants.ts (W3C WebAuthn §5.8.1)
+  var WEBAUTHN_TYPE_GET = "webauthn.get";
+  var WEBAUTHN_TYPE_CREATE = "webauthn.create";
   var TIMEOUT_MS = 120000; // 2 minute timeout for user interaction
 
   if (window[GUARD]) return;
@@ -118,7 +121,7 @@
         var challengeB64 = uint8ToBase64url(challengeBytes);
 
         var clientDataJSON = JSON.stringify({
-          type: "webauthn.get",
+          type: WEBAUTHN_TYPE_GET,
           challenge: challengeB64,
           origin: window.location.origin,
           crossOrigin: false,
@@ -203,7 +206,7 @@
       }
 
       var clientDataJSON = JSON.stringify({
-        type: "webauthn.create",
+        type: WEBAUTHN_TYPE_CREATE,
         challenge: challengeB64,
         origin: window.location.origin,
         crossOrigin: false,

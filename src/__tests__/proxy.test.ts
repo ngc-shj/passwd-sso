@@ -409,7 +409,7 @@ describe("proxy — applySecurityHeaders basePath", () => {
     _applySecurityHeaders(response, dummyOptions);
 
     expect(response.headers.get("Permissions-Policy")).toBe(
-      "camera=(), microphone=(), geolocation=(), payment=()",
+      "camera=(), microphone=(), geolocation=(), payment=(), browsing-topics=()",
     );
   });
 });
