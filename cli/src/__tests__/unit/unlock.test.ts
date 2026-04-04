@@ -265,7 +265,6 @@ describe("autoUnlockIfNeeded", () => {
     expect(output.warn).toHaveBeenCalledTimes(1);
     expect(output.warn).toHaveBeenCalledWith(expect.stringContaining("PSSO_PASSPHRASE"));
     expect(output.warn).toHaveBeenCalledWith(expect.stringContaining("CI/automation"));
-    // Verify passphrase value is NOT leaked in the warning message
     expect(output.warn).not.toHaveBeenCalledWith(expect.stringContaining("env-passphrase"));
   });
 
@@ -280,7 +279,6 @@ describe("autoUnlockIfNeeded", () => {
     expect(result).toBe(false);
     expect(output.warn).toHaveBeenCalledTimes(1);
     expect(output.warn).toHaveBeenCalledWith(expect.stringContaining("PSSO_PASSPHRASE"));
-    // Verify passphrase value is NOT leaked in the warning message
     expect(output.warn).not.toHaveBeenCalledWith(expect.stringContaining("wrong-passphrase"));
   });
 });
