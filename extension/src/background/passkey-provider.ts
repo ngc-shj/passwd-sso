@@ -112,10 +112,10 @@ export async function handlePasskeyGetMatches(
 export async function handlePasskeyCheckDuplicate(
   rpId: string,
   userName: string,
-): Promise<{ entries: PasskeyMatchEntry[] }> {
-  if (!deps) return { entries: [] };
+): Promise<{ entries: PasskeyMatchEntry[]; vaultLocked?: boolean }> {
+  if (!deps) return { entries: [], vaultLocked: true };
   const encKey = deps.getEncryptionKey();
-  if (!encKey) return { entries: [] };
+  if (!encKey) return { entries: [], vaultLocked: true };
 
   try {
     const allEntries = await deps.getCachedEntries();

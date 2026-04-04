@@ -142,6 +142,7 @@ export type ExtensionResponse =
   | {
       type: "PASSKEY_CHECK_DUPLICATE";
       entries: PasskeyMatchEntry[];
+      vaultLocked?: boolean;
     }
   | {
       type: "PASSKEY_CREATE_CREDENTIAL";
