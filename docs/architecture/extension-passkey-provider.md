@@ -78,7 +78,7 @@ sequenceDiagram
     SW ->> SW: assert aadVersion >= 1
     SW ->> SW: decryptData → privateKeyJwk, signCount
     SW ->> SW: isSenderAuthorizedForRpId(storedRpId, senderUrl)
-    SW ->> SW: signCount += 1; sign assertion (P-256 ECDSA)
+    SW ->> SW: signCount += 1, sign assertion (P-256 ECDSA)
     SW ->> Vault: PUT /api/passwords/:id (updated signCount)
     Note over SW: ok:true returned even if PUT fails<br/>(RP validates counter independently)
     SW -->> BR: { ok, credentialId, authenticatorData, signature }
