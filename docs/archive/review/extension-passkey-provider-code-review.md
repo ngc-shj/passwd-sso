@@ -98,4 +98,58 @@ Initial review
 None
 
 ## Resolution Status
-Pending — Round 1 findings to be addressed
+
+### F-C1 [Critical] Team signing wrong key/AAD
+- Action: Added `if (teamId) return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" }` guard
+- Modified file: extension/src/background/passkey-provider.ts
+
+### F-C2 [Critical] Team overview missing rpId/credentialId
+- Action: Deferred — team passkey support restricted to personal entries only (guard in F-C1)
+
+### F-M1 [Major] Team form round-trip
+- Action: Deferred — same scope restriction as F-C1. Team passkey forms will be addressed in separate PR
+
+### F-M2 [Major] Missing lastError check
+- Action: Added `chrome.runtime.lastError` checks to all 3 sendMessage callbacks in webauthn-bridge-lib.ts
+
+### F-m1 [Minor] Unused import
+- Action: Removed `base64urlDecode` import from passkey-provider.ts
+
+### F-m2 [Minor] Unused challenge parameter
+- Action: Removed `challenge` from PASSKEY_CREATE_CREDENTIAL message, bridge, and provider
+
+### F-m3 [Minor] Dropdown i18n
+- Action: Added i18n keys (en/ja) and replaced hardcoded strings with `t()` calls in passkey-dropdown.ts
+
+### S-F2 [Major] allowCredentials not filtered
+- Action: Added `allowCredentials` filtering in webauthn-interceptor.js get() flow
+
+### S-F3 [Major] rpId not validated
+- Action: Added `isValidRpId(rpId, hostname)` validation in both get() and create() flows
+
+### S-F4 [Major] Counter race condition
+- Action: Added `withSigningLock` per-credential mutex using Map<string, Promise> in passkey-provider.ts
+
+### S-F5 [Major] clientDataJSON unvalidated
+- Action: Added JSON.parse + type/challenge field validation in both sign and create handlers
+
+### S-F6 [Minor] localhost HTTP
+- Action: No change — consistent with existing token-bridge pattern
+
+### S-F7 [Minor] No client-side entryId check
+- Action: No change — server-side auth is the guard
+
+### T-F1 [Critical] No CBOR tests
+- Action: Created extension/src/__tests__/cbor.test.ts (30 tests)
+
+### T-F2 [Critical] No WebAuthn crypto tests
+- Action: Created extension/src/__tests__/webauthn-crypto.test.ts (41 tests)
+
+### T-F3 [Major] No passkey provider tests
+- Action: Created extension/src/__tests__/background-passkey-provider.test.ts
+
+### T-F4 [Major] No PASSKEY failsafe tests
+- Action: Added 6 PASSKEY failsafe tests to extension/src/__tests__/background.test.ts
+
+### T-F5 [Major] No bridge-lib tests
+- Action: Created extension/src/__tests__/webauthn-bridge-lib.test.ts (12 tests, jsdom environment)
