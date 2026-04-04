@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.26](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.25...passwd-sso-v0.4.26) (2026-04-04)
+
+
+### Bug Fixes
+
+* address security review findings (CSP, session cache, WebAuthn constants, PSSO_PASSPHRASE) ([#328](https://github.com/ngc-shj/passwd-sso/issues/328)) ([90293a3](https://github.com/ngc-shj/passwd-sso/commit/90293a31f740c31c8cac9544de2828f5281f4c82))
+
 ## [0.4.25](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.24...passwd-sso-v0.4.25) (2026-04-04)
 
 
