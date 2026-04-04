@@ -2,6 +2,7 @@
 // Renders inside the existing Shadow DOM host for style isolation.
 
 import { getShadowHost } from "./shadow-host";
+import { bannerStyles } from "./styles";
 import { t } from "../../lib/i18n";
 
 const BANNER_ID = "psso-save-banner";
@@ -113,70 +114,4 @@ function createButton(
   return btn;
 }
 
-const BANNER_STYLES = `
-  #${BANNER_ID} {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 2147483647;
-    pointer-events: auto;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 10px 16px;
-    background: #1e293b;
-    color: #f1f5f9;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    font-size: 13px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    animation: psso-slide-in 0.2s ease-out;
-  }
-  @keyframes psso-slide-in {
-    from { transform: translateY(-100%); }
-    to { transform: translateY(0); }
-  }
-  .psso-banner-message {
-    flex: 1;
-    min-width: 0;
-  }
-  .psso-banner-username {
-    font-size: 11px;
-    color: #94a3b8;
-    margin-top: 2px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .psso-banner-actions {
-    display: flex;
-    gap: 8px;
-    flex-shrink: 0;
-  }
-  .psso-btn-primary,
-  .psso-btn-secondary {
-    border: none;
-    border-radius: 6px;
-    padding: 6px 14px;
-    font-size: 12px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background 0.15s;
-    pointer-events: auto;
-  }
-  .psso-btn-primary {
-    background: #3b82f6;
-    color: #fff;
-  }
-  .psso-btn-primary:hover {
-    background: #2563eb;
-  }
-  .psso-btn-secondary {
-    background: #334155;
-    color: #cbd5e1;
-  }
-  .psso-btn-secondary:hover {
-    background: #475569;
-  }
-`;
+const BANNER_STYLES = bannerStyles(BANNER_ID);

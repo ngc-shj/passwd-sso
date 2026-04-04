@@ -171,6 +171,13 @@ export function PasswordEditDialog({
               requireReprompt: editData.requireReprompt ?? false,
               travelSafe: editData.travelSafe ?? true,
               expiresAt: editData.expiresAt ?? null,
+              passkeyPrivateKeyJwk: editData.passkeyPrivateKeyJwk ?? null,
+              passkeyPublicKeyCose: editData.passkeyPublicKeyCose ?? null,
+              passkeyUserHandle: editData.passkeyUserHandle ?? null,
+              passkeyUserDisplayName: editData.passkeyUserDisplayName ?? null,
+              passkeySignCount: editData.passkeySignCount ?? null,
+              passkeyAlgorithm: editData.passkeyAlgorithm ?? null,
+              passkeyTransports: editData.passkeyTransports ?? null,
             }}
             onSaved={handleSaved}
             onCancel={handleCancel}

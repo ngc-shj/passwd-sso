@@ -134,3 +134,137 @@ a one-time-code + PKCE exchange (tracked as a future enhancement).
 | `extension/src/lib/session-crypto.ts` | Ephemeral AES-256-GCM key for session encryption |
 | `extension/src/lib/session-storage.ts` | Encrypted persist/load for `chrome.storage.session` |
 | `extension/src/background/index.ts` | Background SW: token state, refresh, dynamic script registration |
+
+---
+
+## Passkey Provider Bridge
+
+The extension also acts as a **WebAuthn passkey provider** — intercepting
+`navigator.credentials.get()` and `navigator.credentials.create()` on any
+web page to offer vault-stored passkeys before falling through to the platform
+authenticator.
+
+### Architecture layers
+
+```mermaid
+flowchart TB
+    subgraph Page["Web Page (any site)"]
+        Site["Site JS<br/>(MAIN world)<br/>navigator.credentials.get/create"]
+        Interceptor["WebAuthn Interceptor<br/>(MAIN world, plain JS)<br/>webauthn-interceptor.js"]
+        Site -- "override" --> Interceptor
+    end
+
+    subgraph Ext["Extension"]
+        Bridge["WebAuthn Bridge Lib<br/>(ISOLATED world)<br/>webauthn-bridge-lib.ts"]
+        SW["Background Service Worker<br/>passkey-provider.ts"]
+        Bridge -- "chrome.runtime.sendMessage<br/>EXT_MSG.PASSKEY_*" --> SW
+    end
+
+    Interceptor -- "window.postMessage<br/>PASSWD_SSO_WEBAUTHN<br/>PASSKEY_BRIDGE_ACTION.*" --> Bridge
+    Bridge -- "window.postMessage<br/>PASSWD_SSO_WEBAUTHN_RESP" --> Interceptor
+```
+
+### Message flow (get)
+
+```mermaid
+sequenceDiagram
+    participant Site as Site JS
+    participant Interceptor as Interceptor (MAIN)
+    participant Bridge as Bridge (ISOLATED)
+    participant SW as Service Worker
+
+    Site ->> Interceptor: navigator.credentials.get(options)
+    Interceptor ->> Bridge: postMessage PASSKEY_GET_MATCHES {rpId}
+    Bridge ->> SW: sendMessage PASSKEY_GET_MATCHES
+    SW -->> Bridge: {entries, vaultLocked}
+    Bridge -->> Interceptor: PASSKEY_GET_MATCHES response
+
+    alt entries found
+        Interceptor ->> Bridge: postMessage PASSKEY_SELECT {entries}
+        Note over Interceptor: Show passkey dropdown UI
+        Bridge -->> Interceptor: {action: "select", entry} or {action: "platform"}
+        Interceptor ->> Bridge: postMessage PASSKEY_SIGN_ASSERTION {entryId, clientDataJSON}
+        Bridge ->> SW: sendMessage PASSKEY_SIGN_ASSERTION
+        SW -->> Bridge: {ok, response: SerializedAssertionResponse}
+        Bridge -->> Interceptor: sign response
+        Interceptor -->> Site: synthetic PublicKeyCredential
+    else no entries / vault locked
+        Interceptor -->> Site: origGet(options) — platform authenticator
+    end
+```
+
+### Message flow (create)
+
+```mermaid
+sequenceDiagram
+    participant Site as Site JS
+    participant Interceptor as Interceptor (MAIN)
+    participant Bridge as Bridge (ISOLATED)
+    participant SW as Service Worker
+
+    Site ->> Interceptor: navigator.credentials.create(options)
+    Interceptor ->> Bridge: postMessage PASSKEY_CONFIRM_CREATE {rpId, userName, ...}
+    Bridge ->> SW: sendMessage PASSKEY_CHECK_DUPLICATE
+    SW -->> Bridge: {entries, vaultLocked}
+
+    alt vault locked or SW unavailable
+        Bridge -->> Interceptor: {action: "platform"}
+        Interceptor -->> Site: origCreate(options)
+    else
+        Note over Bridge: Show save banner UI
+        Bridge -->> Interceptor: {action: "save", replaceEntryId?} or {action: "cancel"}
+        Interceptor ->> Bridge: postMessage PASSKEY_CREATE_CREDENTIAL {clientDataJSON, ...}
+        Bridge ->> SW: sendMessage PASSKEY_CREATE_CREDENTIAL
+        SW -->> Bridge: {ok, response: SerializedAttestationResponse}
+        Bridge -->> Interceptor: create response
+        Interceptor -->> Site: synthetic PublicKeyCredential
+    end
+```
+
+### Constants separation
+
+Two constant objects govern the two message layers:
+
+| Constant | Layer | Purpose |
+|----------|-------|---------|
+| `PASSKEY_BRIDGE_ACTION` | MAIN world ↔ content script (postMessage) | Action names embedded in `window.postMessage` payloads |
+| `EXT_MSG.PASSKEY_*` | Content script ↔ Service Worker (`chrome.runtime.sendMessage`) | SW message type discriminants |
+
+The string values overlap intentionally (e.g., both use `"PASSKEY_GET_MATCHES"`),
+but keeping them as separate constants makes the layer boundary explicit and
+prevents accidental cross-layer coupling.
+
+### Security properties
+
+| Property | Mechanism |
+|----------|-----------|
+| Origin validation (MAIN→ISOLATED) | Bridge checks `event.source === window` and `event.origin === window.location.origin` |
+| rpId spoofing prevention | SW validates sender tab URL via `isSenderAuthorizedForRpId(rpId, sender.tab.url)` |
+| senderUrl not in payload | SW reads `sender.tab.url` from Chrome runtime — never from message payload |
+| Vault locked fallthrough | `vaultLocked: true` in any response causes immediate fallthrough to platform |
+| Timeout | 2-minute pending request timeout in interceptor; resolves `null` → platform fallthrough |
+
+### WebAuthn Interceptor registration
+
+`webauthn-interceptor.js` runs in the **MAIN world** (same JS context as site
+code) and is registered via `chrome.scripting.registerContentScripts` with
+`world: "MAIN"`. It is a plain JS IIFE (no TypeScript/ESM) because CRXJS
+copies `web_accessible_resources` files without transpilation.
+
+A guard flag (`window.__pssoWebAuthnInterceptor`) prevents double-registration
+on navigations.
+
+### Passkey Provider file map
+
+| File | Role |
+|------|------|
+| `extension/src/content/webauthn-interceptor.js` | MAIN world override of `navigator.credentials.get/create` |
+| `extension/src/content/webauthn-bridge.ts` | Entry point: registers ISOLATED world message listener |
+| `extension/src/content/webauthn-bridge-lib.ts` | Bridge logic: routes postMessage → sendMessage and back |
+| `extension/src/content/webauthn-inject.ts` | Registers the MAIN world interceptor script via `registerContentScripts` |
+| `extension/src/content/ui/passkey-dropdown.ts` | Passkey selection dropdown UI (shown by bridge in ISOLATED world) |
+| `extension/src/content/ui/passkey-save-banner.ts` | Save/replace confirmation banner UI |
+| `extension/src/background/passkey-provider.ts` | SW handlers: get matches, check duplicate, sign assertion, create credential |
+| `extension/src/lib/webauthn-crypto.ts` | P-256 keypair gen, CBOR encoding, COSE key, assertion signing |
+| `extension/src/lib/cbor.ts` | Minimal CBOR encoder for attestation object |
+| `extension/src/lib/constants.ts` | `PASSKEY_BRIDGE_ACTION`, `EXT_MSG.PASSKEY_*`, `WEBAUTHN_BRIDGE_MSG/RESP` |

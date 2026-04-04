@@ -75,7 +75,7 @@ Because competitor capabilities vary by plan and deployment model, always verify
 | Feature | passwd-sso | 1Password | Bitwarden | Notes |
 |---|---|---|---|---|
 | Web UI | Done | Yes | Yes | |
-| Browser extension | Done | Yes | Yes | Chrome MV3 |
+| Browser extension | Done | Yes | Yes | Chrome MV3; autofill, passkey provider (WebAuthn get/create interception) |
 | Desktop app | --- | Yes | Yes | |
 | Mobile app | --- | Yes | Yes | |
 

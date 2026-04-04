@@ -43,6 +43,14 @@ interface PasskeyFormProps {
     requireReprompt?: boolean;
     travelSafe?: boolean;
     expiresAt?: string | null;
+    // Passkey provider fields — opaque, preserved on round-trip but not shown in UI
+    passkeyPrivateKeyJwk?: string | null;
+    passkeyPublicKeyCose?: string | null;
+    passkeyUserHandle?: string | null;
+    passkeyUserDisplayName?: string | null;
+    passkeySignCount?: number | null;
+    passkeyAlgorithm?: number | null;
+    passkeyTransports?: string[] | null;
   };
   variant?: "page" | "dialog";
   onSaved?: () => void;
@@ -210,6 +218,16 @@ export function PasskeyForm({
     e.preventDefault();
     const tags = toTagPayload(base.selectedTags);
 
+    // Preserve passkey provider fields on round-trip (never edited in UI)
+    const providerFields: Record<string, unknown> = {};
+    if (initialData?.passkeyPrivateKeyJwk != null) providerFields.passkeyPrivateKeyJwk = initialData.passkeyPrivateKeyJwk;
+    if (initialData?.passkeyPublicKeyCose != null) providerFields.passkeyPublicKeyCose = initialData.passkeyPublicKeyCose;
+    if (initialData?.passkeyUserHandle != null) providerFields.passkeyUserHandle = initialData.passkeyUserHandle;
+    if (initialData?.passkeyUserDisplayName != null) providerFields.passkeyUserDisplayName = initialData.passkeyUserDisplayName;
+    if (initialData?.passkeySignCount != null) providerFields.passkeySignCount = initialData.passkeySignCount;
+    if (initialData?.passkeyAlgorithm != null) providerFields.passkeyAlgorithm = initialData.passkeyAlgorithm;
+    if (initialData?.passkeyTransports != null) providerFields.passkeyTransports = initialData.passkeyTransports;
+
     await base.submitEntry({
       t: tPw,
       fullBlob: JSON.stringify({
@@ -223,6 +241,7 @@ export function PasskeyForm({
         notes: notes || null,
         tags,
         travelSafe,
+        ...providerFields,
       }),
       overviewBlob: JSON.stringify({
         title: base.title,

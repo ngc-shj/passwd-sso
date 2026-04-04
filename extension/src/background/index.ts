@@ -46,6 +46,7 @@ import {
   CMD_COPY_USERNAME,
   CMD_LOCK_VAULT,
   EXT_ENTRY_TYPE,
+  EXT_MSG,
 } from "../lib/constants";
 import { generateTOTPCode } from "../lib/totp";
 import {
@@ -61,6 +62,13 @@ import {
   handleSaveLogin,
   handleUpdateLogin,
 } from "./login-save";
+import {
+  initPasskeyProvider,
+  handlePasskeyGetMatches,
+  handlePasskeyCheckDuplicate,
+  handlePasskeySignAssertion,
+  handlePasskeyCreateCredential,
+} from "./passkey-provider";
 import { copyToClipboard } from "./clipboard";
 
 // ── In-memory state (token/userId persisted to chrome.storage.session) ──
@@ -87,6 +95,10 @@ const TEAM_KEY_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_TEAM_KEY_CACHE = 50;
 const MAX_TEAMS = 10;
 
+const ACTIONABLE_TYPES: Set<string> = new Set([
+  EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD,
+  EXT_ENTRY_TYPE.IDENTITY, EXT_ENTRY_TYPE.PASSKEY,
+]);
 const CACHE_TTL_MS = 60_000; // 1 minute
 const REFRESH_BUFFER_MS = 2 * 60 * 1000; // refresh 2 min before expiry
 
@@ -558,6 +570,33 @@ initLoginSave({
   invalidateCache,
 });
 
+initPasskeyProvider({
+  getEncryptionKey: () => encryptionKey,
+  getCurrentUserId: () => currentUserId,
+  getCachedEntries,
+  swFetch,
+  invalidateCache,
+});
+
+// Register MAIN world WebAuthn interceptor via scripting API.
+// Only the scripting API can inject into MAIN world while bypassing page CSP.
+// Called once at module top-level; unregister-first avoids "Duplicate script ID" errors.
+void (async () => {
+  try {
+    await chrome.scripting.unregisterContentScripts({ ids: ["webauthn-interceptor"] }).catch(() => {});
+    await chrome.scripting.registerContentScripts([{
+      id: "webauthn-interceptor",
+      matches: ["https://*/*", "http://localhost/*"],
+      js: ["src/content/webauthn-interceptor.js"],
+      runAt: "document_start",
+      world: "MAIN" as chrome.scripting.ExecutionWorld,
+      allFrames: true,
+    }]);
+  } catch (err) {
+    console.warn("[passwd-sso] Failed to register WebAuthn interceptor:", err);
+  }
+})();
+
 chrome.runtime.onInstalled.addListener(() => {
   setupContextMenu();
 });
@@ -889,9 +928,6 @@ type RawEntry = {
 
 async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
   if (!encryptionKey || !currentUserId) return [];
-  // Defense-in-depth: API should already filter these, but exclude
-  // trashed/archived entries client-side in case of stale cache or API bug.
-  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY]);
   const active = raw.filter((item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType));
   const entries: DecryptedEntry[] = [];
   for (const item of active) {
@@ -912,6 +948,9 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         additionalUrlHosts?: string[];
         cardholderName?: string;
         fullName?: string;
+        relyingPartyId?: string;
+        credentialId?: string;
+        creationDate?: string;
       };
       const additionalUrlHosts = Array.isArray(overview.additionalUrlHosts)
         ? overview.additionalUrlHosts.filter((h) => typeof h === "string" && h)
@@ -927,6 +966,9 @@ async function decryptOverviews(raw: RawEntry[]): Promise<DecryptedEntry[]> {
         urlHost: overview.urlHost ?? "",
         ...(additionalUrlHosts.length > 0 && { additionalUrlHosts }),
         entryType: item.entryType,
+        ...(overview.relyingPartyId && { relyingPartyId: overview.relyingPartyId }),
+        ...(overview.credentialId && { credentialId: overview.credentialId }),
+        ...(overview.creationDate && { creationDate: overview.creationDate }),
       });
     } catch {
       // Skip entries that fail to decrypt/parse
@@ -1045,7 +1087,6 @@ async function decryptTeamOverviews(
   teamName: string,
   raw: RawTeamEntry[],
 ): Promise<DecryptedEntry[]> {
-  const ACTIONABLE_TYPES: Set<string> = new Set([EXT_ENTRY_TYPE.LOGIN, EXT_ENTRY_TYPE.CREDIT_CARD, EXT_ENTRY_TYPE.IDENTITY]);
   const active = raw.filter(
     (item) => !item.deletedAt && !item.isArchived && ACTIONABLE_TYPES.has(item.entryType),
   );
@@ -1586,7 +1627,7 @@ async function handleMessage(
   await hydrationPromise;
 
   switch (message.type) {
-    case "SET_TOKEN": {
+    case EXT_MSG.SET_TOKEN: {
       const tokenChanged = currentToken !== null && currentToken !== message.token;
       if (tokenChanged) {
         // A new token may represent a different auth session/user.
@@ -1610,37 +1651,37 @@ async function handleMessage(
         clearToken();
       }
 
-      sendResponse({ type: "SET_TOKEN", ok: true });
+      sendResponse({ type: EXT_MSG.SET_TOKEN, ok: true });
       void updateBadge();
       return;
     }
 
-    case "GET_TOKEN": {
+    case EXT_MSG.GET_TOKEN: {
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken();
       }
-      sendResponse({ type: "GET_TOKEN", token: currentToken });
+      sendResponse({ type: EXT_MSG.GET_TOKEN, token: currentToken });
       return;
     }
 
-    case "CLEAR_TOKEN": {
+    case EXT_MSG.CLEAR_TOKEN: {
       await revokeCurrentTokenOnServer();
       clearToken();
       chrome.alarms.clear(ALARM_TOKEN_TTL);
-      sendResponse({ type: "CLEAR_TOKEN", ok: true });
+      sendResponse({ type: EXT_MSG.CLEAR_TOKEN, ok: true });
       return;
     }
 
-    case "KEEPALIVE_PING":
+    case EXT_MSG.KEEPALIVE_PING:
       // No-op — receiving the message keeps the SW alive
       return;
 
-    case "GET_STATUS": {
+    case EXT_MSG.GET_STATUS: {
       if (tokenExpiresAt && Date.now() >= tokenExpiresAt) {
         clearToken();
       }
       sendResponse({
-        type: "GET_STATUS",
+        type: EXT_MSG.GET_STATUS,
         hasToken: currentToken !== null,
         expiresAt: tokenExpiresAt,
         vaultUnlocked: encryptionKey !== null,
@@ -1648,10 +1689,10 @@ async function handleMessage(
       return;
     }
 
-    case "UNLOCK_VAULT": {
+    case EXT_MSG.UNLOCK_VAULT: {
       if (!currentToken) {
         sendResponse({
-          type: "UNLOCK_VAULT",
+          type: EXT_MSG.UNLOCK_VAULT,
           ok: false,
           error: "NO_TOKEN",
         });
@@ -1663,7 +1704,7 @@ async function handleMessage(
         if (!res.ok) {
           const json = await res.json().catch(() => ({}));
           sendResponse({
-            type: "UNLOCK_VAULT",
+            type: EXT_MSG.UNLOCK_VAULT,
             ok: false,
             error: json.error || "UNLOCK_FAILED",
           });
@@ -1688,7 +1729,7 @@ async function handleMessage(
           );
         } catch {
           sendResponse({
-            type: "UNLOCK_VAULT",
+            type: EXT_MSG.UNLOCK_VAULT,
             ok: false,
             error: "INVALID_PASSPHRASE",
           });
@@ -1705,7 +1746,7 @@ async function handleMessage(
           const ok = await verifyKey(encKey, data.verificationArtifact);
           if (!ok) {
             sendResponse({
-              type: "UNLOCK_VAULT",
+              type: EXT_MSG.UNLOCK_VAULT,
               ok: false,
               error: "INVALID_PASSPHRASE",
             });
@@ -1749,12 +1790,12 @@ async function handleMessage(
         }
         void startKeepalive();
 
-        sendResponse({ type: "UNLOCK_VAULT", ok: true });
+        sendResponse({ type: EXT_MSG.UNLOCK_VAULT, ok: true });
         invalidateContextMenu();
         void updateBadge();
       } catch (err) {
         sendResponse({
-          type: "UNLOCK_VAULT",
+          type: EXT_MSG.UNLOCK_VAULT,
           ok: false,
           error: normalizeErrorCode(err, "UNLOCK_FAILED"),
         });
@@ -1762,16 +1803,16 @@ async function handleMessage(
       return;
     }
 
-    case "LOCK_VAULT": {
+    case EXT_MSG.LOCK_VAULT: {
       clearVault();
-      sendResponse({ type: "LOCK_VAULT", ok: true });
+      sendResponse({ type: EXT_MSG.LOCK_VAULT, ok: true });
       return;
     }
 
-    case "FETCH_PASSWORDS": {
+    case EXT_MSG.FETCH_PASSWORDS: {
       if (!encryptionKey || !currentUserId) {
         sendResponse({
-          type: "FETCH_PASSWORDS",
+          type: EXT_MSG.FETCH_PASSWORDS,
           entries: null,
           error: "VAULT_LOCKED",
         });
@@ -1797,14 +1838,14 @@ async function handleMessage(
         // Update cache so inline suggestions stay in sync with popup.
         cachedEntries = entries;
         cacheTimestamp = Date.now();
-        sendResponse({ type: "FETCH_PASSWORDS", entries });
+        sendResponse({ type: EXT_MSG.FETCH_PASSWORDS, entries });
         // Update badge count now that cache is populated
         void chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
           if (tab?.id) void updateBadgeForTab(tab.id, tab.url);
         }).catch(() => {});
       } catch (err) {
         sendResponse({
-          type: "FETCH_PASSWORDS",
+          type: EXT_MSG.FETCH_PASSWORDS,
           entries: null,
           error: normalizeErrorCode(err, "FETCH_FAILED"),
         });
@@ -1812,10 +1853,10 @@ async function handleMessage(
       return;
     }
 
-    case "COPY_PASSWORD": {
+    case EXT_MSG.COPY_PASSWORD: {
       if (!encryptionKey || !currentUserId) {
         sendResponse({
-          type: "COPY_PASSWORD",
+          type: EXT_MSG.COPY_PASSWORD,
           password: null,
           error: "VAULT_LOCKED",
         });
@@ -1829,7 +1870,7 @@ async function handleMessage(
           // Team entry
           const result = await fetchAndDecryptTeamBlob(message.teamId, message.entryId);
           if (!result) {
-            sendResponse({ type: "COPY_PASSWORD", password: null, error: "FETCH_FAILED" });
+            sendResponse({ type: EXT_MSG.COPY_PASSWORD, password: null, error: "FETCH_FAILED" });
             return;
           }
           password = (result.blob.password as string) ?? null;
@@ -1839,7 +1880,7 @@ async function handleMessage(
           if (!res.ok) {
             const json = await res.json().catch(() => ({}));
             sendResponse({
-              type: "COPY_PASSWORD",
+              type: EXT_MSG.COPY_PASSWORD,
               password: null,
               error: json.error || "FETCH_FAILED",
             });
@@ -1871,17 +1912,17 @@ async function handleMessage(
 
         if (!password) {
           sendResponse({
-            type: "COPY_PASSWORD",
+            type: EXT_MSG.COPY_PASSWORD,
             password: null,
             error: "NO_PASSWORD",
           });
           return;
         }
 
-        sendResponse({ type: "COPY_PASSWORD", password });
+        sendResponse({ type: EXT_MSG.COPY_PASSWORD, password });
       } catch (err) {
         sendResponse({
-          type: "COPY_PASSWORD",
+          type: EXT_MSG.COPY_PASSWORD,
           password: null,
           error: normalizeErrorCode(err, "FETCH_FAILED"),
         });
@@ -1889,10 +1930,10 @@ async function handleMessage(
       return;
     }
 
-    case "COPY_TOTP": {
+    case EXT_MSG.COPY_TOTP: {
       if (!encryptionKey || !currentUserId) {
         sendResponse({
-          type: "COPY_TOTP",
+          type: EXT_MSG.COPY_TOTP,
           code: null,
           error: "VAULT_LOCKED",
         });
@@ -1906,7 +1947,7 @@ async function handleMessage(
           // Team entry
           const result = await fetchAndDecryptTeamBlob(message.teamId, message.entryId);
           if (!result) {
-            sendResponse({ type: "COPY_TOTP", code: null, error: "FETCH_FAILED" });
+            sendResponse({ type: EXT_MSG.COPY_TOTP, code: null, error: "FETCH_FAILED" });
             return;
           }
           const blobTotp = result.blob.totp as { secret: string; algorithm?: string; digits?: number; period?: number } | undefined;
@@ -1917,7 +1958,7 @@ async function handleMessage(
           if (!res.ok) {
             const json = await res.json().catch(() => ({}));
             sendResponse({
-              type: "COPY_TOTP",
+              type: EXT_MSG.COPY_TOTP,
               code: null,
               error: json.error || "FETCH_FAILED",
             });
@@ -1951,7 +1992,7 @@ async function handleMessage(
 
         if (!totp?.secret) {
           sendResponse({
-            type: "COPY_TOTP",
+            type: EXT_MSG.COPY_TOTP,
             code: null,
             error: "NO_TOTP",
           });
@@ -1963,16 +2004,16 @@ async function handleMessage(
           code = generateTOTPCode(totp);
         } catch {
           sendResponse({
-            type: "COPY_TOTP",
+            type: EXT_MSG.COPY_TOTP,
             code: null,
             error: "INVALID_TOTP",
           });
           return;
         }
-        sendResponse({ type: "COPY_TOTP", code });
+        sendResponse({ type: EXT_MSG.COPY_TOTP, code });
       } catch {
         sendResponse({
-          type: "COPY_TOTP",
+          type: EXT_MSG.COPY_TOTP,
           code: null,
           error: "FETCH_FAILED",
         });
@@ -1980,7 +2021,7 @@ async function handleMessage(
       return;
     }
 
-    case "AUTOFILL": {
+    case EXT_MSG.AUTOFILL: {
       try {
         const result = await performAutofillForEntry(
           message.entryId,
@@ -1989,13 +2030,13 @@ async function handleMessage(
           message.teamId,
         );
         sendResponse({
-          type: "AUTOFILL",
+          type: EXT_MSG.AUTOFILL,
           ok: result.ok,
           error: result.error,
         });
       } catch (err) {
         sendResponse({
-          type: "AUTOFILL",
+          type: EXT_MSG.AUTOFILL,
           ok: false,
           error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
@@ -2003,7 +2044,7 @@ async function handleMessage(
       return;
     }
 
-    case "AUTOFILL_CREDIT_CARD": {
+    case EXT_MSG.AUTOFILL_CREDIT_CARD: {
       try {
         const result = await performAutofillForEntry(
           message.entryId,
@@ -2012,13 +2053,13 @@ async function handleMessage(
           message.teamId,
         );
         sendResponse({
-          type: "AUTOFILL_CREDIT_CARD",
+          type: EXT_MSG.AUTOFILL_CREDIT_CARD,
           ok: result.ok,
           error: result.error,
         });
       } catch (err) {
         sendResponse({
-          type: "AUTOFILL_CREDIT_CARD",
+          type: EXT_MSG.AUTOFILL_CREDIT_CARD,
           ok: false,
           error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
@@ -2026,7 +2067,7 @@ async function handleMessage(
       return;
     }
 
-    case "AUTOFILL_IDENTITY": {
+    case EXT_MSG.AUTOFILL_IDENTITY: {
       try {
         const result = await performAutofillForEntry(
           message.entryId,
@@ -2035,13 +2076,13 @@ async function handleMessage(
           message.teamId,
         );
         sendResponse({
-          type: "AUTOFILL_IDENTITY",
+          type: EXT_MSG.AUTOFILL_IDENTITY,
           ok: result.ok,
           error: result.error,
         });
       } catch (err) {
         sendResponse({
-          type: "AUTOFILL_IDENTITY",
+          type: EXT_MSG.AUTOFILL_IDENTITY,
           ok: false,
           error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
@@ -2049,10 +2090,10 @@ async function handleMessage(
       return;
     }
 
-    case "GET_MATCHES_FOR_URL": {
+    case EXT_MSG.GET_MATCHES_FOR_URL: {
       if (!cachedEnableInlineSuggestions) {
         sendResponse({
-          type: "GET_MATCHES_FOR_URL",
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
           entries: [],
           vaultLocked: false,
           suppressInline: true,
@@ -2062,7 +2103,7 @@ async function handleMessage(
       const effectiveUrl = message.topUrl ?? message.url;
       if (await isOwnAppPage(effectiveUrl)) {
         sendResponse({
-          type: "GET_MATCHES_FOR_URL",
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
           entries: [],
           vaultLocked: false,
           suppressInline: true,
@@ -2071,7 +2112,7 @@ async function handleMessage(
       }
       if (!currentToken) {
         sendResponse({
-          type: "GET_MATCHES_FOR_URL",
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
           entries: [],
           vaultLocked: false,
           disconnected: true,
@@ -2081,7 +2122,7 @@ async function handleMessage(
       }
       if (!encryptionKey || !currentUserId) {
         sendResponse({
-          type: "GET_MATCHES_FOR_URL",
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
           entries: [],
           vaultLocked: true,
           suppressInline: false,
@@ -2093,7 +2134,7 @@ async function handleMessage(
         const tabHost = extractHost(effectiveUrl);
         if (!tabHost) {
           sendResponse({
-            type: "GET_MATCHES_FOR_URL",
+            type: EXT_MSG.GET_MATCHES_FOR_URL,
             entries: [],
             vaultLocked: false,
             suppressInline: false,
@@ -2107,7 +2148,7 @@ async function handleMessage(
           return (e.additionalUrlHosts ?? []).some((h) => isHostMatch(h, tabHost));
         });
         sendResponse({
-          type: "GET_MATCHES_FOR_URL",
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
           entries: matches,
           vaultLocked: false,
           suppressInline: false,
@@ -2118,7 +2159,7 @@ async function handleMessage(
         }
       } catch {
         sendResponse({
-          type: "GET_MATCHES_FOR_URL",
+          type: EXT_MSG.GET_MATCHES_FOR_URL,
           entries: [],
           vaultLocked: false,
           suppressInline: false,
@@ -2127,10 +2168,10 @@ async function handleMessage(
       return;
     }
 
-    case "AUTOFILL_FROM_CONTENT": {
+    case EXT_MSG.AUTOFILL_FROM_CONTENT: {
       if (!encryptionKey || !currentUserId) {
         sendResponse({
-          type: "AUTOFILL_FROM_CONTENT",
+          type: EXT_MSG.AUTOFILL_FROM_CONTENT,
           ok: false,
           error: "VAULT_LOCKED",
         });
@@ -2141,7 +2182,7 @@ async function handleMessage(
         const tabId = _sender.tab?.id;
         if (!tabId) {
           sendResponse({
-            type: "AUTOFILL_FROM_CONTENT",
+            type: EXT_MSG.AUTOFILL_FROM_CONTENT,
             ok: false,
             error: "NO_TAB",
           });
@@ -2154,13 +2195,13 @@ async function handleMessage(
           message.teamId,
         );
         sendResponse({
-          type: "AUTOFILL_FROM_CONTENT",
+          type: EXT_MSG.AUTOFILL_FROM_CONTENT,
           ok: result.ok,
           error: result.error,
         });
       } catch (err) {
         sendResponse({
-          type: "AUTOFILL_FROM_CONTENT",
+          type: EXT_MSG.AUTOFILL_FROM_CONTENT,
           ok: false,
           error: normalizeErrorCode(err, "AUTOFILL_FAILED"),
         });
@@ -2168,17 +2209,17 @@ async function handleMessage(
       return;
     }
 
-    case "LOGIN_DETECTED": {
+    case EXT_MSG.LOGIN_DETECTED: {
       try {
         // Use sender's tab URL for security — don't trust message.url
         const senderUrl = _sender.tab?.url;
         if (!senderUrl) {
-          sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+          sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
           return;
         }
         // Never offer to save credentials entered on our own app
         if (await isOwnAppPage(senderUrl)) {
-          sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+          sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
           return;
         }
         const result = await handleLoginDetected(
@@ -2190,11 +2231,11 @@ async function handleMessage(
         // Check prompt preferences at detection time
         if (result.action !== "none") {
           if (result.action === "save" && !cachedShowSavePrompt) {
-            sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+            sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
             return;
           }
           if (result.action === "update" && !cachedShowUpdatePrompt) {
-            sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+            sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
             return;
           }
         }
@@ -2228,30 +2269,30 @@ async function handleMessage(
         }
 
         sendResponse({
-          type: "LOGIN_DETECTED",
+          type: EXT_MSG.LOGIN_DETECTED,
           action: result.action,
           existingEntryId: result.existingEntryId,
           existingTitle: result.existingTitle,
         });
       } catch {
-        sendResponse({ type: "LOGIN_DETECTED", action: "none" });
+        sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" });
       }
       return;
     }
 
-    case "SAVE_LOGIN": {
+    case EXT_MSG.SAVE_LOGIN: {
       // Clear pending save — user acted on the banner (page didn't navigate)
       if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       try {
         // Use sender's tab URL for security — don't trust message.url
         const senderUrl = _sender.tab?.url;
         if (!senderUrl) {
-          sendResponse({ type: "SAVE_LOGIN", ok: false, error: "NO_TAB" });
+          sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: false, error: "NO_TAB" });
           return;
         }
         // Defense-in-depth: refuse to save credentials from our own app
         if (await isOwnAppPage(senderUrl)) {
-          sendResponse({ type: "SAVE_LOGIN", ok: false, error: "OWN_APP" });
+          sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: false, error: "OWN_APP" });
           return;
         }
         // Derive title from trusted sender URL instead of message.title
@@ -2265,47 +2306,94 @@ async function handleMessage(
           message.username,
           message.password,
         );
-        sendResponse({ type: "SAVE_LOGIN", ok: result.ok, error: result.error });
+        sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: result.ok, error: result.error });
       } catch {
-        sendResponse({ type: "SAVE_LOGIN", ok: false, error: "SAVE_FAILED" });
+        sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: false, error: "SAVE_FAILED" });
       }
       return;
     }
 
-    case "UPDATE_LOGIN": {
+    case EXT_MSG.UPDATE_LOGIN: {
       if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
       try {
         const senderUrl = _sender.tab?.url;
         if (!senderUrl) {
-          sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "NO_TAB" });
+          sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: false, error: "NO_TAB" });
           return;
         }
         // Defense-in-depth: refuse to update credentials from our own app
         if (await isOwnAppPage(senderUrl)) {
-          sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "OWN_APP" });
+          sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: false, error: "OWN_APP" });
           return;
         }
         const result = await handleUpdateLogin(
           message.entryId,
           message.password,
         );
-        sendResponse({ type: "UPDATE_LOGIN", ok: result.ok, error: result.error });
+        sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: result.ok, error: result.error });
       } catch {
-        sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "UPDATE_FAILED" });
+        sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: false, error: "UPDATE_FAILED" });
       }
       return;
     }
 
-    case "DISMISS_SAVE_PROMPT": {
+    case EXT_MSG.DISMISS_SAVE_PROMPT: {
       if (_sender.tab?.id) pendingSavePrompts.delete(_sender.tab.id);
-      sendResponse({ type: "DISMISS_SAVE_PROMPT", ok: true });
+      sendResponse({ type: EXT_MSG.DISMISS_SAVE_PROMPT, ok: true });
       return;
     }
 
-    case "CHECK_PENDING_SAVE": {
+    case EXT_MSG.PASSKEY_GET_MATCHES: {
+      const result = await handlePasskeyGetMatches(message.rpId);
+      sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, ...result } as ExtensionResponse);
+      return;
+    }
+
+    case EXT_MSG.PASSKEY_CHECK_DUPLICATE: {
+      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName);
+      sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, ...result } as ExtensionResponse);
+      return;
+    }
+
+    case EXT_MSG.PASSKEY_SIGN_ASSERTION: {
+      try {
+        const result = await handlePasskeySignAssertion(
+          message.entryId,
+          message.clientDataJSON,
+          message.teamId,
+          _sender.tab?.url,
+        );
+        sendResponse({ type: EXT_MSG.PASSKEY_SIGN_ASSERTION, ...result } as ExtensionResponse);
+      } catch {
+        sendResponse({ type: EXT_MSG.PASSKEY_SIGN_ASSERTION, ok: false, error: "SIGN_FAILED" } as ExtensionResponse);
+      }
+      return;
+    }
+
+    case EXT_MSG.PASSKEY_CREATE_CREDENTIAL: {
+      try {
+        const result = await handlePasskeyCreateCredential({
+          rpId: message.rpId,
+          rpName: message.rpName,
+          userId: message.userId,
+          userName: message.userName,
+          userDisplayName: message.userDisplayName,
+          excludeCredentialIds: message.excludeCredentialIds,
+          clientDataJSON: message.clientDataJSON,
+          replaceEntryId: message.replaceEntryId,
+          senderUrl: _sender.tab?.url,
+        });
+        sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ...result } as ExtensionResponse);
+      } catch {
+        sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, error: "CREATE_FAILED" } as ExtensionResponse);
+      }
+      return;
+    }
+
+    case EXT_MSG.CHECK_PENDING_SAVE: {
       const tabId = _sender.tab?.id;
       if (!tabId) {
-        sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" });
+        sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" });
         return;
       }
       const pending = pendingSavePrompts.get(tabId);
@@ -2315,12 +2403,12 @@ async function handleMessage(
         const senderHost = _sender.tab?.url ? extractHost(_sender.tab.url) : null;
         if (!senderHost || !isHostMatch(pending.host, senderHost)) {
           pendingSavePrompts.delete(tabId);
-          sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" });
+          sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" });
           return;
         }
         pendingSavePrompts.delete(tabId);
         sendResponse({
-          type: "CHECK_PENDING_SAVE",
+          type: EXT_MSG.CHECK_PENDING_SAVE,
           action: pending.action,
           host: pending.host,
           username: pending.username,
@@ -2330,7 +2418,7 @@ async function handleMessage(
         });
       } else {
         if (pending) pendingSavePrompts.delete(tabId);
-        sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" });
+        sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" });
       }
       return;
     }
@@ -2349,41 +2437,53 @@ chrome.runtime.onMessage.addListener(
       // Each branch returns the correct response shape for the message type.
       try {
         switch (message.type) {
-          case "GET_STATUS":
-            sendResponse({ type: "GET_STATUS", hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
+          case EXT_MSG.GET_STATUS:
+            sendResponse({ type: EXT_MSG.GET_STATUS, hasToken: false, expiresAt: null, vaultUnlocked: false } as ExtensionResponse);
             break;
-          case "GET_TOKEN":
-            sendResponse({ type: "GET_TOKEN", token: null } as ExtensionResponse);
+          case EXT_MSG.GET_TOKEN:
+            sendResponse({ type: EXT_MSG.GET_TOKEN, token: null } as ExtensionResponse);
             break;
-          case "GET_MATCHES_FOR_URL":
-            sendResponse({ type: "GET_MATCHES_FOR_URL", entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
+          case EXT_MSG.GET_MATCHES_FOR_URL:
+            sendResponse({ type: EXT_MSG.GET_MATCHES_FOR_URL, entries: [], vaultLocked: !!currentToken && !encryptionKey, disconnected: !currentToken, suppressInline: false } as ExtensionResponse);
             break;
-          case "FETCH_PASSWORDS":
-            sendResponse({ type: "FETCH_PASSWORDS", entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.FETCH_PASSWORDS:
+            sendResponse({ type: EXT_MSG.FETCH_PASSWORDS, entries: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
-          case "COPY_PASSWORD":
-            sendResponse({ type: "COPY_PASSWORD", password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.COPY_PASSWORD:
+            sendResponse({ type: EXT_MSG.COPY_PASSWORD, password: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
-          case "COPY_TOTP":
-            sendResponse({ type: "COPY_TOTP", code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.COPY_TOTP:
+            sendResponse({ type: EXT_MSG.COPY_TOTP, code: null, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
-          case "LOGIN_DETECTED":
-            sendResponse({ type: "LOGIN_DETECTED", action: "none" } as ExtensionResponse);
+          case EXT_MSG.LOGIN_DETECTED:
+            sendResponse({ type: EXT_MSG.LOGIN_DETECTED, action: "none" } as ExtensionResponse);
             break;
-          case "SAVE_LOGIN":
-            sendResponse({ type: "SAVE_LOGIN", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.SAVE_LOGIN:
+            sendResponse({ type: EXT_MSG.SAVE_LOGIN, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
-          case "UPDATE_LOGIN":
-            sendResponse({ type: "UPDATE_LOGIN", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.UPDATE_LOGIN:
+            sendResponse({ type: EXT_MSG.UPDATE_LOGIN, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
-          case "CHECK_PENDING_SAVE":
-            sendResponse({ type: "CHECK_PENDING_SAVE", action: "none" } as ExtensionResponse);
+          case EXT_MSG.CHECK_PENDING_SAVE:
+            sendResponse({ type: EXT_MSG.CHECK_PENDING_SAVE, action: "none" } as ExtensionResponse);
             break;
-          case "AUTOFILL_CREDIT_CARD":
-            sendResponse({ type: "AUTOFILL_CREDIT_CARD", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.AUTOFILL_CREDIT_CARD:
+            sendResponse({ type: EXT_MSG.AUTOFILL_CREDIT_CARD, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
-          case "AUTOFILL_IDENTITY":
-            sendResponse({ type: "AUTOFILL_IDENTITY", ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+          case EXT_MSG.AUTOFILL_IDENTITY:
+            sendResponse({ type: EXT_MSG.AUTOFILL_IDENTITY, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case EXT_MSG.PASSKEY_GET_MATCHES:
+            sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], vaultLocked: true } as ExtensionResponse);
+            break;
+          case EXT_MSG.PASSKEY_CHECK_DUPLICATE:
+            sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, entries: [], vaultLocked: true } as ExtensionResponse);
+            break;
+          case EXT_MSG.PASSKEY_SIGN_ASSERTION:
+            sendResponse({ type: EXT_MSG.PASSKEY_SIGN_ASSERTION, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
+            break;
+          case EXT_MSG.PASSKEY_CREATE_CREDENTIAL:
+            sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
             break;
           default:
             sendResponse({ type: message.type, ok: false, error: "INTERNAL_ERROR" } as ExtensionResponse);
