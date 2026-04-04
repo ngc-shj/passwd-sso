@@ -23,6 +23,7 @@ Last updated: 2026-03-07
 | Extension bearer token | High | DB + chrome.storage.session |
 | CLI OAuth refresh token | High | DB + `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600) |
 | WebAuthn credentials | High | DB (public key + credential ID) |
+| Extension passkey private keys | Critical | Encrypted in DB entry blob (AES-256-GCM, wrapped by vault secret key) |
 | PRF-derived vault key | Critical | Ephemeral in client memory |
 | Audit logs | Medium | PostgreSQL |
 | Account salt | Low | DB (public parameter) |
@@ -53,6 +54,12 @@ TB5: Extension <-> Web App
 TB6: Client <-> WebAuthn Authenticator
      Browser mediates credential creation/assertion via navigator.credentials API.
      PRF extension provides vault key derivation material.
+
+TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worker)
+     Extension intercepts navigator.credentials.get/create in the MAIN world.
+     Messages cross two isolated world boundaries via postMessage (MAIN→ISOLATED)
+     and chrome.runtime.sendMessage (ISOLATED→SW).
+     rpId is validated against sender.tab.url at the SW boundary (not payload).
 ```
 
 ## 3. STRIDE Analysis
@@ -65,6 +72,7 @@ TB6: Client <-> WebAuthn Authenticator
 | S2: Attacker forges SSO assertion | TB4 | SAML signature validation by Jackson; OIDC token validation by Auth.js | Compromised IdP could issue valid tokens |
 | S3: Attacker replays extension token | TB5 | Token hashed (SHA-256) before DB storage; expiry enforced; single-use refresh | Token window between issue and expiry |
 | S4: Attacker spoofs WebAuthn assertion | TB6 | Origin and RP ID validation; challenge freshness; signature verification | None (WebAuthn protocol provides strong anti-spoofing) |
+| S6: Malicious page spoofs rpId in passkey bridge message | TB7 | SW reads sender URL from Chrome runtime (`sender.tab.url`), not from message payload; `isSenderAuthorizedForRpId` validates rpId is a registrable suffix of page hostname | MAIN world attacker can send arbitrary postMessage payload — rpId payload is untrusted by design |
 | S5: Cross-tenant data access | TB2 | FORCE ROW LEVEL SECURITY on all 39 tenant-scoped tables; tenant context via SET LOCAL | RLS bypass in 47 allowlisted files (CI-guarded) |
 
 > **RLS enforcement**: The application runtime connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS), ensuring RLS policies are enforced in all environments including development. Migrations run as `passwd_user` (SUPERUSER) which owns the tables. The `app.bypass_rls` GUC is used by 47 allowlisted code paths for cross-tenant operations (CI-guarded). See [deployment guide](../operations/deployment.md) for production role setup.
@@ -134,6 +142,7 @@ TB6: Client <-> WebAuthn Authenticator
 | Audit logging | R1, R2, R3 |
 | Sentry scrubbing | I4 |
 | Extension token lifecycle | S3, E4 |
+| Passkey bridge rpId validation (sender.tab.url) | S6 |
 
 ## 5. Residual Risks (Accepted)
 

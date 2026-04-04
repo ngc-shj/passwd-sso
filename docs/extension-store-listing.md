@@ -27,6 +27,8 @@ Tired of copying and pasting passwords from your passwd-sso vault? This extensio
 
 ⏱️ **Auto-lock** — Walk away from your computer? The vault locks itself after a configurable timeout, so your credentials are never left exposed.
 
+🔐 **Passkey autofill** — The extension intercepts WebAuthn requests and offers vault-stored passkeys automatically. Create new passkeys and save them to your vault — with a prompt to replace duplicates. Falls through to the platform authenticator seamlessly when no vault passkeys match.
+
 🏠 **Your server, your data** — The extension connects only to your self-hosted passwd-sso instance. No third-party cloud, no data collection, no tracking.
 
 **Keyboard Shortcuts:**

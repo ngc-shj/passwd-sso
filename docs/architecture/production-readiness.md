@@ -87,6 +87,7 @@ Areas already considered at production level.
 - Terraform IaC (1,315 LOC)
 - Docker multi-stage build + non-root runtime
 - Browser-extension token lifecycle controls
+- Extension passkey provider (WebAuthn get/create interception, three-layer MAIN→ISOLATED→SW bridge, rpId origin validation, synthetic PublicKeyCredential construction, vault fallthrough on locked/unavailable)
 - Input validation (486 LOC Zod schemas, 40 API touchpoints)
 - Audit logs (personal + team, filter/export supported)
 - External audit-log forwarding (pino + Fluent Bit sidecar)

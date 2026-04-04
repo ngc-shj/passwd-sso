@@ -226,7 +226,8 @@ Secure notes now support Markdown authoring with Edit/Preview tabs, rendered/sou
 | ~~X-3~~ | ~~Context menu (right click)~~ | Yes | Yes | Yes | - | - | - | - | — | — |
 | ~~X-4~~ | ~~Extension keyboard shortcuts~~ | Yes | Yes | - | - | - | - | - | — | — |
 | ~~X-5~~ | ~~New-login detect & save prompt~~ | Yes | Yes | Yes | Yes | Yes | Yes | Yes | — | — |
-| X-6 | TOTP QR capture | - | Yes | - | - | - | - | - | Low | Medium |
+| ~~X-6~~ | ~~TOTP QR capture~~ | - | Yes | - | - | - | - | - | — | — |
+| ~~X-7~~ | ~~Extension passkey provider (WebAuthn get/create)~~ | Yes | - | - | - | - | - | - | — | — |
 
 #### ~~X-1 TOTP autofill~~ — Implemented (2026-01)
 
@@ -248,6 +249,17 @@ Chrome `contextMenus` API with URL-matched entry listing (max 5), debounced upda
 #### ~~X-5 New-login detection~~ — Implemented (2026-02-28)
 
 Form submit capture (capture phase) + click-based detection for SPAs. Registration form skipping heuristics (multiple password fields, registration-specific URL paths, extra form fields). Save/update banner in Shadow DOM (15s auto-dismiss). Pending save push/pull mechanism for post-navigation persistence. Security: sender.tab.url validation (untrusted message.url), cross-origin push guard, AAD-bound encryption, pending save TTL 30s / max 5.
+
+#### ~~X-7 Extension passkey provider~~ — Implemented (2026-04-04)
+
+MAIN world WebAuthn interceptor (`webauthn-interceptor.js`) overrides `navigator.credentials.get()` and `navigator.credentials.create()` to offer vault-stored passkeys before falling through to the platform authenticator. Architecture:
+
+- **Three-layer bridge**: MAIN world interceptor → ISOLATED world bridge lib → Service Worker passkey provider
+- **get() flow**: `PASSKEY_GET_MATCHES` → entry list → `PASSKEY_SELECT` dropdown UI → `PASSKEY_SIGN_ASSERTION` → synthetic `PublicKeyCredential`
+- **create() flow**: `PASSKEY_CONFIRM_CREATE` → `PASSKEY_CHECK_DUPLICATE` → save/replace banner UI → `PASSKEY_CREATE_CREDENTIAL` → synthetic attestation
+- **Fallthrough conditions**: vault locked, no matches, SW unavailable, user dismisses, timeout (2 min)
+- **Security**: rpId validated against sender tab URL (defense-in-depth), senderUrl read from Chrome runtime (not payload), origin check on every postMessage
+- **Constants separation**: `PASSKEY_BRIDGE_ACTION` (MAIN↔content) and `EXT_MSG.PASSKEY_*` (content↔SW) are distinct objects
 
 ---
 
@@ -409,6 +421,7 @@ Auto-monitor logic with 24-hour interval and vault-unlock gating. Background bre
 | ~~X-1~~ | TOTP autofill (extension) | ✅ 2026-02-18 |
 | ~~C-1~~ | Send (temporary sharing) | ✅ 2026-02-19 |
 | ~~X-5~~ | ~~New-login detect & save~~ | ✅ 2026-02-28 |
+| ~~X-7~~ | ~~Extension passkey provider~~ | ✅ 2026-04-04 |
 | ~~N-1~~ | ~~Email notification foundation~~ | ✅ 2026-02-23 |
 | ~~N-4~~ | ~~Emergency-access notification (email)~~ | ✅ 2026-02-23 |
 | ~~B-1~~ | ~~SCIM provisioning~~ | ✅ 2026-02-27 |
@@ -554,7 +567,7 @@ Feature-category coverage:
 - Strong audit-log surface (62 action types)
 - Send (temporary text/file sharing) parity with Bitwarden
 - Strong vault management: folder hierarchy + entry history + duplicate detection
-- Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save
+- Full extension feature set: autofill, TOTP, context menu, keyboard shortcuts, login detection & save, passkey provider (WebAuthn interceptor)
 - Email notification infrastructure (Resend + SMTP) with full emergency-access notification coverage
 - Concurrent session management (list/revoke with device detection)
 
@@ -574,6 +587,7 @@ Feature-category coverage:
 - Batch D completed: notification center, login alerts, nested tags, secure note templates/Markdown, share permissions, team policies, audit download + webhooks
 - Batch E completed: CC/address autofill, dark-web monitoring, admin vault reset (tenant-level), CLI tool
 - Batch F completed: SSH key entry type, SSH Agent, CI/CD secrets, API keys, REST API v1, TOTP QR capture, Travel Mode, Directory Sync, Passkey vault unlock
+- Batch G completed: Extension passkey provider (WebAuthn get/create interception, three-layer bridge architecture)
 
 ---
 
@@ -704,6 +718,19 @@ Also in this batch:
 - Redis added as Docker service (session store + rate limiting)
 
 **All four groups completed:** ~~A~~ -> ~~B~~ -> ~~C~~ -> ~~D~~
+
+### Group E: Extension Passkey Provider — ✅ Completed (2026-04-04)
+
+| ID | Feature | Effort | Notes |
+| --- | --- | --- | --- |
+| ~~X-7~~ | ~~Extension passkey provider (WebAuthn get/create)~~ | High | ✅ Three-layer bridge: MAIN world interceptor → ISOLATED bridge → SW provider |
+
+Also in this batch:
+
+- `PASSKEY_BRIDGE_ACTION` and `EXT_MSG.PASSKEY_*` separated as distinct constant objects
+- Passkey dropdown UI (entry selection) and passkey save banner (create/replace confirmation)
+- P-256 keypair generation, CBOR encoding, COSE key format, assertion signing in `webauthn-crypto.ts`
+- Comprehensive test coverage: `background-passkey-provider.test.ts`, `webauthn-bridge-lib.test.ts`, `webauthn-crypto.test.ts`, `cbor.test.ts`
 
 ---
 
