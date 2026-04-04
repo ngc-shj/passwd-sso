@@ -576,23 +576,8 @@ initPasskeyProvider({
   invalidateCache,
 });
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(() => {
   setupContextMenu();
-
-  // Register MAIN world WebAuthn interceptor for passkey provider
-  try {
-    void chrome.scripting.unregisterContentScripts({ ids: ["webauthn-interceptor"] }).catch(() => {});
-    await chrome.scripting.registerContentScripts([{
-      id: "webauthn-interceptor",
-      matches: ["https://*/*", "http://localhost/*"],
-      js: ["src/content/webauthn-interceptor.js"],
-      runAt: "document_start",
-      world: "MAIN" as chrome.scripting.ExecutionWorld,
-      allFrames: true,
-    }]);
-  } catch {
-    // Silently fail if scripting API is unavailable
-  }
 });
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenu();
