@@ -3,7 +3,7 @@
 // handles selection UI, and returns responses.
 // Typed version for testing; entry point in webauthn-bridge.ts.
 
-import { WEBAUTHN_BRIDGE_MSG, WEBAUTHN_BRIDGE_RESP } from "../lib/constants";
+import { WEBAUTHN_BRIDGE_MSG, WEBAUTHN_BRIDGE_RESP, PASSKEY_BRIDGE_ACTION, EXT_MSG } from "../lib/constants";
 import type { PasskeyMatchEntry } from "../types/messages";
 import { showPasskeyDropdown, hidePasskeyDropdown } from "./ui/passkey-dropdown";
 import { showPasskeySaveBanner } from "./ui/passkey-save-banner";
@@ -33,19 +33,19 @@ export function handleWebAuthnMessage(event: MessageEvent): void {
   if (!requestId || !action) return;
 
   switch (action) {
-    case "PASSKEY_GET_MATCHES":
+    case PASSKEY_BRIDGE_ACTION.GET_MATCHES:
       handleGetMatches(requestId, payload);
       break;
-    case "PASSKEY_SELECT":
+    case PASSKEY_BRIDGE_ACTION.SELECT:
       handleSelect(requestId, payload);
       break;
-    case "PASSKEY_SIGN_ASSERTION":
+    case PASSKEY_BRIDGE_ACTION.SIGN_ASSERTION:
       handleSignAssertion(requestId, payload);
       break;
-    case "PASSKEY_CONFIRM_CREATE":
+    case PASSKEY_BRIDGE_ACTION.CONFIRM_CREATE:
       handleConfirmCreate(requestId, payload);
       break;
-    case "PASSKEY_CREATE_CREDENTIAL":
+    case PASSKEY_BRIDGE_ACTION.CREATE_CREDENTIAL:
       handleCreateCredential(requestId, payload);
       break;
   }
@@ -53,7 +53,7 @@ export function handleWebAuthnMessage(event: MessageEvent): void {
 
 function handleGetMatches(requestId: string, payload: { rpId: string }): void {
   chrome.runtime.sendMessage(
-    { type: "PASSKEY_GET_MATCHES", rpId: payload.rpId },
+    { type: EXT_MSG.PASSKEY_GET_MATCHES, rpId: payload.rpId },
     (response) => {
       if (chrome.runtime.lastError) { respond(requestId, null); return; }
       respond(requestId, response);
@@ -94,7 +94,7 @@ function handleSignAssertion(
 ): void {
   chrome.runtime.sendMessage(
     {
-      type: "PASSKEY_SIGN_ASSERTION",
+      type: EXT_MSG.PASSKEY_SIGN_ASSERTION,
       entryId: payload.entryId,
       clientDataJSON: payload.clientDataJSON,
       teamId: payload.teamId,
@@ -139,7 +139,7 @@ function handleConfirmCreate(
   const fallback = setTimeout(fallthrough, 2000);
 
   chrome.runtime.sendMessage(
-    { type: "PASSKEY_CHECK_DUPLICATE", rpId: payload.rpId, userName: payload.userName },
+    { type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, rpId: payload.rpId, userName: payload.userName },
     (dupResponse) => {
       clearTimeout(fallback);
       if (chrome.runtime.lastError || dupResponse?.vaultLocked) {
@@ -167,7 +167,7 @@ function handleCreateCredential(
 ): void {
   chrome.runtime.sendMessage(
     {
-      type: "PASSKEY_CREATE_CREDENTIAL",
+      type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL,
       rpId: payload.rpId,
       rpName: payload.rpName,
       userId: payload.userId,

@@ -54,6 +54,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("ignores events where source !== window", () => {
@@ -313,6 +314,9 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
       cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [{ id: "e1", title: "Example", username: "alice", relyingPartyId: "example.com", credentialId: "cred-1" }] });
     });
 
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
+
     const event = makeEvent({
       data: {
         type: WEBAUTHN_BRIDGE_MSG,
@@ -330,6 +334,8 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
         existingEntries: expect.arrayContaining([expect.objectContaining({ credentialId: "cred-1" })]),
       }),
     );
+    // respond() must not be called immediately — it fires on user action (onSave/onDismiss/onCancel)
+    expect(postedMessages.filter((m) => (m as { type?: string }).type === WEBAUTHN_BRIDGE_RESP)).toHaveLength(0);
   });
 
   it("shows save banner with empty entries when PASSKEY_CHECK_DUPLICATE returns empty", async () => {
@@ -337,6 +343,9 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
       cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [] });
     });
+
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => { postedMessages.push(data); });
 
     const event = makeEvent({
       data: {
@@ -351,6 +360,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     expect(showPasskeySaveBanner).toHaveBeenCalledWith(
       expect.objectContaining({ existingEntries: [] }),
     );
+    expect(postedMessages.filter((m) => (m as { type?: string }).type === WEBAUTHN_BRIDGE_RESP)).toHaveLength(0);
   });
 
   it("responds with platform action when PASSKEY_SELECT receives empty entries list", () => {

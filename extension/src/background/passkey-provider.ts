@@ -62,7 +62,7 @@ export function isSenderAuthorizedForRpId(rpId: string, senderUrl: string | unde
   if (!senderUrl) return false;
   try {
     const hostname = new URL(senderUrl).hostname;
-    if (!rpId || rpId.split(".").length < 2) return false;
+    if (!rpId || rpId.split(".").filter(Boolean).length < 2) return false;
     return rpId === hostname || hostname.endsWith("." + rpId);
   } catch {
     return false;
@@ -197,6 +197,13 @@ async function doSignAssertion(
     return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" };
   }
 
+  // Early senderUrl check before fetching — avoids unnecessary server access
+  // for requests with no tab context (e.g., from popup or options page).
+  // The stored rpId is validated again after decrypt for defense-in-depth.
+  if (!senderUrl) {
+    return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
+  }
+
   try {
     const path = extApiPath.passwordById(entryId);
     const res = await deps.swFetch(path);
@@ -228,7 +235,7 @@ async function doSignAssertion(
     }
 
     // Verify sender tab's hostname is authorized for this entry's rpId (defense-in-depth)
-    if (senderUrl && !isSenderAuthorizedForRpId(rpId, senderUrl)) {
+    if (!isSenderAuthorizedForRpId(rpId, senderUrl)) {
       return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
     }
 
@@ -315,7 +322,7 @@ export async function handlePasskeyCreateCredential(
   } = params;
 
   // Verify sender tab's hostname is authorized for this rpId (defense-in-depth)
-  if (params.senderUrl && !isSenderAuthorizedForRpId(rpId, params.senderUrl)) {
+  if (!isSenderAuthorizedForRpId(rpId, params.senderUrl)) {
     return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
   }
 

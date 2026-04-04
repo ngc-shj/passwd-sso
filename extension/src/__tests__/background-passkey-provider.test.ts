@@ -103,20 +103,6 @@ describe("passkey-provider", () => {
   // ── handlePasskeyGetMatches ──────────────────────────────────
 
   describe("handlePasskeyGetMatches", () => {
-    it("returns vaultLocked:true when deps not initialized", async () => {
-      // Force uninitialized state by calling the module before any init
-      // We achieve this by resetting module state via a separate test import path.
-      // Instead, verify the deps=null path by not calling initPasskeyProvider.
-      // Since module is shared, we reinitialize with a deliberately locked state.
-      const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
-      initPasskeyProvider(deps);
-      // Simulate deps=null by calling after a fresh module reset is not possible
-      // without vi.resetModules. Instead test the vault-locked branch directly.
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
-      // vault locked → entries empty
-      expect(result).toEqual({ entries: [], vaultLocked: true });
-    });
-
     it("returns vaultLocked:true when vault is locked (no encryptionKey)", async () => {
       const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
       initPasskeyProvider(deps);
@@ -371,7 +357,12 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeySignAssertion(TEST_ENTRY_ID, validClientDataJSON);
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://example.com/auth",
+      );
       expect(result.ok).toBe(true);
       expect(result.response).toBeDefined();
       expect(typeof result.response?.signature).toBe("string");
@@ -379,6 +370,10 @@ describe("passkey-provider", () => {
       expect(typeof result.response?.authenticatorData).toBe("string");
       expect(typeof result.response?.clientDataJSON).toBe("string");
       expect(result.response?.credentialId).toBe(TEST_CRED_ID);
+      // Verify counter-update PUT was issued
+      const putCalls = (deps.swFetch as ReturnType<typeof vi.fn>).mock.calls
+        .filter(([, init]: [string, RequestInit?]) => init?.method === "PUT");
+      expect(putCalls).toHaveLength(1);
     });
 
     it("returns SENDER_ORIGIN_MISMATCH when senderUrl hostname does not match stored rpId", async () => {
@@ -516,6 +511,7 @@ describe("passkey-provider", () => {
         challenge: "Y3JlYXRlLWNoYWxsZW5nZQ",
         origin: "https://example.com",
       }),
+      senderUrl: "https://example.com/register",
     };
 
     it("returns VAULT_LOCKED when vault is locked", async () => {
@@ -608,6 +604,7 @@ describe("passkey-provider", () => {
         ...validCreateParams,
         rpId: "different-rp.com",
         excludeCredentialIds: [TEST_CRED_ID],
+        senderUrl: "https://different-rp.com/register",
       });
       // Should proceed (not CREDENTIAL_EXCLUDED); may succeed or fail at POST
       expect(result.error).not.toBe("CREDENTIAL_EXCLUDED");
@@ -659,6 +656,145 @@ describe("passkey-provider", () => {
       expect(typeof result.response?.attestationObject).toBe("string");
       expect(typeof result.response?.clientDataJSON).toBe("string");
       expect(result.response?.transports).toEqual(["internal", "hybrid"]);
+    });
+
+    it("returns SENDER_ORIGIN_MISMATCH when senderUrl does not match rpId", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential({
+        ...validCreateParams,
+        senderUrl: "https://evil.com/register",
+      });
+      expect(result).toEqual({ ok: false, error: "SENDER_ORIGIN_MISMATCH" });
+    });
+
+    it("returns SENDER_ORIGIN_MISMATCH when senderUrl is undefined", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential({
+        ...validCreateParams,
+        senderUrl: undefined,
+      });
+      expect(result).toEqual({ ok: false, error: "SENDER_ORIGIN_MISMATCH" });
+    });
+
+    it("issues DELETE when replaceEntryId matches a PASSKEY entry with same rpId", async () => {
+      const replaceId = "entry-to-replace";
+      const replaceBlob = JSON.stringify({
+        entryType: "PASSKEY",
+        relyingPartyId: TEST_RP_ID,
+      });
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
+
+      const swFetch = vi.fn()
+        // POST (create new entry)
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+        // GET (fetch target entry for validation)
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ id: replaceId, encryptedBlob: encryptedReplaceBlob, aadVersion: 1 }),
+            { status: 200 },
+          ),
+        )
+        // DELETE
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }));
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch,
+        invalidateCache: vi.fn(),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential({
+        ...validCreateParams,
+        replaceEntryId: replaceId,
+      });
+      expect(result.ok).toBe(true);
+      // Verify DELETE was issued for the correct entry
+      const deleteCalls = (swFetch.mock.calls as Array<[string, RequestInit?]>)
+        .filter(([, init]) => init?.method === "DELETE");
+      expect(deleteCalls).toHaveLength(1);
+      expect(deleteCalls[0][0]).toContain(replaceId);
+    });
+
+    it("skips DELETE when replaceEntryId entry has a different entryType", async () => {
+      const replaceId = "entry-login";
+      const replaceBlob = JSON.stringify({
+        entryType: "LOGIN", // not PASSKEY
+        relyingPartyId: TEST_RP_ID,
+      });
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
+
+      const swFetch = vi.fn()
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ id: replaceId, encryptedBlob: encryptedReplaceBlob, aadVersion: 1 }),
+            { status: 200 },
+          ),
+        );
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch,
+        invalidateCache: vi.fn(),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential({
+        ...validCreateParams,
+        replaceEntryId: replaceId,
+      });
+      expect(result.ok).toBe(true);
+      const deleteCalls = (swFetch.mock.calls as Array<[string, RequestInit?]>)
+        .filter(([, init]) => init?.method === "DELETE");
+      expect(deleteCalls).toHaveLength(0);
+      expect(swFetch).toHaveBeenCalledTimes(2); // POST + GET only
+    });
+
+    it("skips DELETE when replaceEntryId entry has a different rpId", async () => {
+      const replaceId = "entry-other-rp";
+      const replaceBlob = JSON.stringify({
+        entryType: "PASSKEY",
+        relyingPartyId: "other.com", // different rpId
+      });
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
+
+      const swFetch = vi.fn()
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ id: replaceId, encryptedBlob: encryptedReplaceBlob, aadVersion: 1 }),
+            { status: 200 },
+          ),
+        );
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch,
+        invalidateCache: vi.fn(),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential({
+        ...validCreateParams,
+        replaceEntryId: replaceId,
+      });
+      expect(result.ok).toBe(true);
+      const deleteCalls = (swFetch.mock.calls as Array<[string, RequestInit?]>)
+        .filter(([, init]) => init?.method === "DELETE");
+      expect(deleteCalls).toHaveLength(0);
+      expect(swFetch).toHaveBeenCalledTimes(2); // POST + GET only
     });
   });
 });

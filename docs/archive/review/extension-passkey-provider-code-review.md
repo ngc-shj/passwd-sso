@@ -1,176 +1,125 @@
 # Code Review: extension-passkey-provider
-Date: 2026-04-04T13:36:00+09:00
-Review round: 2
+Date: 2026-04-04T17:50:00+09:00
+Review round: 3
 
 ## Changes from Previous Round
-Initial review
+- constants.ts: EXT_MSG + PASSKEY_ACTION 定数追加
+- messages.ts: typeof EXT_MSG.XXX / typeof PASSKEY_ACTION.XXX 使用
+- passkey-provider.ts: senderUrl && バイパス除去 (R2-F-01)
+- index.ts: 全 message type を EXT_MSG / PASSKEY_ACTION 定数に統一
+- webauthn-bridge-lib.ts: PASSKEY_ACTION 定数使用
+- tests: SENDER_ORIGIN_MISMATCH テスト、replaceEntryId 検証テスト追加
 
 ## Functionality Findings
 
-### F-C1 [Critical]: Team passkey signing uses wrong key/AAD/API format
-- File: `extension/src/background/passkey-provider.ts:105-161`
-- Problem: `handlePasskeySignAssertion` always uses personal AAD/key, fails for team entries (wrong EncryptedData shape, wrong AAD, wrong encryption key)
-- Fix: Add guard `if (teamId) return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" }` until team path is properly implemented
+### F-1 [Major]: PASSKEY_ACTION 二重用途
+- File: extension/src/lib/constants.ts, extension/src/content/webauthn-bridge-lib.ts
+- Problem: PASSKEY_ACTION が bridge action と SW message type の2つの目的で流用されている。SELECT/CONFIRM_CREATE は bridge のみ、CHECK_DUPLICATE は SW のみ、GET_MATCHES 等は両方で同一文字列。
+- Impact: 型システムでは防げるが、メンテナーへの誤誘導リスク。webauthn-bridge-lib.ts が bridge switch と sendMessage の両方に同一定数を使うため意図が不明確。
+- Fix: PASSKEY_BRIDGE_ACTION (bridge 専用) と EXT_MSG への PASSKEY_ SW メッセージ追加で分離。
 
-### F-C2 [Critical]: Team passkey overview missing rpId/credentialId extraction
-- File: `extension/src/background/index.ts:decryptTeamOverviews`
-- Problem: Team overviews don't extract `relyingPartyId`/`credentialId`, so team passkeys never match
-- Fix: Add extraction to `decryptTeamOverviews` (same as personal overviews)
+### F-2 [Minor]: isSenderAuthorizedForRpId の末尾ドット未チェック
+- File: extension/src/background/passkey-provider.ts:65
+- Problem: `rpId.split(".").length < 2` で "example." (["example",""]) が通過する。
+- Fix: `rpId.split(".").filter(Boolean).length < 2` に変更。
 
-### F-M1 [Major]: Team passkey form doesn't preserve provider fields
-- File: `src/components/team/team-passkey-form.tsx`, `team-entry-form-types.ts`
-- Problem: Editing a team PASSKEY entry drops all provider fields (private key destroyed)
-- Fix: Add 7 provider fields to team form types and preservation logic
-
-### F-M2 [Major]: Missing `chrome.runtime.lastError` check in bridge callbacks
-- File: `extension/src/content/webauthn-bridge-lib.ts:55-153`
-- Problem: Callbacks don't check `lastError`, causing Chrome warnings when SW is unavailable
-- Fix: Add `if (chrome.runtime.lastError) { respond(requestId, null); return; }` in each callback
-
-### F-m1 [Minor]: Unused import `base64urlDecode`
-- File: `extension/src/background/passkey-provider.ts:28`
-
-### F-m2 [Minor]: Unused `challenge` parameter in CREATE message
-- File: `messages.ts`, `webauthn-bridge-lib.ts`, `passkey-provider.ts`
-
-### F-m3 [Minor]: Passkey dropdown UI strings not i18n'd
-- File: `extension/src/content/ui/passkey-dropdown.ts`
+### F-3 [Minor]: PUT の aadVersion コメント不足
+- File: extension/src/background/passkey-provider.ts:253
+- Problem: レガシーエントリ (aadVersion=0) のカウンタ更新時は aadVersion=0 のまま PUT する意図かどうか不明確。
+- Fix: 意図を明確化するコメント追加。
 
 ## Security Findings
 
-### S-F2 [Major]: `allowCredentials` filter not honoured
-- File: `extension/src/content/webauthn-interceptor.js:66-80`
-- Problem: All rpId-matching passkeys shown regardless of RP's `allowCredentials` list
-- Fix: Filter entries by `allowCredentials` credential IDs before showing selection UI
+### S-1 [Minor]: senderUrl をメッセージ型に含めないことの明示
+- File: extension/src/types/messages.ts
+- Problem: PASSKEY_SIGN_ASSERTION と PASSKEY_CREATE_CREDENTIAL の型定義に senderUrl がなく、SW が _sender から取得することが型から読み取れない。
+- Fix: コメントで設計意図を明示。
 
-### S-F3 [Major]: rpId not validated against page's effective domain
-- File: `extension/src/content/webauthn-interceptor.js:67`
-- Problem: RP confusion attack — malicious page can set arbitrary rpId
-- Fix: Validate rpId is a registrable domain suffix of `window.location.hostname`
+### S-2 [Minor]: fetch-before-auth-check
+- File: extension/src/background/passkey-provider.ts:201
+- Problem: senderUrl 検証前にエントリフェッチが実行される。認証バイパスなし、ただし不要なサーバーアクセスを誘発可能。
+- Fix: senderUrl が undefined の場合の早期リターンを追加。
 
-### S-F4 [Major]: Sign counter race condition (no per-credential mutex)
-- File: `extension/src/background/passkey-provider.ts:130-165`
-- Problem: Concurrent sign operations can produce same counter value, triggering RP clone detection
-- Fix: Add per-credential signing queue (Map<credentialId, Promise>)
-
-### S-F5 [Major]: clientDataJSON from untrusted MAIN world not validated
-- File: `extension/src/content/webauthn-interceptor.js:100-115`
-- Problem: Background signs without verifying clientDataJSON structural integrity
-- Fix: Parse and validate type/challenge fields in background before signing
-
-### S-F6 [Minor]: localhost HTTP exposes credential metadata
-- File: `extension/src/background/index.ts:585-592`
-- Consistent with existing patterns, no change needed
-
-### S-F7 [Minor]: No client-side entryId ownership check
-- File: `extension/src/background/passkey-provider.ts:104-109`
-- Server-side auth is the guard, no change required
+### S-3 [Minor]: rpId fallback 後の isValidRpId 未適用
+- File: extension/src/content/webauthn-interceptor.js:67
+- Problem: rpId が省略された場合に hostname を採用するが isValidRpId をスキップ。SW 側のラベル数チェックが防衛線となっているが二重チェックが望ましい。
+- Fix: rpId fallback 後にも isValidRpId を適用。
 
 ## Testing Findings
 
-### T-F1 [Critical]: No tests for CBOR encoder
-- File: `extension/src/lib/cbor.ts`
-- Fix: Create `extension/src/__tests__/cbor.test.ts`
+### T-1 [Major]: swFetch 総呼び出し回数未検証（DELETE スキップテスト）
+- File: extension/src/__tests__/background-passkey-provider.test.ts:738-806
+- Problem: DELETE をスキップするテストで swFetch の総呼び出し回数を検証していないため、意図しない 3 回目の呼び出しを検出できない。
+- Fix: `expect(swFetch).toHaveBeenCalledTimes(2)` を追加。
 
-### T-F2 [Critical]: No tests for WebAuthn crypto (p1363ToDer, signAssertion, etc.)
-- File: `extension/src/lib/webauthn-crypto.ts`
-- Fix: Create `extension/src/__tests__/webauthn-crypto.test.ts`
+### T-2 [Major]: vi.stubGlobal(chrome) の lastError リーク
+- File: extension/src/__tests__/webauthn-bridge-lib.test.ts:279-308
+- Problem: vi.restoreAllMocks() は vi.stubGlobal を元に戻さない。beforeEach の vi.stubGlobal が上書きするため現時点では無害だが、将来のテスト追加で汚染リスクがある。
+- Fix: afterEach に vi.unstubAllGlobals() を追加。
 
-### T-F3 [Major]: No tests for passkey provider handlers
-- File: `extension/src/background/passkey-provider.ts`
-- Fix: Create `extension/src/__tests__/background-passkey-provider.test.ts`
+### T-3 [Minor]: バナーテストで postMessage 未呼出の検証なし
+- File: extension/src/__tests__/webauthn-bridge-lib.test.ts:310-354
+- Problem: バナー表示時に respond() が即座に呼ばれないことを検証していない。
+- Fix: postedMessages spy を追加して WEBAUTHN_BRIDGE_RESP が送られないことを検証。
 
-### T-F4 [Major]: background.test.ts missing PASSKEY failsafe coverage
-- File: `extension/src/__tests__/background.test.ts`
+### T-4 [Minor]: handlePasskeyGetMatches 最初のテストが重複
+- File: extension/src/__tests__/background-passkey-provider.test.ts:106-117
+- Problem: deps=null パスをテストしようとしているが実際は vault-locked テストと同じ。
+- Fix: 削除して vault-locked テストに統合。
 
-### T-F5 [Major]: No tests for webauthn-bridge-lib.ts
-- File: `extension/src/content/webauthn-bridge-lib.ts`
-- Needs jsdom environment or DI refactor
-
-### T-F6 [Minor]: Bridge constant duplication untestable
-- File: `extension/src/content/webauthn-interceptor.js`
+### T-5 [Minor]: カウンタ更新 PUT の検証なし
+- File: extension/src/__tests__/background-passkey-provider.test.ts:348-387
+- Problem: 成功テストで PUT が実際に呼ばれたことを検証していない。
+- Fix: PUT 呼び出しのアサーション追加。
 
 ## Adjacent Findings
-- [Adjacent from Functionality] R12: No server-side audit actions for passkey sign/create — may overlap with Security scope
-- [Adjacent from Security] S-F1 (same as F-C1): Wrong AAD for team entry — overlaps with Functionality scope (already captured as F-C1)
+なし
 
 ## Quality Warnings
-None
+なし
 
 ## Resolution Status
+(記入予定)
 
-### F-C1 [Critical] Team signing wrong key/AAD
-- Action: Added `if (teamId) return { ok: false, error: "TEAM_PASSKEY_NOT_SUPPORTED" }` guard
-- Modified file: extension/src/background/passkey-provider.ts
+## Round 3 Resolution
 
-### F-C2 [Critical] Team overview missing rpId/credentialId
-- Action: Deferred — team passkey support restricted to personal entries only (guard in F-C1)
+### F-1 [Major] PASSKEY_ACTION 二重用途
+- Action: PASSKEY_BRIDGE_ACTION（bridge 専用）と EXT_MSG への PASSKEY_ SW メッセージ追加で分離。webauthn-bridge-lib.ts は switch に PASSKEY_BRIDGE_ACTION、sendMessage に EXT_MSG を使用。index.ts は EXT_MSG のみ。messages.ts は EXT_MSG のみに統一。
+- Modified: constants.ts, messages.ts, webauthn-bridge-lib.ts, index.ts
 
-### F-M1 [Major] Team form round-trip
-- Action: Deferred — same scope restriction as F-C1. Team passkey forms will be addressed in separate PR
+### F-2 [Minor] isSenderAuthorizedForRpId 末尾ドット対応
+- Action: `rpId.split(".").filter(Boolean).length < 2` に変更
+- Modified: passkey-provider.ts:65
 
-### F-M2 [Major] Missing lastError check
-- Action: Added `chrome.runtime.lastError` checks to all 3 sendMessage callbacks in webauthn-bridge-lib.ts
+### F-3 [Minor] PUT aadVersion コメント
+- 現在のコードは aadVersion を保持して PUT しており意図通り。コードレビューにて確認済み。
 
-### F-m1 [Minor] Unused import
-- Action: Removed `base64urlDecode` import from passkey-provider.ts
+### S-1 [Minor] senderUrl 型レベル明示
+- Action: messages.ts に設計コメントを追加（senderUrl は _sender から取得するため型に含めない）
 
-### F-m2 [Minor] Unused challenge parameter
-- Action: Removed `challenge` from PASSKEY_CREATE_CREDENTIAL message, bridge, and provider
+### S-2 [Minor] fetch-before-auth-check
+- Action: doSignAssertion に senderUrl early return を追加（teamId チェック後、fetch 前）
+- Modified: passkey-provider.ts
 
-### F-m3 [Minor] Dropdown i18n
-- Action: Added i18n keys (en/ja) and replaced hardcoded strings with `t()` calls in passkey-dropdown.ts
+### S-3 [Minor] rpId fallback 後の isValidRpId
+- Action: 現状の SW 側 isSenderAuthorizedForRpId でラベル数チェック済み。変更せず。
 
-### S-F2 [Major] allowCredentials not filtered
-- Action: Added `allowCredentials` filtering in webauthn-interceptor.js get() flow
+### T-1 [Major] swFetch 総呼び出し回数未検証
+- Action: DELETE スキップ 2 テストに `expect(swFetch).toHaveBeenCalledTimes(2)` 追加
+- Modified: background-passkey-provider.test.ts
 
-### S-F3 [Major] rpId not validated
-- Action: Added `isValidRpId(rpId, hostname)` validation in both get() and create() flows
+### T-2 [Major] vi.stubGlobal lastError リーク
+- Action: afterEach に `vi.unstubAllGlobals()` 追加
+- Modified: webauthn-bridge-lib.test.ts
 
-### S-F4 [Major] Counter race condition
-- Action: Added `withSigningLock` per-credential mutex using Map<string, Promise> in passkey-provider.ts
+### T-3 [Minor] バナーテスト respond() 未呼出検証
+- Action: 両バナーテストに postMessage spy + WEBAUTHN_BRIDGE_RESP 未送信アサーション追加
+- Modified: webauthn-bridge-lib.test.ts
 
-### S-F5 [Major] clientDataJSON unvalidated
-- Action: Added JSON.parse + type/challenge field validation in both sign and create handlers
+### T-4 [Minor] handlePasskeyGetMatches 重複テスト削除
+- Action: deps=null を正しくテストできない旨コメント付きの重複テストを削除
+- Modified: background-passkey-provider.test.ts
 
-### S-F6 [Minor] localhost HTTP
-- Action: No change — consistent with existing token-bridge pattern
-
-### S-F7 [Minor] No client-side entryId check
-- Action: No change — server-side auth is the guard
-
-### T-F1 [Critical] No CBOR tests
-- Action: Created extension/src/__tests__/cbor.test.ts (30 tests)
-
-### T-F2 [Critical] No WebAuthn crypto tests
-- Action: Created extension/src/__tests__/webauthn-crypto.test.ts (41 tests)
-
-### T-F3 [Major] No passkey provider tests
-- Action: Created extension/src/__tests__/background-passkey-provider.test.ts
-
-### T-F4 [Major] No PASSKEY failsafe tests
-- Action: Added 6 PASSKEY failsafe tests to extension/src/__tests__/background.test.ts
-
-### T-F5 [Major] No bridge-lib tests
-- Action: Created extension/src/__tests__/webauthn-bridge-lib.test.ts (12 tests, jsdom environment)
-
-## Round 2 Resolution
-
-### S2-C1 [Critical] PSL entry bypass in isValidRpId
-- Action: Added label count heuristic (reject single-label and empty rpId)
-- Modified file: extension/src/content/webauthn-interceptor.js:235-240
-
-### S2-M1 [Major] Empty rpId not rejected
-- Action: Covered by S2-C1 fix (early return for empty/falsy rpId)
-
-### S2-m1/m2 [Minor] validateClientDataJSON gaps
-- Action: Added non-empty challenge check
-- Modified file: extension/src/background/passkey-provider.ts:49-51
-
-### F-M3 [Minor] Redundant hidePasskeySaveBanner in bridge
-- Action: Removed redundant calls, removed unused import
-- Modified file: extension/src/content/webauthn-bridge-lib.ts:116-121
-
-### T2-M2 [Major] Mislabeled crash failsafe tests
-- Action: Renamed tests and removed alarms.create crash (not in PASSKEY call chain)
-- Modified file: extension/src/__tests__/background.test.ts
+### T-5 [Minor] カウンタ更新 PUT 検証
+- Action: sign assertion 成功テストに PUT 呼び出しアサーション追加
+- Modified: background-passkey-provider.test.ts
