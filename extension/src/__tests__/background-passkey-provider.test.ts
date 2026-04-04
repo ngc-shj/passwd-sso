@@ -18,8 +18,10 @@ vi.stubGlobal("crypto", {
 import {
   initPasskeyProvider,
   handlePasskeyGetMatches,
+  handlePasskeyCheckDuplicate,
   handlePasskeySignAssertion,
   handlePasskeyCreateCredential,
+  isSenderAuthorizedForRpId,
   type PasskeyProviderDeps,
 } from "../background/passkey-provider";
 
@@ -341,6 +343,161 @@ describe("passkey-provider", () => {
         validClientDataJSON,
       );
       expect(result).toEqual({ ok: false, error: "MISSING_KEY_MATERIAL" });
+    });
+
+    it("returns ok:true with signature on success", async () => {
+      // Build a real encrypted blob with a P-256 key pair
+      const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
+      const { privateKeyJwk } = await generatePasskeyKeypair();
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const blob = JSON.stringify({
+        credentialId: TEST_CRED_ID,
+        relyingPartyId: TEST_RP_ID,
+        passkeyPrivateKeyJwk: JSON.stringify(privateKeyJwk),
+        passkeySignCount: 0,
+      });
+      const encryptedBlob = await encryptData(blob, testKey, aad);
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn()
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 1 }),
+              { status: 200 },
+            ),
+          )
+          .mockResolvedValueOnce(new Response("{}", { status: 200 })), // counter PUT
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(TEST_ENTRY_ID, validClientDataJSON);
+      expect(result.ok).toBe(true);
+      expect(result.response).toBeDefined();
+      expect(typeof result.response?.signature).toBe("string");
+      expect(result.response!.signature.length).toBeGreaterThan(0);
+      expect(typeof result.response?.authenticatorData).toBe("string");
+      expect(typeof result.response?.clientDataJSON).toBe("string");
+      expect(result.response?.credentialId).toBe(TEST_CRED_ID);
+    });
+
+    it("returns SENDER_ORIGIN_MISMATCH when senderUrl hostname does not match stored rpId", async () => {
+      const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
+      const { privateKeyJwk } = await generatePasskeyKeypair();
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const blob = JSON.stringify({
+        credentialId: TEST_CRED_ID,
+        relyingPartyId: TEST_RP_ID, // example.com
+        passkeyPrivateKeyJwk: JSON.stringify(privateKeyJwk),
+        passkeySignCount: 0,
+      });
+      const encryptedBlob = await encryptData(blob, testKey, aad);
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 1 }),
+            { status: 200 },
+          ),
+        ),
+      });
+      initPasskeyProvider(deps);
+
+      // Sender is evil.com but stored rpId is example.com
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://evil.com/path",
+      );
+      expect(result).toEqual({ ok: false, error: "SENDER_ORIGIN_MISMATCH" });
+    });
+  });
+
+  // ── handlePasskeyCheckDuplicate ─────────────────────────────
+
+  describe("handlePasskeyCheckDuplicate", () => {
+    it("returns vaultLocked:true when vault is locked", async () => {
+      const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice");
+      expect(result).toEqual({ entries: [], vaultLocked: true });
+    });
+
+    it("returns matching entries when rpId and userName match", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockResolvedValue([mockPasskeyEntry]),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice");
+      expect(result.entries).toHaveLength(1);
+      expect(result.entries[0].credentialId).toBe(TEST_CRED_ID);
+      expect(result.vaultLocked).toBeUndefined();
+    });
+
+    it("returns empty entries when rpId does not match", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockResolvedValue([mockPasskeyEntry]),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCheckDuplicate("other.com", "alice");
+      expect(result.entries).toHaveLength(0);
+    });
+
+    it("returns empty entries when userName does not match", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockResolvedValue([mockPasskeyEntry]),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "bob");
+      expect(result.entries).toHaveLength(0);
+    });
+
+    it("returns empty entries when getCachedEntries throws", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        getCachedEntries: vi.fn().mockRejectedValue(new Error("cache error")),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice");
+      expect(result).toEqual({ entries: [] });
+    });
+  });
+
+  // ── isSenderAuthorizedForRpId ────────────────────────────────
+
+  describe("isSenderAuthorizedForRpId", () => {
+    it("returns true when senderUrl hostname exactly matches rpId", () => {
+      expect(isSenderAuthorizedForRpId("example.com", "https://example.com/login")).toBe(true);
+    });
+
+    it("returns true when senderUrl hostname is a subdomain of rpId", () => {
+      expect(isSenderAuthorizedForRpId("example.com", "https://sub.example.com/login")).toBe(true);
+    });
+
+    it("returns false when senderUrl hostname does not match rpId", () => {
+      expect(isSenderAuthorizedForRpId("example.com", "https://evil.com/login")).toBe(false);
+    });
+
+    it("returns false when rpId has less than 2 labels", () => {
+      expect(isSenderAuthorizedForRpId("localhost", "https://localhost/login")).toBe(false);
+    });
+
+    it("returns false when senderUrl is undefined", () => {
+      expect(isSenderAuthorizedForRpId("example.com", undefined)).toBe(false);
+    });
+
+    it("returns false when senderUrl is not a valid URL", () => {
+      expect(isSenderAuthorizedForRpId("example.com", "not-a-url")).toBe(false);
     });
   });
 

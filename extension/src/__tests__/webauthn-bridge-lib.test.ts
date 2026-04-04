@@ -246,6 +246,113 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     );
   });
 
+  // ── PASSKEY_CONFIRM_CREATE ────────────────────────────────────
+
+  it("falls through to platform when PASSKEY_CHECK_DUPLICATE returns vaultLocked:true", () => {
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => {
+      postedMessages.push(data);
+    });
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
+      cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [], vaultLocked: true });
+    });
+
+    const event = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userName: "alice", userDisplayName: "Alice" },
+      },
+    });
+    handleWebAuthnMessage(event);
+
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-confirm",
+        response: { action: "platform" },
+      }),
+    );
+  });
+
+  it("falls through to platform when chrome.runtime.lastError is set during PASSKEY_CHECK_DUPLICATE", () => {
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => {
+      postedMessages.push(data);
+    });
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
+      vi.stubGlobal("chrome", {
+        runtime: { id: "test-ext-id", sendMessage: sendMessageMock, lastError: { message: "SW error" } },
+      });
+      cb(undefined);
+    });
+
+    const event = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm-err",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userName: "alice", userDisplayName: "Alice" },
+      },
+    });
+    handleWebAuthnMessage(event);
+
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-confirm-err",
+        response: { action: "platform" },
+      }),
+    );
+  });
+
+  it("shows save banner when PASSKEY_CHECK_DUPLICATE returns entries", async () => {
+    const { showPasskeySaveBanner } = await import("../content/ui/passkey-save-banner");
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
+      cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [{ id: "e1", title: "Example", username: "alice", relyingPartyId: "example.com", credentialId: "cred-1" }] });
+    });
+
+    const event = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm-dup",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userName: "alice", userDisplayName: "Alice" },
+      },
+    });
+    handleWebAuthnMessage(event);
+
+    expect(showPasskeySaveBanner).toHaveBeenCalledWith(
+      expect.objectContaining({
+        rpName: "Example",
+        userName: "alice",
+        existingEntries: expect.arrayContaining([expect.objectContaining({ credentialId: "cred-1" })]),
+      }),
+    );
+  });
+
+  it("shows save banner with empty entries when PASSKEY_CHECK_DUPLICATE returns empty", async () => {
+    const { showPasskeySaveBanner } = await import("../content/ui/passkey-save-banner");
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
+      cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [] });
+    });
+
+    const event = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm-new",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userName: "alice", userDisplayName: "Alice" },
+      },
+    });
+    handleWebAuthnMessage(event);
+
+    expect(showPasskeySaveBanner).toHaveBeenCalledWith(
+      expect.objectContaining({ existingEntries: [] }),
+    );
+  });
+
   it("responds with platform action when PASSKEY_SELECT receives empty entries list", () => {
     const postedMessages: unknown[] = [];
     vi.spyOn(window, "postMessage").mockImplementation((data) => {

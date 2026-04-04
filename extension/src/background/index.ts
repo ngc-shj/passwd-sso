@@ -2360,6 +2360,7 @@ async function handleMessage(
           message.entryId,
           message.clientDataJSON,
           message.teamId,
+          _sender.tab?.url,
         );
         sendResponse({ type: "PASSKEY_SIGN_ASSERTION", ...result } as ExtensionResponse);
       } catch {
@@ -2379,6 +2380,7 @@ async function handleMessage(
           excludeCredentialIds: message.excludeCredentialIds,
           clientDataJSON: message.clientDataJSON,
           replaceEntryId: message.replaceEntryId,
+          senderUrl: _sender.tab?.url,
         });
         sendResponse({ type: "PASSKEY_CREATE_CREDENTIAL", ...result } as ExtensionResponse);
       } catch {

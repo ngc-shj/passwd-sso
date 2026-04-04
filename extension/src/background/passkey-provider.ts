@@ -54,6 +54,21 @@ function validateClientDataJSON(
   }
 }
 
+/**
+ * Verify that rpId is a registrable domain suffix of the sender tab's hostname.
+ * Mirrors the MAIN world isValidRpId() check — defense-in-depth at the SW boundary.
+ */
+export function isSenderAuthorizedForRpId(rpId: string, senderUrl: string | undefined): boolean {
+  if (!senderUrl) return false;
+  try {
+    const hostname = new URL(senderUrl).hostname;
+    if (!rpId || rpId.split(".").length < 2) return false;
+    return rpId === hostname || hostname.endsWith("." + rpId);
+  } catch {
+    return false;
+  }
+}
+
 // Per-credential signing mutex to prevent counter collision from concurrent assertions.
 const signingLocks = new Map<string, Promise<unknown>>();
 
@@ -147,18 +162,20 @@ export function handlePasskeySignAssertion(
   entryId: string,
   clientDataJSON: string,
   teamId?: string,
+  senderUrl?: string,
 ): Promise<{
   ok: boolean;
   response?: SerializedAssertionResponse;
   error?: string;
 }> {
-  return withSigningLock(entryId, () => doSignAssertion(entryId, clientDataJSON, teamId));
+  return withSigningLock(entryId, () => doSignAssertion(entryId, clientDataJSON, teamId, senderUrl));
 }
 
 async function doSignAssertion(
   entryId: string,
   clientDataJSON: string,
   teamId?: string,
+  senderUrl?: string,
 ): Promise<{
   ok: boolean;
   response?: SerializedAssertionResponse;
@@ -208,6 +225,11 @@ async function doSignAssertion(
 
     if (!privateKeyJwkStr || !credentialIdStr || !rpId) {
       return { ok: false, error: "MISSING_KEY_MATERIAL" };
+    }
+
+    // Verify sender tab's hostname is authorized for this entry's rpId (defense-in-depth)
+    if (senderUrl && !isSenderAuthorizedForRpId(rpId, senderUrl)) {
+      return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
     }
 
     const privateKeyJwk = JSON.parse(privateKeyJwkStr) as JsonWebKey;
@@ -269,6 +291,7 @@ export interface CreateCredentialParams {
   excludeCredentialIds: string[];
   clientDataJSON: string;
   replaceEntryId?: string;
+  senderUrl?: string;
 }
 
 export async function handlePasskeyCreateCredential(
@@ -290,6 +313,11 @@ export async function handlePasskeyCreateCredential(
     rpId, rpName, userId, userName, userDisplayName,
     clientDataJSON,
   } = params;
+
+  // Verify sender tab's hostname is authorized for this rpId (defense-in-depth)
+  if (params.senderUrl && !isSenderAuthorizedForRpId(rpId, params.senderUrl)) {
+    return { ok: false, error: "SENDER_ORIGIN_MISMATCH" };
+  }
 
   if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_CREATE)) {
     return { ok: false, error: "INVALID_CLIENT_DATA" };
@@ -362,11 +390,29 @@ export async function handlePasskeyCreateCredential(
       };
     }
 
-    // Delete old entry after successful creation (best-effort, non-fatal)
+    // Delete old entry after successful creation (best-effort, non-fatal).
+    // Validate the target is a PASSKEY entry belonging to the same rpId before deleting.
     if (params.replaceEntryId) {
-      await deps.swFetch(extApiPath.passwordById(params.replaceEntryId), {
-        method: "DELETE",
-      }).catch(() => {});
+      const targetRes = await deps.swFetch(extApiPath.passwordById(params.replaceEntryId)).catch(() => null);
+      if (targetRes?.ok) {
+        const targetData = await targetRes.json().catch(() => null) as { encryptedBlob?: EncryptedData; aadVersion?: number; id?: string } | null;
+        if (targetData?.encryptedBlob && targetData.id) {
+          const targetAad = (targetData.aadVersion ?? 0) >= 1
+            ? buildPersonalEntryAAD(currentUserId, targetData.id)
+            : undefined;
+          const targetBlob = await decryptData(targetData.encryptedBlob, encKey, targetAad)
+            .then((s) => JSON.parse(s) as Record<string, unknown>)
+            .catch(() => null);
+          if (
+            targetBlob?.entryType === EXT_ENTRY_TYPE.PASSKEY &&
+            targetBlob?.relyingPartyId === rpId
+          ) {
+            await deps.swFetch(extApiPath.passwordById(params.replaceEntryId), {
+              method: "DELETE",
+            }).catch(() => {});
+          }
+        }
+      }
     }
 
     deps.invalidateCache();
