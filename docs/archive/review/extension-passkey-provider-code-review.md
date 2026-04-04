@@ -123,3 +123,28 @@ Review round: 3
 ### T-5 [Minor] カウンタ更新 PUT 検証
 - Action: sign assertion 成功テストに PUT 呼び出しアサーション追加
 - Modified: background-passkey-provider.test.ts
+
+## Round 4 Resolution
+
+### F-1 [Minor] failsafe PASSKEY_CHECK_DUPLICATE の vaultLocked 欠落
+- Action: `vaultLocked: true` 追加
+- Modified: index.ts
+
+### F-2 [Minor] isValidRpId ラベルカウント非対称
+- Action: filter(Boolean) に統一
+- Modified: webauthn-interceptor.js
+
+### T-1 [Minor] SENDER_ORIGIN_MISMATCH early-return/post-decrypt 区別なし
+- Action: swFetch 呼び出し回数アサーション追加
+- Modified: background-passkey-provider.test.ts
+
+### T-2 [Minor] handlePasskeySignAssertion senderUrl=undefined テスト欠落
+- Action: early-return テスト追加
+- Modified: background-passkey-provider.test.ts
+
+### T-3 [Minor] バナーテストのコールバック未検証
+- Action: onSave/onDismiss/onCancel 存在検証 + 呼び出し後 respond() 検証追加
+- Modified: webauthn-bridge-lib.test.ts
+
+## Round 5 Result
+Functionality: No findings / Security: No findings / Testing: No findings
