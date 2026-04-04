@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.24](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.23...passwd-sso-v0.4.24) (2026-04-04)
+
+
+### Features
+
+* add passkey provider to browser extension ([#323](https://github.com/ngc-shj/passwd-sso/issues/323)) ([8d2ad7e](https://github.com/ngc-shj/passwd-sso/commit/8d2ad7e6d344441590923ebe99e7a65a4351452a))
+
 ## [0.4.23](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.22...passwd-sso-v0.4.23) (2026-04-03)
 
 
