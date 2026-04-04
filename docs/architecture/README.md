@@ -14,3 +14,4 @@ Language policy: English-only (Class B). See [../operations/language-policy.md](
 | [entry-field-checklist.md](entry-field-checklist.md) | Entry field addition checklist |
 | [machine-identity.md](machine-identity.md) | AI agent identity & MCP Gateway architecture |
 | [extension-token-bridge.md](extension-token-bridge.md) | Browser extension token bridge & session encryption |
+| [extension-passkey-provider.md](extension-passkey-provider.md) | Browser extension passkey provider: get/create flows, security properties, known limitations |
