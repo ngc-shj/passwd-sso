@@ -127,6 +127,9 @@ function handleConfirmCreate(
         onDismiss: () => {
           respond(requestId, { action: "platform" });
         },
+        onCancel: () => {
+          respond(requestId, { action: "cancel" });
+        },
       });
     },
   );

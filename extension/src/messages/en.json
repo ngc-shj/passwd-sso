@@ -118,7 +118,8 @@
     "save": "Save in passwd-sso",
     "replace": "Replace",
     "keepBoth": "Keep both",
-    "useDevice": "Use device"
+    "useDevice": "Use device",
+    "cancel": "Cancel"
   },
   "commands": {
     "copyPassword": "Copy password",

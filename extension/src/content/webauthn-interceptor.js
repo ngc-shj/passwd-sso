@@ -192,7 +192,13 @@
       userDisplayName: userDisplayName,
       userId: userId,
     }).then(function (confirmResp) {
-      if (!confirmResp || !confirmResp.response || confirmResp.response.action !== "save") {
+      if (!confirmResp || !confirmResp.response) {
+        return origCreate(options);
+      }
+      if (confirmResp.response.action === "cancel") {
+        throw new DOMException("The operation either timed out or was not allowed.", "NotAllowedError");
+      }
+      if (confirmResp.response.action !== "save") {
         return origCreate(options);
       }
 

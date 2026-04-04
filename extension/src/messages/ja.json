@@ -118,7 +118,8 @@
     "save": "passwd-sso に保存",
     "replace": "置き換える",
     "keepBoth": "両方保存",
-    "useDevice": "デバイスを使用"
+    "useDevice": "デバイスを使用",
+    "cancel": "キャンセル"
   },
   "commands": {
     "copyPassword": "パスワードをコピー",

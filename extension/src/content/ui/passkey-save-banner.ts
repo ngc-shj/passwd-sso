@@ -13,6 +13,7 @@ export interface PasskeySaveBannerOptions {
   existingEntries?: PasskeyMatchEntry[];
   onSave: (replaceEntryId?: string) => void;
   onDismiss: () => void;
+  onCancel: () => void;
 }
 
 let dismissTimer: ReturnType<typeof setTimeout> | null = null;
@@ -91,6 +92,15 @@ export function showPasskeySaveBanner(options: PasskeySaveBannerOptions): void {
     hidePasskeySaveBanner();
   });
   actions.appendChild(dismissBtn);
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = t("passkeySaveBanner.cancel");
+  cancelBtn.className = "psso-btn-secondary";
+  cancelBtn.addEventListener("click", () => {
+    options.onCancel();
+    hidePasskeySaveBanner();
+  });
+  actions.appendChild(cancelBtn);
 
   banner.appendChild(message);
   banner.appendChild(actions);
