@@ -110,27 +110,44 @@ function handleConfirmCreate(
   requestId: string,
   payload: { rpId: string; rpName: string; userName: string; userDisplayName: string; userId?: string },
 ): void {
+  let resolved = false;
+  const show = (existingEntries: PasskeyMatchEntry[]) => {
+    if (resolved) return;
+    resolved = true;
+    showPasskeySaveBanner({
+      rpName: payload.rpName,
+      userName: payload.userName,
+      existingEntries,
+      onSave: (replaceEntryId?: string) => {
+        respond(requestId, { action: "save", replaceEntryId });
+      },
+      onDismiss: () => {
+        respond(requestId, { action: "platform" });
+      },
+      onCancel: () => {
+        respond(requestId, { action: "cancel" });
+      },
+    });
+  };
+  const fallthrough = () => {
+    if (resolved) return;
+    resolved = true;
+    respond(requestId, { action: "platform" });
+  };
+
+  // Fallback: if SW callback never fires (MV3 SW sleep/terminate), fall through to platform
+  const fallback = setTimeout(fallthrough, 2000);
+
   chrome.runtime.sendMessage(
     { type: "PASSKEY_CHECK_DUPLICATE", rpId: payload.rpId, userName: payload.userName },
     (dupResponse) => {
-      if (chrome.runtime.lastError) {
-        // Proceed as save-only on error
+      clearTimeout(fallback);
+      if (chrome.runtime.lastError || dupResponse?.vaultLocked) {
+        // Vault locked or SW error — fall through to platform authenticator
+        fallthrough();
+        return;
       }
-      const existingEntries = dupResponse?.entries ?? [];
-      showPasskeySaveBanner({
-        rpName: payload.rpName,
-        userName: payload.userName,
-        existingEntries,
-        onSave: (replaceEntryId?: string) => {
-          respond(requestId, { action: "save", replaceEntryId });
-        },
-        onDismiss: () => {
-          respond(requestId, { action: "platform" });
-        },
-        onCancel: () => {
-          respond(requestId, { action: "cancel" });
-        },
-      });
+      show(dupResponse?.entries ?? []);
     },
   );
 }
