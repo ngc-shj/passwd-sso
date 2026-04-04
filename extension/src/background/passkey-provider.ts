@@ -46,7 +46,9 @@ function validateClientDataJSON(
 ): boolean {
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    return parsed.type === expectedType && typeof parsed.challenge === "string";
+    return parsed.type === expectedType
+      && typeof parsed.challenge === "string"
+      && parsed.challenge.length > 0;
   } catch {
     return false;
   }

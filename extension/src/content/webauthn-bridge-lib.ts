@@ -6,7 +6,7 @@
 import { WEBAUTHN_BRIDGE_MSG, WEBAUTHN_BRIDGE_RESP } from "../lib/constants";
 import type { PasskeyMatchEntry } from "../types/messages";
 import { showPasskeyDropdown, hidePasskeyDropdown } from "./ui/passkey-dropdown";
-import { showPasskeySaveBanner, hidePasskeySaveBanner } from "./ui/passkey-save-banner";
+import { showPasskeySaveBanner } from "./ui/passkey-save-banner";
 
 function isContextValid(): boolean {
   try {
@@ -114,11 +114,9 @@ function handleConfirmCreate(
     rpName: payload.rpName,
     userName: payload.userName,
     onSave: () => {
-      hidePasskeySaveBanner();
       respond(requestId, { action: "save" });
     },
     onDismiss: () => {
-      hidePasskeySaveBanner();
       respond(requestId, { action: "platform" });
     },
   });

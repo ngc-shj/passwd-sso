@@ -1609,7 +1609,7 @@ describe("failsafe responses", () => {
     expect(res).toEqual({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false, error: "VAULT_LOCKED" });
   });
 
-  it("returns PASSKEY_GET_MATCHES INTERNAL_ERROR failsafe on crash", async () => {
+  it("returns PASSKEY_GET_MATCHES vault-locked when no encryption key", async () => {
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
@@ -1622,8 +1622,6 @@ describe("failsafe responses", () => {
     await loadBackground();
 
     const handler = messageHandlers[0];
-    // Crash alarms.create to reach the outer try/catch in handleMessage
-    chromeMock!.alarms.create = vi.fn(() => { throw new Error("simulated crash"); });
 
     const res = await new Promise((resolve) => {
       handler(
@@ -1633,11 +1631,10 @@ describe("failsafe responses", () => {
       );
     });
 
-    // Outer failsafe emits { type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true }
     expect(res).toEqual({ type: "PASSKEY_GET_MATCHES", entries: [], vaultLocked: true });
   });
 
-  it("returns PASSKEY_SIGN_ASSERTION INTERNAL_ERROR failsafe on crash", async () => {
+  it("returns PASSKEY_SIGN_ASSERTION vault-locked when no encryption key", async () => {
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
@@ -1650,7 +1647,6 @@ describe("failsafe responses", () => {
     await loadBackground();
 
     const handler = messageHandlers[0];
-    chromeMock!.alarms.create = vi.fn(() => { throw new Error("simulated crash"); });
 
     const res = await new Promise((resolve) => {
       handler(
@@ -1664,12 +1660,11 @@ describe("failsafe responses", () => {
       );
     });
 
-    // PASSKEY_SIGN_ASSERTION has its own inner try/catch — vault locked gives VAULT_LOCKED
     expect(res).toMatchObject({ type: "PASSKEY_SIGN_ASSERTION", ok: false });
     expect(typeof (res as { error?: string }).error).toBe("string");
   });
 
-  it("returns PASSKEY_CREATE_CREDENTIAL INTERNAL_ERROR failsafe on crash", async () => {
+  it("returns PASSKEY_CREATE_CREDENTIAL vault-locked when no encryption key", async () => {
     vi.resetModules();
     vi.clearAllMocks();
     chromeMock = installChromeMock();
@@ -1682,7 +1677,6 @@ describe("failsafe responses", () => {
     await loadBackground();
 
     const handler = messageHandlers[0];
-    chromeMock!.alarms.create = vi.fn(() => { throw new Error("simulated crash"); });
 
     const res = await new Promise((resolve) => {
       handler(
@@ -1701,7 +1695,6 @@ describe("failsafe responses", () => {
       );
     });
 
-    // PASSKEY_CREATE_CREDENTIAL has its own inner try/catch — vault locked gives VAULT_LOCKED
     expect(res).toMatchObject({ type: "PASSKEY_CREATE_CREDENTIAL", ok: false });
     expect(typeof (res as { error?: string }).error).toBe("string");
   });

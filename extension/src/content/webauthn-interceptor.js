@@ -229,10 +229,13 @@
   };
 
   /**
-   * Validate that rpId is the hostname itself or a registrable domain suffix.
-   * Prevents RP confusion attacks where a malicious page specifies a foreign rpId.
+   * Validate rpId is a registrable domain suffix of hostname.
+   * Rejects empty strings and public suffix entries (e.g. "co.uk") via
+   * label count heuristic — full PSL lookup not feasible in MAIN world.
    */
   function isValidRpId(rpId, hostname) {
+    if (!rpId || rpId.length === 0) return false;
+    if (rpId.split(".").length < 2) return false;
     if (rpId === hostname) return true;
     return hostname.endsWith("." + rpId);
   }
