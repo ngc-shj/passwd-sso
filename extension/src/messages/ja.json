@@ -115,9 +115,11 @@
   "passkeySaveBanner": {
     "savePasskey": "{rpName} のパスキーを保存しますか？",
     "duplicateFound": "{rpName} のパスキーはすでに保存されています。",
+    "duplicateFoundMultiple": "{rpName} のパスキーはすでに {count} 件保存されています。",
     "save": "passwd-sso に保存",
     "replace": "置き換える",
     "keepBoth": "両方保存",
+    "addNew": "追加で保存",
     "useDevice": "デバイスを使用",
     "cancel": "キャンセル"
   },
