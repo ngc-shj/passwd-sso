@@ -9,6 +9,7 @@
 (function () {
   "use strict";
 
+  // Must match WEBAUTHN_BRIDGE_MSG / WEBAUTHN_BRIDGE_RESP in constants.ts
   var BRIDGE_MSG = "PASSWD_SSO_WEBAUTHN";
   var BRIDGE_RESP = "PASSWD_SSO_WEBAUTHN_RESP";
   var GUARD = "__pssoWebAuthnInterceptor";
@@ -22,7 +23,6 @@
   var origGet = navigator.credentials.get.bind(navigator.credentials);
   var origCreate = navigator.credentials.create.bind(navigator.credentials);
 
-  // Pending response handlers keyed by requestId
   var pendingRequests = {};
 
   window.addEventListener("message", function (event) {
@@ -55,10 +55,7 @@
     });
   }
 
-  // ── get() override ──
-
   navigator.credentials.get = function (options) {
-    // Only intercept WebAuthn (publicKey) requests
     if (!options || !options.publicKey) {
       return origGet(options);
     }
@@ -84,7 +81,6 @@
 
       var entries = resp.response.entries;
 
-      // Filter by allowCredentials if the RP specified a list
       if (pk.allowCredentials && pk.allowCredentials.length > 0) {
         var allowIds = pk.allowCredentials.map(function (c) {
           var idBytes = c.id instanceof ArrayBuffer
@@ -116,7 +112,6 @@
           return origGet(options);
         }
 
-        // Build clientDataJSON in MAIN world (has access to origin)
         var challengeBytes = pk.challenge instanceof ArrayBuffer
           ? new Uint8Array(pk.challenge)
           : new Uint8Array(pk.challenge.buffer || pk.challenge);
@@ -155,8 +150,6 @@
     });
   };
 
-  // ── create() override ──
-
   navigator.credentials.create = function (options) {
     if (!options || !options.publicKey) {
       return origCreate(options);
@@ -192,7 +185,6 @@
       return uint8ToBase64url(idBytes);
     });
 
-    // Ask user if they want to save in passwd-sso
     return sendBridgeMessage("PASSKEY_CONFIRM_CREATE", {
       rpId: rpId,
       rpName: rpName,
@@ -203,7 +195,6 @@
         return origCreate(options);
       }
 
-      // Build clientDataJSON in MAIN world
       var clientDataJSON = JSON.stringify({
         type: "webauthn.create",
         challenge: challengeB64,
@@ -236,8 +227,6 @@
       return origCreate(options);
     });
   };
-
-  // ── Helpers ──
 
   /**
    * Validate that rpId is the hostname itself or a registrable domain suffix.

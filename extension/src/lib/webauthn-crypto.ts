@@ -1,6 +1,3 @@
-// WebAuthn cryptographic operations for the passkey provider.
-// All functions run in the service worker (trusted extension context).
-
 import { cborEncode, cborEncodeIntKeyMap } from "./cbor";
 import type { CborMap } from "./cbor";
 

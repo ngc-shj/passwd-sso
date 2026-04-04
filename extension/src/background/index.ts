@@ -581,7 +581,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 
   // Register MAIN world WebAuthn interceptor for passkey provider
   try {
-    await chrome.scripting.unregisterContentScripts({ ids: ["webauthn-interceptor"] }).catch(() => {});
+    void chrome.scripting.unregisterContentScripts({ ids: ["webauthn-interceptor"] }).catch(() => {});
     await chrome.scripting.registerContentScripts([{
       id: "webauthn-interceptor",
       matches: ["https://*/*", "http://localhost/*"],

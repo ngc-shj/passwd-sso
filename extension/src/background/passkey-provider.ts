@@ -1,7 +1,3 @@
-// Background handler for passkey provider operations.
-// Handles key generation, signing, and entry CRUD for PASSKEY entries.
-// Follows the same dependency-injection pattern as login-save.ts.
-
 import type { EncryptedData } from "../lib/crypto";
 import {
   encryptData,
@@ -27,8 +23,6 @@ import {
   base64urlEncode,
 } from "../lib/webauthn-crypto";
 
-// ── Dependencies injected from background/index.ts ──────────
-
 export interface PasskeyProviderDeps {
   getEncryptionKey: () => CryptoKey | null;
   getCurrentUserId: () => string | null;
@@ -41,6 +35,21 @@ let deps: PasskeyProviderDeps | null = null;
 
 export function initPasskeyProvider(d: PasskeyProviderDeps): void {
   deps = d;
+}
+
+const WEBAUTHN_TYPE_GET = "webauthn.get";
+const WEBAUTHN_TYPE_CREATE = "webauthn.create";
+
+function validateClientDataJSON(
+  raw: string,
+  expectedType: string,
+): boolean {
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return parsed.type === expectedType && typeof parsed.challenge === "string";
+  } catch {
+    return false;
+  }
 }
 
 // Per-credential signing mutex to prevent counter collision from concurrent assertions.
@@ -126,13 +135,7 @@ async function doSignAssertion(
     return { ok: false, error: "VAULT_LOCKED" };
   }
 
-  // Validate clientDataJSON structure (constructed in untrusted MAIN world)
-  try {
-    const parsed = JSON.parse(clientDataJSON) as Record<string, unknown>;
-    if (parsed.type !== "webauthn.get" || typeof parsed.challenge !== "string") {
-      return { ok: false, error: "INVALID_CLIENT_DATA" };
-    }
-  } catch {
+  if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_GET)) {
     return { ok: false, error: "INVALID_CLIENT_DATA" };
   }
 
@@ -163,7 +166,7 @@ async function doSignAssertion(
     const privateKeyJwkStr = blob.passkeyPrivateKeyJwk as string | null;
     const credentialIdStr = blob.credentialId as string | null;
     const rpId = blob.relyingPartyId as string | null;
-    const userHandle = (blob.passkeyUserHandle as string | null) ?? null;
+    const userHandle = blob.passkeyUserHandle as string | null;
     let signCount = (blob.passkeySignCount as number | null) ?? 0;
 
     if (!privateKeyJwkStr || !credentialIdStr || !rpId) {
@@ -250,13 +253,7 @@ export async function handlePasskeyCreateCredential(
     excludeCredentialIds, clientDataJSON,
   } = params;
 
-  // Validate clientDataJSON structure (constructed in untrusted MAIN world)
-  try {
-    const parsed = JSON.parse(clientDataJSON) as Record<string, unknown>;
-    if (parsed.type !== "webauthn.create" || typeof parsed.challenge !== "string") {
-      return { ok: false, error: "INVALID_CLIENT_DATA" };
-    }
-  } catch {
+  if (!validateClientDataJSON(clientDataJSON, WEBAUTHN_TYPE_CREATE)) {
     return { ok: false, error: "INVALID_CLIENT_DATA" };
   }
 
@@ -277,11 +274,9 @@ export async function handlePasskeyCreateCredential(
     const credentialIdBytes = generateCredentialId();
     const credentialIdB64 = base64urlEncode(credentialIdBytes);
 
-    const signCount = 0;
-
     const authData = await buildAttestationAuthData(
       rpId,
-      signCount,
+      0,
       credentialIdBytes,
       publicKeyCose,
     );
@@ -303,7 +298,7 @@ export async function handlePasskeyCreateCredential(
       passkeyPublicKeyCose: base64urlEncode(publicKeyCose),
       passkeyUserHandle: userId,
       passkeyUserDisplayName: userDisplayName,
-      passkeySignCount: signCount,
+      passkeySignCount: 0,
       passkeyAlgorithm: -7,
       passkeyTransports: ["internal", "hybrid"],
       tags: [],
