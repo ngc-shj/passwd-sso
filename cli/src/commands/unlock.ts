@@ -158,7 +158,7 @@ export async function autoUnlockIfNeeded(): Promise<boolean> {
 
   output.warn(
     "PSSO_PASSPHRASE is set. This env var is intended for CI/automation only. " +
-    "Do not use in interactive or shared environments — the passphrase is visible to child processes.",
+    "Do not use in interactive or shared environments — the passphrase is readable from the process environment.",
   );
   return unlockWithPassphrase(passphrase);
 }
