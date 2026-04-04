@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { WEBAUTHN_BRIDGE_MSG, WEBAUTHN_BRIDGE_RESP } from "../lib/constants";
+import { WEBAUTHN_BRIDGE_MSG, WEBAUTHN_BRIDGE_RESP, EXT_MSG } from "../lib/constants";
 
 // Mock UI modules that touch the DOM — these are not under test here
 vi.mock("../content/ui/passkey-dropdown", () => ({
@@ -132,7 +132,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     handleWebAuthnMessage(event);
 
     expect(sendMessageMock).toHaveBeenCalledWith(
-      { type: "PASSKEY_GET_MATCHES", rpId: "example.com" },
+      { type: EXT_MSG.PASSKEY_GET_MATCHES, rpId: "example.com" },
       expect.any(Function),
     );
   });
@@ -208,7 +208,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "PASSKEY_SIGN_ASSERTION",
+        type: EXT_MSG.PASSKEY_SIGN_ASSERTION,
         entryId: "entry-1",
       }),
       expect.any(Function),
@@ -240,7 +240,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
 
     expect(sendMessageMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        type: "PASSKEY_CREATE_CREDENTIAL",
+        type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL,
         rpId: "example.com",
       }),
       expect.any(Function),
@@ -255,7 +255,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
       postedMessages.push(data);
     });
     sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
-      cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [], vaultLocked: true });
+      cb({ entries: [], vaultLocked: true });
     });
 
     const event = makeEvent({
@@ -311,7 +311,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
   it("shows save banner when PASSKEY_CHECK_DUPLICATE returns entries", async () => {
     const { showPasskeySaveBanner } = await import("../content/ui/passkey-save-banner");
     sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
-      cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [{ id: "e1", title: "Example", username: "alice", relyingPartyId: "example.com", credentialId: "cred-1" }] });
+      cb({ entries: [{ id: "e1", title: "Example", username: "alice", relyingPartyId: "example.com", credentialId: "cred-1" }] });
     });
 
     const postedMessages: unknown[] = [];
@@ -350,7 +350,7 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
   it("shows save banner with empty entries when PASSKEY_CHECK_DUPLICATE returns empty", async () => {
     const { showPasskeySaveBanner } = await import("../content/ui/passkey-save-banner");
     sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
-      cb({ type: "PASSKEY_CHECK_DUPLICATE", entries: [] });
+      cb({ entries: [] });
     });
 
     const postedMessages: unknown[] = [];
@@ -381,6 +381,40 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
     expect(postedMessages).toContainEqual(
       expect.objectContaining({ type: WEBAUTHN_BRIDGE_RESP, response: { action: "cancel" } }),
     );
+  });
+
+  it("falls through to platform after 2000ms when SW never responds (MV3 sleep)", () => {
+    vi.useFakeTimers();
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => {
+      postedMessages.push(data);
+    });
+    // sendMessage never calls the callback (simulates SW termination)
+    sendMessageMock.mockImplementation(() => { /* never calls cb */ });
+
+    const event = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm-timeout",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userName: "alice", userDisplayName: "Alice" },
+      },
+    });
+    handleWebAuthnMessage(event);
+
+    // No response yet before timeout
+    expect(postedMessages.filter((m) => (m as { type?: string }).type === WEBAUTHN_BRIDGE_RESP)).toHaveLength(0);
+
+    vi.advanceTimersByTime(2000);
+
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-confirm-timeout",
+        response: { action: "platform" },
+      }),
+    );
+    vi.useRealTimers();
   });
 
   it("responds with platform action when PASSKEY_SELECT receives empty entries list", () => {

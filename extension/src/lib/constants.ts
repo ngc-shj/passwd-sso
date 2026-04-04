@@ -70,6 +70,12 @@ export const EXT_MSG = {
   PASSKEY_CREATE_CREDENTIAL: "PASSKEY_CREATE_CREDENTIAL",
 } as const;
 
+// ── WebAuthn clientDataJSON type strings ──
+// Note: webauthn-interceptor.js (MAIN world, plain JS) cannot import from this module
+// and must duplicate these as inline string literals — keep both in sync.
+export const WEBAUTHN_TYPE_GET = "webauthn.get";
+export const WEBAUTHN_TYPE_CREATE = "webauthn.create";
+
 // ── Passkey bridge action names (MAIN world → content script via postMessage) ──
 export const PASSKEY_BRIDGE_ACTION = {
   GET_MATCHES: "PASSKEY_GET_MATCHES",

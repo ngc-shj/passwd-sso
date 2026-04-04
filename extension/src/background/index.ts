@@ -2344,13 +2344,13 @@ async function handleMessage(
     }
 
     case EXT_MSG.PASSKEY_GET_MATCHES: {
-      const result = await handlePasskeyGetMatches(message.rpId);
+      const result = await handlePasskeyGetMatches(message.rpId, _sender.tab?.url);
       sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, ...result } as ExtensionResponse);
       return;
     }
 
     case EXT_MSG.PASSKEY_CHECK_DUPLICATE: {
-      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName);
+      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName, _sender.tab?.url);
       sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, ...result } as ExtensionResponse);
       return;
     }

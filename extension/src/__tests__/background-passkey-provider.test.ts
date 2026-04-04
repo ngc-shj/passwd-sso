@@ -107,7 +107,7 @@ describe("passkey-provider", () => {
       const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       expect(result).toEqual({ entries: [], vaultLocked: true });
     });
 
@@ -118,7 +118,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       expect(result).toEqual({ entries: [], vaultLocked: true });
     });
 
@@ -128,7 +128,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       expect(result.vaultLocked).toBe(false);
       // Only mockPasskeyEntry matches example.com — not LOGIN, not other RP, not missing credId
       expect(result.entries).toHaveLength(1);
@@ -141,7 +141,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       const ids = result.entries.map((e) => e.id);
       expect(ids).not.toContain("entry-004");
     });
@@ -152,7 +152,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       expect(result.entries[0]).toEqual({
         id: TEST_ENTRY_ID,
         title: "Example Passkey",
@@ -176,7 +176,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       expect(result.entries[0].teamId).toBe("team-abc");
     });
 
@@ -187,8 +187,17 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyGetMatches(TEST_RP_ID);
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://example.com");
       expect(result).toEqual({ entries: [], vaultLocked: false });
+    });
+
+    it("returns empty entries (not vaultLocked) when sender is not authorized for rpId", async () => {
+      const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey) });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyGetMatches(TEST_RP_ID, "https://evil.com/path");
+      expect(result).toEqual({ entries: [], vaultLocked: false });
+      expect(deps.getCachedEntries).not.toHaveBeenCalled();
     });
   });
 
@@ -249,6 +258,8 @@ describe("passkey-provider", () => {
       const result = await handlePasskeySignAssertion(
         TEST_ENTRY_ID,
         "not-valid-json{{{",
+        undefined,
+        "https://example.com",
       );
       expect(result).toEqual({ ok: false, error: "INVALID_CLIENT_DATA" });
     });
@@ -263,7 +274,7 @@ describe("passkey-provider", () => {
         type: "webauthn.create",
         challenge: "abc",
       });
-      const result = await handlePasskeySignAssertion(TEST_ENTRY_ID, badClientData);
+      const result = await handlePasskeySignAssertion(TEST_ENTRY_ID, badClientData, undefined, "https://example.com");
       expect(result).toEqual({ ok: false, error: "INVALID_CLIENT_DATA" });
     });
 
@@ -274,7 +285,7 @@ describe("passkey-provider", () => {
       initPasskeyProvider(deps);
 
       const badClientData = JSON.stringify({ type: "webauthn.get" });
-      const result = await handlePasskeySignAssertion(TEST_ENTRY_ID, badClientData);
+      const result = await handlePasskeySignAssertion(TEST_ENTRY_ID, badClientData, undefined, "https://example.com");
       expect(result).toEqual({ ok: false, error: "INVALID_CLIENT_DATA" });
     });
 
@@ -380,6 +391,54 @@ describe("passkey-provider", () => {
       const putCalls = (deps.swFetch as ReturnType<typeof vi.fn>).mock.calls
         .filter(([, init]: [string, RequestInit?]) => init?.method === "PUT");
       expect(putCalls).toHaveLength(1);
+      // Verify the PUT body contains the incremented counter
+      const putBody = JSON.parse(putCalls[0][1].body as string) as { encryptedBlob: { ciphertext: string; iv: string; authTag: string }; aadVersion: number };
+      const { decryptData } = await import("../lib/crypto");
+      const decryptedBlobStr = await decryptData(putBody.encryptedBlob, testKey, aad);
+      const decryptedBlob = JSON.parse(decryptedBlobStr) as { passkeySignCount: number };
+      expect(decryptedBlob.passkeySignCount).toBe(1);
+      // Verify invalidateCache was called after successful PUT
+      expect(deps.invalidateCache).toHaveBeenCalledOnce();
+    });
+
+    it("still returns ok:true with signature when counter-update PUT fails (non-fatal)", async () => {
+      const { generatePasskeyKeypair } = await import("../lib/webauthn-crypto");
+      const { privateKeyJwk } = await generatePasskeyKeypair();
+      const aad = buildPersonalEntryAAD(TEST_USER_ID, TEST_ENTRY_ID);
+      const blob = JSON.stringify({
+        credentialId: TEST_CRED_ID,
+        relyingPartyId: TEST_RP_ID,
+        passkeyPrivateKeyJwk: JSON.stringify(privateKeyJwk),
+        passkeySignCount: 0,
+      });
+      const encryptedBlob = await encryptData(blob, testKey, aad);
+
+      const invalidateCache = vi.fn();
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn()
+          .mockResolvedValueOnce(
+            new Response(
+              JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 1 }),
+              { status: 200 },
+            ),
+          )
+          .mockResolvedValueOnce(new Response("Server Error", { status: 500 })), // counter PUT fails
+        invalidateCache,
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://example.com/auth",
+      );
+      // Assertion still succeeds despite PUT failure — RP validates counter independently
+      expect(result.ok).toBe(true);
+      expect(result.response).toBeDefined();
+      // invalidateCache must NOT be called when PUT fails
+      expect(invalidateCache).not.toHaveBeenCalled();
     });
 
     it("returns SENDER_ORIGIN_MISMATCH when senderUrl hostname does not match stored rpId", async () => {
@@ -405,10 +464,17 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      // Sender is evil.com but stored rpId is example.com — post-decrypt path
+      // Sender is evil.com but stored rpId is example.com — post-decrypt path.
+      // clientDataJSON origin must match senderUrl origin to pass pre-fetch validation;
+      // the post-decrypt isSenderAuthorizedForRpId check then catches the mismatch.
+      const evilClientDataJSON = JSON.stringify({
+        type: "webauthn.get",
+        challenge: "dGVzdC1jaGFsbGVuZ2U",
+        origin: "https://evil.com",
+      });
       const result = await handlePasskeySignAssertion(
         TEST_ENTRY_ID,
-        validClientDataJSON,
+        evilClientDataJSON,
         undefined,
         "https://evil.com/path",
       );
@@ -430,6 +496,69 @@ describe("passkey-provider", () => {
       expect(result).toEqual({ ok: false, error: "SENDER_ORIGIN_MISMATCH" });
       expect(deps.swFetch).not.toHaveBeenCalled();
     });
+
+    it("returns INVALID_ENTRY when server responds with aadVersion:0 (PASSKEY entry)", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob: { ciphertext: "", iv: "", authTag: "" }, encryptedOverview: { ciphertext: "", iv: "", authTag: "" }, aadVersion: 0 }),
+            { status: 200 },
+          ),
+        ),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://example.com",
+      );
+      expect(result).toEqual({ ok: false, error: "INVALID_ENTRY" });
+      // No PUT should be issued
+      expect((deps.swFetch as ReturnType<typeof vi.fn>).mock.calls.filter(([, init]: [string, RequestInit?]) => init?.method === "PUT")).toHaveLength(0);
+    });
+
+    it("returns INVALID_ENTRY when server responds without aadVersion (PASSKEY entry)", async () => {
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch: vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({ id: TEST_ENTRY_ID, encryptedBlob: { ciphertext: "", iv: "", authTag: "" }, encryptedOverview: { ciphertext: "", iv: "", authTag: "" } }),
+            { status: 200 },
+          ),
+        ),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        validClientDataJSON,
+        undefined,
+        "https://example.com",
+      );
+      expect(result).toEqual({ ok: false, error: "INVALID_ENTRY" });
+    });
+
+    it("returns INVALID_CLIENT_DATA when clientDataJSON origin does not match sender origin", async () => {
+      const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey) });
+      initPasskeyProvider(deps);
+
+      const mismatchedOriginClientData = JSON.stringify({
+        type: "webauthn.get",
+        challenge: "dGVzdC1jaGFsbGVuZ2U",
+        origin: "https://evil.com", // origin in clientDataJSON does not match senderUrl
+      });
+      const result = await handlePasskeySignAssertion(
+        TEST_ENTRY_ID,
+        mismatchedOriginClientData,
+        undefined,
+        "https://example.com",
+      );
+      expect(result).toEqual({ ok: false, error: "INVALID_CLIENT_DATA" });
+      expect(deps.swFetch).not.toHaveBeenCalled();
+    });
   });
 
   // ── handlePasskeyCheckDuplicate ─────────────────────────────
@@ -439,7 +568,7 @@ describe("passkey-provider", () => {
       const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(null) });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice");
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice", "https://example.com");
       expect(result).toEqual({ entries: [], vaultLocked: true });
     });
 
@@ -450,7 +579,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice");
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice", "https://example.com");
       expect(result.entries).toHaveLength(1);
       expect(result.entries[0].credentialId).toBe(TEST_CRED_ID);
       expect(result.vaultLocked).toBeUndefined();
@@ -463,7 +592,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyCheckDuplicate("other.com", "alice");
+      const result = await handlePasskeyCheckDuplicate("other.com", "alice", "https://other.com");
       expect(result.entries).toHaveLength(0);
     });
 
@@ -474,7 +603,7 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "bob");
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "bob", "https://example.com");
       expect(result.entries).toHaveLength(0);
     });
 
@@ -485,8 +614,17 @@ describe("passkey-provider", () => {
       });
       initPasskeyProvider(deps);
 
-      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice");
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice", "https://example.com");
       expect(result).toEqual({ entries: [] });
+    });
+
+    it("returns empty entries (not vaultLocked) when sender is not authorized for rpId", async () => {
+      const deps = createDeps({ getEncryptionKey: vi.fn().mockReturnValue(testKey) });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCheckDuplicate(TEST_RP_ID, "alice", "https://evil.com");
+      expect(result).toEqual({ entries: [], vaultLocked: false });
+      expect(deps.getCachedEntries).not.toHaveBeenCalled();
     });
   });
 
@@ -626,10 +764,12 @@ describe("passkey-provider", () => {
         ...validCreateParams,
         rpId: "different-rp.com",
         excludeCredentialIds: [TEST_CRED_ID],
+        // clientDataJSON origin must match senderUrl origin
+        clientDataJSON: JSON.stringify({ type: "webauthn.create", challenge: "Y3JlYXRlLWNoYWxsZW5nZQ", origin: "https://different-rp.com" }),
         senderUrl: "https://different-rp.com/register",
       });
       // Should proceed (not CREDENTIAL_EXCLUDED); may succeed or fail at POST
-      expect(result.error).not.toBe("CREDENTIAL_EXCLUDED");
+      expect(result.ok).toBe(true);
     });
 
     it("returns SAVE_FAILED when swFetch POST returns non-ok", async () => {
@@ -711,6 +851,7 @@ describe("passkey-provider", () => {
       const replaceBlob = JSON.stringify({
         entryType: "PASSKEY",
         relyingPartyId: TEST_RP_ID,
+        username: "alice@example.com",
       });
       const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
       const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
@@ -788,6 +929,43 @@ describe("passkey-provider", () => {
       const replaceBlob = JSON.stringify({
         entryType: "PASSKEY",
         relyingPartyId: "other.com", // different rpId
+      });
+      const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
+      const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
+
+      const swFetch = vi.fn()
+        .mockResolvedValueOnce(new Response("{}", { status: 200 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ id: replaceId, encryptedBlob: encryptedReplaceBlob, aadVersion: 1 }),
+            { status: 200 },
+          ),
+        );
+
+      const deps = createDeps({
+        getEncryptionKey: vi.fn().mockReturnValue(testKey),
+        swFetch,
+        invalidateCache: vi.fn(),
+      });
+      initPasskeyProvider(deps);
+
+      const result = await handlePasskeyCreateCredential({
+        ...validCreateParams,
+        replaceEntryId: replaceId,
+      });
+      expect(result.ok).toBe(true);
+      const deleteCalls = (swFetch.mock.calls as Array<[string, RequestInit?]>)
+        .filter(([, init]) => init?.method === "DELETE");
+      expect(deleteCalls).toHaveLength(0);
+      expect(swFetch).toHaveBeenCalledTimes(2); // POST + GET only
+    });
+
+    it("skips DELETE when replaceEntryId entry has a different userName", async () => {
+      const replaceId = "entry-other-user";
+      const replaceBlob = JSON.stringify({
+        entryType: "PASSKEY",
+        relyingPartyId: TEST_RP_ID,
+        username: "bob@example.com", // different userName
       });
       const replaceAad = buildPersonalEntryAAD(TEST_USER_ID, replaceId);
       const encryptedReplaceBlob = await encryptData(replaceBlob, testKey, replaceAad);
