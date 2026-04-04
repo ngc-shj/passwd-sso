@@ -196,8 +196,9 @@ Client(on valid):
   - Key material lifetime is managed by the JavaScript garbage collector after reference clearing
   - There is no guaranteed immediate memory zeroization in browser environments (Web Crypto API limitation)
 - Browser extension:
-  - token persisted in `chrome.storage.session` (cleared on browser close)
-  - `vaultSecretKey` for key re-derivation is also in `chrome.storage.session`
+  - `token` and `vaultSecretKey` are AES-256-GCM encrypted with an ephemeral
+    non-extractable `CryptoKey` held only in SW memory before storage in `chrome.storage.session`.
+    If the SW is terminated, the in-memory key is lost → blobs unreadable → user must re-authenticate.
   - `autoLockMinutes` controls extension vault lock timer (default 15 min)
 
 ## 2. Core Security Controls
@@ -375,12 +376,15 @@ so there is no immediate break scenario. Still, long-term migration planning is 
   - `serverUrl`, `autoLockMinutes`
   - Rationale: persistent settings; non-secret
 - `chrome.storage.session`:
-  - `token`, `expiresAt`, `userId`, `vaultSecretKey` (for re-derivation)
+  - `token` (encrypted), `expiresAt`, `userId`, `vaultSecretKey` (encrypted, for re-derivation)
+  - Sensitive fields (`token`, `vaultSecretKey`) are AES-256-GCM encrypted with an ephemeral
+    non-extractable `CryptoKey` held only in SW memory before storage.
+    If the SW is terminated, the in-memory key is lost → blobs unreadable → user must re-authenticate.
   - Rationale:
     - MV3 Service Worker restarts otherwise drop state too aggressively
     - session scope is cleared on browser close
     - token is short-lived (15m) with refresh + revoke
-    - `vaultSecretKey` is an explicit UX/security tradeoff
+    - `vaultSecretKey` is an explicit UX/security tradeoff; now mitigated by at-rest encryption
 - `background memory`:
   - `encryptionKey`, `currentToken`, etc.
   - Rationale: required for runtime operations; cleared on lock/expiry
@@ -405,8 +409,11 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 - For the web app, `secretKeyRef` (Uint8Array) is explicitly cleared on lock/unload
   (`vault-context.tsx:143`, `vault-context.tsx:280`), which is the best-effort approach
   available in browser environments.
-- For the extension, `vaultSecretKey` in `chrome.storage.session` is cleared on lock
-  and auto-cleared by Chrome on browser close. The 15-minute auto-lock timer provides
+- For the extension, `token` and `vaultSecretKey` are AES-256-GCM encrypted with an ephemeral
+  non-extractable `CryptoKey` before being written to `chrome.storage.session`.
+  If the service worker is terminated, the in-memory key is lost and the encrypted blobs
+  become permanently unreadable — re-authentication is required. Both fields are also cleared
+  on lock and auto-cleared by Chrome on browser close. The 15-minute auto-lock timer provides
   an additional time-bound control.
 - For detailed technical assessment, see `security-review.md` Section 4 (Crypto Primitives).
 

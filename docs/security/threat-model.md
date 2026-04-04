@@ -2,7 +2,7 @@
 
 This document presents a systematic STRIDE-based threat analysis for passwd-sso.
 
-Last updated: 2026-03-07
+Last updated: 2026-04-04
 
 ---
 
@@ -20,7 +20,7 @@ Last updated: 2026-03-07
 | Passphrase verifier hash | High | DB (HMAC-peppered) |
 | Auth hash | High | DB (SHA-256 of HKDF-derived auth key) |
 | Session tokens | High | DB + cookie |
-| Extension bearer token | High | DB + chrome.storage.session |
+| Extension bearer token | High | DB + chrome.storage.session (AES-256-GCM encrypted with ephemeral non-extractable key; blobs unreadable after SW restart) |
 | CLI OAuth refresh token | High | DB + `$XDG_DATA_HOME/passwd-sso/credentials` (JSON, mode 0o600) |
 | WebAuthn credentials | High | DB (public key + credential ID) |
 | Extension passkey private keys | Critical | Encrypted in DB entry blob (AES-256-GCM, wrapped by vault secret key) |
@@ -91,7 +91,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 
 | Threat | Component | Mitigation | Residual risk |
 | --- | --- | --- | --- |
-| R1: User denies performing sensitive action | Server | Audit log records userId, action, IP, user-agent, timestamp for all sensitive operations | Audit log is fire-and-forget (may lose entries under DB outage) |
+| R1: User denies performing sensitive action | Server | Audit log records userId, action, IP, user-agent, timestamp for all sensitive operations; failed writes buffered in-memory (FIFO 100 entries, max 3 retries per entry) with dead-letter log on overflow/exhaustion | Buffer is in-memory only; entries lost on process restart or pod replacement |
 | R2: Admin denies modifying team membership | Server | Audit log with TEAM_MEMBER_ADD/REMOVE actions; extractRequestMeta captures IP/UA | Same as R1 |
 | R3: Emergency access activation without consent | Server | Configurable waiting period; email notification on request; audit trail for approve/activate | Owner must actively monitor email |
 
@@ -101,7 +101,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | --- | --- | --- | --- |
 | I1: Server database breach exposes passwords | TB2 | All vault data is E2E encrypted client-side; server stores ciphertext only | Attacker with DB access sees encrypted blobs, not plaintext |
 | I2: Memory dump reveals secret key | Client | Web Crypto non-extractable keys where possible; explicit zeroization on lock/unload | JavaScript GC timing is non-deterministic |
-| I3: Extension persists vault key | TB5 | chrome.storage.session (browser-session scoped); cleared on lock/logout | Key survives SW restarts within browser session (deliberate UX trade-off) |
+| I3: Extension persists vault key | TB5 | `token` and `vaultSecretKey` are AES-256-GCM encrypted with an ephemeral non-extractable `CryptoKey` before storage in `chrome.storage.session`; if the SW is terminated the in-memory key is lost → encrypted blobs become unreadable → user must re-authenticate | `vaultSecretKey` ciphertext persists while the browser session is active; readable only while the SW process holds the in-memory ephemeral key |
 | I4: Sentry error tracking leaks sensitive data | Server | beforeSend hook recursively strips sensitive field patterns; opt-in only (no DSN = disabled) | Novel field names not matching patterns |
 | I5: Side-channel timing attack on auth hash | TB1 | Auth hash comparison uses constant-time HMAC verification | PBKDF2/Argon2id timing is inherent (mitigated by rate limiting) |
 | I6: Passphrase verifier reveals passphrase | TB2 | Domain-separated PBKDF2 derivation; server stores HMAC(pepper, verifierHash) | Offline brute force against verifier (mitigated by PBKDF2 cost) |
@@ -142,15 +142,16 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | Audit logging | R1, R2, R3 |
 | Sentry scrubbing | I4 |
 | Extension token lifecycle | S3, E4 |
+| Extension session encryption (AES-256-GCM, ephemeral non-extractable key) | I3 |
 | Passkey bridge rpId validation (sender.tab.url) | S6 |
 
 ## 5. Residual Risks (Accepted)
 
-1. **Extension vault key persistence**: `vaultSecretKey` hex survives in `chrome.storage.session` across service worker restarts. Accepted for UX; bounded by browser session lifetime.
+1. **Extension vault key persistence**: `token` and `vaultSecretKey` are AES-256-GCM encrypted with an ephemeral non-extractable `CryptoKey` held only in service worker memory before being written to `chrome.storage.session`. If the SW process is terminated, the in-memory key is lost and the stored ciphertext becomes permanently unreadable — re-authentication is required. Residual risk: the encrypted `vaultSecretKey` blob persists in storage while the browser session is active, but is readable only while the SW holds the in-memory ephemeral key. Bounded by browser session lifetime.
 
 2. **JavaScript GC non-determinism**: Secret key material in JS heap cannot be reliably zeroized. Mitigated by non-extractable CryptoKey usage and explicit clearing on lock events.
 
-3. **Fire-and-forget audit logging**: Audit writes may be lost under DB outage. Acceptable for current deployment model; compliance-sensitive deployments should add durable queue.
+3. **In-memory audit retry**: Failed audit writes are buffered in an in-memory FIFO queue (max 100 entries, max 3 retries per entry). On overflow the oldest entry is moved to a dead-letter log; on retry exhaustion the entry is also sent to the dead-letter log. Buffer is not durable across process restarts or pod replacements; compliance-sensitive deployments should add a persistent queue (e.g., Postgres outbox or message broker).
 
 4. **Compromised IdP**: A compromised Google/SAML identity provider could issue valid authentication tokens. Mitigated by vault passphrase requirement (IdP compromise alone does not decrypt vault data).
 

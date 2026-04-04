@@ -196,8 +196,9 @@ Client(valid時):
   - 鍵素材のライフタイムは参照クリア後の JavaScript ガベージコレクターが管理する
   - ブラウザ環境では即時メモリゼロ化は保証されない（Web Crypto API の制限）
 - ブラウザ拡張:
-  - token は `chrome.storage.session` に保持（ブラウザ終了でクリア）
-  - vault 復号再導出用の `vaultSecretKey` も `chrome.storage.session` で保持
+  - `token` および `vaultSecretKey` は SW メモリ内のみで保持する一時的な非抽出 `CryptoKey`
+    で AES-256-GCM 暗号化してから `chrome.storage.session` へ保存する。
+    SW プロセスが終了すると鍵が失われ、暗号化ブロブは読み取り不能となるため再認証が必要。
   - `autoLockMinutes` により vault ロックタイマー制御（既定 15 分）
 
 ## 2. 基本コントロール
@@ -375,12 +376,15 @@ Client(valid時):
   - `serverUrl`, `autoLockMinutes`
   - 理由: 設定値の永続化が必要。秘密情報ではない
 - `chrome.storage.session`:
-  - `token`, `expiresAt`, `userId`, `vaultSecretKey`（再導出用）
+  - `token`（暗号化済み）, `expiresAt`, `userId`, `vaultSecretKey`（暗号化済み、再導出用）
+  - 機密フィールド（`token`, `vaultSecretKey`）は保存前に SW メモリ内の非抽出
+    一時 `CryptoKey` で AES-256-GCM 暗号化する。SW 終了でその鍵は失われ、
+    暗号化ブロブは読み取り不能となるため再認証が必要。
   - 理由:
     - MV3 Service Worker 再起動で状態が消えるため、運用可能な UX を維持
     - ブラウザ終了時にクリアされるスコープで限定
     - token は短命（15分）+ refresh + revoke で被害時間を抑制
-    - `vaultSecretKey` は利便性とセキュリティのトレードオフとして採用
+    - `vaultSecretKey` は利便性とセキュリティのトレードオフとして採用（保存時暗号化で緩和済み）
 - `background memory`:
   - `encryptionKey`, `currentToken` など
   - 理由: 実処理時に必要。lock/expiry 時にクリア
@@ -403,7 +407,9 @@ Client(valid時):
   意図しないエクスポートを防ぐ一方、鍵素材の解放タイミングはランタイムが制御する。
 - Web アプリでは、`secretKeyRef`（Uint8Array）をロック/アンロード時に明示クリアしており
   （`vault-context.tsx:143`, `vault-context.tsx:280`）、これがブラウザ環境でのベストエフォート対応となる。
-- 拡張では `chrome.storage.session` 内の `vaultSecretKey` をロック時にクリアし、
+- 拡張では `token` および `vaultSecretKey` を非抽出の一時 `CryptoKey` で AES-256-GCM 暗号化
+  してから `chrome.storage.session` に保存する。SW プロセスが終了すると鍵が失われ、
+  暗号化ブロブは永久に読み取り不能となり再認証が必要となる。ロック時は両フィールドを削除し、
   ブラウザ終了時は Chrome が自動クリアする。15 分の自動ロックタイマーが時間的な補完制御を提供する。
 - 詳細な技術評価は `security-review.md` セクション 4（Crypto Primitives）を参照。
 
