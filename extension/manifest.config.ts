@@ -67,12 +67,6 @@ export default defineManifest({
   content_scripts: [
     {
       matches: ["https://*/*", "http://localhost/*"],
-      js: ["src/content/webauthn-inject.ts"],
-      run_at: "document_start",
-      all_frames: true,
-    },
-    {
-      matches: ["https://*/*", "http://localhost/*"],
       js: ["src/content/form-detector.ts"],
       run_at: "document_idle",
       all_frames: true,

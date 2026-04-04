@@ -576,8 +576,31 @@ initPasskeyProvider({
   invalidateCache,
 });
 
+// Register MAIN world WebAuthn interceptor via scripting API.
+// Must use registerContentScripts (not manifest content_scripts or <script> tags)
+// because only the scripting API can inject into MAIN world while bypassing page CSP.
+async function ensureWebAuthnInterceptor(): Promise<void> {
+  try {
+    const existing = await chrome.scripting.getRegisteredContentScripts({ ids: ["webauthn-interceptor"] });
+    if (existing.length > 0) return;
+    await chrome.scripting.registerContentScripts([{
+      id: "webauthn-interceptor",
+      matches: ["https://*/*", "http://localhost/*"],
+      js: ["src/content/webauthn-interceptor.js"],
+      runAt: "document_start",
+      world: "MAIN" as chrome.scripting.ExecutionWorld,
+      allFrames: true,
+    }]);
+  } catch (err) {
+    console.warn("[passwd-sso] Failed to register WebAuthn interceptor:", err);
+  }
+}
+
+void ensureWebAuthnInterceptor();
+
 chrome.runtime.onInstalled.addListener(() => {
   setupContextMenu();
+  void ensureWebAuthnInterceptor();
 });
 chrome.runtime.onStartup.addListener(() => {
   setupContextMenu();
