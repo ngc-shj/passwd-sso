@@ -274,8 +274,9 @@
       signature: signature.buffer,
       userHandle: userHandle ? userHandle.buffer : null,
     };
+    Object.setPrototypeOf(response, AuthenticatorAssertionResponse.prototype);
 
-    return {
+    var cred = {
       id: credentialIdB64,
       rawId: rawId.buffer,
       type: "public-key",
@@ -283,6 +284,8 @@
       response: response,
       getClientExtensionResults: function () { return {}; },
     };
+    Object.setPrototypeOf(cred, PublicKeyCredential.prototype);
+    return cred;
   }
 
   /**
@@ -299,8 +302,9 @@
       getPublicKeyAlgorithm: function () { return -7; },
       getAuthenticatorData: function () { return authData ? authData.buffer : null; },
     };
+    Object.setPrototypeOf(response, AuthenticatorAttestationResponse.prototype);
 
-    return {
+    var cred = {
       id: credentialIdB64,
       rawId: rawId.buffer,
       type: "public-key",
@@ -308,5 +312,7 @@
       response: response,
       getClientExtensionResults: function () { return {}; },
     };
+    Object.setPrototypeOf(cred, PublicKeyCredential.prototype);
+    return cred;
   }
 })();
