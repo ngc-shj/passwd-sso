@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { unauthorized, errorResponse } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import type { Prisma } from "@prisma/client";
@@ -16,16 +17,13 @@ import { isValidCursorId } from "@/lib/audit-query";
 async function handleGET(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
   if (!isValidCursorId(cursor)) {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
   const limitParam = searchParams.get("limit");
   const limit = Math.min(
@@ -50,10 +48,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_CURSOR },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = notifications.length > limit;
@@ -79,10 +74,7 @@ async function handleGET(req: NextRequest) {
 async function handlePATCH(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const result = await withUserTenantRls(session.user.id, async () =>

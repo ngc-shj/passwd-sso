@@ -17,7 +17,7 @@ import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/valid
 import logger from "@/lib/logger";
 
 function internalError() {
-  return NextResponse.json({ error: "INTERNAL_ERROR" }, { status: 500 });
+  return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
 }
 
 export const runtime = "nodejs";

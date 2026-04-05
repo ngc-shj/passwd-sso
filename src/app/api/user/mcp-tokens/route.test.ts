@@ -256,6 +256,6 @@ describe("DELETE /api/user/mcp-tokens", () => {
     const { status, json } = await parseResponse(res);
 
     expect(status).toBe(403);
-    expect(json.error).toBe("No tenant");
+    expect(json.error).toBe("NO_TENANT");
   });
 });

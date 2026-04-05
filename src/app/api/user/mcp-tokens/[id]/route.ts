@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { unauthorized } from "@/lib/api-response";
+import { unauthorized, notFound, errorResponse } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -19,7 +20,7 @@ async function handleDELETE(
   const userId = session.user.id;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return NextResponse.json({ error: "No tenant" }, { status: 403 });
+    return errorResponse(API_ERROR.NO_TENANT, 403);
   }
   const { id } = await params;
 
@@ -112,7 +113,7 @@ async function handleDELETE(
   }, BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!result) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return notFound();
   }
 
   return new NextResponse(null, { status: 204 });

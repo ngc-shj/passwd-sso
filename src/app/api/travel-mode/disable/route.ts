@@ -93,7 +93,7 @@ async function handlePOST(request: NextRequest) {
       ...extractRequestMeta(request),
     });
 
-    return NextResponse.json({ error: "INVALID_PASSPHRASE" }, { status: 401 });
+    return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
   }
 
   await withUserTenantRls(session.user.id, async () =>

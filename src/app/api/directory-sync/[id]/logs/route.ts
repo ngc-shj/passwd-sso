@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { unauthorized, forbidden, notFound, errorResponse } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { isValidCursorId } from "@/lib/audit-query";
@@ -19,10 +20,7 @@ type RouteContext = { params: Promise<{ id: string }> };
 async function handleGET(req: NextRequest, ctx: RouteContext) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json(
-      { error: API_ERROR.UNAUTHORIZED },
-      { status: 401 },
-    );
+    return unauthorized();
   }
 
   const { id } = await ctx.params;
@@ -34,10 +32,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
     }),
   );
   if (!member) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
-    );
+    return forbidden();
   }
   const tenantId = member.tenantId;
 
@@ -49,10 +44,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
     }),
   );
   if (!config) {
-    return NextResponse.json(
-      { error: API_ERROR.NOT_FOUND },
-      { status: 404 },
-    );
+    return notFound();
   }
 
   // Parse query params
@@ -63,7 +55,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
   );
   const cursor = url.searchParams.get("cursor");
   if (!isValidCursorId(cursor)) {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   // Fetch logs with keyset pagination
@@ -95,7 +87,7 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
       }),
     );
   } catch {
-    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = logs.length > limit;

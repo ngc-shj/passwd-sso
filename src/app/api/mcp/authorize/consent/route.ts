@@ -7,19 +7,21 @@ import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { assertOrigin } from "@/lib/csrf";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/api-response";
 
 export async function POST(req: NextRequest) {
   // CSRF protection: Origin header is mandatory for consent (defense-in-depth)
   const origin = req.headers.get("origin");
   if (!origin) {
-    return NextResponse.json({ error: "INVALID_ORIGIN" }, { status: 403 });
+    return errorResponse(API_ERROR.INVALID_ORIGIN, 403);
   }
   const originError = assertOrigin(req);
   if (originError) return originError;
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   // Parse form data submitted from the consent UI

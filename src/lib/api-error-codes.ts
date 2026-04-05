@@ -174,6 +174,18 @@ export const API_ERROR = {
 
   // ── MCP Clients ──────────────────────────────────────────
   MCP_CLIENT_NAME_CONFLICT: "MCP_CLIENT_NAME_CONFLICT",
+  MCP_CLIENT_LIMIT_EXCEEDED: "MCP_CLIENT_LIMIT_EXCEEDED",
+  MCP_TOKEN_NOT_FOUND: "MCP_TOKEN_NOT_FOUND",
+  MCP_TOKEN_SCOPE_INSUFFICIENT: "MCP_TOKEN_SCOPE_INSUFFICIENT",
+
+  // ── Delegation ──────────────────────────────────────────
+  DELEGATION_STORE_FAILED: "DELEGATION_STORE_FAILED",
+  DELEGATION_ENTRIES_NOT_FOUND: "DELEGATION_ENTRIES_NOT_FOUND",
+
+  // ── Tenant / Session ────────────────────────────────────
+  NO_TENANT: "NO_TENANT",
+  INVALID_SESSION: "INVALID_SESSION",
+  INTERNAL_ERROR: "INTERNAL_ERROR",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -302,6 +314,14 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   SA_TOKEN_NOT_FOUND: "saTokenNotFound",
   SA_TOKEN_ALREADY_REVOKED: "saTokenAlreadyRevoked",
   MCP_CLIENT_NAME_CONFLICT: "mcpClientNameConflict",
+  MCP_CLIENT_LIMIT_EXCEEDED: "mcpClientLimitExceeded",
+  MCP_TOKEN_NOT_FOUND: "mcpTokenNotFound",
+  MCP_TOKEN_SCOPE_INSUFFICIENT: "mcpTokenScopeInsufficient",
+  DELEGATION_STORE_FAILED: "delegationStoreFailed",
+  DELEGATION_ENTRIES_NOT_FOUND: "delegationEntriesNotFound",
+  NO_TENANT: "noTenant",
+  INVALID_SESSION: "invalidSession",
+  INTERNAL_ERROR: "internalError",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

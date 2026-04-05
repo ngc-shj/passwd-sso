@@ -100,5 +100,13 @@
   "saTokenLimitExceeded": "Maximum number of tokens per service account reached.",
   "saTokenNotFound": "Service account token not found.",
   "saTokenAlreadyRevoked": "Service account token has already been revoked.",
-  "mcpClientNameConflict": "An MCP client with this name already exists."
+  "mcpClientNameConflict": "An MCP client with this name already exists.",
+  "mcpClientLimitExceeded": "Maximum number of MCP clients per tenant reached.",
+  "mcpTokenNotFound": "MCP token not found or expired.",
+  "mcpTokenScopeInsufficient": "MCP token does not have the required scope.",
+  "delegationStoreFailed": "Failed to store delegation entries.",
+  "delegationEntriesNotFound": "Some entries not found or not accessible.",
+  "noTenant": "No tenant membership found.",
+  "invalidSession": "Invalid session ID.",
+  "internalError": "An internal error occurred."
 }
