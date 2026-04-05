@@ -36,7 +36,7 @@ describe("createRefreshToken", () => {
       clientId: "client-uuid",
       tenantId: "tenant-uuid",
       userId: "user-uuid",
-      scope: "credentials:decrypt",
+      scope: "credentials:list,credentials:use",
     });
 
     expect(result.refreshToken).toMatch(new RegExp(`^${MCP_REFRESH_TOKEN_PREFIX}`));
@@ -53,7 +53,7 @@ describe("createRefreshToken", () => {
       accessTokenId: "access-token-id",
       clientId: "client-uuid",
       tenantId: "tenant-uuid",
-      scope: "credentials:decrypt",
+      scope: "credentials:list,credentials:use",
     });
 
     expect(mockCreate).toHaveBeenCalledOnce();
@@ -73,7 +73,7 @@ describe("createRefreshToken", () => {
       accessTokenId: "access-token-id",
       clientId: "client-uuid",
       tenantId: "tenant-uuid",
-      scope: "credentials:decrypt",
+      scope: "credentials:list,credentials:use",
     });
 
     const callArgs = mockCreate.mock.calls[0][0].data;
@@ -91,7 +91,7 @@ describe("createRefreshToken", () => {
       accessTokenId: "access-token-id",
       clientId: "client-uuid",
       tenantId: "tenant-uuid",
-      scope: "credentials:decrypt",
+      scope: "credentials:list,credentials:use",
       familyId: existingFamilyId,
     });
 
@@ -119,7 +119,7 @@ describe("exchangeRefreshToken", () => {
     tenantId: "tenant-uuid-123",
     userId: "user-uuid-123",
     serviceAccountId: null,
-    scope: "credentials:decrypt",
+    scope: "credentials:list,credentials:use",
     expiresAt: new Date(Date.now() + 3600000),
     revokedAt: null,
     rotatedAt: null,
@@ -190,7 +190,7 @@ describe("exchangeRefreshToken", () => {
       expect(result.accessToken).toMatch(new RegExp(`^${MCP_TOKEN_PREFIX}`));
       expect(result.refreshToken).toMatch(new RegExp(`^${MCP_REFRESH_TOKEN_PREFIX}`));
       expect(result.expiresIn).toBeGreaterThan(0);
-      expect(result.scope).toBe("credentials:decrypt");
+      expect(result.scope).toBe("credentials:list,credentials:use");
     }
   });
 

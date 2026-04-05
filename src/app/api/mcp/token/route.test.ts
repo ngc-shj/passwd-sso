@@ -64,7 +64,7 @@ describe("POST /api/mcp/token", () => {
         accessToken: "mcp_access_token_abc",
         tokenType: "Bearer",
         expiresIn: 3600,
-        scope: "credentials:decrypt,vault:status",
+        scope: "credentials:list,credentials:use,vault:status",
         tokenId: "token-id-123",
         clientDbId: "client-uuid-123",
         tenantId: "tenant-uuid-123",
@@ -83,7 +83,7 @@ describe("POST /api/mcp/token", () => {
     expect(json.access_token).toBe("mcp_access_token_abc");
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBe(3600);
-    expect(json.scope).toBe("credentials:decrypt vault:status");
+    expect(json.scope).toBe("credentials:list credentials:use vault:status");
     expect(json.refresh_token).toBe("mcp_rt_refreshtoken");
     expect(mockHashToken).toHaveBeenCalledWith("secret-value");
     expect(mockExchangeCodeForToken).toHaveBeenCalledWith(
@@ -179,7 +179,7 @@ describe("POST /api/mcp/token", () => {
       accessToken: "mcp_new",
       refreshToken: "mcpr_new",
       expiresIn: 3600,
-      scope: "credentials:decrypt",
+      scope: "credentials:list,credentials:use",
       tenantId: "t1",
       userId: "u1",
     });
@@ -195,7 +195,7 @@ describe("POST /api/mcp/token", () => {
     expect(json.refresh_token).toBe("mcpr_new");
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBe(3600);
-    expect(json.scope).toBe("credentials:decrypt");
+    expect(json.scope).toBe("credentials:list credentials:use");
   });
 
   it("refresh_token: returns 400 when exchangeRefreshToken returns invalid_grant", async () => {

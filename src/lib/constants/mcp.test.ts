@@ -17,11 +17,6 @@ describe("MCP_SCOPE", () => {
     expect(MCP_SCOPES).toContain(MCP_SCOPE.CREDENTIALS_USE);
     expect(MCP_SCOPE.CREDENTIALS_USE).toBe("credentials:use");
   });
-
-  it("includes credentials:decrypt legacy scope", () => {
-    expect(MCP_SCOPES).toContain(MCP_SCOPE.CREDENTIALS_DECRYPT);
-    expect(MCP_SCOPE.CREDENTIALS_DECRYPT).toBe("credentials:decrypt");
-  });
 });
 
 describe("MCP_SCOPE_RISK", () => {
@@ -61,10 +56,6 @@ describe("MCP_SCOPE_RISK", () => {
 
   it("passwords:write is risk level 'write'", () => {
     expect(MCP_SCOPE_RISK[MCP_SCOPE.PASSWORDS_WRITE]).toBe("write");
-  });
-
-  it("credentials:decrypt (legacy) is risk level 'write'", () => {
-    expect(MCP_SCOPE_RISK[MCP_SCOPE.CREDENTIALS_DECRYPT]).toBe("write");
   });
 });
 

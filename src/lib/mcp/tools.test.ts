@@ -123,16 +123,6 @@ describe("toolListCredentials", () => {
     }));
   });
 
-  it("accepts legacy credentials:decrypt scope", async () => {
-    const token = makeToken({ scopes: ["credentials:decrypt"] });
-    mockFindActiveDelegationSession.mockResolvedValueOnce(SESSION);
-    mockGetDelegatedEntryIdsForSession.mockResolvedValueOnce(new Set([ENTRY_ID_1]));
-    mockFetchDelegationEntry.mockResolvedValueOnce(ENTRY_1);
-
-    const result = await toolListCredentials(token, {});
-    expect(result.result).toBeDefined();
-    expect(result.result?.entries).toHaveLength(1);
-  });
 });
 
 // ─── toolSearchCredentials ───────────────────────────────────

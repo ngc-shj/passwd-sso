@@ -5,7 +5,6 @@ export const MCP_CLIENT_ID_PREFIX = "mcpc_";
 export const MCP_SCOPE = {
   CREDENTIALS_LIST: "credentials:list",
   CREDENTIALS_USE: "credentials:use",
-  CREDENTIALS_DECRYPT: "credentials:decrypt", // Legacy alias — expands to list + use at consent time
   TEAM_CREDENTIALS_READ: "team:credentials:read",
   VAULT_STATUS: "vault:status",
   VAULT_UNLOCK_DATA: "vault:unlock-data",
@@ -26,7 +25,6 @@ export const MCP_SCOPE_RISK: Record<McpScope, ScopeRiskLevel> = {
   [MCP_SCOPE.PASSWORDS_READ]: "use",
   [MCP_SCOPE.VAULT_UNLOCK_DATA]: "use",
   [MCP_SCOPE.TEAM_CREDENTIALS_READ]: "use",
-  [MCP_SCOPE.CREDENTIALS_DECRYPT]: "write", // Legacy — expands to list + use but label warns
   [MCP_SCOPE.PASSWORDS_WRITE]: "write",
 };
 

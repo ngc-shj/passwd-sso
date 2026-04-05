@@ -112,11 +112,10 @@ async function handlePOST(request: NextRequest) {
   const scopes = mcpToken.scope.split(",").map((s) => s.trim());
   const hasDelegationScope =
     scopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
-    scopes.includes(MCP_SCOPE.CREDENTIALS_USE) ||
-    scopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT);
+    scopes.includes(MCP_SCOPE.CREDENTIALS_USE);
   if (!hasDelegationScope) {
     return NextResponse.json(
-      { error: "MCP token does not have credentials:list, credentials:use, or credentials:decrypt scope" },
+      { error: "MCP token does not have credentials:list or credentials:use scope" },
       { status: 403 },
     );
   }
@@ -314,8 +313,7 @@ async function handleGET(_request: NextRequest) {
         mcpClientId: t.mcpClient.clientId,
         hasDelegationScope:
           tokenScopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
-          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_USE) ||
-          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT),
+          tokenScopes.includes(MCP_SCOPE.CREDENTIALS_USE),
         expiresAt: t.expiresAt.toISOString(),
       };
     }),

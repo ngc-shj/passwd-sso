@@ -231,22 +231,13 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toMatch(/credentials:list|credentials:use|credentials:decrypt/);
+    expect(json.error).toMatch(/credentials:list|credentials:use/);
   });
 
   it("accepts credentials:use scope", async () => {
     mockPrismaMcpAccessToken.findFirst.mockResolvedValue({
       ...VALID_MCP_TOKEN,
       scope: "credentials:use",
-    });
-    const res = await POST(makePostRequest(VALID_POST_BODY));
-    expect(res.status).toBe(200);
-  });
-
-  it("accepts credentials:decrypt scope", async () => {
-    mockPrismaMcpAccessToken.findFirst.mockResolvedValue({
-      ...VALID_MCP_TOKEN,
-      scope: "credentials:decrypt",
     });
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(200);
@@ -454,15 +445,6 @@ describe("GET /api/vault/delegation", () => {
   it("hasDelegationScope is true for credentials:use scope", async () => {
     mockPrismaMcpAccessToken.findMany.mockResolvedValue([
       { ...TOKEN_RECORD, scope: "credentials:use" },
-    ]);
-    const res = await GET(makeGetRequest());
-    const json = await res.json();
-    expect(json.availableTokens[0].hasDelegationScope).toBe(true);
-  });
-
-  it("hasDelegationScope is true for credentials:decrypt scope", async () => {
-    mockPrismaMcpAccessToken.findMany.mockResolvedValue([
-      { ...TOKEN_RECORD, scope: "credentials:decrypt" },
     ]);
     const res = await GET(makeGetRequest());
     const json = await res.json();

@@ -7,7 +7,6 @@
   "scopeDescriptions": {
     "credentials:list": "エントリ名とユーザー名の閲覧",
     "credentials:use": "ローカルエージェント経由で認証情報を使用",
-    "credentials:decrypt": "認証情報の一覧と使用（レガシー）",
     "team:credentials:read": "チーム認証情報の読み取り",
     "vault:status": "保管庫のステータス確認",
     "vault:unlock-data": "暗号化された保管庫キーの取得",

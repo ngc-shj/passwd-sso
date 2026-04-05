@@ -81,7 +81,7 @@ const VALID_CLIENT = {
   isActive: true,
   tenantId: "tenant-uuid-123",
   redirectUris: ["https://example.com/callback"],
-  allowedScopes: "credentials:decrypt,passwords:read",
+  allowedScopes: "credentials:list,credentials:use,passwords:read",
 };
 
 const VALID_USER = {
@@ -113,7 +113,7 @@ function createFormRequest(url: string, fields: Record<string, string>, headers:
 const VALID_FORM_FIELDS = {
   client_id: "mcpc_testclient",
   redirect_uri: "https://example.com/callback",
-  scope: "credentials:decrypt",
+  scope: "credentials:list credentials:use",
   code_challenge: "test-challenge-value-base64url",
   code_challenge_method: "S256",
   state: "random-state-value",
@@ -326,14 +326,7 @@ describe("POST /api/mcp/authorize/consent", () => {
         userId: VALID_SESSION.user.id,
         redirectUri: "https://example.com/callback",
         codeChallenge: "test-challenge-value-base64url",
-        // Legacy credentials:decrypt is expanded to credentials:list + credentials:use
         scope: expect.stringContaining("credentials:list"),
-      }),
-    );
-    // Verify legacy scope is NOT stored as-is
-    expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: expect.not.stringContaining("credentials:decrypt"),
       }),
     );
   });

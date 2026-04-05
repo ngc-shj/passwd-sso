@@ -157,7 +157,7 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   clientId: "mcpc_abc123def456",
   name: "test-mcp-client",
   redirectUris: ["https://example.com/callback"],
-  allowedScopes: "credentials:decrypt",
+  allowedScopes: "credentials:list,credentials:use",
   isActive: true,
   createdAt: new Date("2026-01-01T00:00:00Z"),
   updatedAt: new Date("2026-01-01T00:00:00Z"),
@@ -180,7 +180,7 @@ const makeTokenData = (overrides: Partial<{
   mcpClientId: "mcpc_testclient1",
   userId: "user-uuid-1",
   serviceAccountId: null,
-  scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] as McpScope[],
+  scopes: [MCP_SCOPE.CREDENTIALS_LIST, MCP_SCOPE.CREDENTIALS_USE] as McpScope[],
   ...overrides,
 });
 
@@ -200,7 +200,7 @@ describe("Scenario 1: MCP Client Registration", () => {
       body: {
         name: "test-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:decrypt"],
+        allowedScopes: ["credentials:list", "credentials:use"],
       },
     });
     const res = await postClients(req);
@@ -290,7 +290,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:decrypt",
+            scope: "credentials:list,credentials:use",
           }),
           update: vi.fn().mockResolvedValue({}),
         },
@@ -318,7 +318,7 @@ describe("Scenario 3: PKCE Token Exchange Success via /api/mcp/token", () => {
     expect(json.access_token).toMatch(/^mcp_/);
     expect(json.token_type).toBe("Bearer");
     expect(json.expires_in).toBeGreaterThan(0);
-    expect(json.scope).toBe("credentials:decrypt");
+    expect(json.scope).toBe("credentials:list credentials:use");
   });
 });
 
@@ -360,7 +360,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:decrypt",
+            scope: "credentials:list,credentials:use",
           }),
           update: vi.fn(),
         },
@@ -400,7 +400,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: "any-challenge",
             codeChallengeMethod: "S256",
-            scope: "credentials:decrypt",
+            scope: "credentials:list,credentials:use",
           }),
           update: vi.fn(),
         },
@@ -440,7 +440,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: "any-challenge",
             codeChallengeMethod: "S256",
-            scope: "credentials:decrypt",
+            scope: "credentials:list,credentials:use",
           }),
           update: vi.fn(),
         },
@@ -483,7 +483,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback",
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:decrypt",
+            scope: "credentials:list,credentials:use",
           }),
           update: vi.fn(),
         },
@@ -530,7 +530,7 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
             redirectUri: "https://example.com/callback", // stored URI
             codeChallenge: challenge,
             codeChallengeMethod: "S256",
-            scope: "credentials:decrypt",
+            scope: "credentials:list,credentials:use",
           }),
           update: vi.fn(),
         },
@@ -570,10 +570,10 @@ describe("Scenario 4: PKCE Failure Paths via POST /api/mcp/token", () => {
 describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("list_credentials with credentials:decrypt scope → -32603 when no active delegation session", async () => {
+  it("list_credentials with credentials:list scope → -32603 when no active delegation session", async () => {
     // delegationSession.findFirst is mocked to return null (no active session)
     // so list_credentials errors with "No active delegation session"
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
 
     const response = await handleMcpRequest(
       {
@@ -650,7 +650,7 @@ describe("Scenario 5: MCP Tool Call with Scope Check via handleMcpRequest", () =
     mockGetDelegatedEntryIdsForSession.mockResolvedValueOnce(new Set([entryId]));
     mockFetchDelegationEntry.mockResolvedValueOnce(mockEntry);
 
-    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_DECRYPT] });
+    const token = makeTokenData({ scopes: [MCP_SCOPE.CREDENTIALS_LIST] });
 
     const response = await handleMcpRequest(
       {
