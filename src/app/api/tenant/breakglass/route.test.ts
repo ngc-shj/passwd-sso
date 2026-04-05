@@ -355,7 +355,6 @@ describe("POST /api/tenant/breakglass", () => {
   });
 
   it("returns 400 when requester tries to access own logs", async () => {
-    // Use valid UUID for session to pass Zod schema, then trigger self-access guard
     const selfUuid = "00000000-0000-4000-a000-000000000099";
     mockAuth.mockResolvedValue({ user: { id: selfUuid } });
     const res = await POST(

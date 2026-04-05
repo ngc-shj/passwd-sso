@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z, type ZodSchema } from "zod";
+import { type ZodSchema } from "zod";
 import { API_ERROR } from "@/lib/api-error-codes";
+import { zodValidationError } from "@/lib/api-response";
 
 type ParseOk<T> = { ok: true; data: T };
 type ParseFail = { ok: false; response: NextResponse };
@@ -40,13 +41,7 @@ export async function parseBody<T>(
   if (!parsed.success) {
     return {
       ok: false,
-      response: NextResponse.json(
-        {
-          error: API_ERROR.VALIDATION_ERROR,
-          details: z.treeifyError(parsed.error),
-        },
-        { status: 400 },
-      ),
+      response: zodValidationError(parsed.error),
     };
   }
 
