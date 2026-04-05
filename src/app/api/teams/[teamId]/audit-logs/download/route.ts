@@ -74,7 +74,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (from || to) {
     const fromDate = from ? new Date(from) : undefined;
     const toDate = to ? new Date(to) : undefined;
-    if ((fromDate && isNaN(fromDate.getTime())) || (toDate && isNaN(toDate.getTime()))) {
+    if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
       return NextResponse.json(
         { error: API_ERROR.VALIDATION_ERROR, details: { date: "Invalid date format" } },
         { status: 400 },

@@ -84,7 +84,7 @@ function parseIpv6(ip: string): number[] | null {
     for (const g of groups) {
       if (g.length < 1 || g.length > 4) return null;
       const val = parseInt(g, 16);
-      if (isNaN(val) || val < 0 || val > 0xffff) return null;
+      if (Number.isNaN(val) || val < 0 || val > 0xffff) return null;
       bytes.push((val >> 8) & 0xff, val & 0xff);
     }
     return bytes;

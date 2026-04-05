@@ -49,8 +49,8 @@ export function parseOtpauthUri(input: string): EntryTotp | null {
     return {
       secret,
       algorithm,
-      digits: !isNaN(rawDigits) && rawDigits >= 4 && rawDigits <= 10 ? rawDigits : undefined,
-      period: !isNaN(rawPeriod) && rawPeriod > 0 && rawPeriod <= 3600 ? rawPeriod : undefined,
+      digits: !Number.isNaN(rawDigits) && rawDigits >= 4 && rawDigits <= 10 ? rawDigits : undefined,
+      period: !Number.isNaN(rawPeriod) && rawPeriod > 0 && rawPeriod <= 3600 ? rawPeriod : undefined,
     };
   } catch {
     return null;

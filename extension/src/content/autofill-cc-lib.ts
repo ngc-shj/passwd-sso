@@ -51,14 +51,14 @@ function normalizeMonthValue(value: string): string {
   const lower = value.toLowerCase().trim();
   if (MONTH_NAMES[lower]) return MONTH_NAMES[lower];
   const num = parseInt(lower, 10);
-  if (!isNaN(num) && num >= 1 && num <= 12) return String(num).padStart(2, "0");
+  if (!Number.isNaN(num) && num >= 1 && num <= 12) return String(num).padStart(2, "0");
   return lower;
 }
 
 function normalizeYearValue(value: string): string {
   const trimmed = value.trim();
   const num = parseInt(trimmed, 10);
-  if (isNaN(num)) return trimmed;
+  if (Number.isNaN(num)) return trimmed;
   // Short year: "25" stays "25", full year "2025" stays "2025"
   return String(num);
 }
