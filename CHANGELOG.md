@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.27](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.26...passwd-sso-v0.4.27) (2026-04-05)
+
+
+### Bug Fixes
+
+* enforce aadVersion &gt;= 1 in personal entry and attachment schemas ([#330](https://github.com/ngc-shj/passwd-sso/issues/330)) ([494a030](https://github.com/ngc-shj/passwd-sso/commit/494a0304bc72a2f8ff6b7d3ad403dd1b3232fc0f))
+
 ## [0.4.26](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.25...passwd-sso-v0.4.26) (2026-04-04)
 
 
