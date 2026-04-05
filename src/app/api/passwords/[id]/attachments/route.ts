@@ -183,6 +183,9 @@ async function handlePOST(
   const blobContext = { attachmentId, entryId: id };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : AAD_VERSION;
+  if (isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
   let attachment;
   try {
     attachment = await withUserTenantRls(session.user.id, async () =>

@@ -695,9 +695,9 @@ describe("createE2EPasswordSchema", () => {
     expect(createE2EPasswordSchema.safeParse(valid).success).toBe(true);
   });
 
-  it("accepts aadVersion=0 without id", () => {
+  it("rejects aadVersion=0", () => {
     const { id: _, ...rest } = valid;
-    expect(createE2EPasswordSchema.safeParse({ ...rest, aadVersion: 0 }).success).toBe(true);
+    expect(createE2EPasswordSchema.safeParse({ ...rest, aadVersion: 0 }).success).toBe(false);
   });
 
   it("rejects aadVersion=1 without id", () => {
@@ -734,6 +734,10 @@ describe("updateE2EPasswordSchema", () => {
 
   it("rejects keyVersion below 1 when provided", () => {
     expect(updateE2EPasswordSchema.safeParse({ keyVersion: 0 }).success).toBe(false);
+  });
+
+  it("rejects aadVersion=0 in update", () => {
+    expect(updateE2EPasswordSchema.safeParse({ aadVersion: 0 }).success).toBe(false);
   });
 
   it("accepts valid entryType", () => {

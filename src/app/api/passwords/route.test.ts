@@ -457,30 +457,12 @@ describe("POST /api/passwords", () => {
     );
   });
 
-  it("creates entry without id (legacy aadVersion=0)", async () => {
-    mockPrismaPasswordEntry.create.mockResolvedValue({
-      id: "new-pw",
-      encryptedOverview: "over",
-      overviewIv: "c".repeat(24),
-      overviewAuthTag: "d".repeat(32),
-      keyVersion: 1,
-      aadVersion: 0,
-      entryType: ENTRY_TYPE.LOGIN,
-      tags: [],
-      createdAt: now,
-      updatedAt: now,
-    });
-
-     
+  it("rejects aadVersion=0 (400)", async () => {
     const { id: _, ...bodyWithoutId } = validBody;
     const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
       body: { ...bodyWithoutId, aadVersion: 0 },
     }));
-    const json = await res.json();
-    expect(res.status).toBe(201);
-    expect(json.aadVersion).toBe(0);
-    const createCall = mockPrismaPasswordEntry.create.mock.calls[0][0];
-    expect(createCall.data).not.toHaveProperty("id");
+    expect(res.status).toBe(400);
   });
 
   it("creates SECURE_NOTE entry (201)", async () => {
