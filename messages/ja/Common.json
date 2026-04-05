@@ -10,5 +10,7 @@
   "close": "閉じる",
   "create": "作成",
   "yes": "はい",
-  "no": "いいえ"
+  "no": "いいえ",
+  "statusUnsaved": "未保存の変更があります",
+  "statusSaved": "変更は保存済みです"
 }

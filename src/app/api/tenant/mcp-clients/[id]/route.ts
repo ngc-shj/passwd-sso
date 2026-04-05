@@ -1,4 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -106,13 +107,27 @@ export async function PUT(
   if (data.allowedScopes !== undefined) updateData.allowedScopes = data.allowedScopes.join(",");
   if (data.isActive !== undefined) updateData.isActive = data.isActive;
 
-  const updated = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.mcpClient.update({
-      where: { id },
-      data: updateData,
-      select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, isDcr: true, updatedAt: true },
-    }),
-  );
+  let updated;
+  try {
+    updated = await withTenantRls(prisma, actor.tenantId, async () =>
+      prisma.mcpClient.update({
+        where: { id },
+        data: updateData,
+        select: { id: true, clientId: true, name: true, redirectUris: true, allowedScopes: true, isActive: true, isDcr: true, updatedAt: true },
+      }),
+    );
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: "MCP_CLIENT_NAME_CONFLICT" },
+        { status: 409 },
+      );
+    }
+    throw err;
+  }
 
   logAudit({
     scope: AUDIT_SCOPE.TENANT,

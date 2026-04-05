@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 import { toast } from "sonner";
 import { ListChecks, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -67,15 +70,22 @@ interface TeamPolicySettingsProps {
 
 export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
   const t = useTranslations("TeamPolicy");
+  const tCommon = useTranslations("Common");
   const [policy, setPolicy] = useState<PolicyData>(DEFAULT_POLICY);
+  const [initialPolicy, setInitialPolicy] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const hasChanges = useFormDirty(policy as unknown as Record<string, unknown>, initialPolicy);
+  useBeforeUnloadGuard(hasChanges);
 
   const fetchPolicy = useCallback(async () => {
     try {
       const res = await fetchApi(`/api/teams/${teamId}/policy`);
       if (res.ok) {
-        setPolicy(await res.json());
+        const data = await res.json();
+        setPolicy(data);
+        setInitialPolicy(data);
       } else {
         toast.error(t("fetchError"));
       }
@@ -113,7 +123,9 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
         body: JSON.stringify(policy),
       });
       if (res.ok) {
-        setPolicy(await res.json());
+        const saved = await res.json();
+        setPolicy(saved);
+        setInitialPolicy(saved);
         setFieldErrors({});
         toast.success(t("saveSuccess"));
       } else if (res.status === 400) {
@@ -280,8 +292,13 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
           />
         </div>
 
-        <div className="flex justify-end pt-1">
-          <Button onClick={handleSave} disabled={saving}>
+        <div className="flex items-center justify-between pt-1">
+          <FormDirtyBadge
+            hasChanges={hasChanges}
+            unsavedLabel={tCommon("statusUnsaved")}
+            savedLabel={tCommon("statusSaved")}
+          />
+          <Button onClick={handleSave} disabled={saving || !hasChanges}>
             {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {saving ? t("saving") : t("save")}
           </Button>

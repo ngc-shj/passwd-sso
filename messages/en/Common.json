@@ -10,5 +10,7 @@
   "close": "Close",
   "create": "Create",
   "yes": "Yes",
-  "no": "No"
+  "no": "No",
+  "statusUnsaved": "Unsaved changes",
+  "statusSaved": "All changes saved"
 }

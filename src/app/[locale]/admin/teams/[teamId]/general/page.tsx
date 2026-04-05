@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use } from "react";
+import { useEffect, useState, useMemo, use } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,9 @@ import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 import { SectionLayout } from "@/components/settings/section-layout";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface TeamInfo {
   id: string;
@@ -60,6 +63,12 @@ export default function TeamGeneralPage({
   const [saving, setSaving] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [initialGeneral, setInitialGeneral] = useState<Record<string, unknown> | null>(null);
+
+  const tCommon = useTranslations("Common");
+  const currentGeneral = useMemo(() => ({ name, description }), [name, description]);
+  const hasChanges = useFormDirty(currentGeneral, initialGeneral);
+  useBeforeUnloadGuard(hasChanges);
 
   const fetchTeam = () => {
     fetchApi(apiPath.teamById(teamId))
@@ -68,9 +77,11 @@ export default function TeamGeneralPage({
         return r.json();
       })
       .then((d) => {
+        const desc = d.description ?? "";
         setTeam(d);
         setName(d.name);
-        setDescription(d.description ?? "");
+        setDescription(desc);
+        setInitialGeneral({ name: d.name, description: desc });
         setLoadError(false);
       })
       .catch(() => {
@@ -104,6 +115,7 @@ export default function TeamGeneralPage({
       }
       if (!res.ok) throw new Error("Failed");
       toast.success(t("updated"));
+      setInitialGeneral({ ...currentGeneral });
       notifyTeamDataChanged();
       fetchTeam();
     } catch {
@@ -192,8 +204,13 @@ export default function TeamGeneralPage({
                   rows={3}
                 />
               </div>
-              <div className="flex justify-end pt-1">
-                <Button onClick={handleUpdateTeam} disabled={saving || !name.trim()}>
+              <div className="flex items-center justify-between pt-1">
+                <FormDirtyBadge
+                  hasChanges={hasChanges}
+                  unsavedLabel={tCommon("statusUnsaved")}
+                  savedLabel={tCommon("statusSaved")}
+                />
+                <Button onClick={handleUpdateTeam} disabled={saving || !name.trim() || !hasChanges}>
                   {saving && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   {t("updateTeam")}
                 </Button>
