@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.32](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.31...passwd-sso-v0.4.32) (2026-04-05)
+
+
+### Bug Fixes
+
+* add P2002 error handling to folder and tag PUT routes ([#340](https://github.com/ngc-shj/passwd-sso/issues/340)) ([a4de794](https://github.com/ngc-shj/passwd-sso/commit/a4de79475d7ea9b3a32582987e9e6baea2226d95))
+
 ## [0.4.31](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.30...passwd-sso-v0.4.31) (2026-04-05)
 
 
