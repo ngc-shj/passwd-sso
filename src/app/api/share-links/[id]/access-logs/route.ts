@@ -6,6 +6,7 @@ import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { SHARE_ACCESS_LOG_LIMIT } from "@/lib/validations/common.server";
+import { isValidCursorId } from "@/lib/audit-query";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -32,6 +33,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
+  if (!isValidCursorId(cursor)) {
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+  }
   const limit = SHARE_ACCESS_LOG_LIMIT;
 
   let logs;

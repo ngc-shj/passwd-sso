@@ -328,14 +328,14 @@ describe("GET /api/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/audit-logs?cursor=abc123"
+      "http://localhost/api/audit-logs?cursor=550e8400-e29b-41d4-a716-446655440000"
     );
 
     await GET(req);
 
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "abc123" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
       })
     );
@@ -347,7 +347,7 @@ describe("GET /api/audit-logs", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/audit-logs?cursor=invalid-cursor-id"
+      "http://localhost/api/audit-logs?cursor=00000000-0000-0000-0000-000000000000"
     );
 
     const res = await GET(req);

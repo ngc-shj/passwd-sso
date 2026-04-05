@@ -8,6 +8,7 @@ import {
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
+  isValidCursorId,
 } from "./audit-query";
 import { AUDIT_ACTION, AUDIT_ACTION_VALUES } from "@/lib/constants";
 
@@ -103,8 +104,8 @@ describe("parseAuditLogParams", () => {
   });
 
   it("parses cursor from search params", () => {
-    const params = new URLSearchParams({ cursor: "cursor-id-123" });
-    expect(parseAuditLogParams(params).cursor).toBe("cursor-id-123");
+    const params = new URLSearchParams({ cursor: "550e8400-e29b-41d4-a716-446655440000" });
+    expect(parseAuditLogParams(params).cursor).toBe("550e8400-e29b-41d4-a716-446655440000");
   });
 
   it("returns null cursor when not provided", () => {
@@ -155,6 +156,44 @@ describe("parseAuditLogParams", () => {
   it("accepts limit of exactly 100", () => {
     const params = new URLSearchParams({ limit: "100" });
     expect(parseAuditLogParams(params).limit).toBe(100);
+  });
+});
+
+describe("isValidCursorId", () => {
+  it("returns true for null (no cursor)", () => {
+    expect(isValidCursorId(null)).toBe(true);
+  });
+
+  it("returns true for undefined (no cursor)", () => {
+    expect(isValidCursorId(undefined)).toBe(true);
+  });
+
+  it("returns true for a valid UUIDv4", () => {
+    expect(isValidCursorId("550e8400-e29b-41d4-a716-446655440000")).toBe(true);
+  });
+
+  it("returns true for a UUIDv4 with uppercase hex", () => {
+    expect(isValidCursorId("550E8400-E29B-41D4-A716-446655440000")).toBe(true);
+  });
+
+  it("returns false for an empty string", () => {
+    expect(isValidCursorId("")).toBe(false);
+  });
+
+  it("returns false for arbitrary text", () => {
+    expect(isValidCursorId("not-a-valid-id")).toBe(false);
+  });
+
+  it("returns false for a UUID missing one segment", () => {
+    expect(isValidCursorId("550e8400-e29b-41d4-a716")).toBe(false);
+  });
+
+  it("returns false for SQL injection attempt", () => {
+    expect(isValidCursorId("'; DROP TABLE--")).toBe(false);
+  });
+
+  it("returns false for a CUID v1 string", () => {
+    expect(isValidCursorId("cjld2cyuq0000t3rmniod1foy")).toBe(false);
   });
 });
 

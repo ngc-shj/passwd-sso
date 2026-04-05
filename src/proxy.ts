@@ -325,7 +325,6 @@ function applySecurityHeaders(
       group: "csp-endpoint",
       max_age: 10886400,
       endpoints: [{ url: cspReportUrl }],
-      include_subdomains: true,
     })
   );
   response.headers.set(

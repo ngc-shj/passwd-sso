@@ -225,7 +225,7 @@ describe("GET /api/share-links/mine", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/share-links/mine?cursor=share-prev"
+      "http://localhost/api/share-links/mine?cursor=550e8400-e29b-41d4-a716-446655440000"
     );
     const res = await GET(req as never);
     const { status, json } = await parseResponse(res);
@@ -235,7 +235,7 @@ describe("GET /api/share-links/mine", () => {
     expect(json.nextCursor).toBe("share-29");
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "share-prev" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
         take: 31,
       })

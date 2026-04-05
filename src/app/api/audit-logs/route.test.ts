@@ -153,12 +153,12 @@ describe("GET /api/audit-logs", () => {
     mockAuditLogFindMany.mockResolvedValue([]);
 
     await GET(
-      createRequest("GET", BASE_URL, { searchParams: { cursor: "log-42" } }),
+      createRequest("GET", BASE_URL, { searchParams: { cursor: "550e8400-e29b-41d4-a716-446655440000" } }),
     );
 
     expect(mockAuditLogFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "log-42" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
       }),
     );
@@ -272,7 +272,7 @@ describe("GET /api/audit-logs", () => {
     mockAuditLogFindMany.mockRejectedValue(new Error("Invalid cursor value"));
 
     const res = await GET(
-      createRequest("GET", BASE_URL, { searchParams: { cursor: "bad-cursor-id" } }),
+      createRequest("GET", BASE_URL, { searchParams: { cursor: "00000000-0000-0000-0000-000000000000" } }),
     );
     expect(res.status).toBe(400);
   });

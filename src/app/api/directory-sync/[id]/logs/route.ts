@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { isValidCursorId } from "@/lib/audit-query";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -60,34 +61,42 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
     100,
     Math.max(1, parseInt(url.searchParams.get("limit") ?? "20", 10) || 20),
   );
-  const cursor = url.searchParams.get("cursor") ?? undefined;
+  const cursor = url.searchParams.get("cursor");
+  if (!isValidCursorId(cursor)) {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   // Fetch logs with keyset pagination
-  const logs = await withUserTenantRls(session.user.id, () =>
-    prisma.directorySyncLog.findMany({
-      where: { configId: id, tenantId },
-      orderBy: { startedAt: "desc" },
-      take: limit + 1, // fetch one extra to detect hasMore
-      ...(cursor
-        ? {
-            cursor: { id: cursor },
-            skip: 1, // skip the cursor row itself
-          }
-        : {}),
-      select: {
-        id: true,
-        status: true,
-        startedAt: true,
-        completedAt: true,
-        dryRun: true,
-        usersCreated: true,
-        usersUpdated: true,
-        usersDeactivated: true,
-        groupsUpdated: true,
-        errorMessage: true,
-      },
-    }),
-  );
+  let logs;
+  try {
+    logs = await withUserTenantRls(session.user.id, () =>
+      prisma.directorySyncLog.findMany({
+        where: { configId: id, tenantId },
+        orderBy: { startedAt: "desc" },
+        take: limit + 1, // fetch one extra to detect hasMore
+        ...(cursor
+          ? {
+              cursor: { id: cursor },
+              skip: 1, // skip the cursor row itself
+            }
+          : {}),
+        select: {
+          id: true,
+          status: true,
+          startedAt: true,
+          completedAt: true,
+          dryRun: true,
+          usersCreated: true,
+          usersUpdated: true,
+          usersDeactivated: true,
+          groupsUpdated: true,
+          errorMessage: true,
+        },
+      }),
+    );
+  } catch {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
 
   const hasMore = logs.length > limit;
   const items = hasMore ? logs.slice(0, limit) : logs;

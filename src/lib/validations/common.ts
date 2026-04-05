@@ -14,6 +14,9 @@ export const HEX64_PATTERN = "[0-9a-fA-F]{64}"; // 256-bit key as hex (base patt
 export const HEX64_RE = new RegExp(`^${HEX64_PATTERN}$`);
 export const HEX_COLOR_REGEX = /^#[0-9a-fA-F]{6}$/;
 
+// UUID — used for cursor-based pagination input validation
+export const CURSOR_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ─── Shared Enum Values ──────────────────────────────────────
 export const EXPIRY_PERIODS = ["1h", "1d", "7d", "30d"] as const;
 export const DIRECTORY_SYNC_PROVIDERS = ["AZURE_AD", "GOOGLE_WORKSPACE", "OKTA"] as const;

@@ -7,6 +7,7 @@ import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
+import { isValidCursorId } from "@/lib/audit-query";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only
@@ -25,6 +26,9 @@ async function handleGET(req: NextRequest) {
   }
   const teamId = searchParams.get("team");
   const cursor = searchParams.get("cursor");
+  if (!isValidCursorId(cursor)) {
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+  }
   const limit = 30;
 
   const where: Record<string, unknown> = {};

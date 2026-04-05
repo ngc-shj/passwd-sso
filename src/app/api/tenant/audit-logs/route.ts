@@ -15,6 +15,7 @@ import {
   buildAuditLogDateFilter,
   buildAuditLogActionFilter,
   paginateResult,
+  isValidCursorId,
 } from "@/lib/audit-query";
 
 // GET /api/tenant/audit-logs — Tenant-scoped audit logs (TENANT + TEAM scope, ADMIN/OWNER only)
@@ -36,6 +37,9 @@ async function handleGET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
+  if (!isValidCursorId(cursor)) {
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+  }
   const scopeParam = searchParams.get("scope");
   const teamIdParam = searchParams.get("teamId");
   const validActorType = parseActorType(searchParams);
