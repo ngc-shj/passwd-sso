@@ -33,6 +33,7 @@ import {
   Paperclip,
   Lock,
   AlertTriangle,
+  Info,
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
@@ -262,6 +263,10 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
           </div>
         ) : (
           <div className="space-y-4">
+            <div className="flex items-start gap-2 rounded-lg border border-blue-500/50 bg-blue-500/10 p-2.5 text-xs text-blue-700 dark:text-blue-400">
+              <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span>{t("sendEncryptionNotice")}</span>
+            </div>
             <Tabs value={tab} onValueChange={setTab}>
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="text" className="flex items-center gap-1.5">

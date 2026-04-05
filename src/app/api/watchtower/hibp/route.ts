@@ -14,6 +14,8 @@ const MAX_CACHE_ENTRIES = 5_000;
 
 type CacheEntry = { expiresAt: number; body: string };
 
+// TODO: When migrating to Redis, unify with proxy.ts session cache
+// to share a single Redis connection and TTL management strategy.
 const cache = new Map<string, CacheEntry>();
 
 const hibpLimiter = createRateLimiter({ windowMs: RATE_WINDOW_MS, max: HIBP_RATE_MAX });
