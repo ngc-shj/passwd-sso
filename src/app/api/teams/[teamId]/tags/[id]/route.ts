@@ -112,10 +112,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return NextResponse.json(
-        { error: API_ERROR.TAG_ALREADY_EXISTS },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
     }
     throw err;
   }
