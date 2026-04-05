@@ -621,6 +621,36 @@ describe("proxy — access restriction", () => {
     expect(mockCheckAccessWithAudit).not.toHaveBeenCalled();
   });
 
+  it("returns 403 for /api/vault/unlock when access denied", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/vault/unlock`, {
+      method: "POST",
+      headers: { Cookie: "authjs.session-token=sess-acl-vault" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("ACCESS_DENIED");
+  });
+
+  it("returns 403 for /api/folders when access denied", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/folders`, {
+      method: "GET",
+      headers: { Cookie: "authjs.session-token=sess-acl-folders" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("ACCESS_DENIED");
+  });
+
   it("returns 403 for dashboard route when access denied", async () => {
     mockResolveUserTenantId.mockResolvedValue("tenant1");
     mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });

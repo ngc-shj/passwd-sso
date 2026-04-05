@@ -39,7 +39,9 @@ export function parseAuditLogParams(searchParams: URLSearchParams): AuditLogPara
 
 /**
  * Builds a Prisma `createdAt` filter object from optional ISO date strings.
- * Returns `undefined` when neither value is provided.
+ * Returns `undefined` when neither value is provided or all dates are invalid.
+ * Invalid date strings are silently ignored (lenient — list endpoints tolerate
+ * bad input; download endpoints validate strictly and return 400).
  */
 export function buildAuditLogDateFilter(
   from: string | null,
