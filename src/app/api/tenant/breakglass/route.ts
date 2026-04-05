@@ -14,7 +14,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, forbidden, rateLimited } from "@/lib/api-response";
+import { errorResponse, unauthorized, forbidden, rateLimited, zodValidationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 
@@ -60,9 +60,7 @@ async function handlePOST(req: NextRequest) {
 
   const parsed = createBreakglassGrantSchema.safeParse(body);
   if (!parsed.success) {
-    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: parsed.error.flatten(),
-    });
+    return zodValidationError(parsed.error);
   }
 
   const { targetUserId, reason, incidentRef } = parsed.data;

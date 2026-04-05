@@ -572,7 +572,7 @@ export function createWebhookCardTests(
             status: 400,
             json: () =>
               Promise.resolve({
-                details: { fieldErrors: { url: ["invalid"] } },
+                details: { properties: { url: { errors: ["invalid"] } } },
               }),
           });
         }

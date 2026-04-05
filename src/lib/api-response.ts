@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { z, type ZodError } from "zod";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { mapPrismaError } from "@/lib/prisma-error";
 
@@ -35,6 +36,9 @@ export const validationError = (details: unknown) =>
   errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
     details,
   });
+
+export const zodValidationError = (error: ZodError) =>
+  validationError(z.treeifyError(error));
 
 export const rateLimited = (retryAfterMs?: number) => {
   const headers: Record<string, string> = {};

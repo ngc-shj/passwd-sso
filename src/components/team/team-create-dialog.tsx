@@ -183,7 +183,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
 
       if (res.status === 400) {
         const data = await res.json().catch(() => null);
-        if (data?.details?.fieldErrors?.slug?.length) {
+        if (data?.details?.properties?.slug?.errors?.length) {
           setSlugError(t("slugInvalidFormat"));
         } else {
           toast.error(t("validationError"));

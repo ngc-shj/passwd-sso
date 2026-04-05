@@ -17,7 +17,7 @@ import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, rateLimited, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, rateLimited, zodValidationError } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import {
@@ -80,7 +80,7 @@ async function handlePOST(request: NextRequest) {
   const body = await request.json();
   const parsed = createDelegationSchema.safeParse(body);
   if (!parsed.success) {
-    return validationError(parsed.error.flatten());
+    return zodValidationError(parsed.error);
   }
 
   // Extract metadata entries — no secrets in request body

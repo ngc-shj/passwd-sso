@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { rateLimited, zodValidationError } from "@/lib/api-response";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -65,10 +65,7 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = generateSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
+    return zodValidationError(parsed.error);
   }
 
   const data = parsed.data;

@@ -6,7 +6,7 @@
  *
  * ### Server side (API routes)
  * - Always return `{ error: API_ERROR.XXX }` — never raw English strings.
- * - For Zod validation failures: `{ error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() }`
+ * - For Zod validation failures: `zodValidationError(parsed.error)` from `@/lib/api-response`
  *
  * ### Client side (components)
  * - **EA UI** (grant-card, create-grant-dialog, invite/[token], [id]/vault):

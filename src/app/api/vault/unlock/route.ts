@@ -12,7 +12,7 @@ import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
 import { hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
@@ -67,7 +67,7 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = unlockSchema.safeParse(body);
   if (!parsed.success) {
-    return validationError(parsed.error.flatten());
+    return zodValidationError(parsed.error);
   }
 
   const user = await withUserTenantRls(session.user.id, async () =>

@@ -18,12 +18,12 @@ describe("errorResponse", () => {
 
   it("merges details into response body", async () => {
     const res = errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
-      details: { fieldErrors: { title: ["required"] } },
+      details: { properties: { title: { errors: ["required"] } } },
     });
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.error).toBe("VALIDATION_ERROR");
-    expect(body.details.fieldErrors.title).toEqual(["required"]);
+    expect(body.details.properties.title.errors).toEqual(["required"]);
   });
 
   it("omits details key when not provided", async () => {
@@ -78,7 +78,7 @@ describe("preset helpers", () => {
   });
 
   it("validationError returns 400 with details", async () => {
-    const details = { fieldErrors: { email: ["invalid"] } };
+    const details = { properties: { email: { errors: ["invalid"] } } };
     const res = validationError(details);
     expect(res.status).toBe(400);
     const body = await res.json();

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { type ZodSchema } from "zod";
+import { z, type ZodSchema } from "zod";
 import { API_ERROR } from "@/lib/api-error-codes";
 
 type ParseOk<T> = { ok: true; data: T };
@@ -43,7 +43,7 @@ export async function parseBody<T>(
       response: NextResponse.json(
         {
           error: API_ERROR.VALIDATION_ERROR,
-          details: parsed.error.flatten(),
+          details: z.treeifyError(parsed.error),
         },
         { status: 400 },
       ),
