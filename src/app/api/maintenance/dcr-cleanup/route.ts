@@ -18,7 +18,7 @@ import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 
@@ -29,7 +29,7 @@ const bodySchema = z.object({
 async function handlePOST(req: NextRequest) {
   // Bearer token auth (checked before rate limit to prevent unauthenticated DoS)
   if (!verifyAdminToken(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   // Rate limit (global fixed key, applied after auth)

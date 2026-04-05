@@ -16,6 +16,8 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse, unauthorized, rateLimited, validationError } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp } from "@/lib/ip-access";
 import {
@@ -60,31 +62,25 @@ async function handlePOST(request: NextRequest) {
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   const userId = session.user.id;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return NextResponse.json({ error: "No tenant" }, { status: 403 });
+    return errorResponse(API_ERROR.NO_TENANT, 403);
   }
 
   // Rate limit
   const rateLimitResult = await delegationRateLimiter.check(`delegation:create:${userId}`);
   if (!rateLimitResult.allowed) {
-    return NextResponse.json(
-      { error: "Rate limit exceeded" },
-      { status: 429, headers: { "Retry-After": String(Math.ceil((rateLimitResult.retryAfterMs ?? 60000) / 1000)) } },
-    );
+    return rateLimited(rateLimitResult.retryAfterMs);
   }
 
   const body = await request.json();
   const parsed = createDelegationSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Invalid request", details: parsed.error.issues },
-      { status: 400 },
-    );
+    return validationError(parsed.error);
   }
 
   // Extract metadata entries — no secrets in request body
@@ -106,7 +102,7 @@ async function handlePOST(request: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   if (!mcpToken) {
-    return NextResponse.json({ error: "MCP token not found or expired" }, { status: 404 });
+    return errorResponse(API_ERROR.MCP_TOKEN_NOT_FOUND, 404);
   }
 
   const scopes = mcpToken.scope.split(",").map((s) => s.trim());
@@ -114,10 +110,7 @@ async function handlePOST(request: NextRequest) {
     scopes.includes(MCP_SCOPE.CREDENTIALS_LIST) ||
     scopes.includes(MCP_SCOPE.CREDENTIALS_USE);
   if (!hasDelegationScope) {
-    return NextResponse.json(
-      { error: "MCP token does not have credentials:list or credentials:use scope" },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.MCP_TOKEN_SCOPE_INSUFFICIENT, 403);
   }
 
   // Check tenant policy for TTL
@@ -152,10 +145,7 @@ async function handlePOST(request: NextRequest) {
   const ownedIds = new Set(ownedEntries.map((e) => e.id));
   const missingIds = entryIds.filter((id) => !ownedIds.has(id));
   if (missingIds.length > 0) {
-    return NextResponse.json(
-      { error: "Some entries not found or not accessible" },
-      { status: 403 },
-    );
+    return errorResponse(API_ERROR.DELEGATION_ENTRIES_NOT_FOUND, 404);
   }
 
   // Auto-revoke existing delegation for this token (one-active-per-token)
@@ -208,10 +198,7 @@ async function handlePOST(request: NextRequest) {
     await withBypassRls(prisma, () =>
       prisma.delegationSession.delete({ where: { id: delegationSession.id } }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP).catch(() => {});
-    return NextResponse.json(
-      { error: "Failed to store delegation entries" },
-      { status: 503 },
-    );
+    return errorResponse(API_ERROR.DELEGATION_STORE_FAILED, 503);
   }
 
   // Audit log — both personal and tenant scope (no plaintext in metadata!)
@@ -237,13 +224,13 @@ async function handlePOST(request: NextRequest) {
 async function handleGET(_request: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   const { id: userId } = session.user;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return NextResponse.json({ error: "No tenant" }, { status: 403 });
+    return errorResponse(API_ERROR.NO_TENANT, 403);
   }
 
   const sessions = await withBypassRls(prisma, () =>
@@ -326,13 +313,13 @@ async function handleDELETE(request: NextRequest) {
 
   const session = await auth();
   if (!session?.user?.id) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   const userId = session.user.id;
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
-    return NextResponse.json({ error: "No tenant" }, { status: 403 });
+    return errorResponse(API_ERROR.NO_TENANT, 403);
   }
 
   const count = await revokeAllDelegationSessions(userId, tenantId, "vault_lock");

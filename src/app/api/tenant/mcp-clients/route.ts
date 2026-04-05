@@ -11,7 +11,7 @@ import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse } from "@/lib/api-response";
+import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -32,14 +32,14 @@ const createSchema = z.object({
 
 export async function GET(_req: NextRequest) {
   const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.id) return unauthorized();
 
   let actor;
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -101,14 +101,14 @@ export async function GET(_req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.id) return unauthorized();
 
   let actor;
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -117,12 +117,12 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Validation error", issues: parsed.error.issues }, { status: 400 });
+    return validationError(parsed.error.flatten());
   }
 
   const { name, redirectUris, allowedScopes } = parsed.data;
@@ -132,10 +132,7 @@ export async function POST(req: NextRequest) {
     prisma.mcpClient.count({ where: { tenantId: actor.tenantId } }),
   );
   if (count >= MAX_MCP_CLIENTS_PER_TENANT) {
-    return NextResponse.json(
-      { error: "MCP_CLIENT_LIMIT_EXCEEDED", message: `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant` },
-      { status: 422 },
-    );
+    return errorResponse(API_ERROR.MCP_CLIENT_LIMIT_EXCEEDED, 422, { message: `Maximum ${MAX_MCP_CLIENTS_PER_TENANT} MCP clients per tenant` });
   }
 
   // Check name uniqueness

@@ -159,7 +159,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(401);
     const json = await res.json();
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 403 when no tenant", async () => {
@@ -167,7 +167,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("No tenant");
+    expect(json.error).toBe("NO_TENANT");
   });
 
   it("returns 429 when rate limited", async () => {
@@ -182,7 +182,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(body));
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("Invalid request");
+    expect(json.error).toBe("VALIDATION_ERROR");
   });
 
   it("returns 400 for non-UUID mcpTokenId", async () => {
@@ -220,7 +220,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toMatch(/not found or expired/i);
+    expect(json.error).toBe("MCP_TOKEN_NOT_FOUND");
   });
 
   it("returns 403 when MCP token lacks delegation scope", async () => {
@@ -231,7 +231,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toMatch(/credentials:list|credentials:use/);
+    expect(json.error).toBe("MCP_TOKEN_SCOPE_INSUFFICIENT");
   });
 
   it("accepts credentials:use scope", async () => {
@@ -243,13 +243,13 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns 403 when entries not owned by user", async () => {
+  it("returns 404 when entries not owned by user", async () => {
     // Only ENTRY_ID_1 owned, ENTRY_ID_2 is not
     mockPrismaPasswordEntry.findMany.mockResolvedValue([{ id: ENTRY_ID_1 }]);
     const res = await POST(makePostRequest(VALID_POST_BODY));
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toMatch(/not found or not accessible/i);
+    expect(json.error).toBe("DELEGATION_ENTRIES_NOT_FOUND");
   });
 
   it("auto-revokes existing delegation session for same token", async () => {
@@ -325,7 +325,7 @@ describe("POST /api/vault/delegation", () => {
     const res = await POST(makePostRequest(VALID_POST_BODY));
     expect(res.status).toBe(503);
     const json = await res.json();
-    expect(json.error).toMatch(/Failed to store/i);
+    expect(json.error).toBe("DELEGATION_STORE_FAILED");
     expect(mockPrismaDelegationSession.delete).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: SESSION_ID } }),
     );

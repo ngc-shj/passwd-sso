@@ -100,5 +100,13 @@
   "saTokenLimitExceeded": "サービスアカウントのトークン上限に達しました。",
   "saTokenNotFound": "サービスアカウントトークンが見つかりません。",
   "saTokenAlreadyRevoked": "サービスアカウントトークンは既に取り消されています。",
-  "mcpClientNameConflict": "同じ名前のMCPクライアントが既に存在します。"
+  "mcpClientNameConflict": "同じ名前のMCPクライアントが既に存在します。",
+  "mcpClientLimitExceeded": "テナントごとのMCPクライアント上限に達しました。",
+  "mcpTokenNotFound": "MCPトークンが見つからないか、有効期限が切れています。",
+  "mcpTokenScopeInsufficient": "MCPトークンに必要なスコープがありません。",
+  "delegationStoreFailed": "委任エントリの保存に失敗しました。",
+  "delegationEntriesNotFound": "一部のエントリが見つからないか、アクセスできません。",
+  "noTenant": "テナントに所属していません。",
+  "invalidSession": "セッションIDが無効です。",
+  "internalError": "内部エラーが発生しました。"
 }

@@ -113,10 +113,7 @@ async function handlePOST(req: NextRequest) {
   if (authResult.type === "service_account") {
     // SA self-service: requires access-request:create scope
     if (!authResult.scopes.includes(SA_TOKEN_SCOPE.ACCESS_REQUEST_CREATE)) {
-      return NextResponse.json(
-        { error: API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT },
-        { status: 403 },
-      );
+      return errorResponse(API_ERROR.EXTENSION_TOKEN_SCOPE_INSUFFICIENT, 403);
     }
 
     tenantId = authResult.tenantId;
@@ -140,7 +137,7 @@ async function handlePOST(req: NextRequest) {
       }),
     BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     if (!sa || !sa.isActive) {
-      return NextResponse.json({ error: API_ERROR.SA_NOT_FOUND }, { status: 404 });
+      return errorResponse(API_ERROR.SA_NOT_FOUND, 404);
     }
     userId = sa.createdById;
   } else {
@@ -176,7 +173,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
     if (!sa || sa.tenantId !== tenantId || !sa.isActive) {
-      return NextResponse.json({ error: API_ERROR.SA_NOT_FOUND }, { status: 404 });
+      return errorResponse(API_ERROR.SA_NOT_FOUND, 404);
     }
   }
 

@@ -169,7 +169,7 @@ async function handlePATCH(req: NextRequest) {
         return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
       }
     } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
-      return NextResponse.json({ error: API_ERROR.VALIDATION_ERROR, message: "tailscaleTailnet is required when tailscaleEnabled is true" }, { status: 400 });
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
     }
   }
   if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {

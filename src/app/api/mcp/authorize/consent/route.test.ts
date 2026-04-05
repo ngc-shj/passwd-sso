@@ -196,7 +196,7 @@ describe("POST /api/mcp/authorize/consent", () => {
 
     expect(res.status).toBe(401);
     const json = await res.json();
-    expect(json.error).toBe("unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 400 when client_id is missing", async () => {

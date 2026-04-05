@@ -10,7 +10,7 @@ import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse } from "@/lib/api-response";
+import { errorResponse, unauthorized, notFound, validationError } from "@/lib/api-response";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -36,14 +36,14 @@ export async function GET(
 ) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.id) return unauthorized();
 
   let actor;
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -65,7 +65,7 @@ export async function GET(
     }),
   );
 
-  if (!client) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!client) return notFound();
   return NextResponse.json({ client });
 }
 
@@ -75,14 +75,14 @@ export async function PUT(
 ) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.id) return unauthorized();
 
   let actor;
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -90,17 +90,17 @@ export async function PUT(
   const existing = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
-  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!existing) return notFound();
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
 
   const parsed = updateSchema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "Validation error", issues: parsed.error.issues }, { status: 400 });
+  if (!parsed.success) return validationError(parsed.error.flatten());
 
   const data = parsed.data;
   const updateData: Record<string, unknown> = {};
@@ -147,14 +147,14 @@ export async function DELETE(
 ) {
   const { id } = await params;
   const session = await auth();
-  if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  if (!session?.user?.id) return unauthorized();
 
   let actor;
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
     if (err instanceof TenantAuthError) {
-      return NextResponse.json({ error: err.message }, { status: err.status });
+      return errorResponse(err.message, err.status);
     }
     throw err;
   }
@@ -162,7 +162,7 @@ export async function DELETE(
   const existing = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.findFirst({ where: { id, tenantId: actor.tenantId } }),
   );
-  if (!existing) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (!existing) return notFound();
 
   await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.mcpClient.delete({ where: { id, tenantId: actor.tenantId } }),

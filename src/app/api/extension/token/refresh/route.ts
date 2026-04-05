@@ -99,7 +99,7 @@ async function handlePOST(req: NextRequest) {
   const parsed = TokenIssueResponseSchema.safeParse(body);
   if (!parsed.success) {
     logger.error({ error: parsed.error.message }, "extension token refresh response validation failed");
-    return NextResponse.json({ error: "INTERNAL_ERROR" }, { status: 500 });
+    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
   }
 
   return NextResponse.json(parsed.data);

@@ -55,7 +55,7 @@ describe("DELETE /api/vault/delegation/[id]", () => {
     const res = await DELETE(makeDeleteRequest(SESSION_ID), params(SESSION_ID));
     expect(res.status).toBe(401);
     const json = await res.json();
-    expect(json.error).toBe("Unauthorized");
+    expect(json.error).toBe("UNAUTHORIZED");
   });
 
   it("returns 403 when no tenant", async () => {
@@ -63,14 +63,14 @@ describe("DELETE /api/vault/delegation/[id]", () => {
     const res = await DELETE(makeDeleteRequest(SESSION_ID), params(SESSION_ID));
     expect(res.status).toBe(403);
     const json = await res.json();
-    expect(json.error).toBe("No tenant");
+    expect(json.error).toBe("NO_TENANT");
   });
 
   it("returns 400 for invalid UUID", async () => {
     const res = await DELETE(makeDeleteRequest("not-a-uuid"), params("not-a-uuid"));
     expect(res.status).toBe(400);
     const json = await res.json();
-    expect(json.error).toBe("Invalid session ID");
+    expect(json.error).toBe("INVALID_SESSION");
   });
 
   it("returns 404 when session not found or already revoked", async () => {
@@ -78,7 +78,7 @@ describe("DELETE /api/vault/delegation/[id]", () => {
     const res = await DELETE(makeDeleteRequest(SESSION_ID), params(SESSION_ID));
     expect(res.status).toBe(404);
     const json = await res.json();
-    expect(json.error).toMatch(/not found or already revoked/i);
+    expect(json.error).toBe("SESSION_NOT_FOUND");
   });
 
   it("returns 200 with revoked: true on success", async () => {
