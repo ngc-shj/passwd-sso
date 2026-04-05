@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.31](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.30...passwd-sso-v0.4.31) (2026-04-05)
+
+
+### Bug Fixes
+
+* add unsaved changes indicator to settings screens, fix MCP client edit P2002 ([#338](https://github.com/ngc-shj/passwd-sso/issues/338)) ([3d94290](https://github.com/ngc-shj/passwd-sso/commit/3d942900b0a79d4414c9b85c1c3a0a9b25ef09bf))
+
 ## [0.4.30](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.29...passwd-sso-v0.4.30) (2026-04-05)
 
 
