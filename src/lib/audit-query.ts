@@ -49,11 +49,11 @@ export function buildAuditLogDateFilter(
   const createdAt: Record<string, Date> = {};
   if (from) {
     const d = new Date(from);
-    if (!isNaN(d.getTime())) createdAt.gte = d;
+    if (!Number.isNaN(d.getTime())) createdAt.gte = d;
   }
   if (to) {
     const d = new Date(to);
-    if (!isNaN(d.getTime())) createdAt.lte = d;
+    if (!Number.isNaN(d.getTime())) createdAt.lte = d;
   }
   // Return undefined when all provided dates were invalid
   return Object.keys(createdAt).length > 0 ? createdAt : undefined;
