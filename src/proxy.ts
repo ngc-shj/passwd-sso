@@ -183,7 +183,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.API_KEYS) ||
     pathname.startsWith(API_PATH.TRAVEL_MODE) ||
     pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
-    pathname.startsWith("/api/vault/") ||
+    pathname.startsWith(API_PATH.VAULT) ||
     pathname.startsWith(API_PATH.FOLDERS) ||
     pathname.startsWith(API_PATH.WEBAUTHN)
   ) {
