@@ -45,10 +45,9 @@ test.describe.serial("Teams", () => {
 
   test("teamOwner: pre-seeded team is visible in teams list", async () => {
     const teamsPage = new TeamsPage(ownerPage);
-    await expect(ownerPage.locator("a.rounded-xl").first()).toBeVisible({
+    await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible({
       timeout: 10_000,
     });
-    await expect(teamsPage.teamByName(PRE_SEEDED_TEAM_NAME)).toBeVisible();
   });
 
   test("teamMember: dashboard loads after vault unlock", async () => {

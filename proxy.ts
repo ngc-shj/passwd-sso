@@ -22,7 +22,6 @@ const _staticDirectives = [
   "form-action 'self' http://localhost:* http://127.0.0.1:*",
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",
-  "block-all-mixed-content",
   "report-to csp-endpoint",
   `report-uri ${_reportUri}`,
 ].join("; ");

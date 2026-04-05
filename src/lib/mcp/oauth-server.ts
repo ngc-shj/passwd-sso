@@ -8,7 +8,7 @@
  * - Token validation (for /api/mcp tool calls)
  */
 
-import { randomBytes, createHash, randomUUID } from "node:crypto";
+import { randomBytes, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -47,14 +47,13 @@ export function computeS256Challenge(verifier: string): string {
 /** Verify PKCE S256: challenge must equal base64url(SHA-256(verifier)). */
 export function verifyPkceS256(challenge: string, verifier: string): boolean {
   const expected = computeS256Challenge(verifier);
-  // Constant-time comparison
-  if (expected.length !== challenge.length) return false;
-  const a = Buffer.from(expected);
-  const b = Buffer.from(challenge);
+  return safeEqual(expected, challenge);
+}
+
+/** Constant-time string comparison via crypto.timingSafeEqual. */
+function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a[i]! ^ b[i]!;
-  return diff === 0;
+  return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
 // ─── Authorization code ───────────────────────────────────────
@@ -154,7 +153,7 @@ export async function exchangeCodeForToken(
       if (authCode.mcpClient.clientId !== params.clientId)
         return { error: "invalid_client" as const };
       const isPublicClient = authCode.mcpClient.clientSecretHash === "";
-      if (!isPublicClient && authCode.mcpClient.clientSecretHash !== params.clientSecretHash)
+      if (!isPublicClient && !safeEqual(authCode.mcpClient.clientSecretHash, params.clientSecretHash))
         return { error: "invalid_client" as const };
       if (!authCode.mcpClient.isActive) return { error: "invalid_client" as const };
 
@@ -330,7 +329,7 @@ export async function exchangeRefreshToken(params: {
       const isPublicClient = rt.mcpClient.clientSecretHash === "";
       if (
         rt.mcpClient.clientId !== params.clientId ||
-        (!isPublicClient && rt.mcpClient.clientSecretHash !== params.clientSecretHash) ||
+        (!isPublicClient && !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash)) ||
         !rt.mcpClient.isActive
       ) {
         return { ok: false as const, error: "invalid_client" as const };
@@ -472,6 +471,7 @@ export async function revokeToken(params: {
   token: string;
   tokenTypeHint?: "access_token" | "refresh_token";
   clientId: string;
+  clientSecretHash?: string;
 }): Promise<void> {
   const tokenHash = hashToken(params.token);
 
@@ -481,10 +481,15 @@ export async function revokeToken(params: {
       if (params.tokenTypeHint !== "access_token") {
         const rt = await tx.mcpRefreshToken.findUnique({
           where: { tokenHash },
-          include: { mcpClient: { select: { clientId: true } } },
+          include: { mcpClient: { select: { clientId: true, clientSecretHash: true } } },
         });
 
         if (rt && rt.mcpClient.clientId === params.clientId) {
+          // RFC 7009 §2.1: confidential clients must authenticate
+          const isPublicClient = rt.mcpClient.clientSecretHash === "";
+          if (!isPublicClient && (!params.clientSecretHash || !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash))) {
+            return; // Silent success per RFC 7009 — do not reveal token existence
+          }
           // Revoke entire rotation family
           await tx.mcpRefreshToken.updateMany({
             where: { familyId: rt.familyId, revokedAt: null },
@@ -509,10 +514,15 @@ export async function revokeToken(params: {
       // Try access token
       const at = await tx.mcpAccessToken.findUnique({
         where: { tokenHash },
-        include: { mcpClient: { select: { clientId: true } } },
+        include: { mcpClient: { select: { clientId: true, clientSecretHash: true } } },
       });
 
       if (at && at.mcpClient.clientId === params.clientId) {
+        // RFC 7009 §2.1: confidential clients must authenticate
+        const isPublicClient = at.mcpClient.clientSecretHash === "";
+        if (!isPublicClient && (!params.clientSecretHash || !safeEqual(at.mcpClient.clientSecretHash, params.clientSecretHash))) {
+          return; // Silent success per RFC 7009
+        }
         await tx.mcpAccessToken.update({
           where: { id: at.id },
           data: { revokedAt: new Date() },

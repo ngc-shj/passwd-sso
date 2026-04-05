@@ -1,5 +1,6 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { revokeToken } from "@/lib/mcp/oauth-server";
+import { hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 
@@ -51,7 +52,10 @@ export async function POST(req: NextRequest) {
     // RFC 7009 §2.1: unsupported token type → ignore hint, try both
   }
 
-  await revokeToken({ token, tokenTypeHint, clientId });
+  const clientSecret = body.client_secret;
+  const clientSecretHash = clientSecret ? hashToken(clientSecret) : undefined;
+
+  await revokeToken({ token, tokenTypeHint, clientId, clientSecretHash });
 
   // RFC 7009 §2.2: always 200
   return new NextResponse(null, { status: 200 });

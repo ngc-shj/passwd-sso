@@ -210,6 +210,36 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for /api/vault/setup without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/setup", {
+        Cookie: "authjs.session-token=sess-vault-setup",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for /api/vault/unlock without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/unlock", {
+        Cookie: "authjs.session-token=sess-vault-unlock",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for /api/folders without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/folders", {
+        Cookie: "authjs.session-token=sess-folders",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("allows non-protected API routes without auth", async () => {
     const res = await proxy(
       createApiRequest("/api/auth/session"),

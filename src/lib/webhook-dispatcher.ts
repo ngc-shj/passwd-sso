@@ -113,7 +113,10 @@ const BLOCKED_CIDRS = [
   "169.254.0.0/16",     // link-local + cloud metadata (169.254.169.254)
   "100.64.0.0/10",      // RFC 6598 CGNAT (also Tailscale)
   "192.0.0.0/24",       // RFC 6890 IETF protocol assignments
+  "192.0.2.0/24",       // RFC 5737 TEST-NET-1
   "198.18.0.0/15",      // RFC 2544 benchmarking
+  "198.51.100.0/24",    // RFC 5737 TEST-NET-2
+  "203.0.113.0/24",     // RFC 5737 TEST-NET-3
   "240.0.0.0/4",        // RFC 1112 reserved
   // IPv6
   "::1/128",            // loopback
