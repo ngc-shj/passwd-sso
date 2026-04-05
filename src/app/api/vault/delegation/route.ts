@@ -80,7 +80,7 @@ async function handlePOST(request: NextRequest) {
   const body = await request.json();
   const parsed = createDelegationSchema.safeParse(body);
   if (!parsed.success) {
-    return validationError(parsed.error);
+    return validationError(parsed.error.flatten());
   }
 
   // Extract metadata entries — no secrets in request body
@@ -145,7 +145,7 @@ async function handlePOST(request: NextRequest) {
   const ownedIds = new Set(ownedEntries.map((e) => e.id));
   const missingIds = entryIds.filter((id) => !ownedIds.has(id));
   if (missingIds.length > 0) {
-    return errorResponse(API_ERROR.DELEGATION_ENTRIES_NOT_FOUND, 404);
+    return errorResponse(API_ERROR.DELEGATION_ENTRIES_NOT_FOUND, 403);
   }
 
   // Auto-revoke existing delegation for this token (one-active-per-token)

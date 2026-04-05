@@ -243,11 +243,11 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns 404 when entries not owned by user", async () => {
+  it("returns 403 when entries not owned by user", async () => {
     // Only ENTRY_ID_1 owned, ENTRY_ID_2 is not
     mockPrismaPasswordEntry.findMany.mockResolvedValue([{ id: ENTRY_ID_1 }]);
     const res = await POST(makePostRequest(VALID_POST_BODY));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
     const json = await res.json();
     expect(json.error).toBe("DELEGATION_ENTRIES_NOT_FOUND");
   });

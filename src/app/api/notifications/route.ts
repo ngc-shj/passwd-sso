@@ -48,10 +48,7 @@ async function handleGET(req: NextRequest) {
       }),
     );
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_CURSOR },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
   }
 
   const hasMore = notifications.length > limit;
