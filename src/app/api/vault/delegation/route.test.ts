@@ -177,6 +177,18 @@ describe("POST /api/vault/delegation", () => {
     expect(res.headers.get("Retry-After")).toBe("30");
   });
 
+  it("returns 400 INVALID_JSON for malformed JSON body", async () => {
+    const req = new NextRequest("http://localhost/api/vault/delegation", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: "http://localhost" },
+      body: "not-valid-json{{{",
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("INVALID_JSON");
+  });
+
   it("returns 400 for missing mcpTokenId", async () => {
     const { mcpTokenId: _omit, ...body } = VALID_POST_BODY;
     const res = await POST(makePostRequest(body));

@@ -95,9 +95,10 @@ async function handlePOST(request: NextRequest) {
   const parsed = rotateKeySchema.safeParse(body);
   if (!parsed.success) {
     // Cap error details to prevent response amplification on bulk payloads
-    const issues = parsed.error.issues;
-    if (issues.length > 10) {
-      return validationError({ errorCount: issues.length });
+    if (parsed.error.issues.length > 10) {
+      return validationError({
+        errors: [`Validation failed with ${parsed.error.issues.length} errors`],
+      });
     }
     return zodValidationError(parsed.error);
   }

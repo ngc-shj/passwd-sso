@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { z } from "zod";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   errorResponse,
@@ -6,6 +7,7 @@ import {
   notFound,
   forbidden,
   validationError,
+  zodValidationError,
   rateLimited,
 } from "./api-response";
 
@@ -84,5 +86,21 @@ describe("preset helpers", () => {
     const body = await res.json();
     expect(body.error).toBe("VALIDATION_ERROR");
     expect(body.details).toEqual(details);
+  });
+
+  it("zodValidationError returns treeifyError shape from ZodError", async () => {
+    const schema = z.object({ name: z.string().min(1), age: z.number() });
+    const result = schema.safeParse({ name: "", age: "not-a-number" });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const res = zodValidationError(result.error);
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toBe("VALIDATION_ERROR");
+      expect(body.details).toHaveProperty("errors");
+      expect(body.details).toHaveProperty("properties");
+      expect(body.details.properties.name).toHaveProperty("errors");
+      expect(body.details.properties.age).toHaveProperty("errors");
+    }
   });
 });
