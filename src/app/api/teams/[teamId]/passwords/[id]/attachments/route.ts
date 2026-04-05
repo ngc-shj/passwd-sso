@@ -196,6 +196,9 @@ async function handlePOST(
   }
 
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : 1;
+  if (isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
 
   // encryptionMode is required and must be 1 (ItemKey)
   if (!encryptionModeStr) {

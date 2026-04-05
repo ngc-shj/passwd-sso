@@ -87,9 +87,10 @@ describe("createE2EPasswordSchema", () => {
     ).toThrow();
   });
 
-  it("id is optional when aadVersion=0", () => {
-    const result = createE2EPasswordSchema.parse({ ...validBase, id: undefined, aadVersion: 0 });
-    expect(result.id).toBeUndefined();
+  it("rejects aadVersion=0", () => {
+    expect(() =>
+      createE2EPasswordSchema.parse({ ...validBase, id: undefined, aadVersion: 0 }),
+    ).toThrow();
   });
 
   it("id is required when aadVersion defaults to 1", () => {
@@ -156,6 +157,12 @@ describe("updateE2EPasswordSchema", () => {
   it("aadVersion is optional in update", () => {
     const result = updateE2EPasswordSchema.parse({ isFavorite: false });
     expect(result.aadVersion).toBeUndefined();
+  });
+
+  it("rejects aadVersion=0 in update", () => {
+    expect(() =>
+      updateE2EPasswordSchema.parse({ aadVersion: 0 }),
+    ).toThrow();
   });
 
   it("rejects aadVersion=2 in update", () => {
