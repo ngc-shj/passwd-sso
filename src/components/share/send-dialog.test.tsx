@@ -166,6 +166,14 @@ describe("SendDialog", () => {
     mockFetch.mockRestore();
   });
 
+  it("shows server-side encryption notice when dialog is open", () => {
+    render(
+      <SendDialog open={true} onOpenChange={() => {}} />
+    );
+
+    expect(screen.getByText("sendEncryptionNotice")).toBeInTheDocument();
+  });
+
   it("shows error toast on API failure", async () => {
     const mockFetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ error: "VALIDATION_ERROR" }), {

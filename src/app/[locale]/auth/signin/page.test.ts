@@ -28,6 +28,12 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
   getAppOrigin: () => "https://example.com",
 }));
+const { mockParseAllowedGoogleDomains } = vi.hoisted(() => ({
+  mockParseAllowedGoogleDomains: vi.fn<() => string[]>(() => []),
+}));
+vi.mock("@/lib/google-domain", () => ({
+  parseAllowedGoogleDomains: mockParseAllowedGoogleDomains,
+}));
 
 // Mock UI components to avoid React DOM rendering in node env
 vi.mock("@/components/ui/card", () => ({
@@ -289,6 +295,62 @@ describe("SignInPage", () => {
       const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
 
       expect(hasProvider(result, "saml-jackson")).toBe(false);
+    });
+  });
+
+  describe("Google multi-domain hint", () => {
+    const googleEnvKeys = ["AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET"] as const;
+    const savedGoogle: Record<string, string | undefined> = {};
+
+    beforeEach(() => {
+      for (const k of googleEnvKeys) savedGoogle[k] = process.env[k];
+    });
+
+    afterEach(() => {
+      for (const k of googleEnvKeys) {
+        if (savedGoogle[k] !== undefined) process.env[k] = savedGoogle[k];
+        else delete process.env[k];
+      }
+      mockParseAllowedGoogleDomains.mockReturnValue([]);
+    });
+
+    it("shows hint when multiple Google Workspace domains are configured", async () => {
+      process.env.AUTH_GOOGLE_ID = "test-id";
+      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      mockParseAllowedGoogleDomains.mockReturnValue(["example.com", "corp.example.com"]);
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
+
+      expect(
+        hasElement(result, (el) => el.props["data-testid"] === "google-domain-hint"),
+      ).toBe(true);
+    });
+
+    it("does not show hint when single domain is configured", async () => {
+      process.env.AUTH_GOOGLE_ID = "test-id";
+      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      mockParseAllowedGoogleDomains.mockReturnValue(["example.com"]);
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
+
+      expect(
+        hasElement(result, (el) => el.props["data-testid"] === "google-domain-hint"),
+      ).toBe(false);
+    });
+
+    it("does not show hint when no domains are configured", async () => {
+      process.env.AUTH_GOOGLE_ID = "test-id";
+      process.env.AUTH_GOOGLE_SECRET = "test-secret";
+      mockParseAllowedGoogleDomains.mockReturnValue([]);
+      mockAuth.mockResolvedValue(null);
+
+      const result = await SignInPage({ params: makeParams(), searchParams: makeSearchParams() });
+
+      expect(
+        hasElement(result, (el) => el.props["data-testid"] === "google-domain-hint"),
+      ).toBe(false);
     });
   });
 });

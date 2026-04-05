@@ -100,6 +100,7 @@
   "sendCreateSuccess": "Sendを作成しました",
   "newSend": "新規Send",
   "newSendDesc": "テキストまたはファイルを一時リンクで安全に送信します。",
+  "sendEncryptionNotice": "Sendはサーバー上で暗号化されて保存・転送されます。保管庫内のエントリーで使用されるエンドツーエンド暗号化とは異なります。",
   "remove": "削除",
   "e2eDecrypting": "復号中...",
   "error_missingKey_title": "復号キーが見つかりません",

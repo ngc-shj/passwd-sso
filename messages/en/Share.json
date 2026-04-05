@@ -100,6 +100,7 @@
   "sendCreateSuccess": "Send created",
   "newSend": "New Send",
   "newSendDesc": "Send text or a file securely via a temporary link.",
+  "sendEncryptionNotice": "Sends are encrypted in transit and at rest on the server. This differs from vault entries, which use end-to-end encryption.",
   "remove": "Remove",
   "e2eDecrypting": "Decrypting...",
   "error_missingKey_title": "Missing Decryption Key",
