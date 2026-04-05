@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.30](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.29...passwd-sso-v0.4.30) (2026-04-05)
+
+
+### Bug Fixes
+
+* harden security boundaries, remove legacy decrypt scope, replace global isNaN ([#336](https://github.com/ngc-shj/passwd-sso/issues/336)) ([133ecf3](https://github.com/ngc-shj/passwd-sso/commit/133ecf30d02415d99f455e15e062399f7566e37d))
+
 ## [0.4.29](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.28...passwd-sso-v0.4.29) (2026-04-05)
 
 
