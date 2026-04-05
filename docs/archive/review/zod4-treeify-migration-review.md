@@ -1,6 +1,6 @@
 # Code Review: Zod 4 flatten() → treeifyError() Migration
 Date: 2026-04-05
-Review round: 1 (findings only — no edits)
+Review round: 1 (complete)
 
 ## Summary
 
@@ -146,3 +146,52 @@ None — all findings include evidence and specific file/line references.
 |---|------|--------|
 | 22 | `src/__tests__/api/audit-logs.test.ts:304` | `details.actions` equality assertion |
 | 23 | `src/__tests__/api/teams/audit-logs.test.ts:279` | `details` full equality assertion |
+
+## Resolution Status
+
+### F-01 [Critical] Breaking API response shape for frontend consumers
+- Action: Updated `fieldErrors` → `properties.*.errors` in both components
+- Modified: `base-webhook-card.tsx:146`, `team-create-dialog.tsx:186`
+
+### F-02 [Major] Centralize treeifyError in helper
+- Action: Added `zodValidationError(error: ZodError)` to `api-response.ts`; updated `parseBody()` to use `z.treeifyError()` internally
+- Modified: `api-response.ts`, `parse-body.ts`
+
+### F-03 [Major] Category B routes bypass helpers
+- Action: All 6 routes migrated to `zodValidationError()`. `breakglass/route.ts:73` custom shape preserved via `errorResponse()`.
+- Modified: `travel-mode/disable`, `vault/recovery-key/generate`, `vault/recovery-key/recover`, `directory-sync/[id]/run`, `tenant/breakglass`
+
+### F-04 [Minor] JSDoc documents deprecated pattern
+- Action: Updated comment to reference `zodValidationError(parsed.error)`
+- Modified: `api-error-codes.ts:9`
+
+### S-01 [Major] rotate-key large error response amplification
+- Action: Added issue count cap (>10 issues → return `{ errorCount }` only)
+- Modified: `vault/rotate-key/route.ts:95-99`
+
+### S-02 [Minor] vault field name leakage
+- Action: No action needed — risk unchanged by migration
+
+### S-03 [Minor] delegation route JSON parse uncaught
+- Action: Added try/catch for `request.json()` returning `INVALID_JSON` on failure
+- Modified: `vault/delegation/route.ts:80-84`
+
+### T-01 [Critical] api-response.test.ts hardcodes flatten() shape
+- Action: Updated assertions from `fieldErrors` to `properties.*.errors`
+- Modified: `api-response.test.ts:21,26,81`
+
+### T-02 [Critical] parse-body.test.ts hardcodes fieldErrors
+- Action: Changed `details.fieldErrors` → `details.properties`
+- Modified: `parse-body.test.ts:60`
+
+### T-03 [Critical] webhook-card test mock diverges from reality
+- Action: Updated mock from `{ fieldErrors: { url: [...] } }` to `{ properties: { url: { errors: [...] } } }`
+- Modified: `webhook-card-test-factory.tsx:575`
+
+### T-04 [Major] audit-logs tests may need update
+- Action: Verified no impact — audit-logs routes use custom `validationError({ actions: [...] })`, not `flatten()`
+- Modified: none
+
+### T-05 [Major] 12 of 14 route tests lack details structure assertions
+- Action: Added `toHaveProperty("properties")` assertions to 6 route tests
+- Modified: `change-passphrase/route.test.ts`, `delegation/route.test.ts`, `recovery-key/generate/route.test.ts`, `directory-sync/[id]/run/route.test.ts`, `tenant/breakglass/route.test.ts` (3 assertions)
