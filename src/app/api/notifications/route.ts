@@ -10,6 +10,7 @@ import {
   NOTIFICATION_PAGE_DEFAULT,
   NOTIFICATION_PAGE_MAX,
 } from "@/lib/validations/common.server";
+import { isValidCursorId } from "@/lib/audit-query";
 
 // GET /api/notifications — List notifications (cursor-based pagination)
 async function handleGET(req: NextRequest) {
@@ -23,6 +24,9 @@ async function handleGET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url);
   const cursor = searchParams.get("cursor");
+  if (!isValidCursorId(cursor)) {
+    return NextResponse.json({ error: API_ERROR.INVALID_CURSOR }, { status: 400 });
+  }
   const limitParam = searchParams.get("limit");
   const limit = Math.min(
     Math.max(parseInt(limitParam ?? String(NOTIFICATION_PAGE_DEFAULT), 10) || NOTIFICATION_PAGE_DEFAULT, NOTIFICATION_PAGE_MIN),

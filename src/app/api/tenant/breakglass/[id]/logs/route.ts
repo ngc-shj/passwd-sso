@@ -16,6 +16,7 @@ import {
   buildAuditLogDateFilter,
   buildAuditLogActionFilter,
   paginateResult,
+  isValidCursorId,
 } from "@/lib/audit-query";
 import type { Prisma } from "@prisma/client";
 
@@ -178,6 +179,9 @@ async function handleGET(
   // Parse pagination/filter query params (same shape as personal audit log API)
   const { searchParams } = new URL(req.url);
   const { action, actions, from, to, cursor, limit } = parseAuditLogParams(searchParams);
+  if (!isValidCursorId(cursor)) {
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+  }
 
   const where: Prisma.AuditLogWhereInput = {
     userId: grant.targetUserId,

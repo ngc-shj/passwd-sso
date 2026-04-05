@@ -293,7 +293,7 @@ describe("GET /api/tenant/breakglass/[id]/logs", () => {
     mockGrantFindFirst.mockResolvedValue(makeGrant(grantId));
     mockAuditLogFindMany.mockResolvedValue([makeLog({ id: "log-next" })]);
     const res = await GET(
-      makeReq(grantId, { cursor: "log-50", limit: "10" }),
+      makeReq(grantId, { cursor: "550e8400-e29b-41d4-a716-446655440000", limit: "10" }),
       createParams({ id: grantId }),
     );
     const { status, json } = await parseResponse(res);
@@ -301,7 +301,7 @@ describe("GET /api/tenant/breakglass/[id]/logs", () => {
     expect(json.items[0].id).toBe("log-next");
     expect(mockAuditLogFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "log-50" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
       }),
     );

@@ -120,13 +120,13 @@ describe("GET /api/notifications", () => {
 
     await GET(
       createRequest("GET", "http://localhost:3000/api/notifications", {
-        searchParams: { cursor: "cursor-id" },
+        searchParams: { cursor: "550e8400-e29b-41d4-a716-446655440000" },
       }),
     );
 
     expect(mockPrismaNotification.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "cursor-id" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
       }),
     );
@@ -139,7 +139,7 @@ describe("GET /api/notifications", () => {
 
     const res = await GET(
       createRequest("GET", "http://localhost:3000/api/notifications", {
-        searchParams: { cursor: "bad-cursor" },
+        searchParams: { cursor: "00000000-0000-0000-0000-000000000000" },
       }),
     );
     expect(res.status).toBe(400);

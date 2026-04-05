@@ -21,7 +21,7 @@ import * as output from "../lib/output.js";
 
 // ─── Input Validation Schema ───────────────────────────────────
 
-const DecryptRequestSchema = z.object({
+export const DecryptRequestSchema = z.object({
   entryId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/),
   clientId: z.string().startsWith("mcpc_").max(100),
   field: z.enum(["password", "username", "url", "notes", "totp", "title", "_json"]).default("password"),
@@ -31,7 +31,7 @@ type DecryptRequest = z.infer<typeof DecryptRequestSchema>;
 
 // ─── Response Types ────────────────────────────────────────────
 
-interface DecryptResponse {
+export interface DecryptResponse {
   ok: boolean;
   value?: string;
   error?: string;
@@ -183,9 +183,9 @@ async function handleDecryptRequest(req: DecryptRequest): Promise<DecryptRespons
 
 // ─── Connection Handler ────────────────────────────────────────
 
-const MAX_BUFFER_SIZE = 64 * 1024; // 64KB — far more than any valid request
+export const MAX_BUFFER_SIZE = 64 * 1024; // 64KB — far more than any valid request
 
-function handleConnection(socket: Socket): void {
+export function handleConnection(socket: Socket): void {
   let buffer = "";
 
   socket.on("data", (chunk: Buffer) => {

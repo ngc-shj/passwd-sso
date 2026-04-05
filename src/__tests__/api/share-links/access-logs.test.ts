@@ -119,7 +119,7 @@ describe("GET /api/share-links/[id]/access-logs", () => {
 
     const req = createRequest(
       "GET",
-      "http://localhost/api/share-links/s1/access-logs?cursor=log50"
+      "http://localhost/api/share-links/s1/access-logs?cursor=550e8400-e29b-41d4-a716-446655440000"
     );
 
     // Return 51 items to trigger hasMore
@@ -139,7 +139,7 @@ describe("GET /api/share-links/[id]/access-logs", () => {
     expect(json.nextCursor).toBe("log49");
     expect(mockFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "log50" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
       })
     );

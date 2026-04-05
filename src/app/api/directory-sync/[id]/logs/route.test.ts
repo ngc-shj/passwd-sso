@@ -145,12 +145,12 @@ describe("GET /api/directory-sync/[id]/logs", () => {
   });
 
   it("uses cursor for keyset pagination", async () => {
-    const req = createRequest("GET", ROUTE_URL, { searchParams: { cursor: "log-5" } });
+    const req = createRequest("GET", ROUTE_URL, { searchParams: { cursor: "550e8400-e29b-41d4-a716-446655440000" } });
     await GET(req, CTX);
 
     expect(mockLogFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        cursor: { id: "log-5" },
+        cursor: { id: "550e8400-e29b-41d4-a716-446655440000" },
         skip: 1,
       }),
     );

@@ -19,6 +19,7 @@ import {
   buildAuditLogActionFilter,
   buildAuditLogDateFilter,
   paginateResult,
+  isValidCursorId,
 } from "@/lib/audit-query";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -43,6 +44,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   const { searchParams } = new URL(req.url);
   const { action, actions: actionsParam, from, to, cursor, limit } = parseAuditLogParams(searchParams);
+  if (!isValidCursorId(cursor)) {
+    return errorResponse(API_ERROR.INVALID_CURSOR, 400);
+  }
   const validActorType = parseActorType(searchParams);
 
   const where: Record<string, unknown> = {

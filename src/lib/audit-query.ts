@@ -1,6 +1,7 @@
 // Shared query helpers for audit log API routes
 
 import { AUDIT_ACTION_VALUES } from "@/lib/constants";
+import { CURSOR_ID_RE } from "@/lib/validations/common";
 import type { AuditAction } from "@prisma/client";
 
 /** Pre-built set of all valid audit action strings for O(1) membership checks. */
@@ -83,6 +84,12 @@ export function buildAuditLogActionFilter(
   }
 
   return undefined;
+}
+
+/** Returns true when cursor is null (absent) or matches UUID format. */
+export function isValidCursorId(cursor: string | null | undefined): boolean {
+  if (cursor == null) return true;
+  return CURSOR_ID_RE.test(cursor);
 }
 
 /**
