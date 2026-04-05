@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.33](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.32...passwd-sso-v0.4.33) (2026-04-05)
+
+
+### Code Refactoring
+
+* unify error responses to use errorResponse helper ([#343](https://github.com/ngc-shj/passwd-sso/issues/343)) ([793df49](https://github.com/ngc-shj/passwd-sso/commit/793df491a0d1f3db55c83a3cba38ecc598acb41c))
+
 ## [0.4.32](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.31...passwd-sso-v0.4.32) (2026-04-05)
 
 
