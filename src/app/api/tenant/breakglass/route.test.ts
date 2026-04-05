@@ -338,6 +338,7 @@ describe("POST /api/tenant/breakglass", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 400 when reason is too short", async () => {
@@ -350,6 +351,7 @@ describe("POST /api/tenant/breakglass", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 400 when requester tries to access own logs", async () => {
@@ -362,6 +364,7 @@ describe("POST /api/tenant/breakglass", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 429 when rate limit is exceeded", async () => {

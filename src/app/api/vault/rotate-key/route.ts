@@ -14,7 +14,7 @@ import { getLogger } from "@/lib/logger";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
 import {
   hexIv,
   hexAuthTag,
@@ -94,6 +94,11 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = rotateKeySchema.safeParse(body);
   if (!parsed.success) {
+    // Cap error details to prevent response amplification on bulk payloads
+    const issues = parsed.error.issues;
+    if (issues.length > 10) {
+      return validationError({ errorCount: issues.length });
+    }
     return zodValidationError(parsed.error);
   }
 

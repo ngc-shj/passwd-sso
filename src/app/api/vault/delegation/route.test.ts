@@ -183,6 +183,7 @@ describe("POST /api/vault/delegation", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 400 for non-UUID mcpTokenId", async () => {

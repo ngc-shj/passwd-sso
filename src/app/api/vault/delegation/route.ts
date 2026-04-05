@@ -77,7 +77,12 @@ async function handlePOST(request: NextRequest) {
     return rateLimited(rateLimitResult.retryAfterMs);
   }
 
-  const body = await request.json();
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
+  }
   const parsed = createDelegationSchema.safeParse(body);
   if (!parsed.success) {
     return zodValidationError(parsed.error);
