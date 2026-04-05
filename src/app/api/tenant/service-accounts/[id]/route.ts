@@ -135,10 +135,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      return NextResponse.json(
-        { error: API_ERROR.SA_NAME_CONFLICT },
-        { status: 409 },
-      );
+      return errorResponse(API_ERROR.SA_NAME_CONFLICT, 409);
     }
     throw err;
   }

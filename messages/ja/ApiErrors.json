@@ -99,5 +99,6 @@
   "saNameConflict": "同じ名前のサービスアカウントが既に存在します。",
   "saTokenLimitExceeded": "サービスアカウントのトークン上限に達しました。",
   "saTokenNotFound": "サービスアカウントトークンが見つかりません。",
-  "saTokenAlreadyRevoked": "サービスアカウントトークンは既に取り消されています。"
+  "saTokenAlreadyRevoked": "サービスアカウントトークンは既に取り消されています。",
+  "mcpClientNameConflict": "同じ名前のMCPクライアントが既に存在します。"
 }

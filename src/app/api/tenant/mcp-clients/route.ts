@@ -10,6 +10,8 @@ import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/mcp";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { errorResponse } from "@/lib/api-response";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -141,7 +143,7 @@ export async function POST(req: NextRequest) {
     prisma.mcpClient.findFirst({ where: { tenantId: actor.tenantId, name } }),
   );
   if (existing) {
-    return NextResponse.json({ error: "MCP_CLIENT_NAME_CONFLICT" }, { status: 409 });
+    return errorResponse(API_ERROR.MCP_CLIENT_NAME_CONFLICT, 409);
   }
 
   // Generate client credentials
