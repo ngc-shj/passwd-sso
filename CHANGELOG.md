@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.29](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.28...passwd-sso-v0.4.29) (2026-04-05)
+
+
+### Bug Fixes
+
+* add cursor validation, MCP authorize hardening, header cleanup ([#334](https://github.com/ngc-shj/passwd-sso/issues/334)) ([6ce655a](https://github.com/ngc-shj/passwd-sso/commit/6ce655a4ff47a9811c9b61041e3fde134e415bf9))
+
 ## [0.4.28](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.27...passwd-sso-v0.4.28) (2026-04-05)
 
 
