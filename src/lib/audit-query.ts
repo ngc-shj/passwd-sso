@@ -55,8 +55,7 @@ export function buildAuditLogDateFilter(
     const d = new Date(to);
     if (!Number.isNaN(d.getTime())) createdAt.lte = d;
   }
-  // Return undefined when all provided dates were invalid
-  return Object.keys(createdAt).length > 0 ? createdAt : undefined;
+  return createdAt.gte || createdAt.lte ? createdAt : undefined;
 }
 
 /**

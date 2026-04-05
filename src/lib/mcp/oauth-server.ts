@@ -50,10 +50,19 @@ export function verifyPkceS256(challenge: string, verifier: string): boolean {
   return safeEqual(expected, challenge);
 }
 
-/** Constant-time string comparison via crypto.timingSafeEqual. */
+/** Same-length constant-time string comparison. Callers must ensure equal length. */
 function safeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
+/**
+ * RFC 7009 §2.1: confidential clients must authenticate at revoke.
+ * Returns true if the client is public or the secret matches.
+ */
+function verifyRevokeClientAuth(storedHash: string, providedHash?: string): boolean {
+  if (storedHash === "") return true; // public client
+  return !!providedHash && safeEqual(storedHash, providedHash);
 }
 
 // ─── Authorization code ───────────────────────────────────────
@@ -485,11 +494,7 @@ export async function revokeToken(params: {
         });
 
         if (rt && rt.mcpClient.clientId === params.clientId) {
-          // RFC 7009 §2.1: confidential clients must authenticate
-          const isPublicClient = rt.mcpClient.clientSecretHash === "";
-          if (!isPublicClient && (!params.clientSecretHash || !safeEqual(rt.mcpClient.clientSecretHash, params.clientSecretHash))) {
-            return; // Silent success per RFC 7009 — do not reveal token existence
-          }
+          if (!verifyRevokeClientAuth(rt.mcpClient.clientSecretHash, params.clientSecretHash)) return;
           // Revoke entire rotation family
           await tx.mcpRefreshToken.updateMany({
             where: { familyId: rt.familyId, revokedAt: null },
@@ -518,11 +523,7 @@ export async function revokeToken(params: {
       });
 
       if (at && at.mcpClient.clientId === params.clientId) {
-        // RFC 7009 §2.1: confidential clients must authenticate
-        const isPublicClient = at.mcpClient.clientSecretHash === "";
-        if (!isPublicClient && (!params.clientSecretHash || !safeEqual(at.mcpClient.clientSecretHash, params.clientSecretHash))) {
-          return; // Silent success per RFC 7009
-        }
+        if (!verifyRevokeClientAuth(at.mcpClient.clientSecretHash, params.clientSecretHash)) return;
         await tx.mcpAccessToken.update({
           where: { id: at.id },
           data: { revokedAt: new Date() },
