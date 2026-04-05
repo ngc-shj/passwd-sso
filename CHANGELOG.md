@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.28](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.27...passwd-sso-v0.4.28) (2026-04-05)
+
+
+### Bug Fixes
+
+* add UX warnings for sends encryption, HIBP cache, and Google multi-domain ([#332](https://github.com/ngc-shj/passwd-sso/issues/332)) ([3916793](https://github.com/ngc-shj/passwd-sso/commit/3916793a6e1f748d99ab44c7e9d2403ce58bca01))
+
 ## [0.4.27](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.26...passwd-sso-v0.4.27) (2026-04-05)
 
 
