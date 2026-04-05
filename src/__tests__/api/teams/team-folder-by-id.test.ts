@@ -182,6 +182,23 @@ describe("PUT /api/teams/[teamId]/folders/[id]", () => {
     await expect(PUT(req, createParams({ teamId: "o1", id: "f1" }))).rejects.toThrow("Unexpected");
   });
 
+  it("returns 409 on P2002 unique constraint violation", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTeamPermission.mockResolvedValue(undefined);
+    const existing = { id: "f1", teamId: "o1", parentId: null, name: "Old" };
+    mockTeamFolderFindUnique.mockResolvedValueOnce(existing);
+    mockTeamFolderFindFirst.mockResolvedValue(null);
+    const { Prisma } = await import("@prisma/client");
+    mockTeamFolderUpdate.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "5.0.0" }),
+    );
+    const req = createRequest("PUT", "http://localhost/api/teams/o1/folders/f1", { body: { name: "New" } });
+    const res = await PUT(req, createParams({ teamId: "o1", id: "f1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
+  });
+
   it("returns 400 for invalid JSON body", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue(undefined);
