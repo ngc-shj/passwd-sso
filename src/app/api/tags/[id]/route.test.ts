@@ -140,6 +140,22 @@ describe("PUT /api/tags/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.color).toBeNull();
   });
+
+  it("returns 409 on P2002 unique constraint violation", async () => {
+    mockPrismaTag.findUnique.mockResolvedValue({ id: TAG_ID, userId: "test-user-id", name: "Old", parentId: null });
+    mockPrismaTag.findFirst.mockResolvedValue(null);
+    const { Prisma } = await import("@prisma/client");
+    mockPrismaTag.update.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "5.0.0" }),
+    );
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/tags/${TAG_ID}`, { body: { name: "New" } }),
+      createParams({ id: TAG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("TAG_ALREADY_EXISTS");
+  });
 });
 
 describe("DELETE /api/tags/[id]", () => {
