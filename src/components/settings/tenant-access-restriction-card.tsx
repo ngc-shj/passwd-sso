@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { ShieldBan, Loader2 } from "lucide-react";
@@ -28,6 +28,10 @@ import {
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { TAILNET_NAME_MAX_LENGTH, MAX_CIDRS } from "@/lib/validations";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+
 const CIDR_REGEX = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;
 const CIDR_V6_REGEX = /^[0-9a-fA-F:]*:[0-9a-fA-F:]*\/\d{1,3}$/;
 
@@ -37,6 +41,7 @@ function isValidCidrFormat(cidr: string): boolean {
 
 export function TenantAccessRestrictionCard() {
   const t = useTranslations("TenantAdmin");
+  const tCommon = useTranslations("Common");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [cidrsText, setCidrsText] = useState("");
@@ -44,6 +49,16 @@ export function TenantAccessRestrictionCard() {
   const [tailscaleTailnet, setTailscaleTailnet] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [showLockoutDialog, setShowLockoutDialog] = useState(false);
+  const [initialRestriction, setInitialRestriction] = useState<Record<string, unknown> | null>(null);
+
+  const currentRestriction = useMemo(() => ({
+    cidrsText,
+    tailscaleEnabled,
+    tailscaleTailnet,
+  }), [cidrsText, tailscaleEnabled, tailscaleTailnet]);
+
+  const hasChanges = useFormDirty(currentRestriction, initialRestriction);
+  useBeforeUnloadGuard(hasChanges);
 
   const fetchPolicy = useCallback(async () => {
     try {
@@ -51,9 +66,17 @@ export function TenantAccessRestrictionCard() {
       if (res.ok) {
         const data = await res.json();
         const cidrs: string[] = data.allowedCidrs ?? [];
-        setCidrsText(cidrs.join("\n"));
-        setTailscaleEnabled(data.tailscaleEnabled ?? false);
-        setTailscaleTailnet(data.tailscaleTailnet ?? "");
+        const cidrsVal = cidrs.join("\n");
+        const tailscaleEnabledVal = data.tailscaleEnabled ?? false;
+        const tailscaleTailnetVal = data.tailscaleTailnet ?? "";
+        setCidrsText(cidrsVal);
+        setTailscaleEnabled(tailscaleEnabledVal);
+        setTailscaleTailnet(tailscaleTailnetVal);
+        setInitialRestriction({
+          cidrsText: cidrsVal,
+          tailscaleEnabled: tailscaleEnabledVal,
+          tailscaleTailnet: tailscaleTailnetVal,
+        });
       }
     } finally {
       setLoading(false);
@@ -112,6 +135,7 @@ export function TenantAccessRestrictionCard() {
       });
       if (res.ok) {
         toast.success(t("accessRestrictionSaved"));
+        setInitialRestriction({ ...currentRestriction });
         setShowLockoutDialog(false);
       } else {
         const data = await res.json().catch(() => null);
@@ -206,8 +230,13 @@ export function TenantAccessRestrictionCard() {
 
           {error && <p className="text-sm text-destructive">{error}</p>}
 
-          <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={saving}>
+          <div className="flex items-center justify-between">
+            <FormDirtyBadge
+              hasChanges={hasChanges}
+              unsavedLabel={tCommon("statusUnsaved")}
+              savedLabel={tCommon("statusSaved")}
+            />
+            <Button onClick={handleSave} disabled={saving || !hasChanges}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {t("accessRestrictionSave")}
             </Button>

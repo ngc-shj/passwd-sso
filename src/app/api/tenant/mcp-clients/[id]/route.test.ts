@@ -137,6 +137,28 @@ describe("PUT /api/tenant/mcp-clients/[id]", () => {
 
     expect(status).toBe(404);
   });
+
+  it("returns 409 on name conflict (P2002)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientFindFirst.mockResolvedValue(makeClient());
+
+    const { Prisma } = await import("@prisma/client");
+    const p2002 = new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+      code: "P2002",
+      clientVersion: "5.0.0",
+    });
+    mockMcpClientUpdate.mockRejectedValue(p2002);
+
+    const req = createRequest("PUT", "http://localhost/api/tenant/mcp-clients/client-1", {
+      body: { name: "duplicate-name" },
+    });
+    const res = await PUT(req, createParams({ id: "client-1" }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(409);
+    expect(json.error).toBe("MCP_CLIENT_NAME_CONFLICT");
+  });
 });
 
 describe("DELETE /api/tenant/mcp-clients/[id]", () => {

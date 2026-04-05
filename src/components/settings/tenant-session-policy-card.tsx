@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { Clock, Loader2 } from "lucide-react";
@@ -16,9 +16,13 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 export function TenantSessionPolicyCard() {
   const t = useTranslations("TenantAdmin");
+  const tCommon = useTranslations("Common");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [unlimited, setUnlimited] = useState(true);
@@ -28,6 +32,19 @@ export function TenantSessionPolicyCard() {
   const [vaultAutoLockEnabled, setVaultAutoLockEnabled] = useState(false);
   const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [initialPolicy, setInitialPolicy] = useState<Record<string, unknown> | null>(null);
+
+  const currentPolicy = useMemo(() => ({
+    unlimited,
+    maxSessions,
+    idleTimeoutEnabled,
+    idleTimeoutMinutes,
+    vaultAutoLockEnabled,
+    vaultAutoLockMinutes,
+  }), [unlimited, maxSessions, idleTimeoutEnabled, idleTimeoutMinutes, vaultAutoLockEnabled, vaultAutoLockMinutes]);
+
+  const hasChanges = useFormDirty(currentPolicy, initialPolicy);
+  useBeforeUnloadGuard(hasChanges);
 
   const fetchPolicy = useCallback(async () => {
     try {
@@ -35,29 +52,52 @@ export function TenantSessionPolicyCard() {
       if (res.ok) {
         const data = await res.json();
         const maxVal = data.maxConcurrentSessions;
+        let unlimitedVal: boolean;
+        let maxSessionsVal: string;
         if (maxVal === null || maxVal === undefined) {
-          setUnlimited(true);
-          setMaxSessions("");
+          unlimitedVal = true;
+          maxSessionsVal = "";
         } else {
-          setUnlimited(false);
-          setMaxSessions(String(maxVal));
+          unlimitedVal = false;
+          maxSessionsVal = String(maxVal);
         }
+        setUnlimited(unlimitedVal);
+        setMaxSessions(maxSessionsVal);
+
         const idleVal = data.sessionIdleTimeoutMinutes;
+        let idleEnabledVal: boolean;
+        let idleMinutesVal: string;
         if (idleVal === null || idleVal === undefined) {
-          setIdleTimeoutEnabled(false);
-          setIdleTimeoutMinutes("");
+          idleEnabledVal = false;
+          idleMinutesVal = "";
         } else {
-          setIdleTimeoutEnabled(true);
-          setIdleTimeoutMinutes(String(idleVal));
+          idleEnabledVal = true;
+          idleMinutesVal = String(idleVal);
         }
+        setIdleTimeoutEnabled(idleEnabledVal);
+        setIdleTimeoutMinutes(idleMinutesVal);
+
         const autoLockVal = data.vaultAutoLockMinutes;
+        let autoLockEnabledVal: boolean;
+        let autoLockMinutesVal: string;
         if (autoLockVal === null || autoLockVal === undefined) {
-          setVaultAutoLockEnabled(false);
-          setVaultAutoLockMinutes("");
+          autoLockEnabledVal = false;
+          autoLockMinutesVal = "";
         } else {
-          setVaultAutoLockEnabled(true);
-          setVaultAutoLockMinutes(String(autoLockVal));
+          autoLockEnabledVal = true;
+          autoLockMinutesVal = String(autoLockVal);
         }
+        setVaultAutoLockEnabled(autoLockEnabledVal);
+        setVaultAutoLockMinutes(autoLockMinutesVal);
+
+        setInitialPolicy({
+          unlimited: unlimitedVal,
+          maxSessions: maxSessionsVal,
+          idleTimeoutEnabled: idleEnabledVal,
+          idleTimeoutMinutes: idleMinutesVal,
+          vaultAutoLockEnabled: autoLockEnabledVal,
+          vaultAutoLockMinutes: autoLockMinutesVal,
+        });
       } else {
         toast.error(t("sessionPolicyLoadFailed"));
       }
@@ -112,6 +152,7 @@ export function TenantSessionPolicyCard() {
       });
       if (res.ok) {
         toast.success(t("sessionPolicySaved"));
+        setInitialPolicy({ ...currentPolicy });
       } else {
         toast.error(t("sessionPolicySaveFailed"));
       }
@@ -265,8 +306,13 @@ export function TenantSessionPolicyCard() {
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
-        <div className="flex justify-end">
-          <Button onClick={handleSave} disabled={saving}>
+        <div className="flex items-center justify-between">
+          <FormDirtyBadge
+            hasChanges={hasChanges}
+            unsavedLabel={tCommon("statusUnsaved")}
+            savedLabel={tCommon("statusSaved")}
+          />
+          <Button onClick={handleSave} disabled={saving || !hasChanges}>
             {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {t("sessionPolicySave")}
           </Button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations, useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +43,8 @@ import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface McpClient {
   id: string;
@@ -105,6 +107,16 @@ export function McpClientCard() {
   const [editNameError, setEditNameError] = useState("");
   const [editUriError, setEditUriError] = useState("");
   const [editScopeError, setEditScopeError] = useState("");
+  const [editInitial, setEditInitial] = useState<Record<string, unknown> | null>(null);
+
+  const editCurrent = useMemo(() => ({
+    name: editName,
+    redirectUris: editRedirectUris,
+    scopes: Array.from(editScopes).sort(),
+    isActive: editIsActive,
+  }), [editName, editRedirectUris, editScopes, editIsActive]);
+
+  const editHasChanges = useFormDirty(editCurrent, editInitial);
 
   const fetchClients = useCallback(async () => {
     try {
@@ -188,16 +200,22 @@ export function McpClientCard() {
   };
 
   const openEdit = (client: McpClient) => {
+    const redirectUrisText = Array.isArray(client.redirectUris) ? client.redirectUris.join("\n") : "";
+    const scopesList = client.allowedScopes ? client.allowedScopes.split(",").map((s) => s.trim()).filter(Boolean) : [];
     setEditClient(client);
     setEditName(client.name);
-    setEditRedirectUris(Array.isArray(client.redirectUris) ? client.redirectUris.join("\n") : "");
-    setEditScopes(
-      new Set(client.allowedScopes ? client.allowedScopes.split(",").map((s) => s.trim()).filter(Boolean) : [])
-    );
+    setEditRedirectUris(redirectUrisText);
+    setEditScopes(new Set(scopesList));
     setEditIsActive(client.isActive);
     setEditNameError("");
     setEditUriError("");
     setEditScopeError("");
+    setEditInitial({
+      name: client.name,
+      redirectUris: redirectUrisText,
+      scopes: [...scopesList].sort(),
+      isActive: client.isActive,
+    });
     setEditOpen(true);
   };
 
@@ -244,6 +262,7 @@ export function McpClientCard() {
         return;
       }
       toast.success(t("mcpUpdated"));
+      setEditInitial({ ...editCurrent });
       setEditOpen(false);
       fetchClients();
     } catch {
@@ -559,9 +578,14 @@ export function McpClientCard() {
           setEditOpen(open);
           if (!open) {
             setEditClient(null);
+            setEditName("");
+            setEditRedirectUris("");
+            setEditScopes(new Set());
+            setEditIsActive(true);
             setEditNameError("");
             setEditUriError("");
             setEditScopeError("");
+            setEditInitial(null);
           }
         }}
       >
@@ -646,14 +670,21 @@ export function McpClientCard() {
               </Label>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              {tCommon("cancel")}
-            </Button>
-            <Button onClick={handleEdit} disabled={editing}>
-              {editing && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-              {tCommon("save")}
-            </Button>
+          <DialogFooter className="flex items-center justify-between sm:justify-between">
+            <FormDirtyBadge
+              hasChanges={editHasChanges}
+              unsavedLabel={tCommon("statusUnsaved")}
+              savedLabel={tCommon("statusSaved")}
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>
+                {tCommon("cancel")}
+              </Button>
+              <Button onClick={handleEdit} disabled={editing || !editHasChanges}>
+                {editing && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                {tCommon("save")}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

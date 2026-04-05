@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useLocale } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,8 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface ServiceAccount {
   id: string;
@@ -89,6 +91,15 @@ export function ServiceAccountCard() {
   const [editDescription, setEditDescription] = useState("");
   const [editIsActive, setEditIsActive] = useState(true);
   const [editNameError, setEditNameError] = useState("");
+  const [editInitial, setEditInitial] = useState<Record<string, unknown> | null>(null);
+
+  const editCurrent = useMemo(() => ({
+    name: editName,
+    description: editDescription,
+    isActive: editIsActive,
+  }), [editName, editDescription, editIsActive]);
+
+  const editHasChanges = useFormDirty(editCurrent, editInitial);
 
   // Create token dialog
   const [tokenCreateOpen, setTokenCreateOpen] = useState(false);
@@ -203,11 +214,13 @@ export function ServiceAccountCard() {
   };
 
   const openEdit = (sa: ServiceAccount) => {
+    const desc = sa.description ?? "";
     setEditSa(sa);
     setEditName(sa.name);
-    setEditDescription(sa.description ?? "");
+    setEditDescription(desc);
     setEditIsActive(sa.isActive);
     setEditNameError("");
+    setEditInitial({ name: sa.name, description: desc, isActive: sa.isActive });
     setEditOpen(true);
   };
 
@@ -242,6 +255,7 @@ export function ServiceAccountCard() {
         return;
       }
       toast.success(t("saUpdated"));
+      setEditInitial({ ...editCurrent });
       setEditOpen(false);
       fetchAccounts();
     } catch {
@@ -797,7 +811,11 @@ export function ServiceAccountCard() {
           setEditOpen(open);
           if (!open) {
             setEditSa(null);
+            setEditName("");
+            setEditDescription("");
+            setEditIsActive(true);
             setEditNameError("");
+            setEditInitial(null);
           }
         }}
       >
@@ -847,14 +865,21 @@ export function ServiceAccountCard() {
               )}
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              {tCommon("cancel")}
-            </Button>
-            <Button onClick={handleEdit} disabled={editing}>
-              {editing && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-              {tCommon("save")}
-            </Button>
+          <DialogFooter className="flex items-center justify-between sm:justify-between">
+            <FormDirtyBadge
+              hasChanges={editHasChanges}
+              unsavedLabel={tCommon("statusUnsaved")}
+              savedLabel={tCommon("statusSaved")}
+            />
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>
+                {tCommon("cancel")}
+              </Button>
+              <Button onClick={handleEdit} disabled={editing || !editHasChanges}>
+                {editing && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                {tCommon("save")}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

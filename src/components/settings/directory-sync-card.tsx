@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,6 +47,8 @@ import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { formatDateTime, formatRelativeTime } from "@/lib/format-datetime";
+import { useFormDirty } from "@/hooks/use-form-dirty";
+import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -97,6 +99,7 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
 
 export function DirectorySyncCard() {
   const t = useTranslations("DirectorySync");
+  const tCommon = useTranslations("Common");
   const locale = useLocale();
   const [configs, setConfigs] = useState<DirectorySyncConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -110,6 +113,15 @@ export function DirectorySyncCard() {
   const [formSyncInterval, setFormSyncInterval] = useState("60");
   const [formCredentials, setFormCredentials] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [editInitial, setEditInitial] = useState<Record<string, unknown> | null>(null);
+
+  const editCurrent = useMemo(() => ({
+    displayName: formDisplayName,
+    enabled: formEnabled,
+    syncInterval: formSyncInterval,
+  }), [formDisplayName, formEnabled, formSyncInterval]);
+
+  const editHasChanges = useFormDirty(editCurrent, editInitial);
 
   // Delete dialog
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -152,16 +164,23 @@ export function DirectorySyncCard() {
     setFormEnabled(true);
     setFormSyncInterval("60");
     setFormCredentials({});
+    setEditInitial(null);
     setDialogOpen(true);
   }
 
   function openEditDialog(config: DirectorySyncConfig) {
+    const interval = String(config.syncIntervalMinutes);
     setEditingConfig(config);
     setFormProvider(config.provider as Provider);
     setFormDisplayName(config.displayName);
     setFormEnabled(config.enabled);
-    setFormSyncInterval(String(config.syncIntervalMinutes));
+    setFormSyncInterval(interval);
     setFormCredentials({});
+    setEditInitial({
+      displayName: config.displayName,
+      enabled: config.enabled,
+      syncInterval: interval,
+    });
     setDialogOpen(true);
   }
 
@@ -185,6 +204,7 @@ export function DirectorySyncCard() {
         });
         if (res.ok) {
           toast.success(t("configUpdated"));
+          setEditInitial({ ...editCurrent });
           setDialogOpen(false);
           fetchConfigs();
         } else if (res.status === 400) {
@@ -633,14 +653,26 @@ export function DirectorySyncCard() {
               {renderCredentialFields()}
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              {t("cancel")}
-            </Button>
-            <Button onClick={handleSave} disabled={saving || !formDisplayName.trim() || !hasRequiredCredentials()}>
-              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
-              {t("save")}
-            </Button>
+          <DialogFooter className={editingConfig ? "flex items-center justify-between sm:justify-between" : ""}>
+            {editingConfig && (
+              <FormDirtyBadge
+                hasChanges={editHasChanges}
+                unsavedLabel={tCommon("statusUnsaved")}
+                savedLabel={tCommon("statusSaved")}
+              />
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setDialogOpen(false)}>
+                {t("cancel")}
+              </Button>
+              <Button
+                onClick={handleSave}
+                disabled={saving || !formDisplayName.trim() || !hasRequiredCredentials() || (!!editingConfig && !editHasChanges)}
+              >
+                {saving && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
+                {t("save")}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
