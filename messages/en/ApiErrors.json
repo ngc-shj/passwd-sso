@@ -99,5 +99,6 @@
   "saNameConflict": "A service account with this name already exists.",
   "saTokenLimitExceeded": "Maximum number of tokens per service account reached.",
   "saTokenNotFound": "Service account token not found.",
-  "saTokenAlreadyRevoked": "Service account token has already been revoked."
+  "saTokenAlreadyRevoked": "Service account token has already been revoked.",
+  "mcpClientNameConflict": "An MCP client with this name already exists."
 }

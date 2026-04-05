@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
@@ -136,12 +137,23 @@ async function handlePUT(
     }
   }
 
-  const folder = await withUserTenantRls(session.user.id, async () =>
-    prisma.folder.update({
-      where: { id },
-      data: updateData,
-    }),
-  );
+  let folder;
+  try {
+    folder = await withUserTenantRls(session.user.id, async () =>
+      prisma.folder.update({
+        where: { id },
+        data: updateData,
+      }),
+    );
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return errorResponse(API_ERROR.FOLDER_ALREADY_EXISTS, 409);
+    }
+    throw err;
+  }
 
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,

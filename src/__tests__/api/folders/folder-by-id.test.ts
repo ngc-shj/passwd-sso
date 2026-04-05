@@ -204,6 +204,22 @@ describe("PUT /api/folders/[id]", () => {
     expect(status).toBe(400);
     expect(json.error).toBe("FOLDER_MAX_DEPTH_EXCEEDED");
   });
+
+  it("returns 409 on P2002 unique constraint violation", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    const existing = { id: "f1", userId: DEFAULT_SESSION.user.id, parentId: null, name: "Old" };
+    mockFolderFindUnique.mockResolvedValueOnce(existing);
+    mockFolderFindFirst.mockResolvedValue(null);
+    const { Prisma } = await import("@prisma/client");
+    mockFolderUpdate.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "5.0.0" }),
+    );
+    const req = createRequest("PUT", "http://localhost/api/folders/f1", { body: { name: "New" } });
+    const res = await PUT(req, createParams({ id: "f1" }));
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(409);
+    expect(json.error).toBe("FOLDER_ALREADY_EXISTS");
+  });
 });
 
 describe("DELETE /api/folders/[id]", () => {

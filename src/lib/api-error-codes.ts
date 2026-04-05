@@ -171,6 +171,9 @@ export const API_ERROR = {
   SA_TOKEN_LIMIT_EXCEEDED: "SA_TOKEN_LIMIT_EXCEEDED",
   SA_TOKEN_NOT_FOUND: "SA_TOKEN_NOT_FOUND",
   SA_TOKEN_ALREADY_REVOKED: "SA_TOKEN_ALREADY_REVOKED",
+
+  // ── MCP Clients ──────────────────────────────────────────
+  MCP_CLIENT_NAME_CONFLICT: "MCP_CLIENT_NAME_CONFLICT",
 } as const;
 
 export type ApiErrorCode = (typeof API_ERROR)[keyof typeof API_ERROR];
@@ -298,6 +301,7 @@ const API_ERROR_I18N: Record<ApiErrorCode, string> = {
   SA_TOKEN_LIMIT_EXCEEDED: "saTokenLimitExceeded",
   SA_TOKEN_NOT_FOUND: "saTokenNotFound",
   SA_TOKEN_ALREADY_REVOKED: "saTokenAlreadyRevoked",
+  MCP_CLIENT_NAME_CONFLICT: "mcpClientNameConflict",
 } satisfies Record<ApiErrorCode, string>;
 
 /**

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { updateTeamTagSchema } from "@/lib/validations";
@@ -98,12 +99,23 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     }
   }
 
-  const updated = await withTeamTenantRls(teamId, async () =>
-    prisma.teamTag.update({
-      where: { id },
-      data: updateData,
-    }),
-  );
+  let updated;
+  try {
+    updated = await withTeamTenantRls(teamId, async () =>
+      prisma.teamTag.update({
+        where: { id },
+        data: updateData,
+      }),
+    );
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
+    }
+    throw err;
+  }
 
   return NextResponse.json({
     id: updated.id,

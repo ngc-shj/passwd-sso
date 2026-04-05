@@ -171,6 +171,24 @@ describe("PUT /api/teams/[teamId]/tags/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.color).toBeNull();
   });
+
+  it("returns 409 on P2002 unique constraint violation", async () => {
+    mockPrismaTeamTag.findUnique.mockResolvedValue({ id: TAG_ID, teamId: TEAM_ID, name: "Old", parentId: null });
+    mockPrismaTeamTag.findFirst.mockResolvedValue(null);
+    const { Prisma } = await import("@prisma/client");
+    mockPrismaTeamTag.update.mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError("Unique constraint failed", { code: "P2002", clientVersion: "5.0.0" }),
+    );
+    const res = await PUT(
+      createRequest("PUT", `http://localhost:3000/api/teams/${TEAM_ID}/tags/${TAG_ID}`, {
+        body: { name: "New" },
+      }),
+      createParams({ teamId: TEAM_ID, id: TAG_ID }),
+    );
+    const json = await res.json();
+    expect(res.status).toBe(409);
+    expect(json.error).toBe("TAG_ALREADY_EXISTS");
+  });
 });
 
 describe("DELETE /api/teams/[teamId]/tags/[id]", () => {
