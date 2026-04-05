@@ -80,7 +80,7 @@ const makeClient = (overrides: Record<string, unknown> = {}) => ({
   clientId: "mcpc_abc123",
   name: "my-mcp-client",
   redirectUris: ["https://example.com/callback"],
-  allowedScopes: "credentials:decrypt",
+  allowedScopes: "credentials:list,credentials:use",
   isActive: true,
   isDcr: false,
   createdAt: new Date(),
@@ -171,7 +171,7 @@ describe("POST /api/tenant/mcp-clients", () => {
       body: {
         name: "my-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:decrypt"],
+        allowedScopes: ["credentials:list", "credentials:use"],
       },
     });
     const res = await POST(req);
@@ -200,7 +200,7 @@ describe("POST /api/tenant/mcp-clients", () => {
       body: {
         name: "my-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:decrypt"],
+        allowedScopes: ["credentials:list", "credentials:use"],
       },
     });
     const res = await POST(req);
@@ -219,7 +219,7 @@ describe("POST /api/tenant/mcp-clients", () => {
       body: {
         name: "my-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:decrypt"],
+        allowedScopes: ["credentials:list", "credentials:use"],
       },
     });
     const res = await POST(req);
@@ -236,7 +236,7 @@ describe("POST /api/tenant/mcp-clients", () => {
       body: {
         name: "my-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:decrypt"],
+        allowedScopes: ["credentials:list", "credentials:use"],
       },
     });
     const res = await POST(req);
@@ -253,7 +253,7 @@ describe("POST /api/tenant/mcp-clients", () => {
       body: {
         name: "my-mcp-client",
         redirectUris: ["https://example.com/callback"],
-        allowedScopes: ["credentials:decrypt"],
+        allowedScopes: ["credentials:list", "credentials:use"],
       },
     });
     const res = await POST(req);

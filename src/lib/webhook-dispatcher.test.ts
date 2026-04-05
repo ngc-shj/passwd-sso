@@ -447,6 +447,52 @@ describe("SSRF defense (resolveAndValidateIps)", () => {
 
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it("skips delivery for TEST-NET-1 IP (RFC 5737)", async () => {
+    mockResolve4.mockResolvedValue(["192.0.2.1"]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips delivery for TEST-NET-2 IP (RFC 5737)", async () => {
+    mockResolve4.mockResolvedValue(["198.51.100.1"]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("skips delivery for TEST-NET-3 IP (RFC 5737)", async () => {
+    mockResolve4.mockResolvedValue(["203.0.113.1"]);
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("fails delivery when server returns redirect (redirect: error)", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockFetch.mockRejectedValue(new TypeError("redirect mode is set to error"));
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    // All retry attempts should fail
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect(mockPrismaTeamWebhook.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ failCount: 1 }),
+      }),
+    );
+  });
 });
 
 describe("dispatchTenantWebhook", () => {

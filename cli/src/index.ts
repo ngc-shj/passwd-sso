@@ -216,12 +216,12 @@ async function interactiveMode(): Promise<void> {
           const idx = lengthIdx !== -1 ? lengthIdx : lengthIdx2;
           const rawLength = idx !== -1 ? args[idx + 1] : undefined;
           const parsedLength = rawLength && !rawLength.startsWith("-") ? parseInt(rawLength, 10) : NaN;
-          if (idx !== -1 && (isNaN(parsedLength) || parsedLength <= 0)) {
+          if (idx !== -1 && (Number.isNaN(parsedLength) || parsedLength <= 0)) {
             output.error("Usage: generate [-l <number>] [--copy]");
             break;
           }
           await generateCommand({
-            length: isNaN(parsedLength) ? 20 : parsedLength,
+            length: Number.isNaN(parsedLength) ? 20 : parsedLength,
             copy: args.includes("--copy") || args.includes("-c"),
             json: args.includes("--json"),
           });

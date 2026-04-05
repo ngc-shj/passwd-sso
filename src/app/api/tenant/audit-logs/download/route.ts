@@ -62,7 +62,7 @@ async function handleGET(req: NextRequest) {
   // Validate date range (from || to is always true here due to early return above)
   const fromDate = from ? new Date(from) : undefined;
   const toDate = to ? new Date(to) : undefined;
-  if ((fromDate && isNaN(fromDate.getTime())) || (toDate && isNaN(toDate.getTime()))) {
+  if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
     return validationError({ date: "Invalid date format" });
   }
   const now = new Date();

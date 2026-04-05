@@ -210,6 +210,36 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 401 for /api/vault/setup without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/setup", {
+        Cookie: "authjs.session-token=sess-vault-setup",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for /api/vault/unlock without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/unlock", {
+        Cookie: "authjs.session-token=sess-vault-unlock",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("returns 401 for /api/folders without session", async () => {
+    const res = await proxy(
+      createApiRequest("/api/folders", {
+        Cookie: "authjs.session-token=sess-folders",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("allows non-protected API routes without auth", async () => {
     const res = await proxy(
       createApiRequest("/api/auth/session"),
@@ -589,6 +619,36 @@ describe("proxy — access restriction", () => {
 
     expect(res.status).toBe(200);
     expect(mockCheckAccessWithAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 403 for /api/vault/unlock when access denied", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/vault/unlock`, {
+      method: "POST",
+      headers: { Cookie: "authjs.session-token=sess-acl-vault" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("ACCESS_DENIED");
+  });
+
+  it("returns 403 for /api/folders when access denied", async () => {
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: false, reason: "IP not in allowed CIDRs" });
+
+    const req = new NextRequest(`${APP_ORIGIN}/api/folders`, {
+      method: "GET",
+      headers: { Cookie: "authjs.session-token=sess-acl-folders" },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await proxy(req, dummyOptions);
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body.error).toBe("ACCESS_DENIED");
   });
 
   it("returns 403 for dashboard route when access denied", async () => {

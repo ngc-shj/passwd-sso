@@ -234,19 +234,6 @@ describe("handleMcpRequest — tools/call", () => {
     });
   });
 
-  it("legacy credentials:decrypt scope accepted for list_credentials", async () => {
-    mockToolListCredentials.mockResolvedValueOnce({ result: { entries: [], total: 0 } });
-    const token = makeToken({ scopes: ["credentials:decrypt"] });
-    const result = await handleMcpRequest(
-      callRequest({ name: "list_credentials", arguments: {} }),
-      token,
-    );
-    expect(result).toMatchObject({
-      result: { content: [{ type: "text" }] },
-    });
-    expect(mockToolListCredentials).toHaveBeenCalledOnce();
-  });
-
   it("tool error propagates as JSON-RPC error", async () => {
     mockToolListCredentials.mockResolvedValueOnce({
       error: { code: -32603, message: "Internal error" },
@@ -291,16 +278,6 @@ describe("hasRequiredScope — via tools/call", () => {
   it("specific scope matches", async () => {
     mockToolListCredentials.mockResolvedValueOnce({ result: { entries: [], total: 0 } });
     const token = makeToken({ scopes: ["credentials:list"] });
-    const result = await handleMcpRequest(
-      makeRequest({ method: "tools/call", params: { name: "list_credentials" } }),
-      token,
-    );
-    expect(result).not.toMatchObject({ error: { code: -32003 } });
-  });
-
-  it("credentials:decrypt legacy alias matches", async () => {
-    mockToolListCredentials.mockResolvedValueOnce({ result: { entries: [], total: 0 } });
-    const token = makeToken({ scopes: ["credentials:decrypt"] });
     const result = await handleMcpRequest(
       makeRequest({ method: "tools/call", params: { name: "list_credentials" } }),
       token,

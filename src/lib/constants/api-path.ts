@@ -24,6 +24,7 @@ export const API_PATH = {
   SENDS_FILE: "/api/sends/file",
   AUDIT_LOGS_IMPORT: "/api/audit-logs/import",
   AUDIT_LOGS_EXPORT: "/api/audit-logs/export",
+  VAULT: "/api/vault",
   VAULT_STATUS: "/api/vault/status",
   VAULT_SETUP: "/api/vault/setup",
   VAULT_UNLOCK_DATA: "/api/vault/unlock/data",

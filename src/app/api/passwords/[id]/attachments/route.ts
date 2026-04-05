@@ -113,7 +113,7 @@ async function handlePOST(
   const contentLength = req.headers.get("content-length");
   if (contentLength) {
     const declaredSize = parseInt(contentLength, 10);
-    if (!isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
+    if (!Number.isNaN(declaredSize) && declaredSize > MAX_FILE_SIZE * 2) {
       return errorResponse(API_ERROR.PAYLOAD_TOO_LARGE, 413);
     }
   }
@@ -150,7 +150,7 @@ async function handlePOST(
 
   // Validate original file size (before encryption)
   const originalSize = parseInt(sizeBytes, 10);
-  if (isNaN(originalSize) || originalSize <= 0 || originalSize > MAX_FILE_SIZE) {
+  if (Number.isNaN(originalSize) || originalSize <= 0 || originalSize > MAX_FILE_SIZE) {
     return errorResponse(API_ERROR.FILE_TOO_LARGE, 400);
   }
 
@@ -183,7 +183,7 @@ async function handlePOST(
   const blobContext = { attachmentId, entryId: id };
   const storedBlob = await blobStore.putObject(buffer, blobContext);
   const aadVersion = aadVersionStr ? parseInt(aadVersionStr, 10) : AAD_VERSION;
-  if (isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
+  if (Number.isNaN(aadVersion) || aadVersion < 1 || aadVersion > 1) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
   let attachment;

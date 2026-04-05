@@ -356,6 +356,30 @@ describe("buildAuditLogDateFilter", () => {
     expect(result?.gte).toBeInstanceOf(Date);
     expect(result?.gte?.toISOString()).toBe(from);
   });
+
+  it("returns undefined when from is an invalid date string", () => {
+    expect(buildAuditLogDateFilter("banana", null)).toBeUndefined();
+  });
+
+  it("returns undefined when to is an invalid date string", () => {
+    expect(buildAuditLogDateFilter(null, "not-a-date")).toBeUndefined();
+  });
+
+  it("returns undefined when both from and to are invalid", () => {
+    expect(buildAuditLogDateFilter("garbage", "invalid")).toBeUndefined();
+  });
+
+  it("ignores invalid from but keeps valid to", () => {
+    const to = "2024-12-31T23:59:59.000Z";
+    const result = buildAuditLogDateFilter("invalid", to);
+    expect(result).toEqual({ lte: new Date(to) });
+  });
+
+  it("ignores invalid to but keeps valid from", () => {
+    const from = "2024-01-01T00:00:00.000Z";
+    const result = buildAuditLogDateFilter(from, "invalid");
+    expect(result).toEqual({ gte: new Date(from) });
+  });
 });
 
 describe("paginateResult", () => {

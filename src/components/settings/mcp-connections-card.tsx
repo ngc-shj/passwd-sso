@@ -205,7 +205,10 @@ export function McpConnectionsCard() {
                       {client.connection ? t("connected") : t("notConnected")}
                     </Badge>
                   </div>
-                  <ScopeBadges scopes={client.allowedScopes} separator={/[\s,]+/} />
+                  <ScopeBadges
+                    scopes={client.connection?.scope ?? client.allowedScopes}
+                    separator={/[\s,]+/}
+                  />
                   <div className="flex gap-4 text-xs text-muted-foreground">
                     <span>
                       {t("registeredAt", { date: formatDateTime(client.clientCreatedAt, locale) })}
@@ -213,7 +216,6 @@ export function McpConnectionsCard() {
                   </div>
                   {client.connection && (
                     <>
-                      <ScopeBadges scopes={client.connection.scope} separator={/[\s,]+/} />
                       <div className="flex gap-4 text-xs text-muted-foreground">
                         <span>
                           {t("created")}:{" "}

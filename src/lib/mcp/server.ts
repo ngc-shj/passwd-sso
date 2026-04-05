@@ -25,9 +25,8 @@ const TOOL_SCOPE_MAP: Record<string, McpScope> = {
   search_credentials: MCP_SCOPE.CREDENTIALS_LIST,
 };
 
-// hasRequiredScope checks for the specific required scope OR the legacy credentials:decrypt alias
 function hasRequiredScope(tokenScopes: string[], required: string): boolean {
-  return tokenScopes.includes(required) || tokenScopes.includes(MCP_SCOPE.CREDENTIALS_DECRYPT);
+  return tokenScopes.includes(required);
 }
 
 // ─── Rate limiting ────────────────────────────────────────────
@@ -93,7 +92,7 @@ async function handleToolsCall(
   const p = params as { name?: string; arguments?: unknown };
   if (!p?.name) return err(id, -32602, "Missing tool name");
 
-  // Scope enforcement — also accepts legacy credentials:decrypt as an alias
+  // Scope enforcement
   const requiredScope = TOOL_SCOPE_MAP[p.name];
   if (requiredScope && !hasRequiredScope(token.scopes, requiredScope)) {
     return err(id, -32003, `Insufficient scope: requires ${requiredScope}`);

@@ -192,10 +192,6 @@ describe("VALID_RESOURCE_ACTIONS allowlist", () => {
     expect(parseScope("access-request:create")).not.toBeNull();
   });
 
-  it("accepts valid MCP scope: credentials:decrypt", () => {
-    expect(parseScope("credentials:decrypt")).not.toBeNull();
-  });
-
   it("accepts valid MCP scope: credentials:list", () => {
     const result = parseScope("credentials:list");
     expect(result).not.toBeNull();
@@ -252,7 +248,7 @@ describe("VALID_TEAM_RESOURCE_ACTIONS allowlist", () => {
   });
 
   it("rejects invalid team-scoped scope: team:<uuid>:credentials:decrypt", () => {
-    // credentials:decrypt is only in SA allowlist, not team allowlist
+    // credentials:decrypt is not a valid scope in any allowlist
     expect(parseScope(`team:${TEAM_UUID}:credentials:decrypt`)).toBeNull();
   });
 

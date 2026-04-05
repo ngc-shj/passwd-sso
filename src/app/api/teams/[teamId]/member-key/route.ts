@@ -46,7 +46,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   let memberKey;
   if (keyVersionParam) {
     const keyVersion = parseInt(keyVersionParam, 10);
-    if (isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
+    if (Number.isNaN(keyVersion) || keyVersion < 1 || keyVersion > 10000) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
     memberKey = await withTeamTenantRls(teamId, async () =>

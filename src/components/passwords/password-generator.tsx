@@ -382,7 +382,7 @@ export function PasswordGenerator({
                 value={settings.length}
                 onChange={(e) => {
                   const v = parseInt(e.target.value, 10);
-                  if (!isNaN(v)) update({ length: v });
+                  if (!Number.isNaN(v)) update({ length: v });
                 }}
                 onBlur={() => {
                   update({ length: Math.min(PASSWORD_LENGTH_MAX, Math.max(PASSWORD_LENGTH_MIN, settings.length)) });
@@ -579,7 +579,7 @@ export function PasswordGenerator({
                 value={settings.passphrase.wordCount}
                 onChange={(e) => {
                   const v = parseInt(e.target.value, 10);
-                  if (!isNaN(v)) updatePassphrase({ wordCount: v });
+                  if (!Number.isNaN(v)) updatePassphrase({ wordCount: v });
                 }}
                 onBlur={() => {
                   updatePassphrase({

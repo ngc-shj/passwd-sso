@@ -90,7 +90,7 @@ export abstract class BaseCloudKeyProvider implements KeyProvider {
       process.env.SHARE_MASTER_KEY_CURRENT_VERSION ?? "1",
       10
     );
-    if (isNaN(currentVersion) || currentVersion < 1) {
+    if (Number.isNaN(currentVersion) || currentVersion < 1) {
       throw new Error("SHARE_MASTER_KEY_CURRENT_VERSION must be a positive integer");
     }
 
