@@ -195,3 +195,29 @@ None — all findings include evidence and specific file/line references.
 ### T-05 [Major] 12 of 14 route tests lack details structure assertions
 - Action: Added `toHaveProperty("properties")` assertions to 6 route tests
 - Modified: `change-passphrase/route.test.ts`, `delegation/route.test.ts`, `recovery-key/generate/route.test.ts`, `directory-sync/[id]/run/route.test.ts`, `tenant/breakglass/route.test.ts` (3 assertions)
+
+## Code Review Round 2 Findings & Resolution
+
+### CR-01 [Critical] breakglass self-access test never reaches self-access guard
+- Action: Used valid UUID session override in test to pass Zod schema validation
+- Modified: `tenant/breakglass/route.test.ts`
+
+### CR-02 [Major] zodValidationError() has no direct unit test
+- Action: Added test with real ZodError verifying treeifyError shape (errors + properties)
+- Modified: `api-response.test.ts`
+
+### CR-03 [Major] rotate-key >10 issues truncation has no test
+- Action: Added test sending empty body (>10 required field issues) verifying truncated response
+- Modified: `vault/rotate-key/route.test.ts`
+
+### CR-04 [Major] breakglass self-access error shape inconsistent
+- Action: Changed from `{ targetUserId: [...] }` to `{ properties: { targetUserId: { errors: [...] } } }` via `validationError()`
+- Modified: `tenant/breakglass/route.ts`
+
+### CR-05 [Minor] rotate-key errorCount unused by clients
+- Action: Simplified to `{ errors: ["Validation failed with N errors"] }` for consistency
+- Modified: `vault/rotate-key/route.ts`
+
+### CR-06 [Minor] delegation POST malformed JSON test missing
+- Action: Added INVALID_JSON test case
+- Modified: `vault/delegation/route.test.ts`
