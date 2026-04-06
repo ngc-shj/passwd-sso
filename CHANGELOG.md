@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.34](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.33...passwd-sso-v0.4.34) (2026-04-06)
+
+
+### Code Refactoring
+
+* migrate Zod validation errors from flatten() to treeifyError() ([#344](https://github.com/ngc-shj/passwd-sso/issues/344)) ([86380fd](https://github.com/ngc-shj/passwd-sso/commit/86380fdae718c5f02688fa6e63085155f059160d))
+
 ## [0.4.33](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.32...passwd-sso-v0.4.33) (2026-04-05)
 
 
