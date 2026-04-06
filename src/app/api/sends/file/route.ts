@@ -18,7 +18,7 @@ import {
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
@@ -68,7 +68,7 @@ async function handlePOST(req: NextRequest) {
     requirePassword: requirePasswordRaw != null ? requirePasswordRaw : undefined,
   });
   if (!parsed.success) {
-    return validationError(parsed.error.flatten());
+    return zodValidationError(parsed.error);
   }
 
   const meta = parsed.data;

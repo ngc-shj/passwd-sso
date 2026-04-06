@@ -419,4 +419,15 @@ describe("POST /api/vault/rotate-key", () => {
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(2, "user-1", expect.any(Function));
     expect(mockWithUserTenantRls).toHaveBeenNthCalledWith(3, "user-1", expect.any(Function));
   });
+
+  it("truncates error details when >10 validation issues", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/vault/rotate-key", { body: {} }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details.errors[0]).toMatch(/Validation failed with \d+ errors/);
+    expect(json.details).not.toHaveProperty("properties");
+  });
 });

@@ -143,7 +143,7 @@ export function BaseWebhookCard({ config }: Props) {
       });
       if (res.status === 400) {
         const data = await res.json().catch(() => null);
-        if (data?.details?.fieldErrors?.url?.length) {
+        if (data?.details?.properties?.url?.errors?.length) {
           setUrlError(t("urlInvalid"));
         } else {
           toast.error(t("validationError"));

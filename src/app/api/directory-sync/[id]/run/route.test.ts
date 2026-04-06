@@ -141,6 +141,7 @@ describe("POST /api/directory-sync/[id]/run", () => {
 
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("runs sync with defaults (dryRun=false, force=false) on empty body", async () => {

@@ -57,7 +57,7 @@ describe("parseBody", () => {
       const json = await result.response.json();
       expect(json.error).toBe("VALIDATION_ERROR");
       expect(json.details).toBeDefined();
-      expect(json.details.fieldErrors).toBeDefined();
+      expect(json.details.properties).toBeDefined();
     }
   });
 

@@ -338,6 +338,7 @@ describe("POST /api/tenant/breakglass", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 400 when reason is too short", async () => {
@@ -350,18 +351,24 @@ describe("POST /api/tenant/breakglass", () => {
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 400 when requester tries to access own logs", async () => {
+    const selfUuid = "00000000-0000-4000-a000-000000000099";
+    mockAuth.mockResolvedValue({ user: { id: selfUuid } });
     const res = await POST(
       createRequest("POST", "http://localhost/api/tenant/breakglass", {
-        body: { targetUserId: ACTOR_USER_ID, reason: "Trying to access own logs here", incidentRef: "INC-001" },
+        body: { targetUserId: selfUuid, reason: "Trying to access own logs here", incidentRef: "INC-001" },
         headers: { origin: "http://localhost" },
       }),
     );
     const { status, json } = await parseResponse(res);
     expect(status).toBe(400);
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details.properties.targetUserId.errors).toContain(
+      "Cannot request access to your own logs",
+    );
   });
 
   it("returns 429 when rate limit is exceeded", async () => {

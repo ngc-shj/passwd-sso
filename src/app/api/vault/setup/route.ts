@@ -11,7 +11,7 @@ import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
 import {
   hexIv,
   hexAuthTag,
@@ -106,7 +106,7 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = setupSchema.safeParse(body);
   if (!parsed.success) {
-    return validationError(parsed.error.flatten());
+    return zodValidationError(parsed.error);
   }
 
   const data = parsed.data;

@@ -11,7 +11,7 @@ import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, zodValidationError } from "@/lib/api-response";
 import { z } from "zod";
 
 const createSchema = z.object({
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
 
   const parsed = createSchema.safeParse(body);
   if (!parsed.success) {
-    return validationError(parsed.error.flatten());
+    return zodValidationError(parsed.error);
   }
 
   const { name, redirectUris, allowedScopes } = parsed.data;

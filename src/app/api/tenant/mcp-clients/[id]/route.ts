@@ -10,7 +10,7 @@ import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound, validationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, notFound, zodValidationError } from "@/lib/api-response";
 import { z } from "zod";
 
 const updateSchema = z.object({
@@ -100,7 +100,7 @@ export async function PUT(
   }
 
   const parsed = updateSchema.safeParse(body);
-  if (!parsed.success) return validationError(parsed.error.flatten());
+  if (!parsed.success) return zodValidationError(parsed.error);
 
   const data = parsed.data;
   const updateData: Record<string, unknown> = {};

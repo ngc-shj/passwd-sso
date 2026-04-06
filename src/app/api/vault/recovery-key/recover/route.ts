@@ -7,7 +7,7 @@ import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/cryp
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { rateLimited, zodValidationError } from "@/lib/api-response";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -103,10 +103,7 @@ async function handlePOST(request: NextRequest) {
 async function handleVerify(body: unknown, userId: string) {
   const parsed = verifySchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
+    return zodValidationError(parsed.error);
   }
 
   const user = await withUserTenantRls(userId, async () =>
@@ -154,10 +151,7 @@ async function handleVerify(body: unknown, userId: string) {
 async function handleReset(body: unknown, userId: string, request: NextRequest) {
   const parsed = resetSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
+    return zodValidationError(parsed.error);
   }
 
   const data = parsed.data;

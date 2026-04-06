@@ -85,6 +85,7 @@ describe("POST /api/vault/recovery-key/generate", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("VALIDATION_ERROR");
+    expect(json.details).toHaveProperty("properties");
   });
 
   it("returns 404 when vault not set up", async () => {

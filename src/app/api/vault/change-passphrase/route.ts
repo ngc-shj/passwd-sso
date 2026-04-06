@@ -10,7 +10,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
@@ -62,7 +62,7 @@ async function handlePOST(request: Request) {
 
   const parsed = changePassphraseSchema.safeParse(body);
   if (!parsed.success) {
-    return validationError(parsed.error.flatten());
+    return zodValidationError(parsed.error);
   }
 
   const data = parsed.data;

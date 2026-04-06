@@ -9,7 +9,7 @@ import { checkLockout, recordFailure } from "@/lib/account-lockout";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, unauthorized, zodValidationError } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -46,10 +46,7 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = disableSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: parsed.error.flatten() },
-      { status: 400 },
-    );
+    return zodValidationError(parsed.error);
   }
 
   const user = await withUserTenantRls(session.user.id, async () =>
