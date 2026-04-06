@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.36](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.35...passwd-sso-v0.4.36) (2026-04-06)
+
+
+### Features
+
+* UI/UX improvements - theme toggle, passkey badge, extension bypass, dark theme ([#348](https://github.com/ngc-shj/passwd-sso/issues/348)) ([a496319](https://github.com/ngc-shj/passwd-sso/commit/a496319212cf297c14a1e3df17985b00f33125f5))
+
 ## [0.4.35](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.34...passwd-sso-v0.4.35) (2026-04-06)
 
 
