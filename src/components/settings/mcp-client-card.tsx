@@ -339,8 +339,10 @@ export function McpClientCard() {
             </Badge>
           )}
         </div>
-        <p className="text-xs text-muted-foreground font-mono">
-          {client.clientId}
+        <p className="text-xs text-muted-foreground font-mono truncate" title={client.clientId}>
+          {client.clientId.length > 16
+            ? `${client.clientId.slice(0, 16)}…`
+            : client.clientId}
         </p>
         <ScopeBadges scopes={client.allowedScopes} />
         {client.connectedUsers && client.connectedUsers.length > 0 && (

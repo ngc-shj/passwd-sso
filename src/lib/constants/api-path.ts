@@ -77,6 +77,7 @@ export const API_PATH = {
   TENANT_ACCESS_REQUESTS: "/api/tenant/access-requests",
   VAULT_DELEGATION: "/api/vault/delegation",
   USER_MCP_TOKENS: "/api/user/mcp-tokens",
+  USER_AUTH_PROVIDER: "/api/user/auth-provider",
 } as const;
 
 export const apiPath = {

@@ -126,22 +126,20 @@ export function SettingsNavSection({
       <CollapsibleContent>
         <div className="ml-3 border-l pl-3 space-y-0.5">
           {!scopedTeam && (
-            <>
-              <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                <Link href="/dashboard/settings" onClick={onNavigate}>
-                  <UserRound className="h-4 w-4" />
-                  {t("settings")}
-                </Link>
-              </Button>
-              {isAdmin && (
-                <Button variant={isAdminActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
-                  <Link href="/admin" onClick={onNavigate}>
-                    <LayoutDashboard className="h-4 w-4" />
-                    {t("adminConsole")}
-                  </Link>
-                </Button>
-              )}
-            </>
+            <Button variant={isSettingsActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+              <Link href="/dashboard/settings" onClick={onNavigate}>
+                <UserRound className="h-4 w-4" />
+                {t("settings")}
+              </Link>
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant={isAdminActive ? "secondary" : "ghost"} className="w-full justify-start gap-2" asChild>
+              <Link href="/admin" onClick={onNavigate}>
+                <LayoutDashboard className="h-4 w-4" />
+                {t("adminConsole")}
+              </Link>
+            </Button>
           )}
         </div>
       </CollapsibleContent>

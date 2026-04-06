@@ -178,6 +178,7 @@ async function handleApiAuth(request: NextRequest) {
     pathname.startsWith(API_PATH.NOTIFICATIONS) ||
     pathname.startsWith(API_PATH.USER_LOCALE) ||
     pathname.startsWith(API_PATH.USER_MCP_TOKENS) ||
+    pathname.startsWith(API_PATH.USER_AUTH_PROVIDER) ||
     pathname.startsWith(API_PATH.EXTENSION) ||
     pathname.startsWith(API_PATH.TENANT) ||
     pathname.startsWith(API_PATH.API_KEYS) ||

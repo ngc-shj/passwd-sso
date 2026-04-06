@@ -86,6 +86,9 @@ export function PasskeyCredentialsCard() {
   const [registering, setRegistering] = useState(false);
   const [nickname, setNickname] = useState("");
 
+  // Auth provider check — whether user can use passkey for sign-in
+  const [canPasskeySignIn, setCanPasskeySignIn] = useState(true); // fail-open
+
   // Inline rename state
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -114,6 +117,17 @@ export function PasskeyCredentialsCard() {
   useEffect(() => {
     fetchCredentials();
   }, [fetchCredentials]);
+
+  useEffect(() => {
+    fetchApi(API_PATH.USER_AUTH_PROVIDER)
+      .then(async (res) => {
+        if (res.ok) {
+          const data = await res.json();
+          setCanPasskeySignIn(data.canPasskeySignIn);
+        }
+      })
+      .catch(() => {}); // fail-open: keep default true
+  }, []);
 
   const handleRegister = async () => {
     if (!webAuthnAvailable || !vaultUnlocked || registering) return;
@@ -424,11 +438,17 @@ export function PasskeyCredentialsCard() {
                       {/* Discoverable (passkey sign-in) */}
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded ${
-                          isNonDiscoverable(cred)
+                          isNonDiscoverable(cred) || !canPasskeySignIn
                             ? "text-muted-foreground/50 line-through"
                             : "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
                         }`}
-                        title={isNonDiscoverable(cred) ? t("notDiscoverableDescription") : t("discoverableDescription")}
+                        title={
+                          !canPasskeySignIn
+                            ? t("discoverableDisabledOidc")
+                            : isNonDiscoverable(cred)
+                              ? t("notDiscoverableDescription")
+                              : t("discoverableDescription")
+                        }
                       >
                         {t("discoverable")}
                       </span>

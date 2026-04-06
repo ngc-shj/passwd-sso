@@ -12,5 +12,9 @@
   "yes": "はい",
   "no": "いいえ",
   "statusUnsaved": "未保存の変更があります",
-  "statusSaved": "変更は保存済みです"
+  "statusSaved": "変更は保存済みです",
+  "theme": "テーマ",
+  "themeLight": "ライト",
+  "themeDark": "ダーク",
+  "themeSystem": "システム設定に従う"
 }

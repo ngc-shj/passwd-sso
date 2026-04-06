@@ -142,8 +142,11 @@ function handleConfirmCreate(
     { type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, rpId: payload.rpId, userName: payload.userName },
     (dupResponse) => {
       clearTimeout(fallback);
-      if (chrome.runtime.lastError || dupResponse?.vaultLocked) {
-        // Vault locked or SW error — fall through to platform authenticator
+      if (chrome.runtime.lastError || dupResponse?.vaultLocked || dupResponse?.suppressed) {
+        // All three cases fall through to the platform authenticator, but for different reasons:
+        //   vaultLocked: vault is locked, cannot access stored passkeys
+        //   suppressed:  on own app page, extension should not intercept WebAuthn
+        //   lastError:   service worker error, cannot communicate with background
         fallthrough();
         return;
       }

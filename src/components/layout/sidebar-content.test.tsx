@@ -100,11 +100,11 @@ describe("SidebarContent", () => {
     expect(props.onCreateFolder).toHaveBeenCalledWith("team-1");
   });
 
-  it("does not render SettingsNavSection for team vault", () => {
+  it("renders SettingsNavSection for team vault (admin console stays accessible)", () => {
     const props = baseProps({ vaultContext: { type: "team", teamId: "team-1", teamRole: "ADMIN" } });
     render(<SidebarContent {...props} />);
 
-    expect(screen.queryByText("settings-nav")).toBeNull();
+    expect(screen.queryByText("settings-nav")).not.toBeNull();
   });
 
   it("does not render SecuritySection for team Viewer", () => {

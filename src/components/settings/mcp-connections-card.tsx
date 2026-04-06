@@ -186,21 +186,23 @@ export function McpConnectionsCard() {
                 className="flex items-start justify-between border rounded-md p-3"
               >
                 <div className="space-y-1.5 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-medium truncate">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium truncate max-w-[12rem]">
                       {client.name}
                     </span>
-                    <span className="text-xs text-muted-foreground font-mono">
-                      {client.clientId}
+                    <span className="text-xs text-muted-foreground font-mono truncate max-w-[10rem]" title={client.clientId}>
+                      {client.clientId.length > 16
+                        ? `${client.clientId.slice(0, 16)}…`
+                        : client.clientId}
                     </span>
                     {client.isDcr && (
-                      <Badge variant="outline" className="text-xs">
+                      <Badge variant="outline" className="text-xs shrink-0">
                         DCR
                       </Badge>
                     )}
                     <Badge
                       variant={client.connection ? "default" : "secondary"}
-                      className="text-xs"
+                      className="text-xs shrink-0"
                     >
                       {client.connection ? t("connected") : t("notConnected")}
                     </Badge>

@@ -198,18 +198,16 @@ export function SidebarContent({
         />
       )}
 
-      {vaultContext.type !== "team" && (
-        <SettingsNavSection
-          isOpen={isOpen("settingsNav")}
-          onOpenChange={toggleSection("settingsNav")}
-          t={t}
-          selectedTeam={selectedTeam}
-          isAdminActive={isAdminActive}
-          isSettingsActive={isSettingsActive}
-          isAdmin={isAdmin}
-          onNavigate={onNavigate}
-        />
-      )}
+      <SettingsNavSection
+        isOpen={isOpen("settingsNav")}
+        onOpenChange={toggleSection("settingsNav")}
+        t={t}
+        selectedTeam={selectedTeam}
+        isAdminActive={isAdminActive}
+        isSettingsActive={isSettingsActive}
+        isAdmin={isAdmin}
+        onNavigate={onNavigate}
+      />
 
       <ToolsSection
         isOpen={isOpen("tools")}
