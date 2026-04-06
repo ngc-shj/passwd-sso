@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.35](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.34...passwd-sso-v0.4.35) (2026-04-06)
+
+
+### Bug Fixes
+
+* force node24 runtime for release-please-action ([#346](https://github.com/ngc-shj/passwd-sso/issues/346)) ([49f3d8e](https://github.com/ngc-shj/passwd-sso/commit/49f3d8e90517c501dc5ce475f1f5afc7712d0b01))
+
 ## [0.4.34](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.33...passwd-sso-v0.4.34) (2026-04-06)
 
 
