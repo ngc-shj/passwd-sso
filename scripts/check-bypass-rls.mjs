@@ -84,6 +84,8 @@ const ALLOWED_USAGE = new Map([
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)
   ["src/app/api/user/mcp-tokens/route.ts", ["mcpAccessToken", "mcpClient"]],
   ["src/app/api/user/mcp-tokens/[id]/route.ts", ["mcpAccessToken", "mcpRefreshToken", "delegationSession", "auditLog"]],
+  // Auth provider check: userId-scoped Account query for passkey sign-in capability
+  ["src/app/api/user/auth-provider/route.ts", ["account"]],
 ]);
 
 // Regex to match prisma model access: prisma.modelName.method(...) or tx.modelName.method(...)
