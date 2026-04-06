@@ -26,6 +26,15 @@
   var origGet = navigator.credentials.get.bind(navigator.credentials);
   var origCreate = navigator.credentials.create.bind(navigator.credentials);
 
+  // Own-app bypass: when the ISOLATED world detects this is the passwd-sso app,
+  // it posts this message so the interceptor skips all WebAuthn interception.
+  var ownAppBypass = false;
+  window.addEventListener("message", function (event) {
+    if (event.source === window && event.data && event.data.type === "PASSWD_SSO_OWN_APP_BYPASS") {
+      ownAppBypass = true;
+    }
+  });
+
   var pendingRequests = {};
 
   window.addEventListener("message", function (event) {
@@ -59,7 +68,7 @@
   }
 
   navigator.credentials.get = function (options) {
-    if (!options || !options.publicKey) {
+    if (ownAppBypass || !options || !options.publicKey) {
       return origGet(options);
     }
 
@@ -154,7 +163,7 @@
   };
 
   navigator.credentials.create = function (options) {
-    if (!options || !options.publicKey) {
+    if (ownAppBypass || !options || !options.publicKey) {
       return origCreate(options);
     }
 
