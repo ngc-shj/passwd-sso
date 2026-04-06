@@ -2348,7 +2348,7 @@ async function handleMessage(
       // remains the security boundary for passkey operations.
       const senderUrl = _sender.tab?.url;
       if (senderUrl && await isOwnAppPage(senderUrl)) {
-        sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], suppressed: true } as ExtensionResponse);
+        sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], vaultLocked: false, suppressed: true } as ExtensionResponse);
         return;
       }
       const result = await handlePasskeyGetMatches(message.rpId, senderUrl);
@@ -2359,7 +2359,7 @@ async function handleMessage(
     case EXT_MSG.PASSKEY_CHECK_DUPLICATE: {
       const senderUrl = _sender.tab?.url;
       if (senderUrl && await isOwnAppPage(senderUrl)) {
-        sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, exists: false, suppressed: true } as ExtensionResponse);
+        sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, entries: [], suppressed: true } as ExtensionResponse);
         return;
       }
       const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName, senderUrl);

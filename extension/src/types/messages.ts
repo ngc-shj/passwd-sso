@@ -137,6 +137,7 @@ export type ExtensionResponse =
       type: typeof EXT_MSG.PASSKEY_GET_MATCHES;
       entries: PasskeyMatchEntry[];
       vaultLocked: boolean;
+      suppressed?: boolean;
     }
   | {
       type: typeof EXT_MSG.PASSKEY_SIGN_ASSERTION;
@@ -148,12 +149,14 @@ export type ExtensionResponse =
       type: typeof EXT_MSG.PASSKEY_CHECK_DUPLICATE;
       entries: PasskeyMatchEntry[];
       vaultLocked?: boolean;
+      suppressed?: boolean;
     }
   | {
       type: typeof EXT_MSG.PASSKEY_CREATE_CREDENTIAL;
       ok: boolean;
       response?: SerializedAttestationResponse;
       error?: string;
+      suppressed?: boolean;
     };
 
 export interface AutofillPayload {

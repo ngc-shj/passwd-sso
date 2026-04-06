@@ -2049,7 +2049,7 @@ describe("PASSKEY handlers suppress on own app", () => {
     expect(res).toEqual(
       expect.objectContaining({
         type: "PASSKEY_CHECK_DUPLICATE",
-        exists: false,
+        entries: [],
         suppressed: true,
       }),
     );
