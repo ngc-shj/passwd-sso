@@ -2062,6 +2062,29 @@ describe("PASSKEY handlers suppress on own app", () => {
     );
     expect(res).not.toHaveProperty("suppressed", true);
   });
+
+  it("returns suppressed for PASSKEY_CREATE_CREDENTIAL on own app", async () => {
+    const res = await sendMessageWithSender(
+      {
+        type: "PASSKEY_CREATE_CREDENTIAL",
+        rpId: "localhost",
+        rpName: "passwd-sso",
+        userId: "dXNlci0x",
+        userName: "user@example.com",
+        userDisplayName: "User",
+        excludeCredentialIds: [],
+        clientDataJSON: "{}",
+      },
+      { tab: { id: 203, url: "https://localhost:3000/ja/dashboard/settings/security/passkey" } },
+    );
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "PASSKEY_CREATE_CREDENTIAL",
+        ok: false,
+        suppressed: true,
+      }),
+    );
+  });
 });
 
 describe("tab event badge updates", () => {

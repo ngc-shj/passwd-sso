@@ -143,7 +143,10 @@ function handleConfirmCreate(
     (dupResponse) => {
       clearTimeout(fallback);
       if (chrome.runtime.lastError || dupResponse?.vaultLocked || dupResponse?.suppressed) {
-        // Vault locked, own app suppression, or SW error — fall through to platform authenticator
+        // All three cases fall through to the platform authenticator, but for different reasons:
+        //   vaultLocked: vault is locked, cannot access stored passkeys
+        //   suppressed:  on own app page, extension should not intercept WebAuthn
+        //   lastError:   service worker error, cannot communicate with background
         fallthrough();
         return;
       }
