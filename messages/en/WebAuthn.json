@@ -59,5 +59,6 @@
   "pinPolicyError": "Security key PIN length does not meet tenant policy requirements. Please set a longer PIN.",
   "pinLength": "PIN: {length} digits",
   "largeBlobLabel": "Offline backup",
-  "largeBlobSupported": "Offline backup capable"
+  "largeBlobSupported": "Offline backup capable",
+  "discoverableDisabledOidc": "Passkey sign-in is not available with OIDC/SAML authentication"
 }

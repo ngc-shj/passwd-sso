@@ -16,6 +16,7 @@ import {
 import { UserAvatar } from "@/components/auth/user-avatar";
 import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
+import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "@/components/notifications/notification-bell";
 import { useVault } from "@/lib/vault-context";
 import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
@@ -106,6 +107,7 @@ export function Header({ onMenuToggle }: HeaderProps) {
           </div>
         )}
 
+        {mounted && <ThemeToggle />}
         {mounted && <LanguageSwitcher />}
         {mounted && <NotificationBell />}
 

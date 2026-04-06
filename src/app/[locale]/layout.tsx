@@ -7,6 +7,7 @@ import {
 } from "next-intl/server";
 import { notFound } from "next/navigation";
 import { SessionProvider } from "@/components/providers/session-provider";
+import { ThemeProvider } from "@/components/providers/theme-provider";
 import { VaultProvider } from "@/lib/vault-context";
 import { Toaster } from "@/components/ui/sonner";
 import { routing } from "@/i18n/routing";
@@ -53,12 +54,14 @@ export default async function LocaleLayout({ children, params }: Props) {
 
   return (
     <NextIntlClientProvider messages={pickMessages(messages, NS_GLOBAL)}>
-      <SessionProvider>
-        <VaultProvider>
-          {children}
-          <Toaster />
-        </VaultProvider>
-      </SessionProvider>
+      <ThemeProvider>
+        <SessionProvider>
+          <VaultProvider>
+            {children}
+            <Toaster />
+          </VaultProvider>
+        </SessionProvider>
+      </ThemeProvider>
     </NextIntlClientProvider>
   );
 }

@@ -443,4 +443,32 @@ describe("webauthn-bridge-lib handleWebAuthnMessage", () => {
       }),
     );
   });
+
+  it("falls through to platform when PASSKEY_CHECK_DUPLICATE returns suppressed:true", () => {
+    const postedMessages: unknown[] = [];
+    vi.spyOn(window, "postMessage").mockImplementation((data) => {
+      postedMessages.push(data);
+    });
+    sendMessageMock.mockImplementation((_msg: unknown, cb: (r: unknown) => void) => {
+      cb({ suppressed: true });
+    });
+
+    const event = makeEvent({
+      data: {
+        type: WEBAUTHN_BRIDGE_MSG,
+        requestId: "req-confirm-suppressed",
+        action: "PASSKEY_CONFIRM_CREATE",
+        payload: { rpId: "example.com", rpName: "Example", userName: "alice", userDisplayName: "Alice" },
+      },
+    });
+    handleWebAuthnMessage(event);
+
+    expect(postedMessages).toContainEqual(
+      expect.objectContaining({
+        type: WEBAUTHN_BRIDGE_RESP,
+        requestId: "req-confirm-suppressed",
+        response: { action: "platform" },
+      }),
+    );
+  });
 });

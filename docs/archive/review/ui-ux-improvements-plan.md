@@ -195,6 +195,42 @@ All new test files must include `// @vitest-environment jsdom` when testing DOM 
 
 ---
 
+## Implementation Checklist
+
+### Shared utilities to reuse
+- `withBypassRls(prisma, fn, BYPASS_PURPOSE.AUTH_FLOW)` from `src/lib/tenant-rls.ts`
+- `auth()` from `@/auth` for session check
+- `unauthorized()` / `errorResponse()` from `src/lib/api-helpers.ts`
+- `withRequestLog()` wrapper for route handlers
+- `API_PATH` object in `src/lib/constants/api-path.ts`
+- `isOwnAppPage()` in `extension/src/background/index.ts`
+- `EXT_MSG` constants in `extension/src/lib/constants.ts`
+
+### Files that must be modified
+- [ ] `src/components/providers/theme-provider.tsx` — CREATE
+- [ ] `src/components/layout/theme-toggle.tsx` — CREATE
+- [ ] `src/app/api/user/auth-provider/route.ts` — CREATE
+- [ ] `src/app/[locale]/layout.tsx` — add ThemeProvider in correct nesting order
+- [ ] `src/components/layout/header.tsx` — add ThemeToggle
+- [ ] `src/components/settings/passkey-credentials-card.tsx` — conditional badge
+- [ ] `src/lib/constants/api-path.ts` — add USER_AUTH_PROVIDER
+- [ ] `src/proxy.ts` — add auth-provider to protected routes
+- [ ] `messages/ja/Common.json` — theme translations
+- [ ] `messages/en/Common.json` — theme translations
+- [ ] `messages/ja/WebAuthn.json` — OIDC disclaimer
+- [ ] `messages/en/WebAuthn.json` — OIDC disclaimer
+- [ ] `extension/src/background/index.ts` — isOwnAppPage checks for passkey handlers
+- [ ] `extension/src/content/webauthn-bridge-lib.ts` — suppression handling
+
+### Patterns to follow
+- API route: `auth()` → `session?.user?.id` check → `withBypassRls` → `NextResponse.json`
+- API_PATH: `USER_AUTH_PROVIDER: "/api/user/auth-provider"` in api-path.ts
+- Proxy: `pathname.startsWith(API_PATH.USER_AUTH_PROVIDER)` in protected list
+- Translation keys: simple camelCase in Common.json/WebAuthn.json
+- Extension: follow LOGIN_DETECTED isOwnAppPage pattern for PASSKEY_* handlers
+
+---
+
 ## Files to Create
 1. `src/components/providers/theme-provider.tsx`
 2. `src/components/layout/theme-toggle.tsx`

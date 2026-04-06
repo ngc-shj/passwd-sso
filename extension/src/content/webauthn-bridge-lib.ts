@@ -142,8 +142,8 @@ function handleConfirmCreate(
     { type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, rpId: payload.rpId, userName: payload.userName },
     (dupResponse) => {
       clearTimeout(fallback);
-      if (chrome.runtime.lastError || dupResponse?.vaultLocked) {
-        // Vault locked or SW error — fall through to platform authenticator
+      if (chrome.runtime.lastError || dupResponse?.vaultLocked || dupResponse?.suppressed) {
+        // Vault locked, own app suppression, or SW error — fall through to platform authenticator
         fallthrough();
         return;
       }

@@ -1968,6 +1968,102 @@ describe("LOGIN_DETECTED suppresses on own app", () => {
   });
 });
 
+describe("PASSKEY handlers suppress on own app", () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.includes(EXT_API_PATH.EXTENSION_TOKEN_REFRESH)) {
+          return {
+            ok: true,
+            json: async () => ({
+              token: "refreshed-tok",
+              expiresAt: new Date(Date.now() + 900_000).toISOString(),
+              scope: ["passwords:read", "vault:unlock-data"],
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.VAULT_UNLOCK_DATA)) {
+          return {
+            ok: true,
+            json: async () => ({
+              userId: "user-1",
+              accountSalt: "00",
+              encryptedSecretKey: "aa",
+              secretKeyIv: "bb",
+              secretKeyAuthTag: "cc",
+              verificationArtifact: { ciphertext: "11", iv: "22", authTag: "33" },
+            }),
+          };
+        }
+        if (url.includes(EXT_API_PATH.PASSWORDS)) {
+          return {
+            ok: true,
+            json: async () => [
+              {
+                id: "pw-1",
+                encryptedOverview: { ciphertext: "11", iv: "22", authTag: "33" },
+                entryType: EXT_ENTRY_TYPE.LOGIN,
+                aadVersion: 1,
+              },
+            ],
+          };
+        }
+        return { ok: false, json: async () => ({}) };
+      }),
+    );
+
+    await loadBackground();
+
+    await sendMessage({
+      type: "SET_TOKEN",
+      token: "t",
+      expiresAt: Date.now() + 60_000,
+    });
+    await sendMessage({ type: "UNLOCK_VAULT", passphrase: "pw" });
+  });
+
+  it("returns suppressed for PASSKEY_GET_MATCHES on own app", async () => {
+    const res = await sendMessageWithSender(
+      { type: "PASSKEY_GET_MATCHES", rpId: "localhost" },
+      { tab: { id: 200, url: "https://localhost:3000/ja/dashboard/settings/security/passkey" } },
+    );
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "PASSKEY_GET_MATCHES",
+        entries: [],
+        suppressed: true,
+      }),
+    );
+  });
+
+  it("returns suppressed for PASSKEY_CHECK_DUPLICATE on own app", async () => {
+    const res = await sendMessageWithSender(
+      { type: "PASSKEY_CHECK_DUPLICATE", rpId: "localhost", userName: "user@example.com" },
+      { tab: { id: 201, url: "https://localhost:3000/ja/dashboard/settings/security/passkey" } },
+    );
+    expect(res).toEqual(
+      expect.objectContaining({
+        type: "PASSKEY_CHECK_DUPLICATE",
+        exists: false,
+        suppressed: true,
+      }),
+    );
+  });
+
+  it("does not suppress PASSKEY_GET_MATCHES on external URLs", async () => {
+    const res = await sendMessageWithSender(
+      { type: "PASSKEY_GET_MATCHES", rpId: "external.com" },
+      { tab: { id: 202, url: "https://external.com/login" } },
+    );
+    expect(res).not.toHaveProperty("suppressed", true);
+  });
+});
+
 describe("tab event badge updates", () => {
   beforeEach(async () => {
     vi.resetModules();

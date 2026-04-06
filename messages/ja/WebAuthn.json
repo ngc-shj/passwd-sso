@@ -59,5 +59,6 @@
   "pinPolicyError": "セキュリティキーのPIN長がテナントポリシーの要件を満たしていません。より長いPINを設定してください。",
   "pinLength": "PIN: {length}桁",
   "largeBlobLabel": "オフラインバックアップ",
-  "largeBlobSupported": "オフラインバックアップ対応"
+  "largeBlobSupported": "オフラインバックアップ対応",
+  "discoverableDisabledOidc": "OIDC/SAML認証ではパスキーログインは利用できません"
 }

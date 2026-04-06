@@ -12,5 +12,9 @@
   "yes": "Yes",
   "no": "No",
   "statusUnsaved": "Unsaved changes",
-  "statusSaved": "All changes saved"
+  "statusSaved": "All changes saved",
+  "theme": "Theme",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "themeSystem": "System"
 }

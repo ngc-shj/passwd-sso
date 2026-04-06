@@ -55,6 +55,9 @@ vi.mock("@/components/vault/recovery-key-dialog", () => ({
 vi.mock("@/components/notifications/notification-bell", () => ({
   NotificationBell: () => <div data-testid="notification-bell" />,
 }));
+vi.mock("./theme-toggle", () => ({
+  ThemeToggle: () => <div data-testid="theme-toggle" />,
+}));
 
 vi.mock("@/hooks/use-travel-mode", () => ({
   useTravelMode: () => ({ active: false, loading: false, enable: vi.fn(), disable: vi.fn() }),

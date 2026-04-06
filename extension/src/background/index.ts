@@ -2344,13 +2344,25 @@ async function handleMessage(
     }
 
     case EXT_MSG.PASSKEY_GET_MATCHES: {
-      const result = await handlePasskeyGetMatches(message.rpId, _sender.tab?.url);
+      // UX suppression only — isSenderAuthorizedForRpId in passkey-provider.ts
+      // remains the security boundary for passkey operations.
+      const senderUrl = _sender.tab?.url;
+      if (senderUrl && await isOwnAppPage(senderUrl)) {
+        sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, entries: [], suppressed: true } as ExtensionResponse);
+        return;
+      }
+      const result = await handlePasskeyGetMatches(message.rpId, senderUrl);
       sendResponse({ type: EXT_MSG.PASSKEY_GET_MATCHES, ...result } as ExtensionResponse);
       return;
     }
 
     case EXT_MSG.PASSKEY_CHECK_DUPLICATE: {
-      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName, _sender.tab?.url);
+      const senderUrl = _sender.tab?.url;
+      if (senderUrl && await isOwnAppPage(senderUrl)) {
+        sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, exists: false, suppressed: true } as ExtensionResponse);
+        return;
+      }
+      const result = await handlePasskeyCheckDuplicate(message.rpId, message.userName, senderUrl);
       sendResponse({ type: EXT_MSG.PASSKEY_CHECK_DUPLICATE, ...result } as ExtensionResponse);
       return;
     }
@@ -2371,6 +2383,11 @@ async function handleMessage(
     }
 
     case EXT_MSG.PASSKEY_CREATE_CREDENTIAL: {
+      const senderUrl = _sender.tab?.url;
+      if (senderUrl && await isOwnAppPage(senderUrl)) {
+        sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ok: false, suppressed: true } as ExtensionResponse);
+        return;
+      }
       try {
         const result = await handlePasskeyCreateCredential({
           rpId: message.rpId,
@@ -2381,7 +2398,7 @@ async function handleMessage(
           excludeCredentialIds: message.excludeCredentialIds,
           clientDataJSON: message.clientDataJSON,
           replaceEntryId: message.replaceEntryId,
-          senderUrl: _sender.tab?.url,
+          senderUrl,
         });
         sendResponse({ type: EXT_MSG.PASSKEY_CREATE_CREDENTIAL, ...result } as ExtensionResponse);
       } catch {
