@@ -14,12 +14,7 @@ export const KDF_ARGON2_PARALLELISM_MAX = 16;
 
 // ─── Session & Auth ───────────────────────────────────────────
 export const PASSKEY_SESSION_MAX_AGE_SECONDS = 28_800; // 8 hours
-export const MAX_CONCURRENT_SESSIONS_MIN = 1;
-export const MAX_CONCURRENT_SESSIONS_MAX = 100;
-export const SESSION_IDLE_TIMEOUT_MIN = 1;
-export const SESSION_IDLE_TIMEOUT_MAX = 1440;          // 24 hours in minutes
-export const VAULT_AUTO_LOCK_MIN = 1;
-export const VAULT_AUTO_LOCK_MAX = 1440;
+// Session policy min/max constants are in common.ts (shared with client).
 
 // ─── Audit Log ────────────────────────────────────────────────
 export const AUDIT_LOG_MAX_RANGE_DAYS = 90;

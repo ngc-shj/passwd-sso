@@ -15,6 +15,10 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  AUDIT_LOG_RETENTION_MIN,
+  AUDIT_LOG_RETENTION_MAX,
+} from "@/lib/validations";
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
@@ -72,8 +76,8 @@ export function TenantRetentionPolicyCard() {
     if (auditLogRetentionEnabled) {
       if (auditLogRetentionDays === "") return t("auditLogRetentionRequired");
       const num = Number(auditLogRetentionDays);
-      if (!Number.isInteger(num) || num < 30) return t("auditLogRetentionValidationMin");
-      if (num > 3650) return t("auditLogRetentionValidationMax");
+      if (!Number.isInteger(num) || num < AUDIT_LOG_RETENTION_MIN) return t("auditLogRetentionValidationMin");
+      if (num > AUDIT_LOG_RETENTION_MAX) return t("auditLogRetentionValidationMax");
     }
     return null;
   };
@@ -143,22 +147,22 @@ export function TenantRetentionPolicyCard() {
             <Input
               id="audit-log-retention-days"
               type="number"
-              min={30}
-              max={3650}
+              min={AUDIT_LOG_RETENTION_MIN}
+              max={AUDIT_LOG_RETENTION_MAX}
               value={auditLogRetentionDays}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (!raw) { setAuditLogRetentionDays(""); } else {
                   const n = parseInt(raw, 10);
                   if (Number.isNaN(n) || n < 1) { setAuditLogRetentionDays(""); } else {
-                    setAuditLogRetentionDays(String(Math.min(n, 3650)));
+                    setAuditLogRetentionDays(String(Math.min(n, AUDIT_LOG_RETENTION_MAX)));
                   }
                 }
                 setError(null);
               }}
               onBlur={() => {
                 const n = parseInt(auditLogRetentionDays, 10);
-                if (!Number.isNaN(n) && n < 30) setAuditLogRetentionDays(String(30));
+                if (!Number.isNaN(n) && n < AUDIT_LOG_RETENTION_MIN) setAuditLogRetentionDays(String(AUDIT_LOG_RETENTION_MIN));
               }}
               placeholder="365"
             />

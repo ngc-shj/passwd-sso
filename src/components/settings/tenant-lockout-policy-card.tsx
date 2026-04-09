@@ -15,6 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  LOCKOUT_THRESHOLD_MIN,
+  LOCKOUT_THRESHOLD_MAX,
+  LOCKOUT_DURATION_MIN,
+  LOCKOUT_DURATION_MAX,
+} from "@/lib/validations";
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
@@ -88,12 +94,12 @@ export function TenantLockoutPolicyCard() {
     const t3 = threshold3 !== "" ? Number(threshold3) : null;
     const d3 = duration3 !== "" ? Number(duration3) : null;
 
-    if (t1 !== null && (t1 < 1 || t1 > 50)) return t("lockoutThresholdRange");
-    if (d1 !== null && (d1 < 1 || d1 > 10080)) return t("lockoutDurationRange");
-    if (t2 !== null && (t2 < 1 || t2 > 50)) return t("lockoutThresholdRange");
-    if (d2 !== null && (d2 < 1 || d2 > 10080)) return t("lockoutDurationRange");
-    if (t3 !== null && (t3 < 1 || t3 > 50)) return t("lockoutThresholdRange");
-    if (d3 !== null && (d3 < 1 || d3 > 10080)) return t("lockoutDurationRange");
+    if (t1 !== null && (t1 < LOCKOUT_THRESHOLD_MIN || t1 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange");
+    if (d1 !== null && (d1 < LOCKOUT_DURATION_MIN || d1 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange");
+    if (t2 !== null && (t2 < LOCKOUT_THRESHOLD_MIN || t2 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange");
+    if (d2 !== null && (d2 < LOCKOUT_DURATION_MIN || d2 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange");
+    if (t3 !== null && (t3 < LOCKOUT_THRESHOLD_MIN || t3 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange");
+    if (d3 !== null && (d3 < LOCKOUT_DURATION_MIN || d3 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange");
 
     // Thresholds must be ascending
     if (t1 !== null && t2 !== null && t2 <= t1) return t("lockoutThresholdAscending");
@@ -171,15 +177,15 @@ export function TenantLockoutPolicyCard() {
                 <Input
                   id={`lockout-threshold-${tier}`}
                   type="number"
-                  min={1}
-                  max={50}
+                  min={LOCKOUT_THRESHOLD_MIN}
+                  max={LOCKOUT_THRESHOLD_MAX}
                   value={threshold}
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (!raw) { setThreshold(""); } else {
                       const n = parseInt(raw, 10);
-                      if (Number.isNaN(n) || n < 1) { setThreshold(""); } else {
-                        setThreshold(String(Math.min(n, 50)));
+                      if (Number.isNaN(n) || n < LOCKOUT_THRESHOLD_MIN) { setThreshold(""); } else {
+                        setThreshold(String(Math.min(n, LOCKOUT_THRESHOLD_MAX)));
                       }
                     }
                     setError(null);
@@ -193,15 +199,15 @@ export function TenantLockoutPolicyCard() {
                 <Input
                   id={`lockout-duration-${tier}`}
                   type="number"
-                  min={1}
-                  max={10080}
+                  min={LOCKOUT_DURATION_MIN}
+                  max={LOCKOUT_DURATION_MAX}
                   value={duration}
                   onChange={(e) => {
                     const raw = e.target.value;
                     if (!raw) { setDuration(""); } else {
                       const n = parseInt(raw, 10);
-                      if (Number.isNaN(n) || n < 1) { setDuration(""); } else {
-                        setDuration(String(Math.min(n, 10080)));
+                      if (Number.isNaN(n) || n < LOCKOUT_DURATION_MIN) { setDuration(""); } else {
+                        setDuration(String(Math.min(n, LOCKOUT_DURATION_MAX)));
                       }
                     }
                     setError(null);

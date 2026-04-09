@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useVault } from "@/lib/vault-context";
 import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
@@ -184,11 +184,16 @@ export function useWatchtower(
     return () => window.clearInterval(id);
   }, []);
 
+  // Track whether policy was explicitly provided so the effect below can check it
+  // without re-running every time the policy object reference changes.
+  const policyProvidedRef = useRef(policy !== undefined);
+  useMemo(() => { policyProvidedRef.current = policy !== undefined; }, [policy]);
+
   // If no policy was passed in, fetch it from the vault status endpoint.
   // This is skipped when policy is passed explicitly (e.g. from a parent component
   // that already has the vault status, or in tests).
   useEffect(() => {
-    if (policy !== undefined || scope.type !== "personal" || !encryptionKey) return;
+    if (policyProvidedRef.current || scope.type !== "personal" || !encryptionKey) return;
     fetchApi(API_PATH.VAULT_STATUS)
       .then((res) => res.ok ? res.json() : null)
       .then((data) => {
@@ -199,7 +204,6 @@ export function useWatchtower(
       .catch(() => {
         // Ignore errors — policy-driven expiry is best-effort
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scope.type, encryptionKey]);
 
 
@@ -567,6 +571,13 @@ export function useWatchtower(
     analyzeRef.current = analyze;
   }, [analyze]);
 
+  // Keep auto-monitor state in refs so the vault-unlock effect can read current
+  // values without re-running every time they change.
+  const autoMonitorEnabledRef = useRef(autoMonitorEnabled);
+  useEffect(() => { autoMonitorEnabledRef.current = autoMonitorEnabled; }, [autoMonitorEnabled]);
+  const lastBreachCheckAtRef = useRef(lastBreachCheckAt);
+  useEffect(() => { lastBreachCheckAtRef.current = lastBreachCheckAt; }, [lastBreachCheckAt]);
+
   // Auto-check on vault unlock (encryptionKey changes).
   // Only runs for personal scope — team auto-monitor is not supported yet.
   useEffect(() => {
@@ -574,9 +585,9 @@ export function useWatchtower(
     if (!encryptionKey) return;
 
     const doAutoCheck = shouldAutoCheck({
-      lastCheckAt: lastBreachCheckAt,
+      lastCheckAt: lastBreachCheckAtRef.current,
       now: Date.now(),
-      enabled: autoMonitorEnabled,
+      enabled: autoMonitorEnabledRef.current,
       vaultUnlocked: true,
     });
 
@@ -602,11 +613,6 @@ export function useWatchtower(
     return () => {
       isMounted = false;
     };
-    // Only re-evaluate when encryptionKey changes (vault unlock/lock).
-    // autoMonitorEnabled and lastBreachCheckAt are read from their
-    // current values at the time of the effect, not as reactive deps,
-    // to prevent re-triggering on every state update.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [encryptionKey, scope.type]);
 
   // After analysis completes, check for new breaches and send alert.

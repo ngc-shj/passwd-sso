@@ -16,6 +16,14 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  POLICY_MIN_PW_LENGTH_MIN,
+  POLICY_MIN_PW_LENGTH_MAX,
+  PASSWORD_MAX_AGE_MIN,
+  PASSWORD_MAX_AGE_MAX,
+  PASSWORD_EXPIRY_WARNING_MIN,
+  PASSWORD_EXPIRY_WARNING_MAX,
+} from "@/lib/validations";
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
@@ -103,19 +111,19 @@ export function TenantPasswordPolicyCard() {
   const validate = (): string | null => {
     if (minPasswordLength !== "") {
       const num = Number(minPasswordLength);
-      if (!Number.isInteger(num) || num < 0) return t("passwordMinLengthValidationMin");
-      if (num > 128) return t("passwordMinLengthValidationMax");
+      if (!Number.isInteger(num) || num < POLICY_MIN_PW_LENGTH_MIN) return t("passwordMinLengthValidationMin");
+      if (num > POLICY_MIN_PW_LENGTH_MAX) return t("passwordMinLengthValidationMax");
     }
     if (passwordMaxAgeEnabled) {
       if (passwordMaxAgeDays === "") return t("passwordMaxAgeRequired");
       const num = Number(passwordMaxAgeDays);
-      if (!Number.isInteger(num) || num < 1) return t("passwordMaxAgeValidationMin");
-      if (num > 730) return t("passwordMaxAgeValidationMax");
+      if (!Number.isInteger(num) || num < PASSWORD_MAX_AGE_MIN) return t("passwordMaxAgeValidationMin");
+      if (num > PASSWORD_MAX_AGE_MAX) return t("passwordMaxAgeValidationMax");
     }
     if (passwordExpiryWarningDays !== "") {
       const num = Number(passwordExpiryWarningDays);
-      if (!Number.isInteger(num) || num < 1) return t("passwordExpiryWarningValidationMin");
-      if (num > 90) return t("passwordExpiryWarningValidationMax");
+      if (!Number.isInteger(num) || num < PASSWORD_EXPIRY_WARNING_MIN) return t("passwordExpiryWarningValidationMin");
+      if (num > PASSWORD_EXPIRY_WARNING_MAX) return t("passwordExpiryWarningValidationMax");
     }
     return null;
   };
@@ -176,15 +184,15 @@ export function TenantPasswordPolicyCard() {
           <Input
             id="tenant-min-password-length"
             type="number"
-            min={0}
-            max={128}
+            min={POLICY_MIN_PW_LENGTH_MIN}
+            max={POLICY_MIN_PW_LENGTH_MAX}
             value={minPasswordLength}
             onChange={(e) => {
               const raw = e.target.value;
               if (!raw) { setMinPasswordLength(""); } else {
                 const n = parseInt(raw, 10);
-                if (Number.isNaN(n) || n < 0) { setMinPasswordLength(""); } else {
-                  setMinPasswordLength(String(Math.min(n, 128)));
+                if (Number.isNaN(n) || n < POLICY_MIN_PW_LENGTH_MIN) { setMinPasswordLength(""); } else {
+                  setMinPasswordLength(String(Math.min(n, POLICY_MIN_PW_LENGTH_MAX)));
                 }
               }
               setError(null);
@@ -258,15 +266,15 @@ export function TenantPasswordPolicyCard() {
               <Input
                 id="password-max-age-days"
                 type="number"
-                min={1}
-                max={730}
+                min={PASSWORD_MAX_AGE_MIN}
+                max={PASSWORD_MAX_AGE_MAX}
                 value={passwordMaxAgeDays}
                 onChange={(e) => {
                   const raw = e.target.value;
                   if (!raw) { setPasswordMaxAgeDays(""); } else {
                     const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < 1) { setPasswordMaxAgeDays(""); } else {
-                      setPasswordMaxAgeDays(String(Math.min(n, 730)));
+                    if (Number.isNaN(n) || n < PASSWORD_MAX_AGE_MIN) { setPasswordMaxAgeDays(""); } else {
+                      setPasswordMaxAgeDays(String(Math.min(n, PASSWORD_MAX_AGE_MAX)));
                     }
                   }
                   setError(null);
@@ -281,15 +289,15 @@ export function TenantPasswordPolicyCard() {
               <Input
                 id="password-expiry-warning-days"
                 type="number"
-                min={1}
-                max={90}
+                min={PASSWORD_EXPIRY_WARNING_MIN}
+                max={PASSWORD_EXPIRY_WARNING_MAX}
                 value={passwordExpiryWarningDays}
                 onChange={(e) => {
                   const raw = e.target.value;
                   if (!raw) { setPasswordExpiryWarningDays(""); } else {
                     const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < 1) { setPasswordExpiryWarningDays(""); } else {
-                      setPasswordExpiryWarningDays(String(Math.min(n, 90)));
+                    if (Number.isNaN(n) || n < PASSWORD_EXPIRY_WARNING_MIN) { setPasswordExpiryWarningDays(""); } else {
+                      setPasswordExpiryWarningDays(String(Math.min(n, PASSWORD_EXPIRY_WARNING_MAX)));
                     }
                   }
                   setError(null);

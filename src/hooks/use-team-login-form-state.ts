@@ -72,16 +72,14 @@ export function useTeamLoginFormState({
     setRawGeneratorSettings(applyPolicyToGeneratorSettings(value, teamPolicy));
   }, [teamPolicy]);
 
-  // Compute policy violations on each render based on current generator settings.
-  // Sync to parent via useEffect only when the computed violations actually change,
-  // comparing by JSON to avoid triggering re-renders on every render.
+  // Compute policy violations based on current generator settings.
+  // generatorSettings is derived from rawGeneratorSettings + teamPolicy, so listing
+  // those two as deps is sufficient and avoids a circular dependency on generatorSettings.
   const violations = useMemo(() => {
     if (!teamPolicy) return [];
-    const hasAnySymbolGroup = SYMBOL_GROUP_KEYS.some((key) => generatorSettings.symbolGroups[key]);
-    return getPolicyViolations({ ...generatorSettings, hasAnySymbolGroup }, teamPolicy);
-  // generatorSettings is derived from rawGeneratorSettings + teamPolicy; both are stable
-  // inputs here (rawGeneratorSettings only changes when setRawGeneratorSettings is called).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const settings = applyPolicyToGeneratorSettings(rawGeneratorSettings, teamPolicy);
+    const hasAnySymbolGroup = SYMBOL_GROUP_KEYS.some((key) => settings.symbolGroups[key]);
+    return getPolicyViolations({ ...settings, hasAnySymbolGroup }, teamPolicy);
   }, [rawGeneratorSettings, teamPolicy]);
 
   const prevViolationsRef = useRef<string>("");

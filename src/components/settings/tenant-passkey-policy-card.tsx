@@ -15,6 +15,12 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  PASSKEY_GRACE_PERIOD_MIN,
+  PASSKEY_GRACE_PERIOD_MAX,
+  PIN_LENGTH_MIN,
+  PIN_LENGTH_MAX,
+} from "@/lib/validations";
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
@@ -77,13 +83,13 @@ export function TenantPasskeyPolicyCard() {
   const validate = (): string | null => {
     if (requirePasskey && gracePeriodDays !== "") {
       const num = Number(gracePeriodDays);
-      if (!Number.isInteger(num) || num < 1) return t("passkeyGracePeriodValidationMin");
-      if (num > 90) return t("passkeyGracePeriodValidationMax");
+      if (!Number.isInteger(num) || num < PASSKEY_GRACE_PERIOD_MIN) return t("passkeyGracePeriodValidationMin");
+      if (num > PASSKEY_GRACE_PERIOD_MAX) return t("passkeyGracePeriodValidationMax");
     }
     if (requireMinPinLength !== "") {
       const num = Number(requireMinPinLength);
-      if (!Number.isInteger(num) || num < 4) return t("passkeyMinPinLengthValidationMin");
-      if (num > 63) return t("passkeyMinPinLengthValidationMax");
+      if (!Number.isInteger(num) || num < PIN_LENGTH_MIN) return t("passkeyMinPinLengthValidationMin");
+      if (num > PIN_LENGTH_MAX) return t("passkeyMinPinLengthValidationMax");
     }
     return null;
   };
@@ -155,15 +161,15 @@ export function TenantPasskeyPolicyCard() {
             <Input
               id="grace-period-days"
               type="number"
-              min={1}
-              max={90}
+              min={PASSKEY_GRACE_PERIOD_MIN}
+              max={PASSKEY_GRACE_PERIOD_MAX}
               value={gracePeriodDays}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (!raw) { setGracePeriodDays(""); } else {
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setGracePeriodDays(""); } else {
-                    setGracePeriodDays(String(Math.min(n, 90)));
+                  if (Number.isNaN(n) || n < PASSKEY_GRACE_PERIOD_MIN) { setGracePeriodDays(""); } else {
+                    setGracePeriodDays(String(Math.min(n, PASSKEY_GRACE_PERIOD_MAX)));
                   }
                 }
                 setError(null);
@@ -180,22 +186,22 @@ export function TenantPasskeyPolicyCard() {
           <Input
             id="min-pin-length"
             type="number"
-            min={4}
-            max={63}
+            min={PIN_LENGTH_MIN}
+            max={PIN_LENGTH_MAX}
             value={requireMinPinLength}
             onChange={(e) => {
               const raw = e.target.value;
               if (!raw) { setRequireMinPinLength(""); } else {
                 const n = parseInt(raw, 10);
-                if (Number.isNaN(n) || n < 1) { setRequireMinPinLength(""); } else {
-                  setRequireMinPinLength(String(Math.min(n, 63)));
+                if (Number.isNaN(n) || n < PIN_LENGTH_MIN) { setRequireMinPinLength(""); } else {
+                  setRequireMinPinLength(String(Math.min(n, PIN_LENGTH_MAX)));
                 }
               }
               setError(null);
             }}
             onBlur={() => {
               const n = parseInt(requireMinPinLength, 10);
-              if (!Number.isNaN(n) && n < 4) setRequireMinPinLength(String(4));
+              if (!Number.isNaN(n) && n < PIN_LENGTH_MIN) setRequireMinPinLength(String(PIN_LENGTH_MIN));
             }}
             placeholder="6"
           />

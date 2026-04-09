@@ -148,6 +148,14 @@ export const POLICY_MIN_PW_LENGTH_MAX = 128;
 export const POLICY_SESSION_DURATION_MIN = 5;
 export const POLICY_SESSION_DURATION_MAX = 43200;
 
+// ─── Session Policy ─────────────────────────────────────────
+export const MAX_CONCURRENT_SESSIONS_MIN = 1;
+export const MAX_CONCURRENT_SESSIONS_MAX = 100;
+export const SESSION_IDLE_TIMEOUT_MIN = 1;
+export const SESSION_IDLE_TIMEOUT_MAX = 1440;          // 24 hours in minutes
+export const VAULT_AUTO_LOCK_MIN = 1;
+export const VAULT_AUTO_LOCK_MAX = 1440;
+
 // ─── Lockout Policy ──────────────────────────────────────────
 export const LOCKOUT_THRESHOLD_MIN = 1;
 export const LOCKOUT_THRESHOLD_MAX = 50;

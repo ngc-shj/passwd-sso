@@ -31,14 +31,14 @@ import {
   PASSKEY_GRACE_PERIOD_MAX,
   POLICY_MIN_PW_LENGTH_MIN,
   POLICY_MIN_PW_LENGTH_MAX,
-} from "@/lib/validations/common";
-import {
   MAX_CONCURRENT_SESSIONS_MIN,
   MAX_CONCURRENT_SESSIONS_MAX,
   SESSION_IDLE_TIMEOUT_MIN,
   SESSION_IDLE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
+} from "@/lib/validations/common";
+import {
   IP_ADDRESS_MAX_LENGTH,
 } from "@/lib/validations/common.server";
 
@@ -232,23 +232,7 @@ async function handlePATCH(req: NextRequest) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
-  // Validate tailscaleTailnet: required when tailscaleEnabled is true
-  if (tailscaleEnabled === true) {
-    if (tailscaleTailnet === undefined) {
-      // Not in request — check if DB already has a value
-      const existing = await withBypassRls(prisma, async () =>
-        prisma.tenant.findUnique({
-          where: { id: membership.tenantId },
-          select: { tailscaleTailnet: true },
-        }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-      if (!existing?.tailscaleTailnet) {
-        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
-      }
-    } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
-    }
-  }
+  // Validate tailscaleTailnet format before the DB read (pure string validation)
   if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {
     if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > TAILNET_NAME_MAX_LENGTH) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
@@ -423,9 +407,12 @@ async function handlePATCH(req: NextRequest) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
-  // Cross-field validation and requirePasskey set-once logic both need current DB state.
-  // Read once if any of the relevant fields are being updated.
+  // Single DB read that covers all three validation needs:
+  //   1. tailscale: check existing tailscaleTailnet when tailscaleEnabled=true without a new value
+  //   2. cross-field: lockout thresholds/durations, password expiry, requirePasskey set-once
+  //   3. self-lockout: current allowedCidrs/tailscaleEnabled to simulate the new policy
   const needsCurrentState =
+    (tailscaleEnabled === true && tailscaleTailnet === undefined) ||
     requirePasskey !== undefined ||
     lockoutThreshold1 !== undefined ||
     lockoutDuration1Minutes !== undefined ||
@@ -434,37 +421,41 @@ async function handlePATCH(req: NextRequest) {
     lockoutThreshold3 !== undefined ||
     lockoutDuration3Minutes !== undefined ||
     passwordMaxAgeDays !== undefined ||
-    passwordExpiryWarningDays !== undefined;
+    passwordExpiryWarningDays !== undefined ||
+    ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
 
-  let currentForCrossValidation: {
-    requirePasskey: boolean;
-    lockoutThreshold1: number | null;
-    lockoutDuration1Minutes: number | null;
-    lockoutThreshold2: number | null;
-    lockoutDuration2Minutes: number | null;
-    lockoutThreshold3: number | null;
-    lockoutDuration3Minutes: number | null;
-    passwordMaxAgeDays: number | null;
-    passwordExpiryWarningDays: number | null;
-  } | null = null;
+  const currentTenant = needsCurrentState
+    ? await withBypassRls(prisma, async () =>
+        prisma.tenant.findUnique({
+          where: { id: membership.tenantId },
+          select: {
+            tailscaleTailnet: true,
+            tailscaleEnabled: true,
+            allowedCidrs: true,
+            requirePasskey: true,
+            lockoutThreshold1: true,
+            lockoutDuration1Minutes: true,
+            lockoutThreshold2: true,
+            lockoutDuration2Minutes: true,
+            lockoutThreshold3: true,
+            lockoutDuration3Minutes: true,
+            passwordMaxAgeDays: true,
+            passwordExpiryWarningDays: true,
+          },
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+    : null;
 
-  if (needsCurrentState) {
-    currentForCrossValidation = await withBypassRls(prisma, async () =>
-      prisma.tenant.findUnique({
-        where: { id: membership.tenantId },
-        select: {
-          requirePasskey: true,
-          lockoutThreshold1: true,
-          lockoutDuration1Minutes: true,
-          lockoutThreshold2: true,
-          lockoutDuration2Minutes: true,
-          lockoutThreshold3: true,
-          lockoutDuration3Minutes: true,
-          passwordMaxAgeDays: true,
-          passwordExpiryWarningDays: true,
-        },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  // Validate tailscaleTailnet: required when tailscaleEnabled is true
+  if (tailscaleEnabled === true) {
+    if (tailscaleTailnet === undefined) {
+      // Not in request — check if DB already has a value
+      if (!currentTenant?.tailscaleTailnet) {
+        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
+      }
+    } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
+    }
   }
 
   // Cross-field validation: lockout thresholds/durations must be strictly ascending.
@@ -472,12 +463,12 @@ async function handlePATCH(req: NextRequest) {
   const DEFAULT_T1 = 5, DEFAULT_T2 = 10, DEFAULT_T3 = 15;
   const DEFAULT_D1 = 15, DEFAULT_D2 = 60, DEFAULT_D3 = 1440;
 
-  const t1 = (lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentForCrossValidation?.lockoutThreshold1) ?? DEFAULT_T1;
-  const t2 = (lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentForCrossValidation?.lockoutThreshold2) ?? DEFAULT_T2;
-  const t3 = (lockoutThreshold3 !== undefined ? lockoutThreshold3 : currentForCrossValidation?.lockoutThreshold3) ?? DEFAULT_T3;
-  const d1 = (lockoutDuration1Minutes !== undefined ? lockoutDuration1Minutes : currentForCrossValidation?.lockoutDuration1Minutes) ?? DEFAULT_D1;
-  const d2 = (lockoutDuration2Minutes !== undefined ? lockoutDuration2Minutes : currentForCrossValidation?.lockoutDuration2Minutes) ?? DEFAULT_D2;
-  const d3 = (lockoutDuration3Minutes !== undefined ? lockoutDuration3Minutes : currentForCrossValidation?.lockoutDuration3Minutes) ?? DEFAULT_D3;
+  const t1 = (lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentTenant?.lockoutThreshold1) ?? DEFAULT_T1;
+  const t2 = (lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentTenant?.lockoutThreshold2) ?? DEFAULT_T2;
+  const t3 = (lockoutThreshold3 !== undefined ? lockoutThreshold3 : currentTenant?.lockoutThreshold3) ?? DEFAULT_T3;
+  const d1 = (lockoutDuration1Minutes !== undefined ? lockoutDuration1Minutes : currentTenant?.lockoutDuration1Minutes) ?? DEFAULT_D1;
+  const d2 = (lockoutDuration2Minutes !== undefined ? lockoutDuration2Minutes : currentTenant?.lockoutDuration2Minutes) ?? DEFAULT_D2;
+  const d3 = (lockoutDuration3Minutes !== undefined ? lockoutDuration3Minutes : currentTenant?.lockoutDuration3Minutes) ?? DEFAULT_D3;
 
   // Lockout thresholds must always be strictly ascending
   if (t1 >= t2 || t2 >= t3) {
@@ -490,26 +481,19 @@ async function handlePATCH(req: NextRequest) {
   }
 
   // Password expiry warning must be less than max age when both are set
-  const mergedMaxAge = passwordMaxAgeDays !== undefined ? passwordMaxAgeDays : currentForCrossValidation?.passwordMaxAgeDays;
-  const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentForCrossValidation?.passwordExpiryWarningDays;
+  const mergedMaxAge = passwordMaxAgeDays !== undefined ? passwordMaxAgeDays : currentTenant?.passwordMaxAgeDays;
+  const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentTenant?.passwordExpiryWarningDays;
   if (mergedMaxAge != null && mergedWarning != null && mergedWarning >= mergedMaxAge) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "passwordExpiryWarningDays must be less than passwordMaxAgeDays" });
   }
 
   // requirePasskeyEnabledAt set-once logic uses the already-fetched current state
-  const currentRequirePasskey = currentForCrossValidation?.requirePasskey ?? false;
+  const currentRequirePasskey = currentTenant?.requirePasskey ?? false;
 
   // Self-lockout detection: check if the requester's IP would be allowed under the new policy
   const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
   const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
   if ((newAllowedCidrs !== undefined || newTailscaleEnabled !== undefined) && !confirmLockout) {
-    // Build hypothetical policy
-    const currentTenant = await withBypassRls(prisma, async () =>
-      prisma.tenant.findUnique({
-        where: { id: membership.tenantId },
-        select: { allowedCidrs: true, tailscaleEnabled: true, tailscaleTailnet: true },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     const hypothetical = {
       allowedCidrs: newAllowedCidrs ?? currentTenant?.allowedCidrs ?? [],
       tailscaleEnabled: newTailscaleEnabled ?? currentTenant?.tailscaleEnabled ?? false,
