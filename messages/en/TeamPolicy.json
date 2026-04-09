@@ -1,6 +1,6 @@
 {
   "title": "Security Policy",
-  "description": "Configure security policies for this team. Password strength rules are advisory — they guide the password generator and show warnings, but do not block saving.",
+  "description": "Configure security policies for this team. Password strength rules block form submission when violated.",
   "passwordRequirements": "Password Requirements",
   "minPasswordLength": "Minimum password length",
   "minPasswordLengthHelp": "Set to 0 to disable",
@@ -26,5 +26,16 @@
   "fetchError": "Failed to load security policy.",
   "validationError": "Invalid input.",
   "minPasswordLengthRange": "Must be between 0 and 128",
-  "maxSessionDurationRange": "Must be between 5 and 43200"
+  "maxSessionDurationRange": "Must be between 5 and 43200",
+  "passwordReusePrevention": "Password Reuse Prevention",
+  "passwordHistoryCount": "Password History Check",
+  "passwordHistoryCountHelp": "Number of previous passwords to check for reuse before saving. Comparison is done client-side before encryption (0 = disabled, max 24).",
+  "teamIpRestriction": "Team IP Restriction",
+  "inheritTenantCidrs": "Inherit Tenant IP Restrictions",
+  "inheritTenantCidrsHelp": "Apply the tenant-level IP restrictions to this team in addition to any team-specific CIDRs",
+  "teamAllowedCidrs": "Team IP Allowlist",
+  "teamAllowedCidrsPlaceholder": "192.168.1.0/24\n10.0.0.0/8",
+  "teamAllowedCidrsHelp": "Additional CIDR ranges allowed for this team (one per line, max {max}). Leave empty to rely solely on tenant restrictions.",
+  "policyPasswordReuse": "This password was used recently",
+  "policyBlocked": "Password does not meet team policy requirements"
 }

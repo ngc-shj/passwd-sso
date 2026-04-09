@@ -78,6 +78,7 @@ export const API_PATH = {
   VAULT_DELEGATION: "/api/vault/delegation",
   USER_MCP_TOKENS: "/api/user/mcp-tokens",
   USER_AUTH_PROVIDER: "/api/user/auth-provider",
+  USER_PASSKEY_STATUS: "/api/user/passkey-status",
 } as const;
 
 export const apiPath = {

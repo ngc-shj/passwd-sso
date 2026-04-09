@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockGetStrictestSessionDuration } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
@@ -41,6 +41,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   },
   mockLogAudit: vi.fn(),
   mockCreateNotification: vi.fn(),
+  mockGetStrictestSessionDuration: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -79,6 +80,9 @@ vi.mock("@/lib/notification", () => ({
 vi.mock("@/lib/new-device-detection", () => ({
   checkNewDeviceAndNotify: vi.fn(),
 }));
+vi.mock("@/lib/team-policy", () => ({
+  getStrictestSessionDuration: mockGetStrictestSessionDuration,
+}));
 
 import { createCustomAdapter } from "./auth-adapter";
 
@@ -101,6 +105,8 @@ describe("createCustomAdapter", () => {
     // Default: no session limit
     mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
     mockTxSession.findMany.mockResolvedValue([]);
+    // Default: no team session duration limit
+    mockGetStrictestSessionDuration.mockResolvedValue(null);
   });
 
   describe("createUser", () => {
@@ -536,6 +542,8 @@ describe("createCustomAdapter", () => {
 
       // findUnique returns current session with tenant relation included
       mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date("2025-03-15T11:00:00Z"),
         lastActiveAt: new Date("2025-03-15T11:59:00Z"),
         tenantId: "tenant-1",
         tenant: { sessionIdleTimeoutMinutes: null },
@@ -555,7 +563,7 @@ describe("createCustomAdapter", () => {
       // Should first read current session (with tenant included)
       expect(mockPrismaSession.findUnique).toHaveBeenCalledWith({
         where: { sessionToken: "tok-1" },
-        select: { lastActiveAt: true, tenantId: true, tenant: { select: { sessionIdleTimeoutMinutes: true } } },
+        select: { userId: true, createdAt: true, lastActiveAt: true, tenantId: true, tenant: { select: { sessionIdleTimeoutMinutes: true } } },
       });
       // Then update
       expect(mockPrismaSession.update).toHaveBeenCalledWith({
@@ -576,6 +584,8 @@ describe("createCustomAdapter", () => {
 
     it("omits expires from data when not provided", async () => {
       mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date(),
         lastActiveAt: new Date(),
         tenantId: "tenant-1",
         tenant: { sessionIdleTimeoutMinutes: null },
@@ -600,6 +610,8 @@ describe("createCustomAdapter", () => {
 
       // Session was last active 10 minutes ago; tenant has 5 minute idle timeout
       mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date("2025-03-15T11:00:00Z"),
         lastActiveAt: new Date("2025-03-15T11:49:00Z"),
         tenantId: "tenant-1",
         tenant: { sessionIdleTimeoutMinutes: 5 },
@@ -633,6 +645,8 @@ describe("createCustomAdapter", () => {
         { code: "P2025", clientVersion: "7.0.0" },
       );
       mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date(),
         lastActiveAt: new Date(),
         tenantId: null,
       });
@@ -647,6 +661,8 @@ describe("createCustomAdapter", () => {
     it("re-throws non-P2025 Prisma errors", async () => {
       const otherErr = new Error("connection lost");
       mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date(),
         lastActiveAt: new Date(),
         tenantId: null,
       });

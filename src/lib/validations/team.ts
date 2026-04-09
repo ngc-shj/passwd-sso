@@ -20,6 +20,8 @@ import {
   ENCRYPTED_TEAM_KEY_MAX,
   EPHEMERAL_PUBLIC_KEY_MAX,
   FILENAME_MAX_LENGTH,
+  PASSWORD_HISTORY_COUNT_MAX,
+  MAX_CIDRS,
   encryptedFieldSchema,
   hexIv,
   hexAuthTag,
@@ -130,6 +132,9 @@ export const upsertTeamPolicySchema = z.object({
   allowExport: z.boolean().default(true),
   allowSharing: z.boolean().default(true),
   requireSharePassword: z.boolean().default(false),
+  passwordHistoryCount: z.number().int().min(0).max(PASSWORD_HISTORY_COUNT_MAX).default(0),
+  inheritTenantCidrs: z.boolean().default(true),
+  teamAllowedCidrs: z.array(z.string()).max(MAX_CIDRS).default([]),
 });
 
 export const inviteSchema = z.object({

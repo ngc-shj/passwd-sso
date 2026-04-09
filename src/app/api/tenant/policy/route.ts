@@ -13,7 +13,24 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
-import { pinLengthSchema, MAX_CIDRS } from "@/lib/validations/common";
+import {
+  pinLengthSchema,
+  MAX_CIDRS,
+  LOCKOUT_THRESHOLD_MIN,
+  LOCKOUT_THRESHOLD_MAX,
+  LOCKOUT_DURATION_MIN,
+  LOCKOUT_DURATION_MAX,
+  PASSWORD_MAX_AGE_MIN,
+  PASSWORD_MAX_AGE_MAX,
+  PASSWORD_EXPIRY_WARNING_MIN,
+  PASSWORD_EXPIRY_WARNING_MAX,
+  AUDIT_LOG_RETENTION_MIN,
+  AUDIT_LOG_RETENTION_MAX,
+  PASSKEY_GRACE_PERIOD_MIN,
+  PASSKEY_GRACE_PERIOD_MAX,
+  POLICY_MIN_PW_LENGTH_MIN,
+  POLICY_MIN_PW_LENGTH_MAX,
+} from "@/lib/validations/common";
 import {
   MAX_CONCURRENT_SESSIONS_MIN,
   MAX_CONCURRENT_SESSIONS_MAX,
@@ -53,6 +70,23 @@ async function handleGET(_req: NextRequest) {
         tailscaleEnabled: true,
         tailscaleTailnet: true,
         requireMinPinLength: true,
+        requirePasskey: true,
+        requirePasskeyEnabledAt: true,
+        passkeyGracePeriodDays: true,
+        lockoutThreshold1: true,
+        lockoutDuration1Minutes: true,
+        lockoutThreshold2: true,
+        lockoutDuration2Minutes: true,
+        lockoutThreshold3: true,
+        lockoutDuration3Minutes: true,
+        passwordMaxAgeDays: true,
+        passwordExpiryWarningDays: true,
+        auditLogRetentionDays: true,
+        tenantMinPasswordLength: true,
+        tenantRequireUppercase: true,
+        tenantRequireLowercase: true,
+        tenantRequireNumbers: true,
+        tenantRequireSymbols: true,
       } } },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -65,6 +99,23 @@ async function handleGET(_req: NextRequest) {
     tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
     tailscaleTailnet: user?.tenant?.tailscaleTailnet ?? null,
     requireMinPinLength: user?.tenant?.requireMinPinLength ?? null,
+    requirePasskey: user?.tenant?.requirePasskey ?? false,
+    requirePasskeyEnabledAt: user?.tenant?.requirePasskeyEnabledAt ?? null,
+    passkeyGracePeriodDays: user?.tenant?.passkeyGracePeriodDays ?? null,
+    lockoutThreshold1: user?.tenant?.lockoutThreshold1 ?? null,
+    lockoutDuration1Minutes: user?.tenant?.lockoutDuration1Minutes ?? null,
+    lockoutThreshold2: user?.tenant?.lockoutThreshold2 ?? null,
+    lockoutDuration2Minutes: user?.tenant?.lockoutDuration2Minutes ?? null,
+    lockoutThreshold3: user?.tenant?.lockoutThreshold3 ?? null,
+    lockoutDuration3Minutes: user?.tenant?.lockoutDuration3Minutes ?? null,
+    passwordMaxAgeDays: user?.tenant?.passwordMaxAgeDays ?? null,
+    passwordExpiryWarningDays: user?.tenant?.passwordExpiryWarningDays ?? null,
+    auditLogRetentionDays: user?.tenant?.auditLogRetentionDays ?? null,
+    tenantMinPasswordLength: user?.tenant?.tenantMinPasswordLength ?? null,
+    tenantRequireUppercase: user?.tenant?.tenantRequireUppercase ?? false,
+    tenantRequireLowercase: user?.tenant?.tenantRequireLowercase ?? false,
+    tenantRequireNumbers: user?.tenant?.tenantRequireNumbers ?? false,
+    tenantRequireSymbols: user?.tenant?.tenantRequireSymbols ?? false,
   });
 }
 
@@ -96,7 +147,32 @@ async function handlePATCH(req: NextRequest) {
   } catch {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
-  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, requireMinPinLength, confirmLockout } = body;
+  const {
+    maxConcurrentSessions,
+    sessionIdleTimeoutMinutes,
+    vaultAutoLockMinutes,
+    allowedCidrs,
+    tailscaleEnabled,
+    tailscaleTailnet,
+    requireMinPinLength,
+    confirmLockout,
+    requirePasskey,
+    passkeyGracePeriodDays,
+    lockoutThreshold1,
+    lockoutDuration1Minutes,
+    lockoutThreshold2,
+    lockoutDuration2Minutes,
+    lockoutThreshold3,
+    lockoutDuration3Minutes,
+    passwordMaxAgeDays,
+    passwordExpiryWarningDays,
+    auditLogRetentionDays,
+    tenantMinPasswordLength,
+    tenantRequireUppercase,
+    tenantRequireLowercase,
+    tenantRequireNumbers,
+    tenantRequireSymbols,
+  } = body;
 
   // Validate maxConcurrentSessions: null (unlimited) or positive integer
   if (maxConcurrentSessions !== null && maxConcurrentSessions !== undefined) {
@@ -189,6 +265,240 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
+  // Validate requirePasskey: boolean
+  if (requirePasskey !== undefined && typeof requirePasskey !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate passkeyGracePeriodDays: null (immediate enforcement) or integer within bounds
+  if (passkeyGracePeriodDays !== null && passkeyGracePeriodDays !== undefined) {
+    if (
+      typeof passkeyGracePeriodDays !== "number" ||
+      !Number.isInteger(passkeyGracePeriodDays) ||
+      passkeyGracePeriodDays < PASSKEY_GRACE_PERIOD_MIN ||
+      passkeyGracePeriodDays > PASSKEY_GRACE_PERIOD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutThreshold1: null (use default) or integer within bounds
+  if (lockoutThreshold1 !== null && lockoutThreshold1 !== undefined) {
+    if (
+      typeof lockoutThreshold1 !== "number" ||
+      !Number.isInteger(lockoutThreshold1) ||
+      lockoutThreshold1 < LOCKOUT_THRESHOLD_MIN ||
+      lockoutThreshold1 > LOCKOUT_THRESHOLD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutDuration1Minutes: null (use default) or integer within bounds
+  if (lockoutDuration1Minutes !== null && lockoutDuration1Minutes !== undefined) {
+    if (
+      typeof lockoutDuration1Minutes !== "number" ||
+      !Number.isInteger(lockoutDuration1Minutes) ||
+      lockoutDuration1Minutes < LOCKOUT_DURATION_MIN ||
+      lockoutDuration1Minutes > LOCKOUT_DURATION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutThreshold2: null (use default) or integer within bounds
+  if (lockoutThreshold2 !== null && lockoutThreshold2 !== undefined) {
+    if (
+      typeof lockoutThreshold2 !== "number" ||
+      !Number.isInteger(lockoutThreshold2) ||
+      lockoutThreshold2 < LOCKOUT_THRESHOLD_MIN ||
+      lockoutThreshold2 > LOCKOUT_THRESHOLD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutDuration2Minutes: null (use default) or integer within bounds
+  if (lockoutDuration2Minutes !== null && lockoutDuration2Minutes !== undefined) {
+    if (
+      typeof lockoutDuration2Minutes !== "number" ||
+      !Number.isInteger(lockoutDuration2Minutes) ||
+      lockoutDuration2Minutes < LOCKOUT_DURATION_MIN ||
+      lockoutDuration2Minutes > LOCKOUT_DURATION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutThreshold3: null (use default) or integer within bounds
+  if (lockoutThreshold3 !== null && lockoutThreshold3 !== undefined) {
+    if (
+      typeof lockoutThreshold3 !== "number" ||
+      !Number.isInteger(lockoutThreshold3) ||
+      lockoutThreshold3 < LOCKOUT_THRESHOLD_MIN ||
+      lockoutThreshold3 > LOCKOUT_THRESHOLD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutDuration3Minutes: null (use default) or integer within bounds
+  if (lockoutDuration3Minutes !== null && lockoutDuration3Minutes !== undefined) {
+    if (
+      typeof lockoutDuration3Minutes !== "number" ||
+      !Number.isInteger(lockoutDuration3Minutes) ||
+      lockoutDuration3Minutes < LOCKOUT_DURATION_MIN ||
+      lockoutDuration3Minutes > LOCKOUT_DURATION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate passwordMaxAgeDays: null (disabled) or integer within bounds
+  if (passwordMaxAgeDays !== null && passwordMaxAgeDays !== undefined) {
+    if (
+      typeof passwordMaxAgeDays !== "number" ||
+      !Number.isInteger(passwordMaxAgeDays) ||
+      passwordMaxAgeDays < PASSWORD_MAX_AGE_MIN ||
+      passwordMaxAgeDays > PASSWORD_MAX_AGE_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate passwordExpiryWarningDays: null (use default) or integer within bounds
+  if (passwordExpiryWarningDays !== null && passwordExpiryWarningDays !== undefined) {
+    if (
+      typeof passwordExpiryWarningDays !== "number" ||
+      !Number.isInteger(passwordExpiryWarningDays) ||
+      passwordExpiryWarningDays < PASSWORD_EXPIRY_WARNING_MIN ||
+      passwordExpiryWarningDays > PASSWORD_EXPIRY_WARNING_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate auditLogRetentionDays: null (forever) or integer within bounds
+  if (auditLogRetentionDays !== null && auditLogRetentionDays !== undefined) {
+    if (
+      typeof auditLogRetentionDays !== "number" ||
+      !Number.isInteger(auditLogRetentionDays) ||
+      auditLogRetentionDays < AUDIT_LOG_RETENTION_MIN ||
+      auditLogRetentionDays > AUDIT_LOG_RETENTION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate tenantMinPasswordLength: null (disabled) or integer within policy bounds
+  if (tenantMinPasswordLength !== null && tenantMinPasswordLength !== undefined) {
+    if (
+      typeof tenantMinPasswordLength !== "number" ||
+      !Number.isInteger(tenantMinPasswordLength) ||
+      tenantMinPasswordLength < POLICY_MIN_PW_LENGTH_MIN ||
+      tenantMinPasswordLength > POLICY_MIN_PW_LENGTH_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate tenantRequireUppercase: boolean
+  if (tenantRequireUppercase !== undefined && typeof tenantRequireUppercase !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate tenantRequireLowercase: boolean
+  if (tenantRequireLowercase !== undefined && typeof tenantRequireLowercase !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate tenantRequireNumbers: boolean
+  if (tenantRequireNumbers !== undefined && typeof tenantRequireNumbers !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate tenantRequireSymbols: boolean
+  if (tenantRequireSymbols !== undefined && typeof tenantRequireSymbols !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Cross-field validation and requirePasskey set-once logic both need current DB state.
+  // Read once if any of the relevant fields are being updated.
+  const needsCurrentState =
+    requirePasskey !== undefined ||
+    lockoutThreshold1 !== undefined ||
+    lockoutDuration1Minutes !== undefined ||
+    lockoutThreshold2 !== undefined ||
+    lockoutDuration2Minutes !== undefined ||
+    lockoutThreshold3 !== undefined ||
+    lockoutDuration3Minutes !== undefined ||
+    passwordMaxAgeDays !== undefined ||
+    passwordExpiryWarningDays !== undefined;
+
+  let currentForCrossValidation: {
+    requirePasskey: boolean;
+    lockoutThreshold1: number | null;
+    lockoutDuration1Minutes: number | null;
+    lockoutThreshold2: number | null;
+    lockoutDuration2Minutes: number | null;
+    lockoutThreshold3: number | null;
+    lockoutDuration3Minutes: number | null;
+    passwordMaxAgeDays: number | null;
+    passwordExpiryWarningDays: number | null;
+  } | null = null;
+
+  if (needsCurrentState) {
+    currentForCrossValidation = await withBypassRls(prisma, async () =>
+      prisma.tenant.findUnique({
+        where: { id: membership.tenantId },
+        select: {
+          requirePasskey: true,
+          lockoutThreshold1: true,
+          lockoutDuration1Minutes: true,
+          lockoutThreshold2: true,
+          lockoutDuration2Minutes: true,
+          lockoutThreshold3: true,
+          lockoutDuration3Minutes: true,
+          passwordMaxAgeDays: true,
+          passwordExpiryWarningDays: true,
+        },
+      }),
+    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+  }
+
+  // Cross-field validation: lockout thresholds/durations must be strictly ascending.
+  // Merge request values with current DB values.
+  const t1 = lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentForCrossValidation?.lockoutThreshold1;
+  const t2 = lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentForCrossValidation?.lockoutThreshold2;
+  const t3 = lockoutThreshold3 !== undefined ? lockoutThreshold3 : currentForCrossValidation?.lockoutThreshold3;
+  const d1 = lockoutDuration1Minutes !== undefined ? lockoutDuration1Minutes : currentForCrossValidation?.lockoutDuration1Minutes;
+  const d2 = lockoutDuration2Minutes !== undefined ? lockoutDuration2Minutes : currentForCrossValidation?.lockoutDuration2Minutes;
+  const d3 = lockoutDuration3Minutes !== undefined ? lockoutDuration3Minutes : currentForCrossValidation?.lockoutDuration3Minutes;
+
+  // Lockout thresholds must be strictly ascending when all three are set
+  if (t1 != null && t2 != null && t3 != null) {
+    if (t1 >= t2 || t2 >= t3) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3" });
+    }
+  }
+
+  // Lockout durations must be strictly ascending when all three are set
+  if (d1 != null && d2 != null && d3 != null) {
+    if (d1 >= d2 || d2 >= d3) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" });
+    }
+  }
+
+  // Password expiry warning must be less than max age when both are set
+  const mergedMaxAge = passwordMaxAgeDays !== undefined ? passwordMaxAgeDays : currentForCrossValidation?.passwordMaxAgeDays;
+  const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentForCrossValidation?.passwordExpiryWarningDays;
+  if (mergedMaxAge != null && mergedWarning != null && mergedWarning >= mergedMaxAge) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "passwordExpiryWarningDays must be less than passwordMaxAgeDays" });
+  }
+
+  // requirePasskeyEnabledAt set-once logic uses the already-fetched current state
+  const currentRequirePasskey = currentForCrossValidation?.requirePasskey ?? false;
+
   // Self-lockout detection: check if the requester's IP would be allowed under the new policy
   const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
   const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
@@ -241,6 +551,65 @@ async function handlePATCH(req: NextRequest) {
     updateData.requireMinPinLength = requireMinPinLength ?? null;
   }
 
+  // requirePasskey + set-once requirePasskeyEnabledAt logic
+  if (requirePasskey !== undefined) {
+    updateData.requirePasskey = requirePasskey;
+    if (requirePasskey === true && currentRequirePasskey === false) {
+      // Transition false → true: record the timestamp
+      updateData.requirePasskeyEnabledAt = new Date();
+    } else if (requirePasskey === false) {
+      // Disabled: clear the timestamp
+      updateData.requirePasskeyEnabledAt = null;
+    }
+    // Already true → true: do NOT overwrite requirePasskeyEnabledAt
+  }
+
+  if (passkeyGracePeriodDays !== undefined) {
+    updateData.passkeyGracePeriodDays = passkeyGracePeriodDays ?? null;
+  }
+  if (lockoutThreshold1 !== undefined) {
+    updateData.lockoutThreshold1 = lockoutThreshold1 ?? null;
+  }
+  if (lockoutDuration1Minutes !== undefined) {
+    updateData.lockoutDuration1Minutes = lockoutDuration1Minutes ?? null;
+  }
+  if (lockoutThreshold2 !== undefined) {
+    updateData.lockoutThreshold2 = lockoutThreshold2 ?? null;
+  }
+  if (lockoutDuration2Minutes !== undefined) {
+    updateData.lockoutDuration2Minutes = lockoutDuration2Minutes ?? null;
+  }
+  if (lockoutThreshold3 !== undefined) {
+    updateData.lockoutThreshold3 = lockoutThreshold3 ?? null;
+  }
+  if (lockoutDuration3Minutes !== undefined) {
+    updateData.lockoutDuration3Minutes = lockoutDuration3Minutes ?? null;
+  }
+  if (passwordMaxAgeDays !== undefined) {
+    updateData.passwordMaxAgeDays = passwordMaxAgeDays ?? null;
+  }
+  if (passwordExpiryWarningDays !== undefined) {
+    updateData.passwordExpiryWarningDays = passwordExpiryWarningDays ?? null;
+  }
+  if (auditLogRetentionDays !== undefined) {
+    updateData.auditLogRetentionDays = auditLogRetentionDays ?? null;
+  }
+  if (tenantMinPasswordLength !== undefined) {
+    updateData.tenantMinPasswordLength = tenantMinPasswordLength ?? null;
+  }
+  if (tenantRequireUppercase !== undefined) {
+    updateData.tenantRequireUppercase = tenantRequireUppercase;
+  }
+  if (tenantRequireLowercase !== undefined) {
+    updateData.tenantRequireLowercase = tenantRequireLowercase;
+  }
+  if (tenantRequireNumbers !== undefined) {
+    updateData.tenantRequireNumbers = tenantRequireNumbers;
+  }
+  if (tenantRequireSymbols !== undefined) {
+    updateData.tenantRequireSymbols = tenantRequireSymbols;
+  }
+
   const updated = await withBypassRls(prisma, async () =>
     prisma.tenant.update({
       where: { id: membership.tenantId },
@@ -253,6 +622,23 @@ async function handlePATCH(req: NextRequest) {
         tailscaleEnabled: true,
         tailscaleTailnet: true,
         requireMinPinLength: true,
+        requirePasskey: true,
+        requirePasskeyEnabledAt: true,
+        passkeyGracePeriodDays: true,
+        lockoutThreshold1: true,
+        lockoutDuration1Minutes: true,
+        lockoutThreshold2: true,
+        lockoutDuration2Minutes: true,
+        lockoutThreshold3: true,
+        lockoutDuration3Minutes: true,
+        passwordMaxAgeDays: true,
+        passwordExpiryWarningDays: true,
+        auditLogRetentionDays: true,
+        tenantMinPasswordLength: true,
+        tenantRequireUppercase: true,
+        tenantRequireLowercase: true,
+        tenantRequireNumbers: true,
+        tenantRequireSymbols: true,
       },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -274,6 +660,23 @@ async function handlePATCH(req: NextRequest) {
       tailscaleEnabled: updated.tailscaleEnabled,
       tailscaleTailnet: updated.tailscaleTailnet,
       requireMinPinLength: updated.requireMinPinLength,
+      requirePasskey: updated.requirePasskey,
+      requirePasskeyEnabledAt: updated.requirePasskeyEnabledAt,
+      passkeyGracePeriodDays: updated.passkeyGracePeriodDays,
+      lockoutThreshold1: updated.lockoutThreshold1,
+      lockoutDuration1Minutes: updated.lockoutDuration1Minutes,
+      lockoutThreshold2: updated.lockoutThreshold2,
+      lockoutDuration2Minutes: updated.lockoutDuration2Minutes,
+      lockoutThreshold3: updated.lockoutThreshold3,
+      lockoutDuration3Minutes: updated.lockoutDuration3Minutes,
+      passwordMaxAgeDays: updated.passwordMaxAgeDays,
+      passwordExpiryWarningDays: updated.passwordExpiryWarningDays,
+      auditLogRetentionDays: updated.auditLogRetentionDays,
+      tenantMinPasswordLength: updated.tenantMinPasswordLength,
+      tenantRequireUppercase: updated.tenantRequireUppercase,
+      tenantRequireLowercase: updated.tenantRequireLowercase,
+      tenantRequireNumbers: updated.tenantRequireNumbers,
+      tenantRequireSymbols: updated.tenantRequireSymbols,
     },
     ip: meta.ip,
     userAgent: meta.userAgent,
@@ -287,6 +690,23 @@ async function handlePATCH(req: NextRequest) {
     tailscaleEnabled: updated.tailscaleEnabled,
     tailscaleTailnet: updated.tailscaleTailnet,
     requireMinPinLength: updated.requireMinPinLength,
+    requirePasskey: updated.requirePasskey,
+    requirePasskeyEnabledAt: updated.requirePasskeyEnabledAt,
+    passkeyGracePeriodDays: updated.passkeyGracePeriodDays,
+    lockoutThreshold1: updated.lockoutThreshold1,
+    lockoutDuration1Minutes: updated.lockoutDuration1Minutes,
+    lockoutThreshold2: updated.lockoutThreshold2,
+    lockoutDuration2Minutes: updated.lockoutDuration2Minutes,
+    lockoutThreshold3: updated.lockoutThreshold3,
+    lockoutDuration3Minutes: updated.lockoutDuration3Minutes,
+    passwordMaxAgeDays: updated.passwordMaxAgeDays,
+    passwordExpiryWarningDays: updated.passwordExpiryWarningDays,
+    auditLogRetentionDays: updated.auditLogRetentionDays,
+    tenantMinPasswordLength: updated.tenantMinPasswordLength,
+    tenantRequireUppercase: updated.tenantRequireUppercase,
+    tenantRequireLowercase: updated.tenantRequireLowercase,
+    tenantRequireNumbers: updated.tenantRequireNumbers,
+    tenantRequireSymbols: updated.tenantRequireSymbols,
   });
 }
 

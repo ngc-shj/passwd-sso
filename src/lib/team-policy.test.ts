@@ -38,6 +38,9 @@ const fullPolicy: TeamPolicyData & { teamId: string } = {
   allowExport: true,
   allowSharing: true,
   requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 beforeEach(() => {
@@ -59,6 +62,9 @@ describe("getTeamPolicy", () => {
       allowExport: true,
       allowSharing: true,
       requireSharePassword: false,
+      passwordHistoryCount: 0,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
     });
   });
 

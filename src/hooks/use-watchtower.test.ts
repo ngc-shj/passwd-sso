@@ -76,7 +76,9 @@ vi.mock("@/lib/watchtower/state", () => ({
 vi.mock("@/lib/constants", () => ({
   API_PATH: {
     WATCHTOWER_START: "/api/watchtower/start",
+    WATCHTOWER_ALERT: "/api/watchtower/alert",
     PASSWORDS: "/api/passwords",
+    VAULT_STATUS: "/api/vault/status",
   },
   ENTRY_TYPE: { LOGIN: "LOGIN" },
   LOCAL_STORAGE_KEY: { WATCHTOWER_LAST_ANALYZED_AT: "watchtower:lastAnalyzedAt" },
@@ -230,7 +232,7 @@ describe("useWatchtower", () => {
   // ─── Initial state ──────────────────────────────────────
 
   it("returns initial state with no report", () => {
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     expect(result.current.report).toBeNull();
     expect(result.current.loading).toBe(false);
@@ -245,7 +247,7 @@ describe("useWatchtower", () => {
       canAnalyze: true,
     });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
     expect(result.current.canAnalyze).toBe(true);
   });
 
@@ -256,7 +258,7 @@ describe("useWatchtower", () => {
       canAnalyze: false,
     });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
     expect(result.current.canAnalyze).toBe(false);
     expect(result.current.cooldownRemainingMs).toBe(60000);
   });
@@ -265,7 +267,7 @@ describe("useWatchtower", () => {
     const ts = Date.now() - 1000;
     window.localStorage.setItem("watchtower:lastAnalyzedAt", String(ts));
 
-    renderHook(() => useWatchtower());
+    renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     // getCooldownState should have been called with a numeric lastAnalyzedAt
     expect(mockGetCooldownState).toHaveBeenCalled();
@@ -279,7 +281,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(jsonResponse({ ok: true })) // POST /api/watchtower/start
       .mockResolvedValueOnce(jsonResponse([])); // GET /api/passwords?include=blob
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -305,7 +307,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -332,7 +334,7 @@ describe("useWatchtower", () => {
     mockDecryptData.mockResolvedValue(raw._plaintext);
     mockAnalyzeStrength.mockReturnValue(weakResult);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -352,7 +354,7 @@ describe("useWatchtower", () => {
     mockDecryptData.mockResolvedValue(raw._plaintext);
     mockAnalyzeStrength.mockReturnValue({ ...weakResult, score: 30, entropy: 25 });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -377,7 +379,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -400,7 +402,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -420,7 +422,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -439,7 +441,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -458,7 +460,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -477,7 +479,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -497,7 +499,7 @@ describe("useWatchtower", () => {
     mockDecryptData.mockResolvedValue(raw._plaintext);
     mockCheckHIBP.mockResolvedValue({ breached: true, count: 100 });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -523,7 +525,7 @@ describe("useWatchtower", () => {
 
     mockCheckHIBP.mockResolvedValue({ breached: true, count: 50 });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -547,7 +549,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -571,7 +573,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(loginEntry._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -589,7 +591,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
       .mockResolvedValueOnce(jsonResponse([noBlobEntry]));
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -612,7 +614,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(legacyEntry._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -629,7 +631,7 @@ describe("useWatchtower", () => {
       jsonResponse({ retryAt }, 429)
     );
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -651,7 +653,7 @@ describe("useWatchtower", () => {
     );
 
     const before = Date.now();
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -670,7 +672,7 @@ describe("useWatchtower", () => {
     } as unknown as Response);
 
     const before = Date.now();
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -687,7 +689,7 @@ describe("useWatchtower", () => {
   it("aborts silently on non-429 start failure", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "server error" }, 500));
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -704,7 +706,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(jsonResponse({ ok: true })) // start succeeds
       .mockResolvedValueOnce(jsonResponse({ error: "fail" }, 500)); // passwords fail
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -729,7 +731,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(goodEntry._plaintext)
       .mockRejectedValueOnce(new Error("decrypt failed"));
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -744,7 +746,7 @@ describe("useWatchtower", () => {
   it("marks analysis unavailable if the personal vault key is missing", async () => {
     mockUseVault.mockReturnValue({ encryptionKey: null, userId: "user-1" });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -767,7 +769,7 @@ describe("useWatchtower", () => {
       canAnalyze: false,
     });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -789,7 +791,7 @@ describe("useWatchtower", () => {
     const fakeAAD = new Uint8Array([1, 2, 3]);
     mockBuildPersonalEntryAAD.mockReturnValue(fakeAAD);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -812,7 +814,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -845,7 +847,7 @@ describe("useWatchtower", () => {
     mockAnalyzeStrength.mockReturnValue(weakResult);
     mockCheckHIBP.mockResolvedValue({ breached: true, count: 999 });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -864,7 +866,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -882,7 +884,7 @@ describe("useWatchtower", () => {
     mockDecryptData.mockResolvedValue(raw._plaintext);
     mockCheckHIBP.mockResolvedValue({ breached: true, count: 5 });
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -901,7 +903,7 @@ describe("useWatchtower", () => {
     mockDecryptData.mockResolvedValue(raw._plaintext);
     mockAnalyzeStrength.mockReturnValue(weakResult);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -919,7 +921,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(jsonResponse([]));
 
     const before = Date.now();
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -946,7 +948,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -983,7 +985,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce({ breached: true, count: 42 }) // weak1
       .mockResolvedValueOnce({ breached: false, count: 0 }); // Strong!99#xyz
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1013,7 +1015,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1036,7 +1038,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1058,7 +1060,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1079,7 +1081,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1102,7 +1104,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(plainNoUrl)
       .mockResolvedValueOnce(plainNoUser);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1121,7 +1123,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1142,7 +1144,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1165,7 +1167,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw2._plaintext)
       .mockResolvedValueOnce(raw3._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1191,7 +1193,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1212,7 +1214,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1237,7 +1239,7 @@ describe("useWatchtower", () => {
 
       mockDecryptData.mockResolvedValue(raw._plaintext);
 
-      const { result } = renderHook(() => useWatchtower());
+      const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
       await act(async () => {
         await result.current.analyze();
@@ -1264,7 +1266,7 @@ describe("useWatchtower", () => {
 
       mockDecryptData.mockResolvedValue(raw._plaintext);
 
-      const { result } = renderHook(() => useWatchtower());
+      const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
       await act(async () => {
         await result.current.analyze();
@@ -1285,7 +1287,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1305,7 +1307,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1328,7 +1330,7 @@ describe("useWatchtower", () => {
       .mockResolvedValueOnce(raw1._plaintext)
       .mockResolvedValueOnce(raw2._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     await act(async () => {
       await result.current.analyze();
@@ -1354,7 +1356,7 @@ describe("useWatchtower", () => {
 
     mockDecryptData.mockResolvedValue(raw._plaintext);
 
-    const { result } = renderHook(() => useWatchtower());
+    const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
 
     // Start analysis (don't await)
     let analyzePromise: Promise<void>;
@@ -1404,7 +1406,7 @@ describe("useWatchtower", () => {
       );
 
     const { result } = renderHook(() =>
-      useWatchtower({ type: "team", teamId: "team-1" })
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
     );
 
     await act(async () => {
@@ -1429,7 +1431,7 @@ describe("useWatchtower", () => {
     });
 
     const { result } = renderHook(() =>
-      useWatchtower({ type: "team", teamId: "team-1" })
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
     );
 
     await act(async () => {

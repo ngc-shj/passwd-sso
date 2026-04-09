@@ -86,6 +86,7 @@ vi.mock("@/lib/generator-prefs", () => ({
     mathCompare: false,
     brackets: false,
   },
+  SYMBOL_GROUP_KEYS: ["hashEtc", "punctuation", "quotes", "slashDash", "mathCompare", "brackets"],
 }));
 
 vi.mock("@/lib/credit-card", () => ({

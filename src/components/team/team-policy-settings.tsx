@@ -14,12 +14,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { fetchApi } from "@/lib/url-helpers";
 import {
   POLICY_MIN_PW_LENGTH_MIN,
   POLICY_MIN_PW_LENGTH_MAX,
   POLICY_SESSION_DURATION_MIN,
   POLICY_SESSION_DURATION_MAX,
+  PASSWORD_HISTORY_COUNT_MAX,
+  MAX_CIDRS,
 } from "@/lib/validations";
 
 interface PolicyData {
@@ -33,6 +36,9 @@ interface PolicyData {
   allowExport: boolean;
   allowSharing: boolean;
   requireSharePassword: boolean;
+  passwordHistoryCount: number;
+  inheritTenantCidrs: boolean;
+  teamAllowedCidrs: string[];
 }
 
 const DEFAULT_POLICY: PolicyData = {
@@ -46,6 +52,9 @@ const DEFAULT_POLICY: PolicyData = {
   allowExport: true,
   allowSharing: true,
   requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 /** Validate policy fields. Returns a map of field name → error key (i18n). */
@@ -75,6 +84,8 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
   const [initialPolicy, setInitialPolicy] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  // Internal text representation for teamAllowedCidrs textarea
+  const [teamCidrsText, setTeamCidrsText] = useState("");
 
   const hasChanges = useFormDirty(policy as unknown as Record<string, unknown>, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
@@ -84,8 +95,10 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
       const res = await fetchApi(`/api/teams/${teamId}/policy`);
       if (res.ok) {
         const data = await res.json();
-        setPolicy(data);
-        setInitialPolicy(data);
+        const cidrsText = (data.teamAllowedCidrs ?? []).join("\n");
+        setTeamCidrsText(cidrsText);
+        setPolicy({ ...DEFAULT_POLICY, ...data });
+        setInitialPolicy({ ...DEFAULT_POLICY, ...data });
       } else {
         toast.error(t("fetchError"));
       }
@@ -117,15 +130,22 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
 
     setSaving(true);
     try {
+      const teamAllowedCidrs = teamCidrsText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
+      const payload = { ...policy, teamAllowedCidrs };
       const res = await fetchApi(`/api/teams/${teamId}/policy`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(policy),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         const saved = await res.json();
-        setPolicy(saved);
-        setInitialPolicy(saved);
+        const savedCidrsText = (saved.teamAllowedCidrs ?? []).join("\n");
+        setTeamCidrsText(savedCidrsText);
+        setPolicy({ ...DEFAULT_POLICY, ...saved });
+        setInitialPolicy({ ...DEFAULT_POLICY, ...saved });
         setFieldErrors({});
         toast.success(t("saveSuccess"));
       } else if (res.status === 400) {
@@ -290,6 +310,52 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               setPolicy((p) => ({ ...p, requireRepromptForAll: v }))
             }
           />
+        </div>
+
+        <Separator />
+
+        {/* Password Reuse Prevention */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">{t("passwordReusePrevention")}</h3>
+          <div className="space-y-2">
+            <Label>{t("passwordHistoryCount")}</Label>
+            <Input
+              type="number"
+              min={0}
+              max={PASSWORD_HISTORY_COUNT_MAX}
+              value={policy.passwordHistoryCount}
+              onChange={(e) => {
+                const parsed = parseInt(e.target.value, 10);
+                const value = Number.isNaN(parsed) ? 0 : Math.max(0, Math.min(PASSWORD_HISTORY_COUNT_MAX, parsed));
+                setPolicy((p) => ({ ...p, passwordHistoryCount: value }));
+              }}
+              className="max-w-[200px]"
+            />
+            <p className="text-xs text-muted-foreground">{t("passwordHistoryCountHelp")}</p>
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Team IP Restriction */}
+        <div className="space-y-3">
+          <h3 className="text-sm font-medium text-muted-foreground">{t("teamIpRestriction")}</h3>
+          <SwitchField
+            label={t("inheritTenantCidrs")}
+            checked={policy.inheritTenantCidrs}
+            onChange={(v) => setPolicy((p) => ({ ...p, inheritTenantCidrs: v }))}
+          />
+          <div className="space-y-2">
+            <Label>{t("teamAllowedCidrs")}</Label>
+            <Textarea
+              rows={4}
+              value={teamCidrsText}
+              onChange={(e) => setTeamCidrsText(e.target.value)}
+              placeholder={t("teamAllowedCidrsPlaceholder")}
+              className="font-mono text-sm"
+            />
+            <p className="text-xs text-muted-foreground">{t("teamAllowedCidrsHelp", { max: MAX_CIDRS })}</p>
+          </div>
         </div>
 
         <div className="flex items-center justify-between pt-1">

@@ -144,7 +144,15 @@ function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
 
 // ─── Hook ────────────────────────────────────────────────────
 
-export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
+export interface WatchtowerPolicy {
+  passwordMaxAgeDays: number | null;
+  passwordExpiryWarningDays: number;
+}
+
+export function useWatchtower(
+  scope: WatchtowerScope = { type: "personal" },
+  policy?: WatchtowerPolicy | null,
+) {
   const { encryptionKey, userId } = useVault();
   const teamVault = useTeamVaultOptional();
   const [report, setReport] = useState<WatchtowerReport | null>(null);
@@ -153,6 +161,9 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     useState<WatchtowerAnalysisUnavailableReason | null>(null);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  // Policy values for password age checks — either from prop or fetched from vault status
+  const [passwordMaxAgeDays, setPasswordMaxAgeDays] = useState<number | null>(policy?.passwordMaxAgeDays ?? null);
+  const [passwordExpiryWarningDays, setPasswordExpiryWarningDays] = useState<number>(policy?.passwordExpiryWarningDays ?? 14);
   const [progress, setProgress] = useState<WatchtowerProgress>({
     current: 0,
     total: 0,
@@ -172,6 +183,25 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, []);
+
+  // If no policy was passed in, fetch it from the vault status endpoint.
+  // This is skipped when policy is passed explicitly (e.g. from a parent component
+  // that already has the vault status, or in tests).
+  useEffect(() => {
+    if (policy !== undefined || scope.type !== "personal" || !encryptionKey) return;
+    fetchApi(API_PATH.VAULT_STATUS)
+      .then((res) => res.ok ? res.json() : null)
+      .then((data) => {
+        if (!data) return;
+        setPasswordMaxAgeDays(data.passwordMaxAgeDays ?? null);
+        setPasswordExpiryWarningDays(data.passwordExpiryWarningDays ?? 14);
+      })
+      .catch(() => {
+        // Ignore errors — policy-driven expiry is best-effort
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope.type, encryptionKey]);
+
 
   const { nextAllowedAt, cooldownRemainingMs, canAnalyze } = getCooldownState(
     lastAnalyzedAt,
@@ -408,6 +438,32 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
         });
       }
 
+      // Policy-driven password age check (personal vault only, when tenant has set a max age)
+      if (scope.type === "personal" && passwordMaxAgeDays) {
+        const maxAgeMs = passwordMaxAgeDays * 24 * 60 * 60 * 1000;
+        const warningDays = Math.min(passwordExpiryWarningDays, passwordMaxAgeDays - 1);
+        const warningMs = (passwordMaxAgeDays - warningDays) * 24 * 60 * 60 * 1000;
+        for (const entry of entries) {
+          const ageMs = now - new Date(entry.updatedAt).getTime();
+          // Skip if already flagged by the explicit expiresAt check
+          const alreadyInExpiring = expiring.some((e) => e.id === entry.id);
+          if (alreadyInExpiring) continue;
+          if (ageMs > maxAgeMs) {
+            expiring.push({
+              ...toWatchtowerEntryRef(entry),
+              severity: "medium",
+              details: `policyExpired:${Math.floor(ageMs / (24 * 60 * 60 * 1000))}`,
+            });
+          } else if (ageMs > warningMs) {
+            expiring.push({
+              ...toWatchtowerEntryRef(entry),
+              severity: "low",
+              details: `policyExpiring:${Math.floor(ageMs / (24 * 60 * 60 * 1000))}`,
+            });
+          }
+        }
+      }
+
       // Step 3: HIBP breach check (rate-limited)
       setProgress({ current: 3, total: 4, step: "hibp" });
       const breached: PasswordIssue[] = [];
@@ -472,7 +528,7 @@ export function useWatchtower(scope: WatchtowerScope = { type: "personal" }) {
     } finally {
       setLoading(false);
     }
-  }, [scope, encryptionKey, userId, loading, cooldownRemainingMs, teamVault]);
+  }, [scope, encryptionKey, userId, loading, cooldownRemainingMs, teamVault, passwordMaxAgeDays, passwordExpiryWarningDays]);
 
   // ── Auto-monitor state ──
 

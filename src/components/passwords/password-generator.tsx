@@ -21,6 +21,7 @@ import {
 } from "@/lib/generator-prefs";
 import { API_PATH } from "@/lib/constants";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import { getPolicyViolations } from "@/lib/password-policy-validation";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
 import {
@@ -39,31 +40,6 @@ interface PasswordGeneratorProps {
   teamPolicy?: TeamPolicyClient | null;
 }
 
-type PolicyViolation =
-  | { key: "policyMinLength"; min: number }
-  | { key: "policyUppercase" }
-  | { key: "policyLowercase" }
-  | { key: "policyNumbers" }
-  | { key: "policySymbols" };
-
-function getPolicyViolations(
-  settings: GeneratorSettings,
-  policy: TeamPolicyClient,
-): PolicyViolation[] {
-  if (settings.mode === "passphrase") return [];
-  const violations: PolicyViolation[] = [];
-  if (policy.minPasswordLength > 0 && settings.length < policy.minPasswordLength) {
-    violations.push({ key: "policyMinLength", min: policy.minPasswordLength });
-  }
-  if (policy.requireUppercase && !settings.uppercase) violations.push({ key: "policyUppercase" });
-  if (policy.requireLowercase && !settings.lowercase) violations.push({ key: "policyLowercase" });
-  if (policy.requireNumbers && !settings.numbers) violations.push({ key: "policyNumbers" });
-  if (policy.requireSymbols) {
-    const hasAnySymbol = Object.values(settings.symbolGroups).some(Boolean);
-    if (!hasAnySymbol) violations.push({ key: "policySymbols" });
-  }
-  return violations;
-}
 
 const SEPARATORS = ["-", ".", "_", " "];
 const LENGTH_PRESETS = [16, 24, 32];
@@ -301,7 +277,17 @@ export function PasswordGenerator({
 
       {/* Team policy advisory warning */}
       {teamPolicy && (() => {
-        const violations = getPolicyViolations(settings, teamPolicy);
+        const violations = getPolicyViolations(
+          {
+            mode: settings.mode,
+            length: settings.length,
+            uppercase: settings.uppercase,
+            lowercase: settings.lowercase,
+            numbers: settings.numbers,
+            hasAnySymbolGroup: Object.values(settings.symbolGroups).some(Boolean),
+          },
+          teamPolicy,
+        );
         if (violations.length === 0) return null;
         const labels = violations.map((v) =>
           v.key === "policyMinLength"

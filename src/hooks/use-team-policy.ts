@@ -14,6 +14,9 @@ export interface TeamPolicyClient {
   allowExport: boolean;
   allowSharing: boolean;
   requireSharePassword: boolean;
+  passwordHistoryCount: number;
+  inheritTenantCidrs: boolean;
+  teamAllowedCidrs: string[];
 }
 
 const DEFAULT_POLICY: TeamPolicyClient = {
@@ -26,6 +29,9 @@ const DEFAULT_POLICY: TeamPolicyClient = {
   allowExport: true,
   allowSharing: true,
   requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 export function useTeamPolicy(open: boolean, teamId: string) {

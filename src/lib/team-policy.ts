@@ -1,5 +1,10 @@
 import { prisma } from "@/lib/prisma";
-import { withTeamTenantRls } from "@/lib/tenant-context";
+import { withTeamTenantRls, resolveTeamTenantId } from "@/lib/tenant-context";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { isIpAllowed, extractClientIp } from "@/lib/ip-access";
+import { logAudit } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import type { NextRequest } from "next/server";
 
 export interface TeamPolicyData {
   minPasswordLength: number;
@@ -12,6 +17,9 @@ export interface TeamPolicyData {
   allowExport: boolean;
   allowSharing: boolean;
   requireSharePassword: boolean;
+  passwordHistoryCount: number;
+  inheritTenantCidrs: boolean;
+  teamAllowedCidrs: string[];
 }
 
 const DEFAULT_POLICY: TeamPolicyData = {
@@ -25,7 +33,17 @@ const DEFAULT_POLICY: TeamPolicyData = {
   allowExport: true,
   allowSharing: true,
   requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
+
+export class PolicyViolationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "PolicyViolationError";
+  }
+}
 
 /**
  * Get the team policy, falling back to defaults if none is set.
@@ -48,6 +66,9 @@ export async function getTeamPolicy(teamId: string): Promise<TeamPolicyData> {
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,
     requireSharePassword: policy.requireSharePassword,
+    passwordHistoryCount: policy.passwordHistoryCount,
+    inheritTenantCidrs: policy.inheritTenantCidrs,
+    teamAllowedCidrs: policy.teamAllowedCidrs,
   };
 }
 
@@ -89,9 +110,119 @@ export async function assertPolicySharePassword(
   }
 }
 
-export class PolicyViolationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "PolicyViolationError";
+// ─── Session duration enforcement ────────────────────────────
+
+const sessionDurationCache = new Map<string, { value: number | null; expiresAt: number }>();
+const SESSION_DURATION_CACHE_TTL_MS = 60_000;
+
+/**
+ * Return the strictest (minimum) maxSessionDurationMinutes across all teams
+ * the user belongs to. Returns null if no team sets a session duration limit.
+ */
+export async function getStrictestSessionDuration(userId: string): Promise<number | null> {
+  const cached = sessionDurationCache.get(userId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
   }
+  if (cached) sessionDurationCache.delete(userId);
+
+  const memberships = await withBypassRls(
+    prisma,
+    async () =>
+      prisma.teamMember.findMany({
+        where: { userId },
+        select: {
+          team: {
+            select: {
+              policy: { select: { maxSessionDurationMinutes: true } },
+            },
+          },
+        },
+      }),
+    BYPASS_PURPOSE.AUTH_FLOW,
+  );
+
+  let minimum: number | null = null;
+  for (const m of memberships) {
+    const duration = m.team.policy?.maxSessionDurationMinutes ?? null;
+    if (duration !== null) {
+      minimum = minimum === null ? duration : Math.min(minimum, duration);
+    }
+  }
+
+  sessionDurationCache.set(userId, { value: minimum, expiresAt: Date.now() + SESSION_DURATION_CACHE_TTL_MS });
+  return minimum;
 }
+
+// ─── Team IP restriction ──────────────────────────────────────
+
+/**
+ * Check whether the given client IP is allowed to access the team's resources.
+ * Throws PolicyViolationError and emits an ACCESS_DENIED audit log if blocked.
+ */
+export async function checkTeamAccessRestriction(teamId: string, clientIp: string): Promise<void> {
+  const policy = await getTeamPolicy(teamId);
+
+  // No restriction configured for this team
+  if (policy.teamAllowedCidrs.length === 0 && !policy.inheritTenantCidrs) {
+    return;
+  }
+
+  const combinedCidrs = [...policy.teamAllowedCidrs];
+
+  if (policy.inheritTenantCidrs) {
+    const tenantId = await resolveTeamTenantId(teamId);
+    if (tenantId) {
+      const tenant = await withBypassRls(
+        prisma,
+        async () =>
+          prisma.tenant.findUnique({
+            where: { id: tenantId },
+            select: { allowedCidrs: true },
+          }),
+        BYPASS_PURPOSE.CROSS_TENANT_LOOKUP,
+      );
+      if (tenant?.allowedCidrs) {
+        combinedCidrs.push(...tenant.allowedCidrs);
+      }
+    }
+  }
+
+  if (combinedCidrs.length === 0) {
+    // inheritTenantCidrs is true but tenant has no CIDRs configured — no restriction
+    return;
+  }
+
+  if (isIpAllowed(clientIp, combinedCidrs)) {
+    return;
+  }
+
+  logAudit({
+    action: AUDIT_ACTION.ACCESS_DENIED,
+    scope: AUDIT_SCOPE.TEAM,
+    userId: "unknown",
+    teamId,
+    ip: clientIp,
+    metadata: { clientIp, reason: "IP not in team allowed CIDRs" },
+  });
+
+  throw new PolicyViolationError("Access denied: IP not in team allowed CIDRs");
+}
+
+/**
+ * Convenience wrapper: extract client IP from request and check team access restriction.
+ */
+export async function withTeamIpRestriction(teamId: string, request: NextRequest): Promise<void> {
+  const clientIp = extractClientIp(request);
+  if (!clientIp) {
+    // Cannot determine IP — check if restrictions are configured
+    const policy = await getTeamPolicy(teamId);
+    const hasRestriction = policy.teamAllowedCidrs.length > 0 || policy.inheritTenantCidrs;
+    if (hasRestriction) {
+      throw new PolicyViolationError("Access denied: client IP unknown; access restricted");
+    }
+    return;
+  }
+  await checkTeamAccessRestriction(teamId, clientIp);
+}
+

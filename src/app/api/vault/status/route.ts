@@ -29,7 +29,18 @@ async function handleGET(request: NextRequest) {
         kdfType: true,
         kdfIterations: true,
         recoveryKeySetAt: true,
-        tenant: { select: { vaultAutoLockMinutes: true } },
+        tenant: {
+          select: {
+            vaultAutoLockMinutes: true,
+            tenantMinPasswordLength: true,
+            tenantRequireUppercase: true,
+            tenantRequireLowercase: true,
+            tenantRequireNumbers: true,
+            tenantRequireSymbols: true,
+            passwordMaxAgeDays: true,
+            passwordExpiryWarningDays: true,
+          },
+        },
       },
     }),
   );
@@ -46,6 +57,13 @@ async function handleGET(request: NextRequest) {
     kdfIterations: user.kdfIterations,
     hasRecoveryKey: !!user.recoveryKeySetAt,
     vaultAutoLockMinutes: user.tenant?.vaultAutoLockMinutes ?? null,
+    tenantMinPasswordLength: user.tenant?.tenantMinPasswordLength ?? 0,
+    tenantRequireUppercase: user.tenant?.tenantRequireUppercase ?? false,
+    tenantRequireLowercase: user.tenant?.tenantRequireLowercase ?? false,
+    tenantRequireNumbers: user.tenant?.tenantRequireNumbers ?? false,
+    tenantRequireSymbols: user.tenant?.tenantRequireSymbols ?? false,
+    passwordMaxAgeDays: user.tenant?.passwordMaxAgeDays ?? null,
+    passwordExpiryWarningDays: user.tenant?.passwordExpiryWarningDays ?? 14,
   });
 }
 

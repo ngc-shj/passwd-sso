@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
+import { type PolicyViolation } from "@/lib/password-policy-validation";
 import type { EntryTypeValue } from "@/lib/constants";
 import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
@@ -77,6 +78,7 @@ export function useTeamBaseFormModel({
 
   // Common state shared by all entry types
   const [saving, setSaving] = useState(false);
+  const [policyViolations, setPolicyViolations] = useState<PolicyViolation[]>([]);
   const [title, setTitle] = useState(editData?.title ?? "");
   const [notes, setNotes] = useState(editData?.notes ?? "");
   const [selectedTags, setSelectedTags] = useState<TeamTagData[]>(
@@ -161,6 +163,11 @@ export function useTeamBaseFormModel({
 
     // Dialog
     handleOpenChange: onOpenChange,
+
+    // Policy
+    policyViolations,
+    setPolicyViolations,
+    policyBlocked: policyViolations.length > 0,
 
     // Common state
     saving,

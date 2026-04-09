@@ -147,6 +147,29 @@ export const POLICY_MIN_PW_LENGTH_MIN = 0;
 export const POLICY_MIN_PW_LENGTH_MAX = 128;
 export const POLICY_SESSION_DURATION_MIN = 5;
 export const POLICY_SESSION_DURATION_MAX = 43200;
+
+// ─── Lockout Policy ──────────────────────────────────────────
+export const LOCKOUT_THRESHOLD_MIN = 1;
+export const LOCKOUT_THRESHOLD_MAX = 50;
+export const LOCKOUT_DURATION_MIN = 1;           // minutes
+export const LOCKOUT_DURATION_MAX = 10080;        // 7 days in minutes
+
+// ─── Password Expiry ─────────────────────────────────────────
+export const PASSWORD_MAX_AGE_MIN = 1;
+export const PASSWORD_MAX_AGE_MAX = 730;          // 2 years in days
+export const PASSWORD_EXPIRY_WARNING_MIN = 1;
+export const PASSWORD_EXPIRY_WARNING_MAX = 90;
+
+// ─── Audit Log Retention ─────────────────────────────────────
+export const AUDIT_LOG_RETENTION_MIN = 30;
+export const AUDIT_LOG_RETENTION_MAX = 3650;      // 10 years in days
+
+// ─── Passkey Enforcement ─────────────────────────────────────
+export const PASSKEY_GRACE_PERIOD_MIN = 1;
+export const PASSKEY_GRACE_PERIOD_MAX = 90;
+
+// ─── Password History ────────────────────────────────────────
+export const PASSWORD_HISTORY_COUNT_MAX = 24;
 export const MAX_VIEWS_MIN = 1;
 export const MAX_VIEWS_MAX = 100;
 export const SEND_NAME_MAX_LENGTH = 200;

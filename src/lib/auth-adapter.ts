@@ -12,6 +12,7 @@ import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validat
 import { logAudit } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { createNotification } from "@/lib/notification";
+import { getStrictestSessionDuration } from "@/lib/team-policy";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -431,6 +432,8 @@ export function createCustomAdapter(): Adapter {
           prisma.session.findUnique({
             where: { sessionToken: session.sessionToken },
             select: {
+              userId: true,
+              createdAt: true,
               lastActiveAt: true,
               tenantId: true,
               tenant: { select: { sessionIdleTimeoutMinutes: true } },
@@ -452,6 +455,31 @@ export function createCustomAdapter(): Adapter {
                   where: { sessionToken: session.sessionToken },
                 }),
               BYPASS_PURPOSE.AUTH_FLOW);
+              return null;
+            }
+          }
+        }
+
+        // Team session duration enforcement
+        if (current.userId) {
+          const maxDuration = await getStrictestSessionDuration(current.userId);
+          if (maxDuration !== null && current.createdAt) {
+            const sessionAgeMs = Date.now() - current.createdAt.getTime();
+            if (sessionAgeMs > maxDuration * 60_000) {
+              await withBypassRls(
+                prisma,
+                () => prisma.session.delete({ where: { sessionToken: session.sessionToken } }),
+                BYPASS_PURPOSE.AUTH_FLOW,
+              );
+              logAudit({
+                scope: AUDIT_SCOPE.PERSONAL,
+                action: AUDIT_ACTION.SESSION_REVOKE,
+                userId: current.userId,
+                metadata: {
+                  reason: "team_session_duration_exceeded",
+                  maxDurationMinutes: maxDuration,
+                },
+              });
               return null;
             }
           }

@@ -281,12 +281,51 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async session({ session, user }) {
       // Auth.js v5 database strategy passes raw adapter fields;
       // strip internal fields to prevent leaking sessionToken etc.
+
+      // Fetch passkey enforcement data alongside session build.
+      // Wrapped in withBypassRls because session callbacks have no RLS context.
+      let hasPasskey = false;
+      let requirePasskey = false;
+      let requirePasskeyEnabledAt: string | null = null;
+      let passkeyGracePeriodDays: number | null = null;
+      try {
+        const passkeyData = await withBypassRls(prisma, async () => {
+          const [credCount, tenant] = await Promise.all([
+            prisma.webAuthnCredential.count({ where: { userId: user.id } }),
+            prisma.user.findUnique({
+              where: { id: user.id },
+              select: {
+                tenant: {
+                  select: {
+                    requirePasskey: true,
+                    requirePasskeyEnabledAt: true,
+                    passkeyGracePeriodDays: true,
+                  },
+                },
+              },
+            }),
+          ]);
+          return { credCount, tenant: tenant?.tenant ?? null };
+        }, BYPASS_PURPOSE.AUTH_FLOW);
+
+        hasPasskey = passkeyData.credCount > 0;
+        requirePasskey = passkeyData.tenant?.requirePasskey ?? false;
+        requirePasskeyEnabledAt = passkeyData.tenant?.requirePasskeyEnabledAt?.toISOString() ?? null;
+        passkeyGracePeriodDays = passkeyData.tenant?.passkeyGracePeriodDays ?? null;
+      } catch {
+        // Non-critical: passkey enforcement data failure should not break session
+      }
+
       return {
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
           image: user.image,
+          hasPasskey,
+          requirePasskey,
+          requirePasskeyEnabledAt,
+          passkeyGracePeriodDays,
         },
         expires: session.expires,
       };

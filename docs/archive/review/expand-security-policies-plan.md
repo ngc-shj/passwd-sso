@@ -375,6 +375,67 @@ Create migration: `prisma/migrations/YYYYMMDDHHMMSS_expand_security_policies/mig
 - `messages/en/TenantAdmin.json` / `messages/ja/TenantAdmin.json`
 - `messages/en/AdminConsole.json` / `messages/ja/AdminConsole.json`
 
+## Implementation Checklist
+
+### Files to modify
+- [ ] `prisma/schema.prisma` — Tenant model (add 18 fields), TeamPolicy model (add 3 fields), AuditAction enum (add 1 value)
+- [ ] `src/lib/validations/common.ts` — Add validation constants (LOCKOUT_*, PASSWORD_MAX_AGE_*, etc.)
+- [ ] `src/lib/validations/common.server.ts` — Add server-only validation constants if needed
+- [ ] `src/lib/validations/team.ts` — Extend `upsertTeamPolicySchema` with 3 new fields
+- [ ] `src/app/api/tenant/policy/route.ts` — Extend GET/PATCH for all new tenant fields + cross-field validation
+- [ ] `src/app/api/teams/[teamId]/policy/route.ts` — Extend PUT for new team fields + rate limiter
+- [ ] `src/lib/constants/audit.ts` — Add `PASSKEY_ENFORCEMENT_BLOCKED` to AUDIT_ACTION, AUDIT_ACTION_VALUES, AUDIT_ACTION_GROUPS_TENANT[ADMIN], TENANT_WEBHOOK_EVENT_GROUPS[ADMIN]
+- [ ] `src/lib/team-policy.ts` — Add `getStrictestSessionDuration`, `checkTeamAccessRestriction`, `withTeamIpRestriction`, update `DEFAULT_POLICY`, update `getTeamPolicy` return block, update `TeamPolicyData`
+- [ ] `src/hooks/use-team-policy.ts` — Extend `TeamPolicyClient` type
+- [ ] `src/hooks/use-team-base-form-model.ts` — Add policyViolations state, submitDisabled logic
+- [ ] `src/hooks/use-team-login-form-state.ts` — Real-time policy validation
+- [ ] `src/components/passwords/password-generator.tsx` — Remove internal getPolicyViolations, import from shared util
+- [ ] `src/lib/password-policy-validation.ts` — NEW: shared PasswordPolicy type, getPolicyViolations, checkPasswordReuse
+- [ ] `src/lib/auth-adapter.ts` — Add createdAt+userId to updateSession select, add session duration check, add hasPasskey to session response
+- [ ] `src/lib/account-lockout.ts` — Replace hardcoded LOCKOUT_THRESHOLDS with getLockoutThresholds(tenantId)
+- [ ] `src/lib/access-restriction.ts` — Reference for cache pattern (no changes)
+- [ ] `src/proxy.ts` — Add passkey enforcement check in handleDashboardAuth, extend SessionInfo
+- [ ] `src/hooks/use-watchtower.ts` — Add passwordMaxAgeDays/passwordExpiryWarningDays expiry checks
+- [ ] `src/app/api/vault/status/route.ts` — Extend response with tenant password policy fields
+- [ ] `src/app/api/maintenance/purge-history/route.ts` — No changes (PasswordEntryHistory, not AuditLog)
+- [ ] `src/app/api/maintenance/purge-audit-logs/route.ts` — NEW: audit log purge with retention check
+- [ ] `src/app/api/user/passkey-status/route.ts` — NEW: passkey enforcement status API
+- [ ] `scripts/purge-audit-logs.sh` — NEW: shell wrapper
+- [ ] `src/components/admin/admin-sidebar.tsx` — Add 4 nav items under tenant security
+- [ ] `src/components/settings/tenant-passkey-policy-card.tsx` — NEW
+- [ ] `src/components/settings/tenant-lockout-policy-card.tsx` — NEW
+- [ ] `src/components/settings/tenant-password-policy-card.tsx` — NEW
+- [ ] `src/components/settings/tenant-retention-policy-card.tsx` — NEW
+- [ ] `src/app/[locale]/admin/tenant/security/passkey-policy/page.tsx` — NEW
+- [ ] `src/app/[locale]/admin/tenant/security/lockout-policy/page.tsx` — NEW
+- [ ] `src/app/[locale]/admin/tenant/security/password-policy/page.tsx` — NEW
+- [ ] `src/app/[locale]/admin/tenant/security/retention-policy/page.tsx` — NEW
+- [ ] `src/components/team/team-policy-settings.tsx` — Add password reuse + IP restriction sections
+- [ ] `messages/en/TeamPolicy.json` + `messages/ja/TeamPolicy.json` — New keys
+- [ ] `messages/en/TenantAdmin.json` + `messages/ja/TenantAdmin.json` — New keys
+- [ ] `messages/en/AdminConsole.json` + `messages/ja/AdminConsole.json` — New nav keys
+- [ ] `messages/en/AuditLog.json` + `messages/ja/AuditLog.json` — PASSKEY_ENFORCEMENT_BLOCKED key
+- [ ] `src/types/next-auth.d.ts` — Add hasPasskey + passkey policy fields
+
+### Shared utilities to reuse (NOT reimplment)
+- `createRateLimiter` from `src/lib/rate-limit.ts` — for new routes
+- `logAudit` + `extractRequestMeta` from `src/lib/audit.ts` — for audit logging
+- `withBypassRls` + `BYPASS_PURPOSE` from `src/lib/tenant-rls.ts` — for cross-tenant queries
+- `withTeamTenantRls` from `src/lib/tenant-context.ts` — for team-scoped queries
+- `invalidateTenantPolicyCache` from `src/lib/access-restriction.ts` — call after tenant policy update
+- `verifyAdminToken` from `src/lib/admin-auth.ts` — for new admin maintenance route
+- `fetchApi` + `API_PATH` from `src/lib/fetch-api.ts` — for client-side API calls
+- Policy cache pattern from `src/lib/access-restriction.ts` (Map + TTL + invalidation)
+- Card component pattern from `src/components/settings/tenant-session-policy-card.tsx`
+- `SectionCardHeader` from `src/components/ui/section-card-header.tsx`
+
+### Existing test constants to update
+- `tenant-policy.test.ts`: `FULL_POLICY_RESPONSE` + L284-318 hardcoded expectations
+- `account-lockout.test.ts`: Mock strategy migration (vi.hoisted for getLockoutThresholds)
+- `team-policy.test.ts`: `fullPolicy`, DEFAULT_POLICY, "returns mapped policy" assertions, add `vi.mock("@/lib/tenant-rls")`
+- `audit.test.ts`: AUDIT_ACTION_VALUES assertion
+- `AuditLog.json` (en/ja): i18n key for new audit action
+
 ### Step 15: Build and Type Generation
 
 - Run `npx prisma generate` after schema changes to update `@prisma/client` types
