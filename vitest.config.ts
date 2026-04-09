@@ -46,6 +46,7 @@ export default defineConfig({
         "src/lib/prisma-error.ts",
         "src/lib/sentry-sanitize.ts",
         "src/lib/mcp/**/*.ts",
+        "src/lib/password-policy-validation.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",

@@ -160,7 +160,7 @@ export async function getStrictestSessionDuration(userId: string): Promise<numbe
  * Check whether the given client IP is allowed to access the team's resources.
  * Throws PolicyViolationError and emits an ACCESS_DENIED audit log if blocked.
  */
-export async function checkTeamAccessRestriction(teamId: string, clientIp: string): Promise<void> {
+export async function checkTeamAccessRestriction(teamId: string, clientIp: string, userId?: string): Promise<void> {
   const policy = await getTeamPolicy(teamId);
 
   // No restriction configured for this team
@@ -200,7 +200,7 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
   logAudit({
     action: AUDIT_ACTION.ACCESS_DENIED,
     scope: AUDIT_SCOPE.TEAM,
-    userId: "unknown",
+    userId: userId ?? "unknown",
     teamId,
     ip: clientIp,
     metadata: { clientIp, reason: "IP not in team allowed CIDRs" },
@@ -212,7 +212,7 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
 /**
  * Convenience wrapper: extract client IP from request and check team access restriction.
  */
-export async function withTeamIpRestriction(teamId: string, request: NextRequest): Promise<void> {
+export async function withTeamIpRestriction(teamId: string, request: NextRequest, userId?: string): Promise<void> {
   const clientIp = extractClientIp(request);
   if (!clientIp) {
     // Cannot determine IP — check if restrictions are configured
@@ -223,6 +223,6 @@ export async function withTeamIpRestriction(teamId: string, request: NextRequest
     }
     return;
   }
-  await checkTeamAccessRestriction(teamId, clientIp);
+  await checkTeamAccessRestriction(teamId, clientIp, userId);
 }
 

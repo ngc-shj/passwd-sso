@@ -159,7 +159,13 @@ export function TenantPasskeyPolicyCard() {
               max={90}
               value={gracePeriodDays}
               onChange={(e) => {
-                setGracePeriodDays(e.target.value);
+                const raw = e.target.value;
+                if (!raw) { setGracePeriodDays(""); } else {
+                  const n = parseInt(raw, 10);
+                  if (Number.isNaN(n) || n < 1) { setGracePeriodDays(""); } else {
+                    setGracePeriodDays(String(Math.min(n, 90)));
+                  }
+                }
                 setError(null);
               }}
               placeholder="30"
@@ -178,8 +184,18 @@ export function TenantPasskeyPolicyCard() {
             max={63}
             value={requireMinPinLength}
             onChange={(e) => {
-              setRequireMinPinLength(e.target.value);
+              const raw = e.target.value;
+              if (!raw) { setRequireMinPinLength(""); } else {
+                const n = parseInt(raw, 10);
+                if (Number.isNaN(n) || n < 1) { setRequireMinPinLength(""); } else {
+                  setRequireMinPinLength(String(Math.min(n, 63)));
+                }
+              }
               setError(null);
+            }}
+            onBlur={() => {
+              const n = parseInt(requireMinPinLength, 10);
+              if (!Number.isNaN(n) && n < 4) setRequireMinPinLength(String(4));
             }}
             placeholder="6"
           />

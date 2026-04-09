@@ -1443,4 +1443,86 @@ describe("useWatchtower", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(window.localStorage.getItem("watchtower:lastAnalyzedAt")).toBeNull();
   });
+
+  // ─── passwordMaxAgeDays policy checks ────────────────────
+
+  it("flags entry older than passwordMaxAgeDays as policy-expired (medium)", async () => {
+    // Entry updated 95 days ago; max age is 90 days
+    const oldDate = new Date(Date.now() - 95 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = makeRawEntry({ id: "age-1", updatedAt: oldDate });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() =>
+      useWatchtower(undefined, { passwordMaxAgeDays: 90, passwordExpiryWarningDays: 14 })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    const expiring = result.current.report!.expiring;
+    const found = expiring.find((e) => e.id === "age-1");
+    expect(found).toBeDefined();
+    expect(found!.severity).toBe("medium");
+    expect(found!.details).toMatch(/^policyExpired:/);
+  });
+
+  it("flags entry within warning window as policy-expiring (low)", async () => {
+    // Entry updated 80 days ago; max age is 90 days, warning is 14 days
+    // Warning window starts at 90-14=76 days, so 80 days > 76 days → expiring
+    const warningDate = new Date(Date.now() - 80 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = makeRawEntry({ id: "age-2", updatedAt: warningDate });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() =>
+      useWatchtower(undefined, { passwordMaxAgeDays: 90, passwordExpiryWarningDays: 14 })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    const expiring = result.current.report!.expiring;
+    const found = expiring.find((e) => e.id === "age-2");
+    expect(found).toBeDefined();
+    expect(found!.severity).toBe("low");
+    expect(found!.details).toMatch(/^policyExpiring:/);
+  });
+
+  it("passwordMaxAgeDays=null has no effect on expiring list", async () => {
+    // Entry updated 200 days ago, but no max age policy
+    const veryOldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = makeRawEntry({ id: "age-3", updatedAt: veryOldDate });
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([raw]));
+
+    mockDecryptData.mockResolvedValue(raw._plaintext);
+
+    const { result } = renderHook(() =>
+      useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    // Policy check skipped — no policyExpired/policyExpiring entries
+    const expiring = result.current.report!.expiring;
+    const policyIssues = expiring.filter(
+      (e) => e.details?.startsWith("policyExpired:") || e.details?.startsWith("policyExpiring:")
+    );
+    expect(policyIssues).toHaveLength(0);
+  });
 });

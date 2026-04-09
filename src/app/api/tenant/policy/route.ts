@@ -13,6 +13,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
+import { invalidateLockoutThresholdCache } from "@/lib/account-lockout";
 import {
   pinLengthSchema,
   MAX_CIDRS,
@@ -467,26 +468,25 @@ async function handlePATCH(req: NextRequest) {
   }
 
   // Cross-field validation: lockout thresholds/durations must be strictly ascending.
-  // Merge request values with current DB values.
-  const t1 = lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentForCrossValidation?.lockoutThreshold1;
-  const t2 = lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentForCrossValidation?.lockoutThreshold2;
-  const t3 = lockoutThreshold3 !== undefined ? lockoutThreshold3 : currentForCrossValidation?.lockoutThreshold3;
-  const d1 = lockoutDuration1Minutes !== undefined ? lockoutDuration1Minutes : currentForCrossValidation?.lockoutDuration1Minutes;
-  const d2 = lockoutDuration2Minutes !== undefined ? lockoutDuration2Minutes : currentForCrossValidation?.lockoutDuration2Minutes;
-  const d3 = lockoutDuration3Minutes !== undefined ? lockoutDuration3Minutes : currentForCrossValidation?.lockoutDuration3Minutes;
+  // Merge request values with current DB values, falling back to schema defaults when DB has no value.
+  const DEFAULT_T1 = 5, DEFAULT_T2 = 10, DEFAULT_T3 = 15;
+  const DEFAULT_D1 = 15, DEFAULT_D2 = 60, DEFAULT_D3 = 1440;
 
-  // Lockout thresholds must be strictly ascending when all three are set
-  if (t1 != null && t2 != null && t3 != null) {
-    if (t1 >= t2 || t2 >= t3) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3" });
-    }
+  const t1 = (lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentForCrossValidation?.lockoutThreshold1) ?? DEFAULT_T1;
+  const t2 = (lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentForCrossValidation?.lockoutThreshold2) ?? DEFAULT_T2;
+  const t3 = (lockoutThreshold3 !== undefined ? lockoutThreshold3 : currentForCrossValidation?.lockoutThreshold3) ?? DEFAULT_T3;
+  const d1 = (lockoutDuration1Minutes !== undefined ? lockoutDuration1Minutes : currentForCrossValidation?.lockoutDuration1Minutes) ?? DEFAULT_D1;
+  const d2 = (lockoutDuration2Minutes !== undefined ? lockoutDuration2Minutes : currentForCrossValidation?.lockoutDuration2Minutes) ?? DEFAULT_D2;
+  const d3 = (lockoutDuration3Minutes !== undefined ? lockoutDuration3Minutes : currentForCrossValidation?.lockoutDuration3Minutes) ?? DEFAULT_D3;
+
+  // Lockout thresholds must always be strictly ascending
+  if (t1 >= t2 || t2 >= t3) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3" });
   }
 
-  // Lockout durations must be strictly ascending when all three are set
-  if (d1 != null && d2 != null && d3 != null) {
-    if (d1 >= d2 || d2 >= d3) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" });
-    }
+  // Lockout durations must always be strictly ascending
+  if (d1 >= d2 || d2 >= d3) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" });
   }
 
   // Password expiry warning must be less than max age when both are set
@@ -645,6 +645,7 @@ async function handlePATCH(req: NextRequest) {
 
   // Bust the tenant policy cache so access restriction picks up new values immediately
   invalidateTenantPolicyCache(membership.tenantId);
+  invalidateLockoutThresholdCache(membership.tenantId);
 
   const meta = extractRequestMeta(req);
   logAudit({

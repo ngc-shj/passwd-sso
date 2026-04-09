@@ -673,6 +673,93 @@ describe("createCustomAdapter", () => {
         adapter.updateSession!({ sessionToken: "tok-1" }),
       ).rejects.toThrow("connection lost");
     });
+
+    it("deletes session when team session duration exceeded", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // Session created 2 hours ago; team limit is 60 minutes
+      mockGetStrictestSessionDuration.mockResolvedValue(60);
+      mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date("2025-03-15T10:00:00Z"),
+        lastActiveAt: new Date("2025-03-15T11:55:00Z"),
+        tenantId: "tenant-1",
+        tenant: { sessionIdleTimeoutMinutes: null },
+      });
+      mockPrismaSession.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-dur" });
+
+      expect(result).toBeNull();
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({
+        where: { sessionToken: "tok-dur" },
+      });
+      expect(mockPrismaSession.update).not.toHaveBeenCalled();
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "SESSION_REVOKE",
+          metadata: expect.objectContaining({
+            reason: "team_session_duration_exceeded",
+          }),
+        }),
+      );
+    });
+
+    it("does NOT delete session when within team session duration limit", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // Session created 1 hour ago; team limit is 120 minutes
+      mockGetStrictestSessionDuration.mockResolvedValue(120);
+      mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date("2025-03-15T11:00:00Z"),
+        lastActiveAt: new Date("2025-03-15T11:55:00Z"),
+        tenantId: "tenant-1",
+        tenant: { sessionIdleTimeoutMinutes: null },
+      });
+      mockPrismaSession.update.mockResolvedValue({
+        sessionToken: "tok-dur2",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-dur2" });
+
+      expect(mockPrismaSession.delete).not.toHaveBeenCalled();
+      expect(mockPrismaSession.update).toHaveBeenCalled();
+      expect(result).not.toBeNull();
+    });
+
+    it("does not enforce duration when getStrictestSessionDuration returns null", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // Explicitly null — no team duration limit
+      mockGetStrictestSessionDuration.mockResolvedValue(null);
+      mockPrismaSession.findUnique.mockResolvedValue({
+        userId: "u-1",
+        createdAt: new Date("2025-01-01T00:00:00Z"), // very old
+        lastActiveAt: new Date("2025-03-15T11:59:00Z"),
+        tenantId: "tenant-1",
+        tenant: { sessionIdleTimeoutMinutes: null },
+      });
+      mockPrismaSession.update.mockResolvedValue({
+        sessionToken: "tok-no-limit",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.updateSession!({ sessionToken: "tok-no-limit" });
+
+      // Should not delete — no duration limit
+      expect(mockPrismaSession.delete).not.toHaveBeenCalled();
+      expect(mockPrismaSession.update).toHaveBeenCalled();
+    });
   });
 
   describe("getUser", () => {

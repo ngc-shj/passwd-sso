@@ -117,7 +117,16 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
-      tenant: { vaultAutoLockMinutes: null },
+      tenant: {
+        vaultAutoLockMinutes: null,
+        tenantMinPasswordLength: 0,
+        tenantRequireUppercase: false,
+        tenantRequireLowercase: false,
+        tenantRequireNumbers: false,
+        tenantRequireSymbols: false,
+        passwordMaxAgeDays: null,
+        passwordExpiryWarningDays: 14,
+      },
     });
     const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();
@@ -138,7 +147,16 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: new Date(),
-      tenant: { vaultAutoLockMinutes: null },
+      tenant: {
+        vaultAutoLockMinutes: null,
+        tenantMinPasswordLength: 0,
+        tenantRequireUppercase: false,
+        tenantRequireLowercase: false,
+        tenantRequireNumbers: false,
+        tenantRequireSymbols: false,
+        passwordMaxAgeDays: null,
+        passwordExpiryWarningDays: 14,
+      },
     });
     const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();
@@ -154,7 +172,16 @@ describe("GET /api/vault/status", () => {
       kdfType: 0,
       kdfIterations: 600_000,
       recoveryKeySetAt: null,
-      tenant: { vaultAutoLockMinutes: 30 },
+      tenant: {
+        vaultAutoLockMinutes: 30,
+        tenantMinPasswordLength: 0,
+        tenantRequireUppercase: false,
+        tenantRequireLowercase: false,
+        tenantRequireNumbers: false,
+        tenantRequireSymbols: false,
+        passwordMaxAgeDays: null,
+        passwordExpiryWarningDays: 14,
+      },
     });
     const res = await GET(createRequest("GET", "http://localhost/api/vault/status"));
     const json = await res.json();

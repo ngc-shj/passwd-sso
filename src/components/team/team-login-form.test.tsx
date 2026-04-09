@@ -118,6 +118,9 @@ vi.mock("@/hooks/use-team-policy", () => ({
       requireRepromptForAll: false,
       allowExport: true,
       allowSharing: true,
+      passwordHistoryCount: 0,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
     },
   }),
 }));

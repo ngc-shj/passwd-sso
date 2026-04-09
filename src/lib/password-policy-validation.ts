@@ -44,9 +44,19 @@ export function getPolicyViolations(
   return violations;
 }
 
+function timingSafeEqual(a: string, b: string): boolean {
+  const encoder = new TextEncoder();
+  const ab = encoder.encode(a);
+  const bb = encoder.encode(b);
+  if (ab.length !== bb.length) return false;
+  let result = 0;
+  for (let i = 0; i < ab.length; i++) result |= ab[i] ^ bb[i];
+  return result === 0;
+}
+
 export function checkPasswordReuse(
   password: string,
   decryptedHistory: string[],
 ): boolean {
-  return decryptedHistory.some((prev) => prev === password);
+  return decryptedHistory.some((prev) => timingSafeEqual(prev, password));
 }
