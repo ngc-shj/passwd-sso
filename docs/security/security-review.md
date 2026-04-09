@@ -209,7 +209,8 @@ Evidence:
 - Entries exceeding max retries or dropped due to buffer overflow are logged to a dead-letter logger (`_logType: "audit-dead-letter"`) for external collection.
 
 ### Notes / residual risk
-- The retry buffer is in-memory and not durable. A process crash loses buffered entries (they will appear in dead-letter logs if the logger flushed before crash).
+- The retry buffer is memory-resident only and does not survive process restart, pod eviction, or crash. Entries in flight at the time of termination are lost (they will appear in dead-letter logs only if the logger flushed before termination).
+  Therefore this mechanism improves availability but does not provide durable audit guarantees.
 - If strict compliance requires guaranteed delivery, a durable queue or transactional outbox would be needed.
 
 ### Conclusion (Section 5)

@@ -50,6 +50,9 @@ TB4: Server <-> SAML Jackson
 TB5: Extension <-> Web App
      Extension communicates with web app via extension token (Bearer).
      Token issued via Auth.js session, validated server-side per request.
+     Token delivery uses window.postMessage (ISOLATED world content script).
+     Because postMessage is observable by same-origin main-world scripts,
+     this channel is treated as exposure-minimized but not confidentiality-isolated.
 
 TB6: Client <-> WebAuthn Authenticator
      Browser mediates credential creation/assertion via navigator.credentials API.
