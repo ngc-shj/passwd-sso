@@ -28,7 +28,7 @@ CORS is a **browser-enforced constraint only**. Non-browser clients (curl, scrip
 The browser extension communicates with the API via its **Background Service Worker** using **Bearer token** authentication. Chrome extension service workers are not subject to browser CORS restrictions, so no cross-origin CORS headers are needed for extension access.
 
 Communication flow:
-1. Extension obtains a Bearer token via the token bridge (same-origin DOM injection)
+1. Extension obtains a Bearer token via the token bridge (`window.postMessage` with strict origin and schema validation)
 2. Background Service Worker makes `fetch()` calls with `Authorization: Bearer <token>`
 3. Service Worker network requests bypass browser CORS checks entirely
 

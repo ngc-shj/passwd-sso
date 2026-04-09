@@ -2,6 +2,7 @@
 
 This document describes the cryptographic architecture of passwd-sso.
 For the full domain separation ledger, see [crypto-domain-ledger.md](crypto-domain-ledger.md).
+For threat assumptions and non-cryptographic trust boundaries, see [threat-model.md](threat-model.md).
 
 Last updated: 2026-04-09
 
