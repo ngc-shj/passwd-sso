@@ -1,6 +1,6 @@
 # Security Review
 
-Last updated: 2026-02-27
+Last updated: 2026-04-09
 Branch baseline: `main` (includes merged fixes from `fix/security-review-proxy-import` and `feat/tenant-team-scim-spec`)
 
 ## 1. Authentication / Authorization Boundary
@@ -103,14 +103,16 @@ Evidence:
 - `extension/src/__tests__/background.test.ts:211` verifies relock on token change.
 
 ### Notes / residual risk
-- `vaultSecretKey` is persisted in `chrome.storage.session` (`extension/src/lib/session-storage.ts:12`).  
-  This is a deliberate UX/security trade-off (survive MV3 SW restarts).  
-  **Decision:** keep `chrome.storage.session` persistence for extension `vaultSecretKey` to preserve UX.
-  Security controls remain: browser-session scoped storage, token TTL/refresh, explicit lock/clear flows.
+- Sensitive session fields (`token`, `vaultSecretKey`) are encrypted with an ephemeral AES-256-GCM key before being persisted to `chrome.storage.session` (`extension/src/lib/session-crypto.ts`, `extension/src/lib/session-storage.ts`).
+  - The wrapping key is generated via `crypto.subtle.generateKey()` with `extractable: false` and held only in memory.
+  - On service worker restart, the ephemeral key is lost, rendering stored ciphertext undecryptable. This forces re-authentication rather than allowing silent secret recovery.
+  - `chrome.storage.session.setAccessLevel({ accessLevel: "TRUSTED_CONTEXTS" })` further restricts access to trusted extension contexts.
+- This is a deliberate UX/security trade-off: secrets survive transient SW idle shutdowns (where the key remains in memory) but are irrecoverable after a full restart.
+  **Decision:** keep `chrome.storage.session` with envelope encryption for extension `vaultSecretKey` to preserve UX.
 
 ### Conclusion (Section 2)
 - No immediate logic bug found.
-- Current implementation is consistent with the chosen model: token/session continuity across SW restarts.
+- Current implementation is consistent with the chosen model: envelope-encrypted token/session continuity across SW idle shutdowns, with forced re-authentication after full restarts.
 
 ## 3. Input / Metadata Sanitization
 
@@ -172,12 +174,12 @@ Evidence:
 - Extension unlock zeroes temporary secret: `extension/src/background/index.ts:798`.
 
 ### Notes / residual risk
-- Extension keeps `vaultSecretKey` hex in memory and session storage (`extension/src/background/index.ts:39`, `extension/src/background/index.ts:127`).  
-  This is the highest-sensitivity residual risk in current design.
+- Extension `vaultSecretKey` is held in memory and persisted to `chrome.storage.session` via envelope encryption (AES-256-GCM with a non-extractable ephemeral key; see Section 2 notes).
+  Plaintext secret is never written to storage. The residual risk is limited to in-memory exposure during an active session.
 
 ### Conclusion (Section 4)
 - Crypto primitives and AAD usage are solid.
-- Main remaining risk is persistence/handling policy for extension vault secret continuity.
+- Extension vault secret persistence uses envelope encryption; residual risk is limited to in-memory exposure.
 
 ## 5. Audit Log Integrity / Traceability
 
@@ -202,15 +204,17 @@ Evidence:
 3. Audit write failures do not break primary operation  
 Status: `PASS`  
 Evidence:
-- `src/lib/audit.ts:57` catches DB write errors by design (fire-and-forget).
+- `src/lib/audit.ts` catches DB write errors and enqueues failed entries for retry (`src/lib/audit-retry.ts`).
+- Retry mechanism: in-memory FIFO buffer (max 100 entries), piggyback flush on subsequent `logAudit()` calls (drains up to 10 entries per call), bounded at 3 retries per entry.
+- Entries exceeding max retries or dropped due to buffer overflow are logged to a dead-letter logger (`_logType: "audit-dead-letter"`) for external collection.
 
 ### Notes / residual risk
-- Fire-and-forget means potential audit loss under DB outage.
-- If strict compliance is required, move to durable queue/transactional outbox.
+- The retry buffer is in-memory and not durable. A process crash loses buffered entries (they will appear in dead-letter logs if the logger flushed before crash).
+- If strict compliance requires guaranteed delivery, a durable queue or transactional outbox would be needed.
 
 ### Conclusion (Section 5)
-- Current audit model is consistent with availability-first design.
-- Compliance-hardening would require architectural change, not patch-level fixes.
+- Current audit model is best-effort with bounded retry, reducing audit loss compared to pure fire-and-forget.
+- Compliance-hardening beyond this would require a durable delivery mechanism.
 
 ## 6. Test Coverage Review (Current Security Findings)
 

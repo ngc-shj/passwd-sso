@@ -3,7 +3,7 @@
 This document describes the cryptographic architecture of passwd-sso.
 For the full domain separation ledger, see [crypto-domain-ledger.md](crypto-domain-ledger.md).
 
-Last updated: 2026-03-07
+Last updated: 2026-04-09
 
 ---
 
@@ -164,6 +164,14 @@ Server stores: HMAC(serverPepper, verifierHash)
 
 All encryption uses the Web Crypto API (`crypto.subtle`). CryptoKey objects are created with `extractable: false` where possible.
 
+### 4.1 HKDF Usage Notes
+
+HKDF (RFC 5869) is used for all key derivation from high-entropy input key material (IKM). Design rationale:
+
+- **Zero salt**: Personal vault HKDF derivations use an empty (zero-length) salt. This is acceptable under RFC 5869 §3.1 when the IKM is uniformly random (256-bit `secretKey`). Domain separation is achieved exclusively via distinct `info` labels.
+- **Non-zero salt**: Team key wrapping and recovery key wrapping use a random salt per operation. The salt is stored alongside the wrapped key and serves as a domain separator in addition to the `info` label.
+- **Info labels**: Each derivation path uses a unique info string (e.g., `passwd-sso-enc-v1`, `passwd-sso-auth-v1`). The full ledger is maintained in [crypto-domain-ledger.md](crypto-domain-ledger.md).
+
 ## 5. AAD (Additional Authenticated Data) Binding
 
 Every ciphertext is bound to its context via AAD. This prevents:
@@ -233,9 +241,15 @@ For entries with `itemKeyVersion = 0` (legacy, no ItemKey):
 
 ### 7.3 Extension compromised
 
-**Attacker can**: Access vault secret key in chrome.storage.session during active session.
+**Attacker can**: Access vault secret key in memory during an active session. Stored ciphertext in `chrome.storage.session` is not directly usable without the ephemeral wrapping key.
 
-**Mitigations**: chrome.storage.session is scoped to browser session (cleared on browser close). Token TTL limits exposure window. Content scripts run in isolated worlds.
+**Mitigations**:
+- Sensitive session fields are encrypted with an ephemeral AES-256-GCM key before storage. The wrapping key is non-extractable and held only in memory.
+- On service worker full restart, the ephemeral key is lost and stored ciphertext becomes undecryptable, forcing re-authentication.
+- `chrome.storage.session` is scoped to browser session (cleared on browser close) and restricted to `TRUSTED_CONTEXTS`.
+- Token TTL limits exposure window. Content scripts run in isolated worlds.
+
+**Residual risk**: An attacker with arbitrary code execution in the extension context can read the in-memory secret key during an active session. This is an inherent limitation of browser extension architecture.
 
 ### 7.4 IdP compromised (Google/SAML)
 
