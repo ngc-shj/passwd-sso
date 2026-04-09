@@ -36,6 +36,8 @@
   "teamAllowedCidrs": "チームIPアドレス許可リスト",
   "teamAllowedCidrsPlaceholder": "192.168.1.0/24\n10.0.0.0/8",
   "teamAllowedCidrsHelp": "このチームに追加で許可するCIDR範囲（1行に1つ、最大{max}件）。空欄の場合はテナント制限のみが適用されます。",
+  "passwordHistoryCountRange": "0〜24の範囲で入力してください",
+  "teamAllowedCidrsMax": "CIDRエントリは最大{max}件です",
   "policyPasswordReuse": "このパスワードは最近使用されました",
   "policyBlocked": "パスワードがチームのポリシー要件を満たしていません"
 }

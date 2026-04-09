@@ -147,13 +147,7 @@ export function TenantRetentionPolicyCard() {
               max={3650}
               value={auditLogRetentionDays}
               onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setAuditLogRetentionDays(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 30) { setAuditLogRetentionDays(""); } else {
-                    setAuditLogRetentionDays(String(Math.min(n, 3650)));
-                  }
-                }
+                setAuditLogRetentionDays(e.target.value);
                 setError(null);
               }}
               placeholder="365"

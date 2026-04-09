@@ -36,6 +36,8 @@
   "teamAllowedCidrs": "Team IP Allowlist",
   "teamAllowedCidrsPlaceholder": "192.168.1.0/24\n10.0.0.0/8",
   "teamAllowedCidrsHelp": "Additional CIDR ranges allowed for this team (one per line, max {max}). Leave empty to rely solely on tenant restrictions.",
+  "passwordHistoryCountRange": "Must be between 0 and 24",
+  "teamAllowedCidrsMax": "Maximum {max} CIDR entries allowed",
   "policyPasswordReuse": "This password was used recently",
   "policyBlocked": "Password does not meet team policy requirements"
 }

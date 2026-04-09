@@ -175,13 +175,7 @@ export function TenantLockoutPolicyCard() {
                   max={50}
                   value={threshold}
                   onChange={(e) => {
-                    const raw = e.target.value;
-                    if (!raw) { setThreshold(""); } else {
-                      const n = parseInt(raw, 10);
-                      if (Number.isNaN(n) || n < 1) { setThreshold(""); } else {
-                        setThreshold(String(Math.min(n, 50)));
-                      }
-                    }
+                    setThreshold(e.target.value);
                     setError(null);
                   }}
                   placeholder="5"
@@ -197,13 +191,7 @@ export function TenantLockoutPolicyCard() {
                   max={10080}
                   value={duration}
                   onChange={(e) => {
-                    const raw = e.target.value;
-                    if (!raw) { setDuration(""); } else {
-                      const n = parseInt(raw, 10);
-                      if (Number.isNaN(n) || n < 1) { setDuration(""); } else {
-                        setDuration(String(Math.min(n, 10080)));
-                      }
-                    }
+                    setDuration(e.target.value);
                     setError(null);
                   }}
                   placeholder="15"

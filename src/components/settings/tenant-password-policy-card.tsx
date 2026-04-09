@@ -180,13 +180,7 @@ export function TenantPasswordPolicyCard() {
             max={128}
             value={minPasswordLength}
             onChange={(e) => {
-              const raw = e.target.value;
-              if (!raw) { setMinPasswordLength(""); } else {
-                const n = parseInt(raw, 10);
-                if (Number.isNaN(n) || n < 0) { setMinPasswordLength(""); } else {
-                  setMinPasswordLength(String(Math.min(n, 128)));
-                }
-              }
+              setMinPasswordLength(e.target.value);
               setError(null);
             }}
             placeholder="0"
@@ -262,13 +256,7 @@ export function TenantPasswordPolicyCard() {
                 max={730}
                 value={passwordMaxAgeDays}
                 onChange={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) { setPasswordMaxAgeDays(""); } else {
-                    const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < 1) { setPasswordMaxAgeDays(""); } else {
-                      setPasswordMaxAgeDays(String(Math.min(n, 730)));
-                    }
-                  }
+                  setPasswordMaxAgeDays(e.target.value);
                   setError(null);
                 }}
                 placeholder="90"
@@ -285,13 +273,7 @@ export function TenantPasswordPolicyCard() {
                 max={90}
                 value={passwordExpiryWarningDays}
                 onChange={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) { setPasswordExpiryWarningDays(""); } else {
-                    const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < 1) { setPasswordExpiryWarningDays(""); } else {
-                      setPasswordExpiryWarningDays(String(Math.min(n, 90)));
-                    }
-                  }
+                  setPasswordExpiryWarningDays(e.target.value);
                   setError(null);
                 }}
                 placeholder="14"

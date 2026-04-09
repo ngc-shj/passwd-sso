@@ -59,7 +59,7 @@ const DEFAULT_POLICY: PolicyData = {
 
 /** Validate policy fields. Returns a map of field name → error key (i18n). */
 export function validatePolicy(
-  policy: Pick<PolicyData, "minPasswordLength" | "maxSessionDurationMinutes">,
+  policy: Pick<PolicyData, "minPasswordLength" | "maxSessionDurationMinutes" | "passwordHistoryCount" | "teamAllowedCidrs">,
 ): Record<string, string> {
   const errs: Record<string, string> = {};
   const pwLen = policy.minPasswordLength;
@@ -69,6 +69,13 @@ export function validatePolicy(
   const dur = policy.maxSessionDurationMinutes;
   if (dur !== null && (Number.isNaN(dur) || dur < POLICY_SESSION_DURATION_MIN || dur > POLICY_SESSION_DURATION_MAX)) {
     errs.maxSessionDurationMinutes = "maxSessionDurationRange";
+  }
+  const histCount = policy.passwordHistoryCount;
+  if (Number.isNaN(histCount) || histCount < 0 || histCount > PASSWORD_HISTORY_COUNT_MAX) {
+    errs.passwordHistoryCount = "passwordHistoryCountRange";
+  }
+  if (policy.teamAllowedCidrs.length > MAX_CIDRS) {
+    errs.teamAllowedCidrs = "teamAllowedCidrsMax";
   }
   return errs;
 }
