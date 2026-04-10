@@ -442,8 +442,8 @@ export function useWatchtower(
         });
       }
 
-      // Policy-driven password age check (personal vault only, when tenant has set a max age)
-      if (scope.type === "personal" && passwordMaxAgeDays) {
+      // Policy-driven password age check (when tenant has set a max age)
+      if (passwordMaxAgeDays) {
         const maxAgeMs = passwordMaxAgeDays * 24 * 60 * 60 * 1000;
         const warningDays = Math.min(passwordExpiryWarningDays, passwordMaxAgeDays - 1);
         const warningMs = (passwordMaxAgeDays - warningDays) * 24 * 60 * 60 * 1000;

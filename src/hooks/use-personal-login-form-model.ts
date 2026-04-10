@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -46,21 +46,11 @@ export function usePersonalLoginFormModel({
   });
 
   // Compute policy violations based on current generator settings against tenant policy.
-  const [policyViolations, setPolicyViolations] = useState<PolicyViolation[]>([]);
   const generatorSettings = formState.values.generatorSettings;
-  const violations = useMemo(() => {
+  const policyViolations = useMemo(() => {
     const hasAnySymbolGroup = SYMBOL_GROUP_KEYS.some((key) => generatorSettings.symbolGroups[key]);
     return getPolicyViolations({ ...generatorSettings, hasAnySymbolGroup }, tenantPolicy);
   }, [generatorSettings, tenantPolicy]);
-
-  const prevViolationsRef = useRef<string>("");
-  useEffect(() => {
-    const serialized = JSON.stringify(violations);
-    if (serialized !== prevViolationsRef.current) {
-      prevViolationsRef.current = serialized;
-      setPolicyViolations(violations);
-    }
-  });
 
   const policyBlocked = policyViolations.length > 0;
 

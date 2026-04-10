@@ -57,7 +57,6 @@ async function handlePOST(req: NextRequest) {
       select: {
         tenantId: true,
         role: true,
-        tenant: { select: { auditLogRetentionDays: true } },
       },
     }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
@@ -68,33 +67,59 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Enforce tenant minimum retention policy
-  const tenantRetentionDays = membership.tenant?.auditLogRetentionDays ?? null;
-  if (tenantRetentionDays !== null && retentionDays < tenantRetentionDays) {
-    return NextResponse.json(
-      {
-        error: `retentionDays (${retentionDays}) is less than the tenant minimum retention policy (${tenantRetentionDays})`,
-      },
-      { status: 400 },
-    );
-  }
-
-  // Build where clause (shared between count and delete)
-  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
-  const whereClause = { createdAt: { lt: cutoffDate } };
-
-  if (dryRun) {
-    // Count matching records without deleting
-    const matched = await withBypassRls(prisma, async () =>
-      prisma.auditLog.count({ where: whereClause }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-    return NextResponse.json({ purged: 0, matched, dryRun: true });
-  }
-
-  // Delete old audit log entries across all tenants
-  const deleted = await withBypassRls(prisma, async () =>
-    prisma.auditLog.deleteMany({ where: whereClause }),
+  // Fetch all tenants with their retention policies
+  const tenants = await withBypassRls(prisma, async () =>
+    prisma.tenant.findMany({
+      select: { id: true, auditLogRetentionDays: true },
+    }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+
+  let totalPurged = 0;
+
+  // Per-tenant purge: each tenant's floor retention is respected
+  for (const tenant of tenants) {
+    const tenantRetention = tenant.auditLogRetentionDays;
+    // Use the stricter (longer) of the requested vs tenant-configured retention
+    const effectiveRetentionDays = tenantRetention
+      ? Math.max(retentionDays, tenantRetention)
+      : retentionDays;
+    const tenantCutoff = new Date(Date.now() - effectiveRetentionDays * 24 * 60 * 60 * 1000);
+
+    if (dryRun) {
+      const count = await withBypassRls(prisma, async () =>
+        prisma.auditLog.count({
+          where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
+        }),
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+      totalPurged += count;
+    } else {
+      const result = await withBypassRls(prisma, async () =>
+        prisma.auditLog.deleteMany({
+          where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
+        }),
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+      totalPurged += result.count;
+    }
+  }
+
+  // Handle audit logs with null tenantId using the requested retentionDays directly
+  const nullTenantCutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  if (dryRun) {
+    const count = await withBypassRls(prisma, async () =>
+      prisma.auditLog.count({
+        where: { tenantId: null, createdAt: { lt: nullTenantCutoff } },
+      }),
+    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+    totalPurged += count;
+    return NextResponse.json({ purged: 0, matched: totalPurged, dryRun: true });
+  }
+
+  const nullResult = await withBypassRls(prisma, async () =>
+    prisma.auditLog.deleteMany({
+      where: { tenantId: null, createdAt: { lt: nullTenantCutoff } },
+    }),
+  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+  totalPurged += nullResult.count;
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
@@ -104,7 +129,7 @@ async function handlePOST(req: NextRequest) {
     userId: operatorId,
     tenantId: membership.tenantId,
     metadata: {
-      [AUDIT_METADATA_KEY.PURGED_COUNT]: deleted.count,
+      [AUDIT_METADATA_KEY.PURGED_COUNT]: totalPurged,
       retentionDays,
       targetTable: "auditLog",
       systemWide: true,
@@ -113,7 +138,7 @@ async function handlePOST(req: NextRequest) {
     userAgent,
   });
 
-  return NextResponse.json({ purged: deleted.count });
+  return NextResponse.json({ purged: totalPurged });
 }
 
 export const POST = withRequestLog(handlePOST);

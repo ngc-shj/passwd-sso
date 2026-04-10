@@ -29,9 +29,8 @@ Created: 2026-04-09
 
 ## Deferred Enforcement (resolved in this PR)
 
-### TODO-01: PASSKEY_ENFORCEMENT_BLOCKED audit log emission — REMAINING
-- **Status**: Edge Runtime constraint prevents `logAudit()` from proxy.ts. This is the only remaining TODO.
-- **Mitigation**: Passkey enforcement redirect is still functional; only the audit trail is missing.
+### TODO-01: PASSKEY_ENFORCEMENT_BLOCKED audit log emission — RESOLVED
+- **Resolution**: Fire-and-forget fetch from proxy.ts to `/api/internal/audit-emit` endpoint. Session cookie forwarded for auth. Errors swallowed to never block redirect.
 
 ### TODO-02: Password reuse prevention — RESOLVED
 - **Resolution**: `checkPasswordReuse()` wired into `use-team-login-form-state.ts`. Fetches + decrypts last N history entries on form open, blocks submit on match.
@@ -39,13 +38,13 @@ Created: 2026-04-09
 ### TODO-03: Team IP restriction — RESOLVED
 - **Resolution**: `withTeamIpRestriction()` integrated into `requireTeamMember`/`requireTeamPermission` in `team-auth.ts` (single enforcement point for all 28 team route handlers).
 
-### TODO-04: Watchtower policy expiry — team scope — REMAINING
-- **Status**: Policy-driven expiry only applies to personal vault entries. Team scope requires tenant policy resolution from team context.
+### TODO-04: Watchtower policy expiry — team scope — RESOLVED
+- **Resolution**: Removed `scope.type === "personal"` guard in `use-watchtower.ts`. The hook already receives `passwordMaxAgeDays` for both scopes.
 
 ### TODO-05: Tenant password policy — personal vault form — RESOLVED
 - **Resolution**: `use-personal-login-form-model.ts` now calls `getPolicyViolations()` with `tenantPolicy` from vault context. Submit blocked on violations.
 
-### TODO-06: Audit log purge — multi-tenant retention — REMAINING
-- **Status**: Single-tenant retention check only. Design decision needed for multi-tenant scenario.
+### TODO-06: Audit log purge — multi-tenant retention — RESOLVED
+- **Resolution**: Purge now iterates all tenants, applying `max(requestedRetentionDays, tenant.auditLogRetentionDays)` per tenant. Null-tenantId logs use requested retention directly.
 
 ---

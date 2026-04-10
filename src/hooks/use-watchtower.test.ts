@@ -1525,4 +1525,143 @@ describe("useWatchtower", () => {
     );
     expect(policyIssues).toHaveLength(0);
   });
+
+  // ─── Team scope: policy-driven password age check ────────
+
+  it("flags team entry older than passwordMaxAgeDays as policy-expired (medium)", async () => {
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+    });
+
+    // Entry updated 95 days ago; max age is 90 days
+    const oldDate = new Date(Date.now() - 95 * 24 * 60 * 60 * 1000).toISOString();
+    const teamEntry = {
+      id: "team-age-1",
+      entryType: "LOGIN",
+      encryptedBlob: "cipher",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      updatedAt: oldDate,
+      expiresAt: null,
+    };
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([teamEntry]));
+
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Team Site",
+        username: "alice",
+        password: "TeamStr0ng!42",
+        url: "https://team.example.com",
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: 90, passwordExpiryWarningDays: 14 })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    const expiring = result.current.report!.expiring;
+    const found = expiring.find((e) => e.id === "team-age-1");
+    expect(found).toBeDefined();
+    expect(found!.severity).toBe("medium");
+    expect(found!.details).toMatch(/^policyExpired:/);
+  });
+
+  it("flags team entry within warning window as policy-expiring (low)", async () => {
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+    });
+
+    // Entry updated 80 days ago; max age is 90 days, warning is 14 days
+    // Warning window starts at 90-14=76 days, so 80 days > 76 days → expiring
+    const warningDate = new Date(Date.now() - 80 * 24 * 60 * 60 * 1000).toISOString();
+    const teamEntry = {
+      id: "team-age-2",
+      entryType: "LOGIN",
+      encryptedBlob: "cipher",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      updatedAt: warningDate,
+      expiresAt: null,
+    };
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([teamEntry]));
+
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Team Site",
+        username: "bob",
+        password: "TeamStr0ng!42",
+        url: "https://team.example.com",
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: 90, passwordExpiryWarningDays: 14 })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    const expiring = result.current.report!.expiring;
+    const found = expiring.find((e) => e.id === "team-age-2");
+    expect(found).toBeDefined();
+    expect(found!.severity).toBe("low");
+    expect(found!.details).toMatch(/^policyExpiring:/);
+  });
+
+  it("team scope: passwordMaxAgeDays=null has no policy effect", async () => {
+    mockUseTeamVaultOptional.mockReturnValue({
+      getTeamEncryptionKey: vi.fn().mockResolvedValue(fakeKey),
+    });
+
+    // Entry updated 200 days ago, but no max age policy
+    const veryOldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const teamEntry = {
+      id: "team-age-3",
+      entryType: "LOGIN",
+      encryptedBlob: "cipher",
+      blobIv: "iv",
+      blobAuthTag: "tag",
+      updatedAt: veryOldDate,
+      expiresAt: null,
+    };
+
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse([teamEntry]));
+
+    mockDecryptData.mockResolvedValue(
+      JSON.stringify({
+        title: "Team Site",
+        username: "carol",
+        password: "TeamStr0ng!42",
+        url: "https://team.example.com",
+      }),
+    );
+
+    const { result } = renderHook(() =>
+      useWatchtower({ type: "team", teamId: "team-1" }, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 })
+    );
+
+    await act(async () => {
+      await result.current.analyze();
+    });
+
+    // Policy check skipped — no policyExpired/policyExpiring entries
+    const expiring = result.current.report!.expiring;
+    const policyIssues = expiring.filter(
+      (e) => e.details?.startsWith("policyExpired:") || e.details?.startsWith("policyExpiring:")
+    );
+    expect(policyIssues).toHaveLength(0);
+  });
 });

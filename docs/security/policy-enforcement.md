@@ -20,14 +20,14 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Middleware (Edge) + route handler (Node.js); 60s cache |
 | `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify) |
 | `requireMinPinLength` | Blocking | Server | `webauthn/register/verify/route.ts` | Platform authenticators (Touch ID, etc.) exempt — they don't report PIN length |
-| `requirePasskey` | Blocking/Advisory | Server | `proxy.ts` middleware | After grace period: redirect (blocking). Within grace: advisory banner via `/api/user/passkey-status` |
+| `requirePasskey` | Blocking/Advisory | Server | `proxy.ts` middleware | After grace period: redirect (blocking) + audit via `/api/internal/audit-emit`. Within grace: advisory banner via `/api/user/passkey-status` |
 | `requirePasskeyEnabledAt` | — | Server | `proxy.ts` | Grace period start timestamp; set-once on `false→true` transition |
 | `passkeyGracePeriodDays` | — | Server | `proxy.ts` | Grace period duration; used with `requirePasskeyEnabledAt` |
 | `lockoutThreshold1/2/3` | Blocking | Server | `account-lockout.ts` `recordFailure()` | Per-tenant thresholds; 60s cache; 3 progressive tiers |
 | `lockoutDuration1/2/3Minutes` | Blocking | Server | `account-lockout.ts` `recordFailure()` | Monotonic lock extension (never shortens active locks) |
 | `passwordMaxAgeDays` | Advisory | Client | `use-watchtower.ts` | Watchtower scan flags expired entries; no forced password change |
 | `passwordExpiryWarningDays` | Advisory | Client | `use-watchtower.ts` | Warning period before `passwordMaxAgeDays` threshold |
-| `auditLogRetentionDays` | Blocking | Server | `purge-audit-logs/route.ts` | Minimum retention floor; rejects purge below configured days |
+| `auditLogRetentionDays` | Blocking | Server | `purge-audit-logs/route.ts` | Per-tenant enforcement: iterates all tenants, applies `max(requested, tenant.retentionDays)` |
 | `tenantMinPasswordLength` | Blocking | Client | `use-personal-login-form-model.ts` | `getPolicyViolations()` blocks form submit; E2E encryption prevents server check |
 | `tenantRequireUppercase` | Blocking | Client | `use-personal-login-form-model.ts` | Same |
 | `tenantRequireLowercase` | Blocking | Client | `use-personal-login-form-model.ts` | Same |

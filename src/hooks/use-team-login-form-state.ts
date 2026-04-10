@@ -149,34 +149,28 @@ export function useTeamLoginFormState({
   // Compute policy violations based on current generator settings and password reuse.
   // generatorSettings is derived from rawGeneratorSettings + teamPolicy, so listing
   // those two as deps is sufficient and avoids a circular dependency on generatorSettings.
-  const violations = useMemo(() => {
+  const generatorViolations = useMemo(() => {
     if (!teamPolicy) return [];
     const settings = applyPolicyToGeneratorSettings(rawGeneratorSettings, teamPolicy);
     const hasAnySymbolGroup = SYMBOL_GROUP_KEYS.some((key) => settings.symbolGroups[key]);
-    const policyViolations = getPolicyViolations({ ...settings, hasAnySymbolGroup }, teamPolicy);
+    return getPolicyViolations({ ...settings, hasAnySymbolGroup }, teamPolicy);
+  }, [rawGeneratorSettings, teamPolicy]);
 
-    // Check password reuse against decrypted history
+  // Password reuse check runs in effect (not render) because it reads a ref.
+  useEffect(() => {
+    if (!setPolicyViolations) return;
+    const violations = [...generatorViolations];
     if (
+      teamPolicy &&
       teamPolicy.passwordHistoryCount > 0 &&
       decryptedHistoryRef.current !== null &&
       password &&
       checkPasswordReuse(password, decryptedHistoryRef.current)
     ) {
-      policyViolations.push({ key: "policyPasswordReuse" });
+      violations.push({ key: "policyPasswordReuse" });
     }
-
-    return policyViolations;
-  }, [rawGeneratorSettings, teamPolicy, password]);
-
-  const prevViolationsRef = useRef<string>("");
-  useEffect(() => {
-    if (!setPolicyViolations) return;
-    const serialized = JSON.stringify(violations);
-    if (serialized !== prevViolationsRef.current) {
-      prevViolationsRef.current = serialized;
-      setPolicyViolations(violations);
-    }
-  });
+    setPolicyViolations(violations);
+  }, [generatorViolations, teamPolicy, password, setPolicyViolations]);
 
   return {
     username,

@@ -132,6 +132,20 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
       if (isPasskeyGracePeriodExpired(session.requirePasskeyEnabledAt, session.passkeyGracePeriodDays)) {
         const securityUrl = request.nextUrl.clone();
         securityUrl.pathname = `/${locale}/dashboard/settings/security`;
+
+        // Fire-and-forget audit log (Edge Runtime cannot use Prisma directly)
+        void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            cookie: request.headers.get("cookie") ?? "",
+          },
+          body: JSON.stringify({
+            action: "PASSKEY_ENFORCEMENT_BLOCKED",
+            metadata: { blockedPath: pathWithoutLocale },
+          }),
+        }).catch(() => {});  // swallow errors — audit logging must not block navigation
+
         return applySecurityHeaders(
           NextResponse.redirect(securityUrl),
           options,
