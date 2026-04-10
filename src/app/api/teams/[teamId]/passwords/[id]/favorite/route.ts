@@ -11,7 +11,7 @@ import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // POST /api/teams/[teamId]/passwords/[id]/favorite — Toggle per-user favorite
-async function handlePOST(_req: NextRequest, { params }: Params) {
+async function handlePOST(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -20,7 +20,7 @@ async function handlePOST(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

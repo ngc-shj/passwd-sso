@@ -30,6 +30,7 @@ interface UsePersonalFormSectionsPropsArgs {
   expirationDescription: string;
   hasChanges: boolean;
   submitting: boolean;
+  submitDisabled?: boolean;
   saveLabel: string;
   cancelLabel: string;
   statusUnsavedLabel: string;
@@ -74,6 +75,7 @@ export function buildPersonalFormSectionsProps({
   expirationDescription,
   hasChanges,
   submitting,
+  submitDisabled,
   saveLabel,
   cancelLabel,
   statusUnsavedLabel,
@@ -126,6 +128,7 @@ export function buildPersonalFormSectionsProps({
     actionBarProps: buildEntryActionBarProps({
       hasChanges,
       submitting,
+      submitDisabled,
       saveLabel,
       cancelLabel,
       statusUnsavedLabel,

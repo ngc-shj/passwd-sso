@@ -15,7 +15,7 @@ import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 type Params = { params: Promise<{ teamId: string }> };
 
 // GET /api/teams/[teamId]/invitations — List pending invitations
-async function handleGET(_req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -24,7 +24,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -67,7 +67,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

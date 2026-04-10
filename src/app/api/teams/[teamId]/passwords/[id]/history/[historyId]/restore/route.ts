@@ -21,7 +21,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const { teamId, id, historyId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

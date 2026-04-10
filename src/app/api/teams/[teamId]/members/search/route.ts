@@ -25,7 +25,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

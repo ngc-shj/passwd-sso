@@ -33,7 +33,8 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     actorMembership = await requireTeamPermission(
         session.user.id,
         teamId,
-        TEAM_PERMISSION.MEMBER_CHANGE_ROLE
+        TEAM_PERMISSION.MEMBER_CHANGE_ROLE,
+        req
       );
   } catch (e) {
     if (e instanceof TeamAuthError) {
@@ -157,7 +158,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     actorMembership = await requireTeamPermission(
         session.user.id,
         teamId,
-        TEAM_PERMISSION.MEMBER_REMOVE
+        TEAM_PERMISSION.MEMBER_REMOVE,
+        req
       );
   } catch (e) {
     if (e instanceof TeamAuthError) {

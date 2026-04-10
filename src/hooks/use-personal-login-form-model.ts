@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
@@ -15,6 +16,8 @@ import {
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
 import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
+import { getPolicyViolations, type PolicyViolation } from "@/lib/password-policy-validation";
+import { SYMBOL_GROUP_KEYS } from "@/lib/generator-prefs";
 
 type PersonalLoginFormModelInput = Pick<PersonalLoginFormProps, "mode" | "initialData" | "variant" | "onSaved" | "onCancel" | "defaultFolderId" | "defaultTags">;
 
@@ -30,7 +33,7 @@ export function usePersonalLoginFormModel({
   const translationBundle = useEntryFormTranslations();
   const translations = toPersonalLoginFormTranslations(translationBundle);
   const router = useRouter();
-  const { encryptionKey, userId } = useVault();
+  const { encryptionKey, userId, tenantPolicy } = useVault();
   const formState = usePersonalLoginFormState(initialData, { defaultFolderId, defaultTags });
   const { folders } = usePersonalFolders();
 
@@ -41,6 +44,26 @@ export function usePersonalLoginFormModel({
     defaultFolderId,
     defaultTags,
   });
+
+  // Compute policy violations based on current generator settings against tenant policy.
+  const [policyViolations, setPolicyViolations] = useState<PolicyViolation[]>([]);
+  const generatorSettings = formState.values.generatorSettings;
+  const violations = useMemo(() => {
+    const hasAnySymbolGroup = SYMBOL_GROUP_KEYS.some((key) => generatorSettings.symbolGroups[key]);
+    return getPolicyViolations({ ...generatorSettings, hasAnySymbolGroup }, tenantPolicy);
+  }, [generatorSettings, tenantPolicy]);
+
+  const prevViolationsRef = useRef<string>("");
+  useEffect(() => {
+    const serialized = JSON.stringify(violations);
+    if (serialized !== prevViolationsRef.current) {
+      prevViolationsRef.current = serialized;
+      setPolicyViolations(violations);
+    }
+  });
+
+  const policyBlocked = policyViolations.length > 0;
+
   const { handleSubmit, handleCancel, handleBack } = buildPersonalLoginFormController({
     mode,
     initialData,
@@ -64,6 +87,8 @@ export function usePersonalLoginFormModel({
     folders,
     hasChanges,
     loginMainFieldsProps,
+    policyViolations,
+    policyBlocked,
     handleSubmit,
     handleCancel,
     handleBack,

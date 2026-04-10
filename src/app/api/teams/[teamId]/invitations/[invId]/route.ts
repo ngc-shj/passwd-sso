@@ -11,7 +11,7 @@ import { errorResponse, unauthorized } from "@/lib/api-response";
 type Params = { params: Promise<{ teamId: string; invId: string }> };
 
 // DELETE /api/teams/[teamId]/invitations/[invId] — Cancel invitation
-async function handleDELETE(_req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -20,7 +20,7 @@ async function handleDELETE(_req: NextRequest, { params }: Params) {
   const { teamId, invId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

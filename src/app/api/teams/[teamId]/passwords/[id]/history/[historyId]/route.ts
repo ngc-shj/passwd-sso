@@ -18,7 +18,7 @@ type Params = { params: Promise<{ teamId: string; id: string; historyId: string 
 const reencryptLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 // GET /api/teams/[teamId]/passwords/[id]/history/[historyId] — Return encrypted history blob (client decrypts)
-async function handleGET(_req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -27,7 +27,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   const { teamId, id, historyId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -87,7 +87,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   const { teamId, id, historyId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

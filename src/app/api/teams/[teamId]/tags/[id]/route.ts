@@ -24,7 +24,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -126,7 +126,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/teams/[teamId]/tags/[id] — Delete team tag
-async function handleDELETE(_req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -135,7 +135,7 @@ async function handleDELETE(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
