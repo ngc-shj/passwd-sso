@@ -1,81 +1,35 @@
 # Code Review: expand-security-policies
 Date: 2026-04-10
-Review round: 1
+Review rounds: 2
 
-## Changes from Previous Round
-Initial review
+## Round 1 Findings (resolved)
 
-## Functionality Findings
+| ID | Severity | Problem | Resolution |
+|----|----------|---------|-----------|
+| F-01 | Major | invalidateLockoutThresholdCache not called | Added call after policy update |
+| F-03/S-02 | Major | Cross-field validation bypass with null | Schema defaults as fallback |
+| S-01 | Major | Non-timing-safe password comparison | timingSafeEqual with XOR loop |
+| S-03 | Major | Missing userId in ACCESS_DENIED audit | Optional userId parameter added |
+| C-01 | Critical | No session duration test | 3 tests added |
+| C-02 | Critical | No password-policy-validation test | 13 tests added |
+| M-01,M-03,M-04,M-05 | Major | Mock shape issues | All fixed |
 
-### F-01 [Major] invalidateLockoutThresholdCache not called — RESOLVED
-Action: Added import + call after invalidateTenantPolicyCache in tenant policy PATCH
+## Round 2 Findings (resolved)
 
-### F-02 [Major] PASSKEY_ENFORCEMENT_BLOCKED audit not emitted — DEFERRED (TODO-01)
-Reason: Edge Runtime limitation; needs fire-and-forget fetch pattern
+| ID | Severity | Problem | Resolution |
+|----|----------|---------|-----------|
+| BUG-01 | Critical | teamId not passed to useTeamLoginFormState | Added teamId prop + test fixes |
+| BUG-02 | Critical | null writes to non-nullable schema fields | Skip null for non-nullable, validate accordingly |
+| F3 | Major | /api/internal/audit-emit no rate limit | Added 20 req/min per user |
+| ISSUE-01 | Major | null IP + inheritTenantCidrs=true blocks all | Delegate to checkTeamAccessRestriction for tenant CIDR resolution |
 
-### F-03 [Major] Cross-field validation bypass with null DB values — RESOLVED
-Action: Use schema default fallbacks, remove null guards, always enforce monotonicity
+## Remaining Items (Low severity, documented)
 
-### F-04 [Major] Policy expiry not applied to team scope — DEFERRED (TODO-04)
-Reason: Requires team-to-tenant policy resolution in watchtower context
-
-### F-05 [Major] checkPasswordReuse/withTeamIpRestriction defined but not called — DEFERRED (TODO-02, TODO-03)
-Reason: Functions are ready; wiring to route handlers/forms is follow-up work
-
-### F-07 [Major] Multi-tenant retention enforcement gap — DEFERRED (TODO-06)
-Reason: Design decision needed (per-tenant vs strictest-wins)
-
-### Unlisted: Tenant password policy not enforced in personal form — DEFERRED (TODO-05)
-Reason: vault/status exposes data; consuming hook is follow-up work
-
-## Security Findings
-
-### S-01 [Major] Non-timing-safe password comparison — RESOLVED
-Action: Replaced === with TextEncoder + XOR constant-time loop
-
-### S-02 [Major] TOCTOU partial-update bypass on lockout validation — RESOLVED
-Action: Merged with F-03 fix (schema defaults)
-
-### S-03 [Major] Missing userId in ACCESS_DENIED audit log — RESOLVED
-Action: Added optional userId parameter, threaded from callers
-
-### S-04 [Minor] Passkey exempt-path completeness — Noted (sign-out flow unaffected)
-### S-05 [Minor] Plaintext tokens in heap — Pre-existing accepted trade-off
-### S-06 [Minor] Retention bypass via operatorId — DEFERRED (TODO-06)
-
-## Testing Findings
-
-### C-01 [Critical] No session duration enforcement test — RESOLVED
-Action: Added 3 tests to auth-adapter.test.ts
-
-### C-02 [Critical] No password-policy-validation tests — RESOLVED
-Action: Created password-policy-validation.test.ts (13 tests)
-
-### C-03 [Critical] No purge-audit-logs tests — DEFERRED
-Reason: Route is admin-only with bearer token; follow-up PR
-
-### C-04 [Critical] No passkey-status tests — DEFERRED
-Reason: Route is simple session-based GET; follow-up PR
-
-### M-01 [Major] Inconsistent vault/status mock shapes — RESOLVED
-### M-03 [Major] Watchtower policy expiry not exercised — RESOLVED (3 tests added)
-### M-04 [Major] team-login-form mock missing fields — RESOLVED
-### M-05 [Major] No getStrictestSessionDuration tests — RESOLVED (4 tests added)
-
-## Resolution Status
-
-| Finding | Severity | Status |
-|---------|----------|--------|
-| F-01 | Major | Resolved |
-| F-02 | Major | Deferred → TODO-01 |
-| F-03/S-02 | Major | Resolved |
-| F-04 | Major | Deferred → TODO-04 |
-| F-05 | Major | Deferred → TODO-02, TODO-03 |
-| F-07 | Major | Deferred → TODO-06 |
-| S-01 | Major | Resolved |
-| S-03 | Major | Resolved |
-| C-01 | Critical | Resolved |
-| C-02 | Critical | Resolved |
-| C-03 | Critical | Deferred |
-| C-04 | Critical | Deferred |
-| M-01,M-03,M-04,M-05 | Major | Resolved |
+| ID | Severity | Problem | Status |
+|----|----------|---------|--------|
+| F1/Sec | Low | timingSafeEqual early return on length mismatch | Client-side only; documented |
+| F2/Sec | Low | GET /api/tenant/policy no rate limit | Admin-only endpoint |
+| F7/Sec | Low | Passkey exempt list — future-proofing | Comment added |
+| F8/Sec | Low | HISTORY_PURGE action reused for audit log purge | Metadata distinguishes; documented |
+| ISSUE-02 | Low | Policy check on generator settings not password value | Consistent with team form behavior |
+| Missing tests | Medium | passkey-status, audit-emit route tests | Deferred — simple routes |
