@@ -45,6 +45,10 @@ function isPasskeyGracePeriodExpired(
   return Date.now() > enabledAt + gracePeriodMs;
 }
 
+// Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
+const PASSKEY_AUDIT_DEDUP_MS = 5 * 60 * 1000;
+const passkeyAuditEmitted = new Map<string, number>();
+
 interface SessionInfo {
   valid: boolean;
   userId?: string;
@@ -133,18 +137,23 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
         const securityUrl = request.nextUrl.clone();
         securityUrl.pathname = `/${locale}/dashboard/settings/security`;
 
-        // Fire-and-forget audit log (Edge Runtime cannot use Prisma directly)
-        void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            cookie: request.headers.get("cookie") ?? "",
-          },
-          body: JSON.stringify({
-            action: "PASSKEY_ENFORCEMENT_BLOCKED",
-            metadata: { blockedPath: pathWithoutLocale },
-          }),
-        }).catch(() => {});  // swallow errors — audit logging must not block navigation
+        // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
+        const userId = session.userId ?? "";
+        const lastEmitted = passkeyAuditEmitted.get(userId);
+        if (!lastEmitted || Date.now() - lastEmitted > PASSKEY_AUDIT_DEDUP_MS) {
+          passkeyAuditEmitted.set(userId, Date.now());
+          void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              cookie: request.headers.get("cookie") ?? "",
+            },
+            body: JSON.stringify({
+              action: "PASSKEY_ENFORCEMENT_BLOCKED",
+              metadata: { blockedPath: pathWithoutLocale },
+            }),
+          }).catch(() => {});
+        }
 
         return applySecurityHeaders(
           NextResponse.redirect(securityUrl),

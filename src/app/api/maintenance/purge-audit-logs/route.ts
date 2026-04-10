@@ -29,24 +29,20 @@ const bodySchema = z.object({
 });
 
 async function handlePOST(req: NextRequest) {
-  // Bearer token auth (checked before rate limit to prevent unauthenticated DoS)
   if (!verifyAdminToken(req)) {
     return unauthorized();
   }
 
-  // Rate limit (global fixed key, applied after auth)
   const rl = await rateLimiter.check("rl:admin:purge-audit-logs");
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  // Parse body
   const result = await parseBody(req, bodySchema);
   if (!result.ok) return result.response;
 
   const { operatorId, retentionDays, dryRun } = result.data;
 
-  // Verify operatorId is an active tenant admin
   const membership = await withBypassRls(prisma, async () =>
     prisma.tenantMember.findFirst({
       where: {
@@ -67,7 +63,6 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Fetch all tenants with their retention policies
   const tenants = await withBypassRls(prisma, async () =>
     prisma.tenant.findMany({
       select: { id: true, auditLogRetentionDays: true },
@@ -121,7 +116,6 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
   totalPurged += nullResult.count;
 
-  // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
     scope: AUDIT_SCOPE.TENANT,

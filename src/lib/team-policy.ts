@@ -75,8 +75,8 @@ export async function getTeamPolicy(teamId: string): Promise<TeamPolicyData> {
 /**
  * Assert that the team policy allows export. Throws if not allowed.
  */
-export async function assertPolicyAllowsExport(teamId: string): Promise<void> {
-  const policy = await getTeamPolicy(teamId);
+export async function assertPolicyAllowsExport(teamId: string, existingPolicy?: TeamPolicyData): Promise<void> {
+  const policy = existingPolicy ?? await getTeamPolicy(teamId);
   if (!policy.allowExport) {
     throw new PolicyViolationError("Export is disabled by team policy");
   }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useVault } from "@/lib/vault-context";
 import { useTeamVaultOptional } from "@/lib/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto-client";
@@ -187,7 +187,7 @@ export function useWatchtower(
   // Track whether policy was explicitly provided so the effect below can check it
   // without re-running every time the policy object reference changes.
   const policyProvidedRef = useRef(policy !== undefined);
-  useMemo(() => { policyProvidedRef.current = policy !== undefined; }, [policy]);
+  useEffect(() => { policyProvidedRef.current = policy !== undefined; }, [policy]);
 
   // If no policy was passed in, fetch it from the vault status endpoint.
   // This is skipped when policy is passed explicitly (e.g. from a parent component
