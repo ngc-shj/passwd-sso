@@ -27,36 +27,25 @@ Created: 2026-04-09
 - **Reason**: The base form model is shared by all entry types (login, card, identity, secure note). Only login entries have password-based policy checks. Adding violations to the base model would pollute the shared interface.
 - **Impact scope**: `src/hooks/use-team-login-form-state.ts`, `src/hooks/use-team-login-form-model.ts`, `src/hooks/use-team-base-form-model.ts`
 
-## Deferred Enforcement (TODO — follow-up PRs)
+## Deferred Enforcement (resolved in this PR)
 
-### TODO-01: PASSKEY_ENFORCEMENT_BLOCKED audit log emission
-- **Plan step**: Step 4 / Step 7
-- **Status**: Audit action defined in enum + constants. Proxy redirects user. But `logAudit()` is not called from `proxy.ts` because it runs in Edge Runtime (no Prisma access).
-- **Required**: Fire-and-forget fetch to an internal API endpoint from proxy, or emit from the passkey-status API when the client calls it after redirect.
+### TODO-01: PASSKEY_ENFORCEMENT_BLOCKED audit log emission — REMAINING
+- **Status**: Edge Runtime constraint prevents `logAudit()` from proxy.ts. This is the only remaining TODO.
+- **Mitigation**: Passkey enforcement redirect is still functional; only the audit trail is missing.
 
-### TODO-02: Password reuse prevention — client-side wiring
-- **Plan step**: Step 12
-- **Status**: `checkPasswordReuse()` is defined in `password-policy-validation.ts` with timing-safe comparison. `passwordHistoryCount` field exists in TeamPolicy schema + UI + API. But no calling code fetches/decrypts history entries in `use-team-login-form-state.ts`.
-- **Required**: In the team login form, when `passwordHistoryCount > 0` and editing an existing entry, fetch history, decrypt last N entries, call `checkPasswordReuse()`, and block submission on match.
+### TODO-02: Password reuse prevention — RESOLVED
+- **Resolution**: `checkPasswordReuse()` wired into `use-team-login-form-state.ts`. Fetches + decrypts last N history entries on form open, blocks submit on match.
 
-### TODO-03: Team IP restriction — route handler wiring
-- **Plan step**: Step 13
-- **Status**: `withTeamIpRestriction()` and `checkTeamAccessRestriction()` are defined in `team-policy.ts`. `inheritTenantCidrs` and `teamAllowedCidrs` fields exist in schema + UI + API. But no team route handler calls these functions.
-- **Required**: Add `withTeamIpRestriction(teamId, request, userId)` call to all team resource route handlers (passwords, tags, folders, members, etc.), or implement as shared middleware.
+### TODO-03: Team IP restriction — RESOLVED
+- **Resolution**: `withTeamIpRestriction()` integrated into `requireTeamMember`/`requireTeamPermission` in `team-auth.ts` (single enforcement point for all 28 team route handlers).
 
-### TODO-04: Watchtower policy expiry — team scope
-- **Plan step**: Step 9
-- **Status**: Policy-driven expiry check works for personal vault entries. Team entries skip the check because `passwordMaxAgeDays` is only read from the personal vault context.
-- **Required**: Apply the same policy-driven age check for team scope entries by reading the tenant policy from the team's tenant.
+### TODO-04: Watchtower policy expiry — team scope — REMAINING
+- **Status**: Policy-driven expiry only applies to personal vault entries. Team scope requires tenant policy resolution from team context.
 
-### TODO-05: Tenant password policy — personal vault form enforcement
-- **Plan step**: Step 11
-- **Status**: `vault/status` API returns `tenantMinPasswordLength`, `tenantRequireUppercase`, etc. But no personal password form hook reads or enforces these values.
-- **Required**: Create a hook or extend the existing personal form to fetch tenant policy from `vault/status` and apply `getPolicyViolations()` blocking.
+### TODO-05: Tenant password policy — personal vault form — RESOLVED
+- **Resolution**: `use-personal-login-form-model.ts` now calls `getPolicyViolations()` with `tenantPolicy` from vault context. Submit blocked on violations.
 
-### TODO-06: Audit log purge — multi-tenant retention enforcement
-- **Plan step**: Step 10b
-- **Status**: `purge-audit-logs` route checks the retention policy of the `operatorId`'s tenant only. A system-wide purge can bypass other tenants' retention policies.
-- **Required**: Either scope the purge per-tenant or enforce the strictest retention across all tenants as the floor.
+### TODO-06: Audit log purge — multi-tenant retention — REMAINING
+- **Status**: Single-tenant retention check only. Design decision needed for multi-tenant scenario.
 
 ---
