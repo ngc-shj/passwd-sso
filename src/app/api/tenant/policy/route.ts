@@ -267,8 +267,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate lockoutThreshold1: null (use default) or integer within bounds
-  if (lockoutThreshold1 !== null && lockoutThreshold1 !== undefined) {
+  // Validate lockoutThreshold1: non-nullable; skip if null (do not write to DB)
+  if (lockoutThreshold1 !== undefined && lockoutThreshold1 !== null) {
     if (
       typeof lockoutThreshold1 !== "number" ||
       !Number.isInteger(lockoutThreshold1) ||
@@ -279,8 +279,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate lockoutDuration1Minutes: null (use default) or integer within bounds
-  if (lockoutDuration1Minutes !== null && lockoutDuration1Minutes !== undefined) {
+  // Validate lockoutDuration1Minutes: non-nullable; skip if null (do not write to DB)
+  if (lockoutDuration1Minutes !== undefined && lockoutDuration1Minutes !== null) {
     if (
       typeof lockoutDuration1Minutes !== "number" ||
       !Number.isInteger(lockoutDuration1Minutes) ||
@@ -291,8 +291,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate lockoutThreshold2: null (use default) or integer within bounds
-  if (lockoutThreshold2 !== null && lockoutThreshold2 !== undefined) {
+  // Validate lockoutThreshold2: non-nullable; skip if null (do not write to DB)
+  if (lockoutThreshold2 !== undefined && lockoutThreshold2 !== null) {
     if (
       typeof lockoutThreshold2 !== "number" ||
       !Number.isInteger(lockoutThreshold2) ||
@@ -303,8 +303,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate lockoutDuration2Minutes: null (use default) or integer within bounds
-  if (lockoutDuration2Minutes !== null && lockoutDuration2Minutes !== undefined) {
+  // Validate lockoutDuration2Minutes: non-nullable; skip if null (do not write to DB)
+  if (lockoutDuration2Minutes !== undefined && lockoutDuration2Minutes !== null) {
     if (
       typeof lockoutDuration2Minutes !== "number" ||
       !Number.isInteger(lockoutDuration2Minutes) ||
@@ -315,8 +315,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate lockoutThreshold3: null (use default) or integer within bounds
-  if (lockoutThreshold3 !== null && lockoutThreshold3 !== undefined) {
+  // Validate lockoutThreshold3: non-nullable; skip if null (do not write to DB)
+  if (lockoutThreshold3 !== undefined && lockoutThreshold3 !== null) {
     if (
       typeof lockoutThreshold3 !== "number" ||
       !Number.isInteger(lockoutThreshold3) ||
@@ -327,8 +327,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate lockoutDuration3Minutes: null (use default) or integer within bounds
-  if (lockoutDuration3Minutes !== null && lockoutDuration3Minutes !== undefined) {
+  // Validate lockoutDuration3Minutes: non-nullable; skip if null (do not write to DB)
+  if (lockoutDuration3Minutes !== undefined && lockoutDuration3Minutes !== null) {
     if (
       typeof lockoutDuration3Minutes !== "number" ||
       !Number.isInteger(lockoutDuration3Minutes) ||
@@ -351,8 +351,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate passwordExpiryWarningDays: null (use default) or integer within bounds
-  if (passwordExpiryWarningDays !== null && passwordExpiryWarningDays !== undefined) {
+  // Validate passwordExpiryWarningDays: non-nullable; skip if null (do not write to DB)
+  if (passwordExpiryWarningDays !== undefined && passwordExpiryWarningDays !== null) {
     if (
       typeof passwordExpiryWarningDays !== "number" ||
       !Number.isInteger(passwordExpiryWarningDays) ||
@@ -375,8 +375,8 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate tenantMinPasswordLength: null (disabled) or integer within policy bounds
-  if (tenantMinPasswordLength !== null && tenantMinPasswordLength !== undefined) {
+  // Validate tenantMinPasswordLength: non-nullable; skip if null (do not write to DB)
+  if (tenantMinPasswordLength !== undefined && tenantMinPasswordLength !== null) {
     if (
       typeof tenantMinPasswordLength !== "number" ||
       !Number.isInteger(tenantMinPasswordLength) ||
@@ -551,35 +551,35 @@ async function handlePATCH(req: NextRequest) {
   if (passkeyGracePeriodDays !== undefined) {
     updateData.passkeyGracePeriodDays = passkeyGracePeriodDays ?? null;
   }
-  if (lockoutThreshold1 !== undefined) {
-    updateData.lockoutThreshold1 = lockoutThreshold1 ?? null;
+  if (lockoutThreshold1 !== undefined && lockoutThreshold1 !== null) {
+    updateData.lockoutThreshold1 = lockoutThreshold1;
   }
-  if (lockoutDuration1Minutes !== undefined) {
-    updateData.lockoutDuration1Minutes = lockoutDuration1Minutes ?? null;
+  if (lockoutDuration1Minutes !== undefined && lockoutDuration1Minutes !== null) {
+    updateData.lockoutDuration1Minutes = lockoutDuration1Minutes;
   }
-  if (lockoutThreshold2 !== undefined) {
-    updateData.lockoutThreshold2 = lockoutThreshold2 ?? null;
+  if (lockoutThreshold2 !== undefined && lockoutThreshold2 !== null) {
+    updateData.lockoutThreshold2 = lockoutThreshold2;
   }
-  if (lockoutDuration2Minutes !== undefined) {
-    updateData.lockoutDuration2Minutes = lockoutDuration2Minutes ?? null;
+  if (lockoutDuration2Minutes !== undefined && lockoutDuration2Minutes !== null) {
+    updateData.lockoutDuration2Minutes = lockoutDuration2Minutes;
   }
-  if (lockoutThreshold3 !== undefined) {
-    updateData.lockoutThreshold3 = lockoutThreshold3 ?? null;
+  if (lockoutThreshold3 !== undefined && lockoutThreshold3 !== null) {
+    updateData.lockoutThreshold3 = lockoutThreshold3;
   }
-  if (lockoutDuration3Minutes !== undefined) {
-    updateData.lockoutDuration3Minutes = lockoutDuration3Minutes ?? null;
+  if (lockoutDuration3Minutes !== undefined && lockoutDuration3Minutes !== null) {
+    updateData.lockoutDuration3Minutes = lockoutDuration3Minutes;
   }
   if (passwordMaxAgeDays !== undefined) {
     updateData.passwordMaxAgeDays = passwordMaxAgeDays ?? null;
   }
-  if (passwordExpiryWarningDays !== undefined) {
-    updateData.passwordExpiryWarningDays = passwordExpiryWarningDays ?? null;
+  if (passwordExpiryWarningDays !== undefined && passwordExpiryWarningDays !== null) {
+    updateData.passwordExpiryWarningDays = passwordExpiryWarningDays;
   }
   if (auditLogRetentionDays !== undefined) {
     updateData.auditLogRetentionDays = auditLogRetentionDays ?? null;
   }
-  if (tenantMinPasswordLength !== undefined) {
-    updateData.tenantMinPasswordLength = tenantMinPasswordLength ?? null;
+  if (tenantMinPasswordLength !== undefined && tenantMinPasswordLength !== null) {
+    updateData.tenantMinPasswordLength = tenantMinPasswordLength;
   }
   if (tenantRequireUppercase !== undefined) {
     updateData.tenantRequireUppercase = tenantRequireUppercase;

@@ -3,8 +3,11 @@ import type { NextRequest } from "next/server";
 import { checkAuth } from "@/lib/check-auth";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { createRateLimiter } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
+
+const auditEmitLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 // Actions callable from the proxy via internal fetch.
 // Restricting to a fixed set prevents this endpoint from becoming
@@ -18,6 +21,11 @@ export async function POST(request: NextRequest) {
   if (!authResult.ok) return NextResponse.json({}, { status: 401 });
 
   const { userId } = authResult.auth;
+
+  const rl = await auditEmitLimiter.check(`rl:audit_emit:${userId}`);
+  if (!rl.allowed) {
+    return NextResponse.json({}, { status: 429 });
+  }
 
   let body: { action: string; metadata?: Record<string, unknown> };
   try {

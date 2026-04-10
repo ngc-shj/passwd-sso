@@ -34,6 +34,7 @@ export function useTeamLoginFormModel({
     defaultTags,
   });
   const loginState = useTeamLoginFormState({
+    teamId,
     editData,
     teamPolicy: base.teamPolicy,
     setPolicyViolations: base.setPolicyViolations,

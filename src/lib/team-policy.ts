@@ -218,11 +218,18 @@ export async function withTeamIpRestriction(teamId: string, request: NextRequest
   // Fetch the policy once; pass it through to avoid a second DB call inside checkTeamAccessRestriction.
   const policy = await getTeamPolicy(teamId);
   if (!clientIp) {
-    // Cannot determine IP — check if restrictions are configured
-    const hasRestriction = policy.teamAllowedCidrs.length > 0 || policy.inheritTenantCidrs;
-    if (hasRestriction) {
+    // Cannot determine IP — only block if there are explicit team CIDRs configured.
+    // For inheritTenantCidrs, defer to checkTeamAccessRestriction which resolves
+    // actual tenant CIDRs; pass empty string so it can determine whether any CIDRs exist.
+    if (policy.teamAllowedCidrs.length > 0) {
       throw new PolicyViolationError("Access denied: client IP unknown; access restricted");
     }
+    if (!policy.inheritTenantCidrs) {
+      return;
+    }
+    // inheritTenantCidrs=true: let checkTeamAccessRestriction resolve tenant CIDRs.
+    // Pass empty string IP so isIpAllowed will return false only if CIDRs actually exist.
+    await checkTeamAccessRestriction(teamId, "", userId, policy);
     return;
   }
   await checkTeamAccessRestriction(teamId, clientIp, userId, policy);
