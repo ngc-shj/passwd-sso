@@ -25,14 +25,19 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `passkeyGracePeriodDays` | — | Server | `proxy.ts` | Grace period duration; used with `requirePasskeyEnabledAt` |
 | `lockoutThreshold1/2/3` | Blocking | Server | `account-lockout.ts` `recordFailure()` | Per-tenant thresholds; 60s cache; 3 progressive tiers |
 | `lockoutDuration1/2/3Minutes` | Blocking | Server | `account-lockout.ts` `recordFailure()` | Monotonic lock extension (never shortens active locks) |
-| `passwordMaxAgeDays` | Advisory | Client | `use-watchtower.ts` | Watchtower scan flags expired entries; no forced password change |
-| `passwordExpiryWarningDays` | Advisory | Client | `use-watchtower.ts` | Warning period before `passwordMaxAgeDays` threshold |
+| `passwordMaxAgeDays` | Advisory | Client | `use-watchtower.ts` | Watchtower scan flags expired entries; no forced password change. Personal scope only — team watchtower page does not supply policy at runtime |
+| `passwordExpiryWarningDays` | Advisory | Client | `use-watchtower.ts` | Warning period before `passwordMaxAgeDays` threshold. Same personal-scope-only limitation |
 | `auditLogRetentionDays` | Blocking | Server | `purge-audit-logs/route.ts` | Per-tenant enforcement: iterates all tenants, applies `max(requested, tenant.retentionDays)` |
 | `tenantMinPasswordLength` | Blocking | Client | `use-personal-login-form-model.ts` | `getPolicyViolations()` blocks form submit; E2E encryption prevents server check |
 | `tenantRequireUppercase` | Blocking | Client | `use-personal-login-form-model.ts` | Same |
 | `tenantRequireLowercase` | Blocking | Client | `use-personal-login-form-model.ts` | Same |
 | `tenantRequireNumbers` | Blocking | Client | `use-personal-login-form-model.ts` | Same |
 | `tenantRequireSymbols` | Blocking | Client | `use-personal-login-form-model.ts` | Same |
+| `jitTokenDefaultTtlSec` | Blocking | Server | `tenant/access-requests/[id]/approve/route.ts` | Default TTL for JIT access tokens; capped by `jitTokenMaxTtlSec` |
+| `jitTokenMaxTtlSec` | Blocking | Server | `tenant/access-requests/[id]/approve/route.ts` | Hard ceiling for JIT token TTL; enforced via `Math.min()` |
+| `delegationDefaultTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Default TTL for delegation sessions |
+| `delegationMaxTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Hard ceiling for delegation TTL; enforced via `Math.min(requested, max)` |
+| `saTokenMaxExpiryDays` | **Not enforced** | — | — | Defined in schema but no enforcement code references this field |
 
 ## Team Policy Fields
 
