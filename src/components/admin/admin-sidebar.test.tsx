@@ -73,9 +73,9 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const links = screen.getAllByRole("link");
-    // Leaf items (members, teams) + children under groups (security×7, provisioning×2, service-accounts×2, mcp×1, audit-logs×2)
-    // = 2 leaf + 14 children = 16 per sidebar × 2 sidebars = 32
-    expect(links.length).toBe(32);
+    // Leaf items (members, teams, security) + children under groups (provisioning×2, service-accounts×2, mcp×1, audit-logs×2)
+    // = 3 leaf + 7 children = 10 per sidebar × 2 sidebars = 20
+    expect(links.length).toBe(20);
   });
 
   it("renders correct tenant nav hrefs including children", () => {
@@ -92,13 +92,7 @@ describe("AdminSidebar — tenant scope", () => {
     const expectedHrefs = [
       "/admin/tenant/members",
       "/admin/tenant/teams",
-      "/admin/tenant/security/session-policy",
-      "/admin/tenant/security/passkey-policy",
-      "/admin/tenant/security/lockout-policy",
-      "/admin/tenant/security/password-policy",
-      "/admin/tenant/security/retention-policy",
-      "/admin/tenant/security/access-restriction",
-      "/admin/tenant/security/webhooks",
+      "/admin/tenant/security",
       "/admin/tenant/provisioning/scim",
       "/admin/tenant/provisioning/directory-sync",
       "/admin/tenant/service-accounts/accounts",

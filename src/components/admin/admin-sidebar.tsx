@@ -8,11 +8,9 @@ import { VisuallyHidden } from "radix-ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { AdminScopeSelector } from "./admin-scope-selector";
 import {
-  Archive,
   Blocks,
   Bot,
   ChevronDown,
-  Clock,
   Crown,
   Cpu,
   Database,
@@ -20,12 +18,10 @@ import {
   KeyRound,
   Link2,
   ListChecks,
-  Lock,
   ScrollText,
   Settings2,
   Shield,
   ShieldAlert,
-  ShieldBan,
   ShieldCheck,
   UserPlus,
   Users,
@@ -110,15 +106,6 @@ function useNavItems(
       href: "/admin/tenant/security",
       label: t("navSecurity"),
       icon: <Shield className="h-4 w-4 shrink-0" />,
-      children: [
-        { href: "/admin/tenant/security/session-policy", label: t("navSessionPolicy"), icon: <Clock className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/passkey-policy", label: t("navPasskeyPolicy"), icon: <KeyRound className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/lockout-policy", label: t("navLockoutPolicy"), icon: <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/password-policy", label: t("navPasswordPolicy"), icon: <Lock className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/retention-policy", label: t("navRetentionPolicy"), icon: <Archive className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/access-restriction", label: t("navAccessRestriction"), icon: <ShieldBan className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/webhooks", label: t("navWebhooks"), icon: <Webhook className="h-3.5 w-3.5 shrink-0" /> },
-      ],
     },
     {
       href: "/admin/tenant/provisioning",
