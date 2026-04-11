@@ -102,7 +102,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const sa = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.serviceAccount.findUnique({
       where: { id },
-      select: { id: true, tenantId: true, isActive: true },
+      select: { id: true, tenantId: true, isActive: true, tenant: { select: { saTokenMaxExpiryDays: true } } },
     }),
   );
 
@@ -125,6 +125,16 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const tokenHash = hashToken(plaintext);
   const scope = result.data.scope.join(",");
 
+  // Enforce tenant-level SA token max expiry policy
+  let expiresAt = new Date(result.data.expiresAt);
+  const maxExpiryDays = sa.tenant?.saTokenMaxExpiryDays;
+  if (maxExpiryDays != null) {
+    const maxExpiresAt = new Date(Date.now() + maxExpiryDays * 24 * 60 * 60 * 1000);
+    if (expiresAt > maxExpiresAt) {
+      expiresAt = maxExpiresAt;
+    }
+  }
+
   let token;
   try {
     token = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -143,7 +153,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             prefix,
             name: result.data.name,
             scope,
-            expiresAt: result.data.expiresAt,
+            expiresAt,
           },
         });
       }),

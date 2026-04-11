@@ -176,6 +176,14 @@ export const AUDIT_LOG_RETENTION_MAX = 3650;      // 10 years in days
 export const PASSKEY_GRACE_PERIOD_MIN = 1;
 export const PASSKEY_GRACE_PERIOD_MAX = 90;
 
+// ─── Machine Identity Policy ─────────────────────────────────
+export const SA_TOKEN_MAX_EXPIRY_MIN = 1;
+export const SA_TOKEN_MAX_EXPIRY_MAX = 3650;
+export const JIT_TOKEN_TTL_MIN = 60;      // 1 minute
+export const JIT_TOKEN_TTL_MAX = 86400;   // 24 hours
+export const DELEGATION_TTL_MIN = 60;     // 1 minute
+export const DELEGATION_TTL_MAX = 86400;  // 24 hours
+
 // ─── Password History ────────────────────────────────────────
 export const PASSWORD_HISTORY_COUNT_MAX = 24;
 export const MAX_VIEWS_MIN = 1;

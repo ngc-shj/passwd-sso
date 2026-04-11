@@ -37,7 +37,7 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `jitTokenMaxTtlSec` | Blocking | Server | `tenant/access-requests/[id]/approve/route.ts` | Hard ceiling for JIT token TTL; enforced via `Math.min()` |
 | `delegationDefaultTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Default TTL for delegation sessions |
 | `delegationMaxTtlSec` | Blocking | Server | `vault/delegation/route.ts` | Hard ceiling for delegation TTL; enforced via `Math.min(requested, max)` |
-| `saTokenMaxExpiryDays` | **Not enforced** | — | — | Defined in schema but no enforcement code references this field |
+| `saTokenMaxExpiryDays` | Blocking | Server | `tenant/service-accounts/[id]/tokens/route.ts` | Caps SA token `expiresAt` to `now + saTokenMaxExpiryDays`; null = no limit. Admin UI: Security → Machine Identity → Token |
 
 ## Team Policy Fields
 

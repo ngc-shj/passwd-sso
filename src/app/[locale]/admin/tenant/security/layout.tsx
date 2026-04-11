@@ -3,8 +3,11 @@
 import { useTranslations } from "next-intl";
 import {
   Archive,
+  Bot,
   Clock,
   Globe,
+  Handshake,
+  Key,
   KeyRound,
   Lock,
   Shield,
@@ -44,6 +47,15 @@ export default function TenantSecurityLayout({ children }: { children: React.Rea
       children: [
         { href: "/admin/tenant/security/access-restriction", label: t("navAccessRestriction"), icon: ShieldBan },
         { href: "/admin/tenant/security/webhooks", label: t("navWebhooks"), icon: Webhook },
+      ],
+    },
+    {
+      href: "/admin/tenant/security/token-policy",
+      label: t("navGroupMachineIdentity"),
+      icon: Bot,
+      children: [
+        { href: "/admin/tenant/security/token-policy", label: t("navTokenPolicy"), icon: Key },
+        { href: "/admin/tenant/security/delegation-policy", label: t("navDelegationPolicy"), icon: Handshake },
       ],
     },
   ];

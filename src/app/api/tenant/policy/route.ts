@@ -37,6 +37,12 @@ import {
   SESSION_IDLE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
+  SA_TOKEN_MAX_EXPIRY_MIN,
+  SA_TOKEN_MAX_EXPIRY_MAX,
+  JIT_TOKEN_TTL_MIN,
+  JIT_TOKEN_TTL_MAX,
+  DELEGATION_TTL_MIN,
+  DELEGATION_TTL_MAX,
 } from "@/lib/validations/common";
 import {
   IP_ADDRESS_MAX_LENGTH,
@@ -88,6 +94,11 @@ async function handleGET(_req: NextRequest) {
         tenantRequireLowercase: true,
         tenantRequireNumbers: true,
         tenantRequireSymbols: true,
+        saTokenMaxExpiryDays: true,
+        jitTokenDefaultTtlSec: true,
+        jitTokenMaxTtlSec: true,
+        delegationDefaultTtlSec: true,
+        delegationMaxTtlSec: true,
       } } },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -117,6 +128,11 @@ async function handleGET(_req: NextRequest) {
     tenantRequireLowercase: user?.tenant?.tenantRequireLowercase ?? false,
     tenantRequireNumbers: user?.tenant?.tenantRequireNumbers ?? false,
     tenantRequireSymbols: user?.tenant?.tenantRequireSymbols ?? false,
+    saTokenMaxExpiryDays: user?.tenant?.saTokenMaxExpiryDays ?? null,
+    jitTokenDefaultTtlSec: user?.tenant?.jitTokenDefaultTtlSec ?? null,
+    jitTokenMaxTtlSec: user?.tenant?.jitTokenMaxTtlSec ?? null,
+    delegationDefaultTtlSec: user?.tenant?.delegationDefaultTtlSec ?? null,
+    delegationMaxTtlSec: user?.tenant?.delegationMaxTtlSec ?? null,
   });
 }
 
@@ -173,6 +189,11 @@ async function handlePATCH(req: NextRequest) {
     tenantRequireLowercase,
     tenantRequireNumbers,
     tenantRequireSymbols,
+    saTokenMaxExpiryDays,
+    jitTokenDefaultTtlSec,
+    jitTokenMaxTtlSec,
+    delegationDefaultTtlSec,
+    delegationMaxTtlSec,
   } = body;
 
   // Validate maxConcurrentSessions: null (unlimited) or positive integer
@@ -407,6 +428,66 @@ async function handlePATCH(req: NextRequest) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
+  // Validate saTokenMaxExpiryDays: null (no limit) or integer within bounds
+  if (saTokenMaxExpiryDays !== null && saTokenMaxExpiryDays !== undefined) {
+    if (
+      typeof saTokenMaxExpiryDays !== "number" ||
+      !Number.isInteger(saTokenMaxExpiryDays) ||
+      saTokenMaxExpiryDays < SA_TOKEN_MAX_EXPIRY_MIN ||
+      saTokenMaxExpiryDays > SA_TOKEN_MAX_EXPIRY_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate jitTokenDefaultTtlSec: null (use system default) or integer within bounds
+  if (jitTokenDefaultTtlSec !== null && jitTokenDefaultTtlSec !== undefined) {
+    if (
+      typeof jitTokenDefaultTtlSec !== "number" ||
+      !Number.isInteger(jitTokenDefaultTtlSec) ||
+      jitTokenDefaultTtlSec < JIT_TOKEN_TTL_MIN ||
+      jitTokenDefaultTtlSec > JIT_TOKEN_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate jitTokenMaxTtlSec: null (no limit) or integer within bounds
+  if (jitTokenMaxTtlSec !== null && jitTokenMaxTtlSec !== undefined) {
+    if (
+      typeof jitTokenMaxTtlSec !== "number" ||
+      !Number.isInteger(jitTokenMaxTtlSec) ||
+      jitTokenMaxTtlSec < JIT_TOKEN_TTL_MIN ||
+      jitTokenMaxTtlSec > JIT_TOKEN_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate delegationDefaultTtlSec: null (use system default) or integer within bounds
+  if (delegationDefaultTtlSec !== null && delegationDefaultTtlSec !== undefined) {
+    if (
+      typeof delegationDefaultTtlSec !== "number" ||
+      !Number.isInteger(delegationDefaultTtlSec) ||
+      delegationDefaultTtlSec < DELEGATION_TTL_MIN ||
+      delegationDefaultTtlSec > DELEGATION_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate delegationMaxTtlSec: null (no limit) or integer within bounds
+  if (delegationMaxTtlSec !== null && delegationMaxTtlSec !== undefined) {
+    if (
+      typeof delegationMaxTtlSec !== "number" ||
+      !Number.isInteger(delegationMaxTtlSec) ||
+      delegationMaxTtlSec < DELEGATION_TTL_MIN ||
+      delegationMaxTtlSec > DELEGATION_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
   // Single DB read that covers all three validation needs:
   //   1. tailscale: check existing tailscaleTailnet when tailscaleEnabled=true without a new value
   //   2. cross-field: lockout thresholds/durations, password expiry, requirePasskey set-once
@@ -485,6 +566,20 @@ async function handlePATCH(req: NextRequest) {
   const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentTenant?.passwordExpiryWarningDays;
   if (mergedMaxAge != null && mergedWarning != null && mergedWarning >= mergedMaxAge) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "passwordExpiryWarningDays must be less than passwordMaxAgeDays" });
+  }
+
+  // Cross-field validation: jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec when both set
+  const mergedJitDefault = jitTokenDefaultTtlSec !== undefined ? jitTokenDefaultTtlSec : undefined;
+  const mergedJitMax = jitTokenMaxTtlSec !== undefined ? jitTokenMaxTtlSec : undefined;
+  if (mergedJitDefault != null && mergedJitMax != null && mergedJitDefault > mergedJitMax) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec" });
+  }
+
+  // Cross-field validation: delegationDefaultTtlSec must be <= delegationMaxTtlSec when both set
+  const mergedDelegDefault = delegationDefaultTtlSec !== undefined ? delegationDefaultTtlSec : undefined;
+  const mergedDelegMax = delegationMaxTtlSec !== undefined ? delegationMaxTtlSec : undefined;
+  if (mergedDelegDefault != null && mergedDelegMax != null && mergedDelegDefault > mergedDelegMax) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "delegationDefaultTtlSec must be <= delegationMaxTtlSec" });
   }
 
   // requirePasskeyEnabledAt set-once logic uses the already-fetched current state
@@ -596,6 +691,21 @@ async function handlePATCH(req: NextRequest) {
   if (tenantRequireSymbols !== undefined) {
     updateData.tenantRequireSymbols = tenantRequireSymbols;
   }
+  if (saTokenMaxExpiryDays !== undefined) {
+    updateData.saTokenMaxExpiryDays = saTokenMaxExpiryDays ?? null;
+  }
+  if (jitTokenDefaultTtlSec !== undefined) {
+    updateData.jitTokenDefaultTtlSec = jitTokenDefaultTtlSec ?? null;
+  }
+  if (jitTokenMaxTtlSec !== undefined) {
+    updateData.jitTokenMaxTtlSec = jitTokenMaxTtlSec ?? null;
+  }
+  if (delegationDefaultTtlSec !== undefined) {
+    updateData.delegationDefaultTtlSec = delegationDefaultTtlSec ?? null;
+  }
+  if (delegationMaxTtlSec !== undefined) {
+    updateData.delegationMaxTtlSec = delegationMaxTtlSec ?? null;
+  }
 
   const updated = await withBypassRls(prisma, async () =>
     prisma.tenant.update({
@@ -626,6 +736,11 @@ async function handlePATCH(req: NextRequest) {
         tenantRequireLowercase: true,
         tenantRequireNumbers: true,
         tenantRequireSymbols: true,
+        saTokenMaxExpiryDays: true,
+        jitTokenDefaultTtlSec: true,
+        jitTokenMaxTtlSec: true,
+        delegationDefaultTtlSec: true,
+        delegationMaxTtlSec: true,
       },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -665,6 +780,11 @@ async function handlePATCH(req: NextRequest) {
       tenantRequireLowercase: updated.tenantRequireLowercase,
       tenantRequireNumbers: updated.tenantRequireNumbers,
       tenantRequireSymbols: updated.tenantRequireSymbols,
+      saTokenMaxExpiryDays: updated.saTokenMaxExpiryDays,
+      jitTokenDefaultTtlSec: updated.jitTokenDefaultTtlSec,
+      jitTokenMaxTtlSec: updated.jitTokenMaxTtlSec,
+      delegationDefaultTtlSec: updated.delegationDefaultTtlSec,
+      delegationMaxTtlSec: updated.delegationMaxTtlSec,
     },
     ip: meta.ip,
     userAgent: meta.userAgent,
@@ -695,6 +815,11 @@ async function handlePATCH(req: NextRequest) {
     tenantRequireLowercase: updated.tenantRequireLowercase,
     tenantRequireNumbers: updated.tenantRequireNumbers,
     tenantRequireSymbols: updated.tenantRequireSymbols,
+    saTokenMaxExpiryDays: updated.saTokenMaxExpiryDays,
+    jitTokenDefaultTtlSec: updated.jitTokenDefaultTtlSec,
+    jitTokenMaxTtlSec: updated.jitTokenMaxTtlSec,
+    delegationDefaultTtlSec: updated.delegationDefaultTtlSec,
+    delegationMaxTtlSec: updated.delegationMaxTtlSec,
   });
 }
 
