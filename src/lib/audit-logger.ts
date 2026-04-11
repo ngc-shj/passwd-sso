@@ -40,7 +40,6 @@ export const METADATA_BLOCKLIST = new Set([
   "entries",
 ]);
 
-export { isProtoKey } from "@/lib/safe-keys";
 
 /**
  * Factory to create a pino logger instance for audit events.

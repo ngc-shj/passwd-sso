@@ -8,7 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
-import { safeSet } from "@/lib/safe-keys";
+import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
@@ -77,16 +77,17 @@ export function sanitizeMetadata(value: unknown): unknown {
   }
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
-    const cleaned: Record<string, unknown> = Object.create(null);
+    const entries: [string, unknown][] = [];
     for (const [k, v] of Object.entries(obj)) {
       if (!METADATA_BLOCKLIST.has(k)) {
         const sanitized = sanitizeMetadata(v);
         if (sanitized !== undefined) {
-          safeSet(cleaned, k, sanitized);
+          entries.push([k, sanitized]);
         }
       }
     }
-    return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+    if (entries.length === 0) return undefined;
+    return safeRecord(entries);
   }
   return value;
 }

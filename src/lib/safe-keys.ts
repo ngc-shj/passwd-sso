@@ -4,20 +4,15 @@ export function isProtoKey(key: string): boolean {
 }
 
 /**
- * Safely assign a value to a property on an object, preventing prototype pollution.
- * Uses Object.defineProperty with a data descriptor so CodeQL does not flag it
- * as a remote property injection sink.
+ * Build a plain object from entries, skipping prototype-pollution keys.
+ * Uses Map internally so CodeQL does not flag dynamic property writes.
  */
-export function safeSet(
-  obj: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): void {
-  if (isProtoKey(key)) return;
-  Object.defineProperty(obj, key, {
-    value,
-    writable: true,
-    enumerable: true,
-    configurable: true,
-  });
+export function safeRecord(
+  entries: Iterable<[string, unknown]>,
+): Record<string, unknown> {
+  const map = new Map<string, unknown>();
+  for (const [k, v] of entries) {
+    if (!isProtoKey(k)) map.set(k, v);
+  }
+  return Object.fromEntries(map);
 }

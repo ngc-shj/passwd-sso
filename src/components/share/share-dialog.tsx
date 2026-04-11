@@ -43,7 +43,7 @@ import {
 import { formatDateTime } from "@/lib/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
-import { safeSet } from "@/lib/safe-keys";
+import { safeRecord } from "@/lib/safe-keys";
 
 interface ShareLink {
   id: string;
@@ -270,10 +270,9 @@ export function ShareDialog({
       // Strip TOTP and undefined/null fields before sharing (F-21)
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { totp, ...rawData } = (decryptedData ?? {}) as Record<string, unknown>;
-      const safeData: Record<string, unknown> = Object.create(null);
-      for (const [k, v] of Object.entries(rawData)) {
-        if (v !== undefined && v !== null) safeSet(safeData, k, v);
-      }
+      const safeData = safeRecord(
+        Object.entries(rawData).filter(([, v]) => v !== undefined && v !== null),
+      );
 
       const permissions =
         permission === SHARE_PERMISSION.VIEW_ALL ? [] : [permission];

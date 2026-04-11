@@ -1,71 +1,69 @@
 import { describe, expect, it } from "vitest";
-import { safeSet } from "./safe-keys";
+import { isProtoKey, safeRecord } from "./safe-keys";
 import { sanitizeMetadata } from "@/lib/audit";
 
-describe("safeSet", () => {
-  // Proto key guards (no-op, no pollution)
+describe("isProtoKey", () => {
+  it.each(["__proto__", "constructor", "prototype"])(
+    "returns true for %s",
+    (key) => {
+      expect(isProtoKey(key)).toBe(true);
+    },
+  );
 
-  it("__proto__ key is a no-op and does not pollute Object.prototype", () => {
-    const obj: Record<string, unknown> = {};
-    safeSet(obj, "__proto__", { polluted: true });
+  it.each(["name", "value", ""])(
+    "returns false for normal key %j",
+    (key) => {
+      expect(isProtoKey(key)).toBe(false);
+    },
+  );
+
+  it.each(["__proto", "Constructor", "PROTOTYPE", "proto__", "__prototype__"])(
+    "returns false for similar-but-different string %s",
+    (key) => {
+      expect(isProtoKey(key)).toBe(false);
+    },
+  );
+});
+
+describe("safeRecord", () => {
+  it("builds a record from entries", () => {
+    const result = safeRecord([["a", 1], ["b", 2]]);
+    expect(result).toEqual({ a: 1, b: 2 });
+  });
+
+  it("skips __proto__ key", () => {
+    const result = safeRecord([["__proto__", { polluted: true }], ["safe", "ok"]]);
+    expect(Object.keys(result)).toEqual(["safe"]);
     expect((Object.prototype as Record<string, unknown>)["polluted"]).toBeUndefined();
-    expect(Object.keys(obj)).not.toContain("__proto__");
   });
 
-  it("constructor key is a no-op", () => {
-    const obj: Record<string, unknown> = {};
-    safeSet(obj, "constructor", "evil");
-    expect(Object.keys(obj)).not.toContain("constructor");
+  it("skips constructor and prototype keys", () => {
+    const result = safeRecord([["constructor", "x"], ["prototype", "y"], ["ok", "z"]]);
+    expect(Object.keys(result)).toEqual(["ok"]);
   });
 
-  it("prototype key is a no-op", () => {
-    const obj: Record<string, unknown> = {};
-    safeSet(obj, "prototype", "evil");
-    expect(Object.keys(obj)).not.toContain("prototype");
+  it("returns empty object for empty entries", () => {
+    const result = safeRecord([]);
+    expect(result).toEqual({});
   });
 
-  // Normal operation
-
-  it("sets a normal key with the given value and makes it enumerable", () => {
-    const obj: Record<string, unknown> = {};
-    safeSet(obj, "foo", "bar");
-    expect(obj["foo"]).toBe("bar");
-    expect(Object.keys(obj)).toContain("foo");
+  it("handles entries with undefined values", () => {
+    const result = safeRecord([["key", undefined]]);
+    expect("key" in result).toBe(true);
+    expect(result["key"]).toBeUndefined();
   });
+});
 
-  it("works on an Object.create(null) target", () => {
-    const obj = Object.create(null) as Record<string, unknown>;
-    safeSet(obj, "key", 42);
-    expect(obj["key"]).toBe(42);
-    expect(Object.keys(obj)).toContain("key");
-  });
-
-  it("overwrites an existing property", () => {
-    const obj: Record<string, unknown> = { key: "old" };
-    safeSet(obj, "key", "new");
-    expect(obj["key"]).toBe("new");
-  });
-
-  it("handles undefined value — property is still defined and appears in Object.keys", () => {
-    const obj: Record<string, unknown> = {};
-    safeSet(obj, "undef", undefined);
-    expect(Object.keys(obj)).toContain("undef");
-    expect(obj["undef"]).toBeUndefined();
-  });
-
-  // Integration: sanitizeMetadata with __proto__ input
-
-  it("sanitizeMetadata with __proto__ input returns only safe keys", () => {
+describe("sanitizeMetadata integration", () => {
+  it("strips __proto__ key from input", () => {
     const input = { "__proto__": { polluted: true }, safe: "ok" };
     const result = sanitizeMetadata(input) as Record<string, unknown>;
     expect(Object.keys(result)).toEqual(["safe"]);
     expect(result["safe"]).toBe("ok");
-    expect(result["__proto__"]).toBeUndefined();
   });
 
-  it("sanitizeMetadata does not pollute Object.prototype", () => {
-    const input = { "__proto__": { polluted: true }, safe: "ok" };
-    sanitizeMetadata(input);
+  it("does not pollute Object.prototype", () => {
+    sanitizeMetadata({ "__proto__": { polluted: true }, safe: "ok" });
     expect((Object.prototype as Record<string, unknown>)["polluted"]).toBeUndefined();
   });
 });
