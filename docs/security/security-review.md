@@ -1,7 +1,7 @@
 # Security Review
 
-Last updated: 2026-04-09
-Branch baseline: `main` (includes merged fixes from `fix/security-review-proxy-import` and `feat/tenant-team-scim-spec`)
+Last updated: 2026-04-12
+Branch baseline: `main` (includes merged fixes from `fix/security-review-proxy-import`, `feat/tenant-team-scim-spec`, and the bridge-code exchange flow from `feature/extension-bridge-code-exchange`)
 
 ## 1. Authentication / Authorization Boundary
 
@@ -46,9 +46,19 @@ Evidence:
 5. Token lifecycle boundaries are explicit  
 Status: `PASS`  
 Evidence:
-- Issue requires Auth.js session: `src/app/api/extension/token/route.ts:26`.
-- Revoke requires valid Bearer token: `src/app/api/extension/token/route.ts:83`.
-- Refresh requires valid Bearer token + active DB session: `src/app/api/extension/token/refresh/route.ts:22` and `src/app/api/extension/token/refresh/route.ts:41`.
+- Issue (legacy direct) requires Auth.js session: `src/app/api/extension/token/route.ts`.
+- Issue (bridge code) requires Auth.js session + Origin check: `src/app/api/extension/bridge-code/route.ts`.
+- Exchange consumes a one-time, server-side, atomically-claimed code (no session): `src/app/api/extension/token/exchange/route.ts`.
+- Revoke requires valid Bearer token: `src/app/api/extension/token/route.ts` (DELETE handler).
+- Refresh requires valid Bearer token + active DB session: `src/app/api/extension/token/refresh/route.ts`.
+
+6. Bridge code exchange enforces server-side identity resolution  
+Status: `PASS`  
+Evidence:
+- `userId`, `tenantId`, `scope` are read from the consumed `ExtensionBridgeCode` row, never from request body — see `src/app/api/extension/token/exchange/route.ts`.
+- Atomic single-use enforcement via `updateMany({ where: { codeHash, usedAt: null, expiresAt: { gt: now } }, data: { usedAt: now } })` returning `count === 0` on replay — same pattern as the existing optimistic-lock pattern in `src/app/api/extension/token/refresh/route.ts`.
+- Failure paths (unknown code, replay, malformed body) log via pino without `logAudit` because no resolvable user/tenant is available.
+- See `docs/architecture/extension-token-bridge.md` for the full threat-model write-up.
 
 ### Notes / residual risk
 - `authOrToken` prioritizes session over token (`src/lib/auth-or-token.ts:30`).  

@@ -8,19 +8,33 @@ web application and maintains a secure session.
 ## Overview
 
 The extension connects to the web app via a short-lived Bearer token
-(15-minute TTL). The token is delivered from the web app to the extension
-through a `postMessage` bridge — the web app's JavaScript sends the token
-via `window.postMessage`, and an ISOLATED-world content script receives it
-and forwards it to the background service worker.
+(15-minute TTL). Token delivery uses a **one-time bridge code exchange**
+(introduced in `feature/extension-bridge-code-exchange`):
+
+1. The web app's JavaScript obtains a single-use bridge code from
+   `POST /api/extension/bridge-code` (requires Auth.js session).
+2. The web app posts the code via `window.postMessage` to the content script.
+3. The content script (ISOLATED world) calls `POST /api/extension/token/exchange`
+   directly via `fetch()` to atomically consume the code and receive a token.
+4. The content script forwards the token to the background service worker.
+
+The bridge code is short-lived (60 s TTL) and single-use, enforced server-side
+via a single atomic `UPDATE`. The bearer token never appears in any
+`postMessage` payload — only the code does — so a MAIN-world XSS that observes
+the postMessage receives a code, not a token, and must race the legitimate
+content script to consume it before being blocked by single-use enforcement.
 
 ```mermaid
 flowchart TB
     subgraph BrowserTab["Browser Tab (web app page)"]
-        WebApp["Web App JS<br/>(MAIN world)<br/>injectExtensionToken"]
-        ContentScript["Content Script<br/>(ISOLATED world)"]
-        WebApp -- "window.postMessage<br/>{type, token, expiresAt}<br/>targetOrigin: same-origin" --> ContentScript
+        WebApp["Web App JS<br/>(MAIN world)<br/>injectExtensionBridgeCode"]
+        ContentScript["Content Script<br/>(ISOLATED world)<br/>token-bridge.js"]
+        WebApp -- "window.postMessage<br/>{type: PASSWD_SSO_BRIDGE_CODE,<br/>code, expiresAt}<br/>targetOrigin: same-origin" --> ContentScript
     end
 
+    ContentScript -- "fetch POST<br/>/api/extension/token/exchange<br/>{code}" --> ApiServer
+    ApiServer["API Server<br/>(/api/extension/token/exchange)<br/>• atomic single-use consume<br/>• issue ExtensionToken<br/>• audit emit"]
+    ApiServer -- "{token, expiresAt}" --> ContentScript
     ContentScript -- "chrome.runtime.sendMessage<br/>{type: SET_TOKEN}" --> BgWorker
 
     BgWorker["Background Service Worker<br/>• stores token<br/>• schedules refresh alarm<br/>• persists to encrypted session storage"]
@@ -32,21 +46,26 @@ flowchart TB
 sequenceDiagram
     actor User
     participant Popup as Extension Popup
-    participant WebApp as Web App
+    participant WebApp as Web App (MAIN)
+    participant CS as Content Script (ISOLATED)
     participant API as API Server
+    participant BG as Background SW
 
     User ->> Popup: click "Connect"
     Popup ->> WebApp: open tab (?ext_connect=1)
-    User ->> WebApp: login
-    WebApp ->> API: POST /api/extension/token
-    API -->> WebApp: {token, expiresAt}
-    WebApp ->> Popup: window.postMessage (PASSWD_SSO_TOKEN_RELAY)
+    User ->> WebApp: login (Auth.js session)
+    WebApp ->> API: POST /api/extension/bridge-code
+    API -->> WebApp: {code, expiresAt}
+    WebApp ->> CS: window.postMessage (PASSWD_SSO_BRIDGE_CODE)
 
-    Note over Popup: Content script validates:<br/>• event.source === window<br/>• event.origin match<br/>• event.data.type match
+    Note over CS: Content script validates:<br/>• event.source === window<br/>• event.origin match<br/>• event.data.type match<br/>• code is 64-char hex
 
-    Note over Popup: Background receives SET_TOKEN
+    CS ->> API: POST /api/extension/token/exchange {code}
+    Note over API: Atomic UPDATE:<br/>SET used_at = now<br/>WHERE code_hash = ? AND used_at IS NULL<br/>AND expires_at > now
+    API -->> CS: {token, expiresAt}
 
-    Note over Popup: Store token, encrypt &<br/>persist to session store,<br/>schedule refresh alarm
+    CS ->> BG: chrome.runtime.sendMessage SET_TOKEN
+    Note over BG: Store token, encrypt &<br/>persist to session store,<br/>schedule refresh alarm
 
     Popup -->> User: "Connected" badge
     WebApp -->> User: "Connected" UI
@@ -56,13 +75,37 @@ sequenceDiagram
 
 | Phase | Mechanism | TTL |
 |-------|-----------|-----|
-| **Issue** | `POST /api/extension/token` (requires Auth.js session) | 15 min |
-| **Delivery** | `window.postMessage` → content script → background | instant |
+| **Issue (bridge code)** | `POST /api/extension/bridge-code` (requires Auth.js session) | 60 s code TTL |
+| **Code delivery** | `window.postMessage` (MAIN → ISOLATED) | instant |
+| **Code → token exchange** | `POST /api/extension/token/exchange` (no session, atomic single-use consume) | issues 15-min token |
+| **Issue (legacy direct)** | `POST /api/extension/token` (Auth.js session) — kept for migration period | 15 min |
 | **Storage** | Encrypted with ephemeral AES-256-GCM key in `chrome.storage.session` | until browser close |
 | **Refresh** | `POST /api/extension/token/refresh` (Bearer + session) | 15 min (new token) |
 | **Refresh trigger** | `ALARM_TOKEN_REFRESH` fires 2 min before expiry | — |
 | **Revocation** | `DELETE /api/extension/token` or token expiry | — |
 | **SW restart** | Ephemeral key lost → token unreadable → re-auth required | — |
+
+### Server-side identity resolution
+
+The exchange endpoint resolves `userId`, `tenantId`, and `scope` **from the
+consumed bridge code DB record**, never from the request body. The client
+only supplies the 64-char hex code; everything else comes from the row that
+was atomically claimed by the `UPDATE`. This prevents horizontal privilege
+escalation if a code is intercepted.
+
+### Failure path logging
+
+Failed exchanges (unknown / consumed / expired code, malformed body) cannot
+be attributed to a user — there is no resolvable `userId` / `tenantId`. They
+are logged via `getLogger().warn(...)` (pino, structured app log) instead of
+`logAudit(...)` (which requires a user/tenant context). The successful
+exchange path uses `logAudit({ action: EXTENSION_TOKEN_EXCHANGE_SUCCESS, ... })`
+with values from the consumed record.
+
+A separate `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit action is emitted when
+the bridge code is consumed successfully but `issueExtensionToken()` throws
+afterwards (we have a known `consumed.userId` / `consumed.tenantId` in that
+branch).
 
 ## Session Storage Encryption
 
@@ -94,46 +137,100 @@ background service worker using `chrome.scripting.registerContentScripts`:
 
 ## Validation Checks
 
-The content script performs three checks before forwarding:
+The content script performs four checks before forwarding:
 
 | Check | Purpose | Failure mode |
 |-------|---------|-------------|
 | `event.source === window` | Reject messages from child iframes | Silent drop |
 | `event.origin === window.location.origin` | Reject cross-origin messages | Silent drop |
-| `event.data.type === "PASSWD_SSO_TOKEN_RELAY"` | Reject unrelated postMessage traffic | Silent drop |
+| `event.data.type === "PASSWD_SSO_BRIDGE_CODE"` (or legacy `PASSWD_SSO_TOKEN_RELAY`) | Reject unrelated postMessage traffic | Silent drop |
+| `code.length === 64` and hex (bridge code path only) | Reject malformed payloads | Silent drop |
 
 All rejections are silent (no error response) to prevent oracle attacks.
 
+### Cross-origin / CORS for the exchange endpoint
+
+`POST /api/extension/token/exchange` is reached from the content script via
+direct `fetch()`. Although content scripts share the page's `Origin` for
+fetch, the request still must succeed regardless of the page origin matching
+`APP_URL`. The proxy (`src/proxy.ts`) special-cases this path:
+
+- Bypasses the session check (the whole point of the endpoint is to bootstrap
+  auth from a code, not from a session).
+- `applyCorsHeaders(..., { allowExtension: true })` adds CORS headers permitting
+  `chrome-extension://`, `moz-extension://`, and `safari-web-extension://` origins.
+- Preflight `OPTIONS` requests are handled with the same `allowExtension` flag.
+
+CSRF protection (`assertOrigin`) is intentionally NOT applied to this endpoint
+because the content script's effective origin may be `chrome-extension://`,
+which would fail any same-origin check. The compensating control is the
+256-bit single-use code.
+
 ## Threat Model
 
-The `postMessage` approach eliminates the 10-second DOM attribute exposure
-of the old hidden-`<div>` injection. However, it does **not** mitigate
-MAIN-world-level attackers (e.g., supply-chain-compromised npm packages)
-who can call `window.addEventListener("message", ...)` to intercept the token.
+The bridge code exchange replaces the previous bearer-in-postMessage scheme.
+A MAIN-world attacker (XSS, supply-chain-compromised npm package) can still
+call `window.addEventListener("message", ...)` to intercept the postMessage,
+but the payload is now a one-time, 60-second-TTL, server-side single-use code
+— not a bearer token. The captured code yields a token only if the attacker:
 
-This is a **defense-in-depth improvement** — the full mitigation would require
-a one-time-code + PKCE exchange (tracked as a future enhancement).
+1. Acts within 60 seconds of issuance.
+2. Wins a race against the legitimate content script's exchange call.
+3. The atomic `UPDATE` (`SET used_at = now WHERE used_at IS NULL`) lets only
+   one party succeed; the loser receives 401 and the failed exchange is
+   logged via pino for forensic correlation.
 
-| Attack vector | Old (DOM injection) | New (postMessage) |
-|--------------|-------------------|------------------|
-| DOM query (`getElementById`) | 10-sec window | Not applicable |
-| MutationObserver | 10-sec window | Not applicable |
-| postMessage listener | Not applicable | Single event cycle |
-| MAIN-world event listener | Not applicable | Single event cycle |
-| DevTools / memory forensics | DOM + memory | Memory only |
+Even if the attacker wins the race, they obtain a token with the same scope
+and TTL the legitimate user would have received — no horizontal escalation,
+no cross-tenant access. The legitimate flow degrades to "extension stays
+unconnected" (the user retries).
+
+A future enhancement (Stage 4 of the original plan, **out of scope**) would
+add a PKCE-style verifier so that even capturing the code does not enable
+exchange. This was deferred because a meaningful PKCE design requires the
+extension to register a `code_challenge` with the server through a channel
+the web app cannot tamper with — that requires a bootstrap mechanism the
+extension does not yet have.
+
+| Attack vector | Old direct token (legacy) | New bridge code exchange |
+|--------------|-------------------------|------------------------|
+| DOM query (`getElementById`) | N/A (bearer in postMessage) | N/A |
+| MutationObserver | N/A | N/A |
+| postMessage listener captures bearer | **Token captured directly (15-min TTL)** | Captures a 60-s single-use code |
+| MAIN-world event listener captures payload | Token (15-min TTL) | Code (60-s TTL, single-use, race with content script) |
+| Replay (after legitimate consume) | N/A | Atomic `UPDATE` returns count = 0 → 401 |
+| DevTools / memory forensics | Memory only | Memory only |
+| Cross-tenant escalation via tampered request | N/A | Server-side identity resolution from DB record |
 
 ## File Map
 
 | File | Role |
 |------|------|
-| `src/lib/inject-extension-token.ts` | Web app: dispatches `postMessage` with token |
-| `src/lib/constants/extension.ts` | Shared constants: `TOKEN_BRIDGE_MSG_TYPE` |
-| `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives postMessage, forwards to background |
-| `extension/src/content/token-bridge-lib.ts` | TypeScript version of content script (for tests) |
-| `extension/src/lib/constants.ts` | Extension constants (mirrors web app constants) |
+| `src/lib/inject-extension-bridge-code.ts` | Web app: dispatches `postMessage` with bridge code (replaces `inject-extension-token.ts`) |
+| `src/app/api/extension/bridge-code/route.ts` | Web app endpoint: issues a one-time code (Auth.js session required) |
+| `src/app/api/extension/token/exchange/route.ts` | Web app endpoint: atomically consumes a code, returns a token (no session) |
+| `src/lib/extension-token.ts` | Shared `issueExtensionToken()` helper used by legacy POST + new exchange |
+| `src/lib/constants/extension.ts` | Shared constants: `TOKEN_BRIDGE_MSG_TYPE` (legacy), `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
+| `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives postMessage, exchanges bridge code, forwards token to background. Plain JS — see project memory `project_extension_parallel_impl.md`. |
+| `extension/src/content/token-bridge-lib.ts` | TypeScript version of content script (for tests only — not registered at runtime) |
+| `extension/src/lib/constants.ts` | Extension constants (mirrors web app constants; cross-repo sync test enforces equality) |
+| `extension/src/lib/api-paths.ts` | Extension paths: includes `EXTENSION_TOKEN_EXCHANGE` |
 | `extension/src/lib/session-crypto.ts` | Ephemeral AES-256-GCM key for session encryption |
 | `extension/src/lib/session-storage.ts` | Encrypted persist/load for `chrome.storage.session` |
 | `extension/src/background/index.ts` | Background SW: token state, refresh, dynamic script registration |
+| `prisma/schema.prisma` | `ExtensionBridgeCode` model + `EXTENSION_BRIDGE_CODE_ISSUE` / `EXTENSION_TOKEN_EXCHANGE_SUCCESS` / `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit actions |
+
+### Migration period (Phase 1)
+
+The legacy `POST /api/extension/token` endpoint and the legacy `TOKEN_BRIDGE_MSG_TYPE`
+postMessage path are kept operational for the transition period. Older installed
+extensions (pre-bridge-code) only listen for `TOKEN_BRIDGE_MSG_TYPE`; they will
+not be able to receive a token from a web app that has switched to the new flow
+until the user updates the extension.
+
+The legacy POST route emits a structured log entry
+(`event: extension_token_legacy_issuance`) on every call so we can measure
+when legacy traffic drops to zero and remove the endpoint in a future phase.
 
 ---
 
