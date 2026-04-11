@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Writable } from "node:stream";
-import { createAuditLogger, METADATA_BLOCKLIST } from "./audit-logger";
+import { createAuditLogger, METADATA_BLOCKLIST, isProtoKey } from "./audit-logger";
 
 function collectOutput(fn: (logger: ReturnType<typeof createAuditLogger>) => void): string {
   let buf = "";
@@ -87,4 +87,27 @@ describe("METADATA_BLOCKLIST", () => {
     expect(METADATA_BLOCKLIST.has("username")).toBe(false);
     expect(METADATA_BLOCKLIST.has("email")).toBe(false);
   });
+});
+
+describe("isProtoKey", () => {
+  it.each(["__proto__", "constructor", "prototype"])(
+    "returns true for %s",
+    (key) => {
+      expect(isProtoKey(key)).toBe(true);
+    }
+  );
+
+  it.each(["name", "value", ""])(
+    "returns false for normal key %j",
+    (key) => {
+      expect(isProtoKey(key)).toBe(false);
+    }
+  );
+
+  it.each(["__proto", "Constructor", "PROTOTYPE", "proto__", "__prototype__"])(
+    "returns false for similar-but-different string %s",
+    (key) => {
+      expect(isProtoKey(key)).toBe(false);
+    }
+  );
 });

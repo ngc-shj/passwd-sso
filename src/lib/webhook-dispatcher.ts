@@ -8,7 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { METADATA_BLOCKLIST, isProtoKey } from "@/lib/audit-logger";
 import { getLogger } from "@/lib/logger";
 import {
   getMasterKeyByVersion,
@@ -84,9 +84,9 @@ function sanitizeWebhookData(value: unknown): unknown {
   }
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
-    const cleaned: Record<string, unknown> = {};
+    const cleaned: Record<string, unknown> = Object.create(null);
     for (const [k, v] of Object.entries(obj)) {
-      if (!WEBHOOK_METADATA_BLOCKLIST.has(k)) {
+      if (!WEBHOOK_METADATA_BLOCKLIST.has(k) && !isProtoKey(k)) {
         const sanitized = sanitizeWebhookData(v);
         if (sanitized !== undefined) {
           cleaned[k] = sanitized;
