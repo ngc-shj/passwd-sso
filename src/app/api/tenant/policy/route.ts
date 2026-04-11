@@ -493,6 +493,9 @@ async function handlePATCH(req: NextRequest) {
   // Self-lockout detection: check if the requester's IP would be allowed under the new policy
   const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
   const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
+  if (confirmLockout !== undefined && typeof confirmLockout !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
   if ((newAllowedCidrs !== undefined || newTailscaleEnabled !== undefined) && !confirmLockout) {
     const hypothetical = {
       allowedCidrs: newAllowedCidrs ?? currentTenant?.allowedCidrs ?? [],

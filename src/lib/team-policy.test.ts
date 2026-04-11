@@ -21,7 +21,7 @@ vi.mock("@/lib/tenant-context", () => ({
 // withBypassRls just invokes the callback
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
-  BYPASS_PURPOSE: { AUTH_FLOW: "auth_flow", CROSS_TENANT_LOOKUP: "cross_tenant" },
+  BYPASS_PURPOSE: { AUTH_FLOW: "auth_flow", CROSS_TENANT_LOOKUP: "cross_tenant_lookup" },
 }));
 
 import { prisma } from "@/lib/prisma";

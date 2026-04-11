@@ -47,6 +47,7 @@ function isPasskeyGracePeriodExpired(
 
 // Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
 const PASSKEY_AUDIT_DEDUP_MS = 5 * 60 * 1000;
+const PASSKEY_AUDIT_MAP_MAX = 1000;
 const passkeyAuditEmitted = new Map<string, number>();
 
 interface SessionInfo {
@@ -141,6 +142,11 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
         const userId = session.userId ?? "";
         const lastEmitted = passkeyAuditEmitted.get(userId);
         if (!lastEmitted || Date.now() - lastEmitted > PASSKEY_AUDIT_DEDUP_MS) {
+          if (passkeyAuditEmitted.size >= PASSKEY_AUDIT_MAP_MAX) {
+            // Evict oldest entry to prevent unbounded growth
+            const oldest = passkeyAuditEmitted.keys().next().value;
+            if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
+          }
           passkeyAuditEmitted.set(userId, Date.now());
           void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
             method: "POST",

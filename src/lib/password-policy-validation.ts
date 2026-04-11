@@ -48,9 +48,9 @@ function timingSafeEqual(a: string, b: string): boolean {
   const encoder = new TextEncoder();
   const ab = encoder.encode(a);
   const bb = encoder.encode(b);
-  if (ab.length !== bb.length) return false;
-  let result = 0;
-  for (let i = 0; i < ab.length; i++) result |= ab[i] ^ bb[i];
+  const maxLen = Math.max(ab.length, bb.length);
+  let result = ab.length ^ bb.length; // non-zero if lengths differ
+  for (let i = 0; i < maxLen; i++) result |= (ab[i] ?? 0) ^ (bb[i] ?? 0);
   return result === 0;
 }
 

@@ -114,7 +114,6 @@ vi.mock("@/hooks/use-team-policy", () => ({
       requireLowercase: false,
       requireNumbers: false,
       requireSymbols: false,
-      maxSessionDurationMinutes: null,
       requireRepromptForAll: false,
       allowExport: true,
       allowSharing: true,
