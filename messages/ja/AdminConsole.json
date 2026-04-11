@@ -46,7 +46,7 @@
   "sectionProvisioning": "プロビジョニング",
   "sectionProvisioningDesc": "SCIMプロビジョニングとディレクトリ同期。",
   "sectionServiceAccounts": "サービスアカウント",
-  "sectionServiceAccountsDesc": "サービスアカウントとJITアクセスリクエストを管理します。",
+  "sectionServiceAccountsDesc": "サービスアカウントとジャストインタイム（JIT）アクセスリクエストを管理します。",
   "sectionMcp": "MCP",
   "sectionMcpDesc": "MCPクライアント登録を管理します。",
   "sectionAuditLogs": "監査ログ",
