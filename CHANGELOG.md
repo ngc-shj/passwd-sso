@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.38](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.37...passwd-sso-v0.4.38) (2026-04-11)
+
+
+### Bug Fixes
+
+* resolve CodeQL prototype pollution and Dependabot alerts ([#359](https://github.com/ngc-shj/passwd-sso/issues/359)) ([06fc9f4](https://github.com/ngc-shj/passwd-sso/commit/06fc9f430ebff71967a6c3005fa3497b5d07511b))
+* use Object.defineProperty to eliminate CodeQL property injection sink ([#361](https://github.com/ngc-shj/passwd-sso/issues/361)) ([51825b1](https://github.com/ngc-shj/passwd-sso/commit/51825b13d9836541dccd5c2eddf60e16c47bb2b0))
+
 ## [0.4.37](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.36...passwd-sso-v0.4.37) (2026-04-11)
 
 
