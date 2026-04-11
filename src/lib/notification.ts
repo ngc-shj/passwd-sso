@@ -12,7 +12,8 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import type { NotificationType } from "@prisma/client";
-import { METADATA_BLOCKLIST, isProtoKey } from "@/lib/audit-logger";
+import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { safeSet } from "@/lib/safe-keys";
 import { NOTIFICATION_TITLE_MAX, NOTIFICATION_BODY_MAX } from "@/lib/validations/common";
 
 export interface CreateNotificationParams {
@@ -34,12 +35,12 @@ function sanitizeNotificationMetadata(
   if (!metadata) return undefined;
   const cleaned: Record<string, unknown> = Object.create(null);
   for (const [k, v] of Object.entries(metadata)) {
-    if (METADATA_BLOCKLIST.has(k) || isProtoKey(k)) continue;
+    if (METADATA_BLOCKLIST.has(k)) continue;
     if (v !== null && typeof v === "object" && !Array.isArray(v)) {
       const nested = sanitizeNotificationMetadata(v as Record<string, unknown>);
-      if (nested) cleaned[k] = nested;
+      if (nested) safeSet(cleaned, k, nested);
     } else {
-      cleaned[k] = v;
+      safeSet(cleaned, k, v);
     }
   }
   return Object.keys(cleaned).length > 0 ? cleaned : undefined;

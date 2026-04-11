@@ -7,7 +7,8 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { auditLogger, METADATA_BLOCKLIST, isProtoKey } from "@/lib/audit-logger";
+import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { safeSet } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
@@ -78,10 +79,10 @@ export function sanitizeMetadata(value: unknown): unknown {
     const obj = value as Record<string, unknown>;
     const cleaned: Record<string, unknown> = Object.create(null);
     for (const [k, v] of Object.entries(obj)) {
-      if (!METADATA_BLOCKLIST.has(k) && !isProtoKey(k)) {
+      if (!METADATA_BLOCKLIST.has(k)) {
         const sanitized = sanitizeMetadata(v);
         if (sanitized !== undefined) {
-          cleaned[k] = sanitized;
+          safeSet(cleaned, k, sanitized);
         }
       }
     }
