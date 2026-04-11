@@ -22,14 +22,82 @@ import type { NextRequest } from "next/server";
 const OBSERVATION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 /**
- * Lockout thresholds — ordered descending by attempts.
+ * Default lockout thresholds — ordered descending by attempts.
  * First match wins (most severe threshold applied).
+ * Used as fallback when tenant config is unavailable.
  */
-const LOCKOUT_THRESHOLDS = [
+const DEFAULT_LOCKOUT_THRESHOLDS = [
   { attempts: 15, lockMinutes: 1440 }, // 24h
   { attempts: 10, lockMinutes: 60 },   // 1h
   { attempts: 5, lockMinutes: 15 },    // 15min
-] as const;
+];
+
+type LockoutThreshold = { attempts: number; lockMinutes: number };
+
+const lockoutThresholdCache = new Map<string, { thresholds: LockoutThreshold[]; expiresAt: number }>();
+const LOCKOUT_THRESHOLD_CACHE_TTL_MS = 60_000;
+
+/**
+ * Return per-tenant lockout thresholds, falling back to defaults if tenant
+ * is not found or an error occurs. Results are cached for 60s.
+ */
+async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[]> {
+  const cached = lockoutThresholdCache.get(tenantId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.thresholds;
+  }
+  if (cached) lockoutThresholdCache.delete(tenantId);
+
+  try {
+    const tenant = await withBypassRls(
+      prisma,
+      () =>
+        prisma.tenant.findUnique({
+          where: { id: tenantId },
+          select: {
+            lockoutThreshold1: true,
+            lockoutDuration1Minutes: true,
+            lockoutThreshold2: true,
+            lockoutDuration2Minutes: true,
+            lockoutThreshold3: true,
+            lockoutDuration3Minutes: true,
+          },
+        }),
+      BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
+    );
+
+    if (!tenant) {
+      lockoutThresholdCache.set(tenantId, {
+        thresholds: DEFAULT_LOCKOUT_THRESHOLDS,
+        expiresAt: Date.now() + LOCKOUT_THRESHOLD_CACHE_TTL_MS,
+      });
+      return DEFAULT_LOCKOUT_THRESHOLDS;
+    }
+
+    // Build descending array: threshold3 (highest) → threshold1 (lowest)
+    const thresholds: LockoutThreshold[] = [
+      { attempts: tenant.lockoutThreshold3, lockMinutes: tenant.lockoutDuration3Minutes },
+      { attempts: tenant.lockoutThreshold2, lockMinutes: tenant.lockoutDuration2Minutes },
+      { attempts: tenant.lockoutThreshold1, lockMinutes: tenant.lockoutDuration1Minutes },
+    ];
+
+    lockoutThresholdCache.set(tenantId, {
+      thresholds,
+      expiresAt: Date.now() + LOCKOUT_THRESHOLD_CACHE_TTL_MS,
+    });
+    return thresholds;
+  } catch {
+    return DEFAULT_LOCKOUT_THRESHOLDS;
+  }
+}
+
+/**
+ * Invalidate the lockout threshold cache for a specific tenant.
+ * Call this after updating tenant lockout policy settings.
+ */
+export function invalidateLockoutThresholdCache(tenantId: string): void {
+  lockoutThresholdCache.delete(tenantId);
+}
 
 export interface LockoutStatus {
   locked: boolean;
@@ -81,12 +149,32 @@ interface UserLockoutRow {
  *
  * Uses $transaction + SELECT ... FOR UPDATE for row-level locking.
  * Returns null if lock_timeout occurs (counter NOT incremented).
+ *
+ * @param tenantId - Optional tenant ID for per-tenant lockout thresholds.
+ *   If omitted, the user's tenantId is resolved from the database.
  */
 export async function recordFailure(
   userId: string,
   request?: NextRequest,
+  tenantId?: string,
 ): Promise<RecordFailureResult | null> {
   const now = new Date();
+
+  // Resolve tenantId before the transaction (getLockoutThresholds is async)
+  let resolvedTenantId = tenantId;
+  if (!resolvedTenantId) {
+    const userRow = await withBypassRls(
+      prisma,
+      () => prisma.user.findUnique({ where: { id: userId }, select: { tenantId: true } }),
+      BYPASS_PURPOSE.AUTH_FLOW,
+    );
+    resolvedTenantId = userRow?.tenantId;
+  }
+
+  // Fetch per-tenant thresholds before acquiring the row lock
+  const thresholds = resolvedTenantId
+    ? await getLockoutThresholds(resolvedTenantId)
+    : DEFAULT_LOCKOUT_THRESHOLDS;
 
   try {
     // withBypassRls required: called outside tenant RLS context (post-auth side effect).
@@ -128,7 +216,7 @@ export async function recordFailure(
       // Threshold check — descending order, first match wins
       let newLockedUntil: Date | null = null;
       let lockMinutes: number | null = null;
-      for (const threshold of LOCKOUT_THRESHOLDS) {
+      for (const threshold of thresholds) {
         if (newAttempts >= threshold.attempts) {
           lockMinutes = threshold.lockMinutes;
           newLockedUntil = new Date(
@@ -152,7 +240,7 @@ export async function recordFailure(
       }
 
       // True only when newAttempts first reaches a threshold prevAttempts hadn't
-      const matchedThreshold = LOCKOUT_THRESHOLDS.find(
+      const matchedThreshold = thresholds.find(
         (t) => newAttempts >= t.attempts,
       );
       const thresholdCrossed =

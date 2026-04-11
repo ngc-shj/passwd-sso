@@ -86,6 +86,7 @@ vi.mock("@/lib/generator-prefs", () => ({
     mathCompare: false,
     brackets: false,
   },
+  SYMBOL_GROUP_KEYS: ["hashEtc", "punctuation", "quotes", "slashDash", "mathCompare", "brackets"],
 }));
 
 vi.mock("@/lib/credit-card", () => ({
@@ -113,12 +114,55 @@ vi.mock("@/hooks/use-team-policy", () => ({
       requireLowercase: false,
       requireNumbers: false,
       requireSymbols: false,
-      maxSessionDurationMinutes: null,
       requireRepromptForAll: false,
       allowExport: true,
       allowSharing: true,
+      passwordHistoryCount: 0,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
     },
   }),
+}));
+
+// Mock the entire hook to cut the crypto-client / crypto-aad dependency chain.
+// The hook's internal logic (policy validation, history decrypt) is tested in
+// use-team-login-form-state.test.ts — here we only test UI behaviour.
+vi.mock("@/hooks/use-team-login-form-state", () => ({
+  useTeamLoginFormState: vi.fn(({ editData }: { editData?: { username?: string; password?: string; url?: string } | null }) => ({
+    username: editData?.username ?? "",
+    setUsername: vi.fn(),
+    password: editData?.password ?? "",
+    setPassword: vi.fn(),
+    url: editData?.url ?? "",
+    setUrl: vi.fn(),
+    showPassword: false,
+    setShowPassword: vi.fn(),
+    showGenerator: false,
+    setShowGenerator: vi.fn(),
+    generatorSettings: {
+      mode: "password",
+      length: 16,
+      passphrase: { wordCount: 4 },
+      uppercase: true,
+      lowercase: true,
+      numbers: true,
+      symbolGroups: {
+        hashEtc: false,
+        punctuation: false,
+        quotes: false,
+        slashDash: false,
+        mathCompare: false,
+        brackets: false,
+      },
+    },
+    setGeneratorSettings: vi.fn(),
+    customFields: editData ? (("customFields" in editData && Array.isArray((editData as { customFields?: unknown }).customFields)) ? (editData as { customFields: [] }).customFields : []) : [],
+    setCustomFields: vi.fn(),
+    totp: null,
+    setTotp: vi.fn(),
+    showTotpInput: false,
+    setShowTotpInput: vi.fn(),
+  })),
 }));
 
 // Minimal UI component mocks

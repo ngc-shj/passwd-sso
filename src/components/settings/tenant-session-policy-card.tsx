@@ -16,6 +16,14 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import {
+  MAX_CONCURRENT_SESSIONS_MIN,
+  MAX_CONCURRENT_SESSIONS_MAX,
+  SESSION_IDLE_TIMEOUT_MIN,
+  SESSION_IDLE_TIMEOUT_MAX,
+  VAULT_AUTO_LOCK_MIN,
+  VAULT_AUTO_LOCK_MAX,
+} from "@/lib/validations";
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
@@ -115,18 +123,18 @@ export function TenantSessionPolicyCard() {
   const validate = (): string | null => {
     if (!unlimited) {
       const num = Number(maxSessions);
-      if (!Number.isInteger(num) || num < 1) return t("sessionPolicyValidationMin");
-      if (num > 100) return t("sessionPolicyValidationMax");
+      if (!Number.isInteger(num) || num < MAX_CONCURRENT_SESSIONS_MIN) return t("sessionPolicyValidationMin");
+      if (num > MAX_CONCURRENT_SESSIONS_MAX) return t("sessionPolicyValidationMax");
     }
     if (idleTimeoutEnabled) {
       const num = Number(idleTimeoutMinutes);
-      if (!Number.isInteger(num) || num < 1) return t("idleTimeoutValidationMin");
-      if (num > 1440) return t("idleTimeoutValidationMax");
+      if (!Number.isInteger(num) || num < SESSION_IDLE_TIMEOUT_MIN) return t("idleTimeoutValidationMin");
+      if (num > SESSION_IDLE_TIMEOUT_MAX) return t("idleTimeoutValidationMax");
     }
     if (vaultAutoLockEnabled) {
       const num = Number(vaultAutoLockMinutes);
-      if (!Number.isInteger(num) || num < 1) return t("vaultAutoLockValidationMin");
-      if (num > 1440) return t("vaultAutoLockValidationMax");
+      if (!Number.isInteger(num) || num < VAULT_AUTO_LOCK_MIN) return t("vaultAutoLockValidationMin");
+      if (num > VAULT_AUTO_LOCK_MAX) return t("vaultAutoLockValidationMax");
     }
     return null;
   };
@@ -197,15 +205,15 @@ export function TenantSessionPolicyCard() {
             <Input
               id="max-sessions"
               type="number"
-              min={1}
-              max={100}
+              min={MAX_CONCURRENT_SESSIONS_MIN}
+              max={MAX_CONCURRENT_SESSIONS_MAX}
               value={maxSessions}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (!raw) { setMaxSessions(""); } else {
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setMaxSessions(""); } else {
-                    setMaxSessions(String(Math.min(n, 100)));
+                  if (Number.isNaN(n) || n < MAX_CONCURRENT_SESSIONS_MIN) { setMaxSessions(""); } else {
+                    setMaxSessions(String(Math.min(n, MAX_CONCURRENT_SESSIONS_MAX)));
                   }
                 }
                 setError(null);
@@ -240,15 +248,15 @@ export function TenantSessionPolicyCard() {
             <Input
               id="idle-timeout"
               type="number"
-              min={1}
-              max={1440}
+              min={SESSION_IDLE_TIMEOUT_MIN}
+              max={SESSION_IDLE_TIMEOUT_MAX}
               value={idleTimeoutMinutes}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (!raw) { setIdleTimeoutMinutes(""); } else {
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setIdleTimeoutMinutes(""); } else {
-                    setIdleTimeoutMinutes(String(Math.min(n, 1440)));
+                  if (Number.isNaN(n) || n < SESSION_IDLE_TIMEOUT_MIN) { setIdleTimeoutMinutes(""); } else {
+                    setIdleTimeoutMinutes(String(Math.min(n, SESSION_IDLE_TIMEOUT_MAX)));
                   }
                 }
                 setError(null);
@@ -283,15 +291,15 @@ export function TenantSessionPolicyCard() {
             <Input
               id="vault-auto-lock"
               type="number"
-              min={1}
-              max={1440}
+              min={VAULT_AUTO_LOCK_MIN}
+              max={VAULT_AUTO_LOCK_MAX}
               value={vaultAutoLockMinutes}
               onChange={(e) => {
                 const raw = e.target.value;
                 if (!raw) { setVaultAutoLockMinutes(""); } else {
                   const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setVaultAutoLockMinutes(""); } else {
-                    setVaultAutoLockMinutes(String(Math.min(n, 1440)));
+                  if (Number.isNaN(n) || n < VAULT_AUTO_LOCK_MIN) { setVaultAutoLockMinutes(""); } else {
+                    setVaultAutoLockMinutes(String(Math.min(n, VAULT_AUTO_LOCK_MAX)));
                   }
                 }
                 setError(null);

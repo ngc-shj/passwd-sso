@@ -147,6 +147,45 @@ export const POLICY_MIN_PW_LENGTH_MIN = 0;
 export const POLICY_MIN_PW_LENGTH_MAX = 128;
 export const POLICY_SESSION_DURATION_MIN = 5;
 export const POLICY_SESSION_DURATION_MAX = 43200;
+
+// ─── Session Policy ─────────────────────────────────────────
+export const MAX_CONCURRENT_SESSIONS_MIN = 1;
+export const MAX_CONCURRENT_SESSIONS_MAX = 100;
+export const SESSION_IDLE_TIMEOUT_MIN = 1;
+export const SESSION_IDLE_TIMEOUT_MAX = 1440;          // 24 hours in minutes
+export const VAULT_AUTO_LOCK_MIN = 1;
+export const VAULT_AUTO_LOCK_MAX = 1440;
+
+// ─── Lockout Policy ──────────────────────────────────────────
+export const LOCKOUT_THRESHOLD_MIN = 1;
+export const LOCKOUT_THRESHOLD_MAX = 50;
+export const LOCKOUT_DURATION_MIN = 1;           // minutes
+export const LOCKOUT_DURATION_MAX = 10080;        // 7 days in minutes
+
+// ─── Password Expiry ─────────────────────────────────────────
+export const PASSWORD_MAX_AGE_MIN = 1;
+export const PASSWORD_MAX_AGE_MAX = 730;          // 2 years in days
+export const PASSWORD_EXPIRY_WARNING_MIN = 1;
+export const PASSWORD_EXPIRY_WARNING_MAX = 90;
+
+// ─── Audit Log Retention ─────────────────────────────────────
+export const AUDIT_LOG_RETENTION_MIN = 30;
+export const AUDIT_LOG_RETENTION_MAX = 3650;      // 10 years in days
+
+// ─── Passkey Enforcement ─────────────────────────────────────
+export const PASSKEY_GRACE_PERIOD_MIN = 1;
+export const PASSKEY_GRACE_PERIOD_MAX = 90;
+
+// ─── Machine Identity Policy ─────────────────────────────────
+export const SA_TOKEN_MAX_EXPIRY_MIN = 1;
+export const SA_TOKEN_MAX_EXPIRY_MAX = 3650;
+export const JIT_TOKEN_TTL_MIN = 60;      // 1 minute
+export const JIT_TOKEN_TTL_MAX = 86400;   // 24 hours
+export const DELEGATION_TTL_MIN = 60;     // 1 minute
+export const DELEGATION_TTL_MAX = 86400;  // 24 hours
+
+// ─── Password History ────────────────────────────────────────
+export const PASSWORD_HISTORY_COUNT_MAX = 24;
 export const MAX_VIEWS_MIN = 1;
 export const MAX_VIEWS_MAX = 100;
 export const SEND_NAME_MAX_LENGTH = 200;

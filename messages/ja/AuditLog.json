@@ -207,6 +207,7 @@
   "DELEGATION_CHECK": "委任認可チェック",
   "MCP_CONNECTION_REVOKE": "MCP接続を取り消し",
   "MCP_CONNECTION_REVOKE_ALL": "すべてのMCP接続を取り消し",
+  "PASSKEY_ENFORCEMENT_BLOCKED": "パスキー未登録のためアクセスをブロック",
   "groupDelegation": "委任",
   "delegationListMeta": "委任済み {entryCount} 件を一覧表示",
   "delegationSearchMeta": "「{query}」を検索 — {entryCount} 件",

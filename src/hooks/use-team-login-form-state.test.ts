@@ -1,8 +1,14 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
+
+vi.mock("@/lib/team-vault-context", () => ({
+  useTeamVault: () => ({
+    getEntryDecryptionKey: vi.fn(),
+  }),
+}));
 import {
   applyPolicyToGeneratorSettings,
 } from "@/hooks/team-login-form-initial-values";
@@ -21,12 +27,16 @@ const NO_POLICY: TeamPolicyClient = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 describe("useTeamLoginFormState", () => {
   it("initializes defaults without editData", () => {
     const { result } = renderHook(() =>
-      useTeamLoginFormState({ teamPolicy: NO_POLICY }),
+      useTeamLoginFormState({ teamId: "team-1", teamPolicy: NO_POLICY }),
     );
 
     expect(result.current.username).toBe("");
@@ -42,6 +52,7 @@ describe("useTeamLoginFormState", () => {
   it("applies editData to initial state", () => {
     const { result } = renderHook(() =>
       useTeamLoginFormState({
+        teamId: "team-1",
         editData: {
           id: "entry-1",
           title: "GitHub",
@@ -72,7 +83,7 @@ describe("useTeamLoginFormState", () => {
 
   it("updates values via setters", () => {
     const { result } = renderHook(() =>
-      useTeamLoginFormState({ teamPolicy: NO_POLICY }),
+      useTeamLoginFormState({ teamId: "team-1", teamPolicy: NO_POLICY }),
     );
 
     act(() => {
@@ -92,7 +103,7 @@ describe("useTeamLoginFormState", () => {
 
   it("builds generator settings from default when no policy constraints", () => {
     const { result } = renderHook(() =>
-      useTeamLoginFormState({ teamPolicy: NO_POLICY }),
+      useTeamLoginFormState({ teamId: "team-1", teamPolicy: NO_POLICY }),
     );
 
     expect(result.current.generatorSettings.length).toBe(
@@ -119,10 +130,14 @@ describe("useTeamLoginFormState", () => {
       requireRepromptForAll: false,
       allowExport: true,
       allowSharing: true,
+      requireSharePassword: false,
+      passwordHistoryCount: 0,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
     };
 
     const { result } = renderHook(() =>
-      useTeamLoginFormState({ teamPolicy: strictPolicy }),
+      useTeamLoginFormState({ teamId: "team-1", teamPolicy: strictPolicy }),
     );
 
     // Policy enforces minimum length
@@ -146,10 +161,14 @@ describe("useTeamLoginFormState", () => {
       requireRepromptForAll: false,
       allowExport: true,
       allowSharing: true,
+      requireSharePassword: false,
+      passwordHistoryCount: 0,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
     };
 
     const { result } = renderHook(() =>
-      useTeamLoginFormState({ teamPolicy: policy }),
+      useTeamLoginFormState({ teamId: "team-1", teamPolicy: policy }),
     );
 
     // Try to set a short length and disable uppercase (policy should override)

@@ -123,7 +123,7 @@
   "arTokenLimitExceeded": "トークン上限に達しています。既存のトークンを無効化してから承認してください。",
   "arSaInactive": "サービスアカウントが無効化されています",
   "arInvalidScope": "無効なスコープが要求されています",
-  "arJitToken": "JIT アクセストークン",
+  "arJitToken": "ジャストインタイム（JIT）アクセストークン",
   "arJitTokenWarning": "このトークンは再表示できません。今すぐコピーしてください。",
   "arJitTokenTtl": "このトークンは承認されたスコープの TTL が経過すると無効になります。",
   "arCreate": "新規リクエスト",

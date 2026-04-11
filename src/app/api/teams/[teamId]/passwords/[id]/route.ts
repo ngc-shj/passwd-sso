@@ -29,7 +29,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_READ, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -86,7 +86,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 
   let membership;
   try {
-    membership = await requireTeamMember(session.user.id, teamId);
+    membership = await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -172,7 +172,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

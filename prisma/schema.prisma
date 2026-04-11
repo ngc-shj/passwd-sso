@@ -454,6 +454,33 @@ model Tenant {
   delegationDefaultTtlSec    Int?     @map("delegation_default_ttl_sec")
   delegationMaxTtlSec        Int?     @map("delegation_max_ttl_sec")
 
+  // MFA enforcement
+  requirePasskey             Boolean  @default(false) @map("require_passkey")
+  requirePasskeyEnabledAt    DateTime? @map("require_passkey_enabled_at")
+  passkeyGracePeriodDays     Int?     @map("passkey_grace_period_days")
+
+  // Configurable vault lockout
+  lockoutThreshold1          Int      @default(5)    @map("lockout_threshold_1")
+  lockoutDuration1Minutes    Int      @default(15)   @map("lockout_duration_1_minutes")
+  lockoutThreshold2          Int      @default(10)   @map("lockout_threshold_2")
+  lockoutDuration2Minutes    Int      @default(60)   @map("lockout_duration_2_minutes")
+  lockoutThreshold3          Int      @default(15)   @map("lockout_threshold_3")
+  lockoutDuration3Minutes    Int      @default(1440) @map("lockout_duration_3_minutes")
+
+  // Password expiry
+  passwordMaxAgeDays         Int?     @map("password_max_age_days")
+  passwordExpiryWarningDays  Int      @default(14)   @map("password_expiry_warning_days")
+
+  // Audit log retention
+  auditLogRetentionDays      Int?     @map("audit_log_retention_days")
+
+  // Tenant-wide password policy
+  tenantMinPasswordLength    Int      @default(0)    @map("tenant_min_password_length")
+  tenantRequireUppercase     Boolean  @default(false) @map("tenant_require_uppercase")
+  tenantRequireLowercase     Boolean  @default(false) @map("tenant_require_lowercase")
+  tenantRequireNumbers       Boolean  @default(false) @map("tenant_require_numbers")
+  tenantRequireSymbols       Boolean  @default(false) @map("tenant_require_symbols")
+
   @@map("tenants")
 }
 
@@ -848,6 +875,7 @@ enum AuditAction {
   DELEGATION_CHECK
   MCP_CONNECTION_REVOKE
   MCP_CONNECTION_REVOKE_ALL
+  PASSKEY_ENFORCEMENT_BLOCKED
 }
 
 enum AuditScope {
@@ -1176,6 +1204,13 @@ model TeamPolicy {
   allowExport               Boolean @default(true) @map("allow_export")
   allowSharing              Boolean @default(true) @map("allow_sharing")
   requireSharePassword      Boolean @default(false) @map("require_share_password")
+
+  // Password reuse prevention
+  passwordHistoryCount      Int     @default(0)  @map("password_history_count")
+
+  // Team IP restriction
+  inheritTenantCidrs        Boolean @default(true) @map("inherit_tenant_cidrs")
+  teamAllowedCidrs          String[] @default([])  @map("team_allowed_cidrs")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

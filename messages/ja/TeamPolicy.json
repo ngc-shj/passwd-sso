@@ -1,6 +1,6 @@
 {
   "title": "セキュリティポリシー",
-  "description": "チームのセキュリティポリシーを設定します。パスワード強度ルールは参考値です — パスワードジェネレーターのデフォルト設定と警告表示に使用されますが、保存をブロックしません。",
+  "description": "チームのセキュリティポリシーを設定します。パスワード強度ルールに違反するとフォームの送信がブロックされます。",
   "passwordRequirements": "パスワード要件",
   "minPasswordLength": "最小パスワード長",
   "minPasswordLengthHelp": "0で無効化",
@@ -26,5 +26,18 @@
   "fetchError": "セキュリティポリシーの読み込みに失敗しました。",
   "validationError": "入力内容に誤りがあります。",
   "minPasswordLengthRange": "0〜128の範囲で入力してください",
-  "maxSessionDurationRange": "5〜43200の範囲で入力してください"
+  "maxSessionDurationRange": "5〜43200の範囲で入力してください",
+  "passwordReusePrevention": "パスワード再利用防止",
+  "passwordHistoryCount": "パスワード履歴チェック",
+  "passwordHistoryCountHelp": "保存前に再利用を確認する過去のパスワード数。比較は暗号化前にクライアント側で行われます（0=無効、最大24件）。",
+  "teamIpRestriction": "チームIPアドレス制限",
+  "inheritTenantCidrs": "テナントのIP制限を継承する",
+  "inheritTenantCidrsHelp": "テナントレベルのIPアドレス制限をこのチームにも適用します（チーム固有のCIDRに加えて）",
+  "teamAllowedCidrs": "チームIPアドレス許可リスト",
+  "teamAllowedCidrsPlaceholder": "192.168.1.0/24\n10.0.0.0/8",
+  "teamAllowedCidrsHelp": "このチームに追加で許可するCIDR範囲（1行に1つ、最大{max}件）。空欄の場合はテナント制限のみが適用されます。",
+  "passwordHistoryCountRange": "0〜24の範囲で入力してください",
+  "teamAllowedCidrsMax": "CIDRエントリは最大{max}件です",
+  "policyPasswordReuse": "このパスワードは最近使用されました",
+  "policyBlocked": "パスワードがチームのポリシー要件を満たしていません"
 }

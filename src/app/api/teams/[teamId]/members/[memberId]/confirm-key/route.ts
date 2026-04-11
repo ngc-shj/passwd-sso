@@ -27,7 +27,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     await requireTeamPermission(
         session.user.id,
         teamId,
-        TEAM_PERMISSION.MEMBER_INVITE
+        TEAM_PERMISSION.MEMBER_INVITE,
+        req
       );
   } catch (e) {
     if (e instanceof TeamAuthError) {

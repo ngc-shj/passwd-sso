@@ -6,12 +6,22 @@ vi.mock("@/lib/prisma", () => ({
     teamPolicy: {
       findUnique: vi.fn(),
     },
+    teamMember: {
+      findMany: vi.fn(),
+    },
   },
 }));
 
 // withTeamTenantRls just invokes the callback
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: vi.fn((_teamId: string, fn: () => unknown) => fn()),
+  resolveTeamTenantId: vi.fn(),
+}));
+
+// withBypassRls just invokes the callback
+vi.mock("@/lib/tenant-rls", () => ({
+  withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  BYPASS_PURPOSE: { AUTH_FLOW: "auth_flow", CROSS_TENANT_LOOKUP: "cross_tenant_lookup" },
 }));
 
 import { prisma } from "@/lib/prisma";
@@ -20,6 +30,7 @@ import {
   assertPolicyAllowsExport,
   assertPolicyAllowsSharing,
   assertPolicySharePassword,
+  getStrictestSessionDuration,
   PolicyViolationError,
   type TeamPolicyData,
 } from "./team-policy";
@@ -38,6 +49,9 @@ const fullPolicy: TeamPolicyData & { teamId: string } = {
   allowExport: true,
   allowSharing: true,
   requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 beforeEach(() => {
@@ -59,6 +73,9 @@ describe("getTeamPolicy", () => {
       allowExport: true,
       allowSharing: true,
       requireSharePassword: false,
+      passwordHistoryCount: 0,
+      inheritTenantCidrs: true,
+      teamAllowedCidrs: [],
     });
   });
 
@@ -131,6 +148,47 @@ describe("assertPolicySharePassword", () => {
   it("throws when requireSharePassword is true and requirePassword is undefined", async () => {
     mockFindUnique.mockResolvedValue({ ...fullPolicy, requireSharePassword: true });
     await expect(assertPolicySharePassword("team-1", undefined)).rejects.toThrow(PolicyViolationError);
+  });
+});
+
+describe("getStrictestSessionDuration", () => {
+  const mockFindMany = prisma.teamMember.findMany as ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    mockFindMany.mockReset();
+  });
+
+  it("returns null for user with no teams", async () => {
+    mockFindMany.mockResolvedValue([]);
+    const result = await getStrictestSessionDuration("user-no-teams");
+    expect(result).toBeNull();
+  });
+
+  it("returns null when all teams have null duration", async () => {
+    mockFindMany.mockResolvedValue([
+      { team: { policy: null } },
+      { team: { policy: { maxSessionDurationMinutes: null } } },
+    ]);
+    const result = await getStrictestSessionDuration("user-all-null");
+    expect(result).toBeNull();
+  });
+
+  it("returns minimum non-null duration across teams", async () => {
+    mockFindMany.mockResolvedValue([
+      { team: { policy: { maxSessionDurationMinutes: 120 } } },
+      { team: { policy: { maxSessionDurationMinutes: 60 } } },
+      { team: { policy: { maxSessionDurationMinutes: 240 } } },
+    ]);
+    const result = await getStrictestSessionDuration("user-multi-teams");
+    expect(result).toBe(60);
+  });
+
+  it("returns single team's duration", async () => {
+    mockFindMany.mockResolvedValue([
+      { team: { policy: { maxSessionDurationMinutes: 90 } } },
+    ]);
+    const result = await getStrictestSessionDuration("user-single-team");
+    expect(result).toBe(90);
   });
 });
 

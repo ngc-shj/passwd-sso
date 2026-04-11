@@ -44,6 +44,13 @@ describe("usePersonalLoginFormModel", () => {
     useVaultMock.mockReturnValue({
       encryptionKey: {} as CryptoKey,
       userId: "user-1",
+      tenantPolicy: {
+        minPasswordLength: 0,
+        requireUppercase: false,
+        requireLowercase: false,
+        requireNumbers: false,
+        requireSymbols: false,
+      },
     });
     usePersonalFoldersMock.mockReturnValue([]);
     submitPersonalLoginFormMock.mockResolvedValue(undefined);

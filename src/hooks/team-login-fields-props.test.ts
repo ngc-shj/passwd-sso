@@ -16,6 +16,10 @@ const fakePolicy: TeamPolicyClient = {
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
+  requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 function createTextProps(): TeamLoginFieldTextProps {

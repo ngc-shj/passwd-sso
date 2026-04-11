@@ -29,7 +29,7 @@ function getExtension(filename: string): string {
 
 // GET /api/teams/[teamId]/passwords/[id]/attachments - List attachment metadata
 async function handleGET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: RouteContext
 ) {
   const session = await auth();
@@ -40,7 +40,7 @@ async function handleGET(
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -90,7 +90,7 @@ async function handlePOST(
   const { teamId, id } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

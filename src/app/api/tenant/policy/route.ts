@@ -13,14 +13,38 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
-import { pinLengthSchema, MAX_CIDRS } from "@/lib/validations/common";
+import { invalidateLockoutThresholdCache } from "@/lib/account-lockout";
 import {
+  pinLengthSchema,
+  MAX_CIDRS,
+  LOCKOUT_THRESHOLD_MIN,
+  LOCKOUT_THRESHOLD_MAX,
+  LOCKOUT_DURATION_MIN,
+  LOCKOUT_DURATION_MAX,
+  PASSWORD_MAX_AGE_MIN,
+  PASSWORD_MAX_AGE_MAX,
+  PASSWORD_EXPIRY_WARNING_MIN,
+  PASSWORD_EXPIRY_WARNING_MAX,
+  AUDIT_LOG_RETENTION_MIN,
+  AUDIT_LOG_RETENTION_MAX,
+  PASSKEY_GRACE_PERIOD_MIN,
+  PASSKEY_GRACE_PERIOD_MAX,
+  POLICY_MIN_PW_LENGTH_MIN,
+  POLICY_MIN_PW_LENGTH_MAX,
   MAX_CONCURRENT_SESSIONS_MIN,
   MAX_CONCURRENT_SESSIONS_MAX,
   SESSION_IDLE_TIMEOUT_MIN,
   SESSION_IDLE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
+  SA_TOKEN_MAX_EXPIRY_MIN,
+  SA_TOKEN_MAX_EXPIRY_MAX,
+  JIT_TOKEN_TTL_MIN,
+  JIT_TOKEN_TTL_MAX,
+  DELEGATION_TTL_MIN,
+  DELEGATION_TTL_MAX,
+} from "@/lib/validations/common";
+import {
   IP_ADDRESS_MAX_LENGTH,
 } from "@/lib/validations/common.server";
 
@@ -53,6 +77,28 @@ async function handleGET(_req: NextRequest) {
         tailscaleEnabled: true,
         tailscaleTailnet: true,
         requireMinPinLength: true,
+        requirePasskey: true,
+        requirePasskeyEnabledAt: true,
+        passkeyGracePeriodDays: true,
+        lockoutThreshold1: true,
+        lockoutDuration1Minutes: true,
+        lockoutThreshold2: true,
+        lockoutDuration2Minutes: true,
+        lockoutThreshold3: true,
+        lockoutDuration3Minutes: true,
+        passwordMaxAgeDays: true,
+        passwordExpiryWarningDays: true,
+        auditLogRetentionDays: true,
+        tenantMinPasswordLength: true,
+        tenantRequireUppercase: true,
+        tenantRequireLowercase: true,
+        tenantRequireNumbers: true,
+        tenantRequireSymbols: true,
+        saTokenMaxExpiryDays: true,
+        jitTokenDefaultTtlSec: true,
+        jitTokenMaxTtlSec: true,
+        delegationDefaultTtlSec: true,
+        delegationMaxTtlSec: true,
       } } },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
@@ -65,6 +111,28 @@ async function handleGET(_req: NextRequest) {
     tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
     tailscaleTailnet: user?.tenant?.tailscaleTailnet ?? null,
     requireMinPinLength: user?.tenant?.requireMinPinLength ?? null,
+    requirePasskey: user?.tenant?.requirePasskey ?? false,
+    requirePasskeyEnabledAt: user?.tenant?.requirePasskeyEnabledAt ?? null,
+    passkeyGracePeriodDays: user?.tenant?.passkeyGracePeriodDays ?? null,
+    lockoutThreshold1: user?.tenant?.lockoutThreshold1 ?? null,
+    lockoutDuration1Minutes: user?.tenant?.lockoutDuration1Minutes ?? null,
+    lockoutThreshold2: user?.tenant?.lockoutThreshold2 ?? null,
+    lockoutDuration2Minutes: user?.tenant?.lockoutDuration2Minutes ?? null,
+    lockoutThreshold3: user?.tenant?.lockoutThreshold3 ?? null,
+    lockoutDuration3Minutes: user?.tenant?.lockoutDuration3Minutes ?? null,
+    passwordMaxAgeDays: user?.tenant?.passwordMaxAgeDays ?? null,
+    passwordExpiryWarningDays: user?.tenant?.passwordExpiryWarningDays ?? null,
+    auditLogRetentionDays: user?.tenant?.auditLogRetentionDays ?? null,
+    tenantMinPasswordLength: user?.tenant?.tenantMinPasswordLength ?? null,
+    tenantRequireUppercase: user?.tenant?.tenantRequireUppercase ?? false,
+    tenantRequireLowercase: user?.tenant?.tenantRequireLowercase ?? false,
+    tenantRequireNumbers: user?.tenant?.tenantRequireNumbers ?? false,
+    tenantRequireSymbols: user?.tenant?.tenantRequireSymbols ?? false,
+    saTokenMaxExpiryDays: user?.tenant?.saTokenMaxExpiryDays ?? null,
+    jitTokenDefaultTtlSec: user?.tenant?.jitTokenDefaultTtlSec ?? null,
+    jitTokenMaxTtlSec: user?.tenant?.jitTokenMaxTtlSec ?? null,
+    delegationDefaultTtlSec: user?.tenant?.delegationDefaultTtlSec ?? null,
+    delegationMaxTtlSec: user?.tenant?.delegationMaxTtlSec ?? null,
   });
 }
 
@@ -96,7 +164,37 @@ async function handlePATCH(req: NextRequest) {
   } catch {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
-  const { maxConcurrentSessions, sessionIdleTimeoutMinutes, vaultAutoLockMinutes, allowedCidrs, tailscaleEnabled, tailscaleTailnet, requireMinPinLength, confirmLockout } = body;
+  const {
+    maxConcurrentSessions,
+    sessionIdleTimeoutMinutes,
+    vaultAutoLockMinutes,
+    allowedCidrs,
+    tailscaleEnabled,
+    tailscaleTailnet,
+    requireMinPinLength,
+    confirmLockout,
+    requirePasskey,
+    passkeyGracePeriodDays,
+    lockoutThreshold1,
+    lockoutDuration1Minutes,
+    lockoutThreshold2,
+    lockoutDuration2Minutes,
+    lockoutThreshold3,
+    lockoutDuration3Minutes,
+    passwordMaxAgeDays,
+    passwordExpiryWarningDays,
+    auditLogRetentionDays,
+    tenantMinPasswordLength,
+    tenantRequireUppercase,
+    tenantRequireLowercase,
+    tenantRequireNumbers,
+    tenantRequireSymbols,
+    saTokenMaxExpiryDays,
+    jitTokenDefaultTtlSec,
+    jitTokenMaxTtlSec,
+    delegationDefaultTtlSec,
+    delegationMaxTtlSec,
+  } = body;
 
   // Validate maxConcurrentSessions: null (unlimited) or positive integer
   if (maxConcurrentSessions !== null && maxConcurrentSessions !== undefined) {
@@ -155,23 +253,7 @@ async function handlePATCH(req: NextRequest) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
   }
 
-  // Validate tailscaleTailnet: required when tailscaleEnabled is true
-  if (tailscaleEnabled === true) {
-    if (tailscaleTailnet === undefined) {
-      // Not in request — check if DB already has a value
-      const existing = await withBypassRls(prisma, async () =>
-        prisma.tenant.findUnique({
-          where: { id: membership.tenantId },
-          select: { tailscaleTailnet: true },
-        }),
-      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-      if (!existing?.tailscaleTailnet) {
-        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
-      }
-    } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
-      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
-    }
-  }
+  // Validate tailscaleTailnet format before the DB read (pure string validation)
   if (tailscaleTailnet !== null && tailscaleTailnet !== undefined) {
     if (typeof tailscaleTailnet !== "string" || tailscaleTailnet.length > TAILNET_NAME_MAX_LENGTH) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
@@ -189,17 +271,337 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
+  // Validate requirePasskey: boolean
+  if (requirePasskey !== undefined && typeof requirePasskey !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate passkeyGracePeriodDays: null (immediate enforcement) or integer within bounds
+  if (passkeyGracePeriodDays !== null && passkeyGracePeriodDays !== undefined) {
+    if (
+      typeof passkeyGracePeriodDays !== "number" ||
+      !Number.isInteger(passkeyGracePeriodDays) ||
+      passkeyGracePeriodDays < PASSKEY_GRACE_PERIOD_MIN ||
+      passkeyGracePeriodDays > PASSKEY_GRACE_PERIOD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutThreshold1: non-nullable; skip if null (do not write to DB)
+  if (lockoutThreshold1 !== undefined && lockoutThreshold1 !== null) {
+    if (
+      typeof lockoutThreshold1 !== "number" ||
+      !Number.isInteger(lockoutThreshold1) ||
+      lockoutThreshold1 < LOCKOUT_THRESHOLD_MIN ||
+      lockoutThreshold1 > LOCKOUT_THRESHOLD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutDuration1Minutes: non-nullable; skip if null (do not write to DB)
+  if (lockoutDuration1Minutes !== undefined && lockoutDuration1Minutes !== null) {
+    if (
+      typeof lockoutDuration1Minutes !== "number" ||
+      !Number.isInteger(lockoutDuration1Minutes) ||
+      lockoutDuration1Minutes < LOCKOUT_DURATION_MIN ||
+      lockoutDuration1Minutes > LOCKOUT_DURATION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutThreshold2: non-nullable; skip if null (do not write to DB)
+  if (lockoutThreshold2 !== undefined && lockoutThreshold2 !== null) {
+    if (
+      typeof lockoutThreshold2 !== "number" ||
+      !Number.isInteger(lockoutThreshold2) ||
+      lockoutThreshold2 < LOCKOUT_THRESHOLD_MIN ||
+      lockoutThreshold2 > LOCKOUT_THRESHOLD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutDuration2Minutes: non-nullable; skip if null (do not write to DB)
+  if (lockoutDuration2Minutes !== undefined && lockoutDuration2Minutes !== null) {
+    if (
+      typeof lockoutDuration2Minutes !== "number" ||
+      !Number.isInteger(lockoutDuration2Minutes) ||
+      lockoutDuration2Minutes < LOCKOUT_DURATION_MIN ||
+      lockoutDuration2Minutes > LOCKOUT_DURATION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutThreshold3: non-nullable; skip if null (do not write to DB)
+  if (lockoutThreshold3 !== undefined && lockoutThreshold3 !== null) {
+    if (
+      typeof lockoutThreshold3 !== "number" ||
+      !Number.isInteger(lockoutThreshold3) ||
+      lockoutThreshold3 < LOCKOUT_THRESHOLD_MIN ||
+      lockoutThreshold3 > LOCKOUT_THRESHOLD_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate lockoutDuration3Minutes: non-nullable; skip if null (do not write to DB)
+  if (lockoutDuration3Minutes !== undefined && lockoutDuration3Minutes !== null) {
+    if (
+      typeof lockoutDuration3Minutes !== "number" ||
+      !Number.isInteger(lockoutDuration3Minutes) ||
+      lockoutDuration3Minutes < LOCKOUT_DURATION_MIN ||
+      lockoutDuration3Minutes > LOCKOUT_DURATION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate passwordMaxAgeDays: null (disabled) or integer within bounds
+  if (passwordMaxAgeDays !== null && passwordMaxAgeDays !== undefined) {
+    if (
+      typeof passwordMaxAgeDays !== "number" ||
+      !Number.isInteger(passwordMaxAgeDays) ||
+      passwordMaxAgeDays < PASSWORD_MAX_AGE_MIN ||
+      passwordMaxAgeDays > PASSWORD_MAX_AGE_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate passwordExpiryWarningDays: non-nullable; skip if null (do not write to DB)
+  if (passwordExpiryWarningDays !== undefined && passwordExpiryWarningDays !== null) {
+    if (
+      typeof passwordExpiryWarningDays !== "number" ||
+      !Number.isInteger(passwordExpiryWarningDays) ||
+      passwordExpiryWarningDays < PASSWORD_EXPIRY_WARNING_MIN ||
+      passwordExpiryWarningDays > PASSWORD_EXPIRY_WARNING_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate auditLogRetentionDays: null (forever) or integer within bounds
+  if (auditLogRetentionDays !== null && auditLogRetentionDays !== undefined) {
+    if (
+      typeof auditLogRetentionDays !== "number" ||
+      !Number.isInteger(auditLogRetentionDays) ||
+      auditLogRetentionDays < AUDIT_LOG_RETENTION_MIN ||
+      auditLogRetentionDays > AUDIT_LOG_RETENTION_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate tenantMinPasswordLength: non-nullable; skip if null (do not write to DB)
+  if (tenantMinPasswordLength !== undefined && tenantMinPasswordLength !== null) {
+    if (
+      typeof tenantMinPasswordLength !== "number" ||
+      !Number.isInteger(tenantMinPasswordLength) ||
+      tenantMinPasswordLength < POLICY_MIN_PW_LENGTH_MIN ||
+      tenantMinPasswordLength > POLICY_MIN_PW_LENGTH_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate tenantRequireUppercase: boolean
+  if (tenantRequireUppercase !== undefined && typeof tenantRequireUppercase !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate tenantRequireLowercase: boolean
+  if (tenantRequireLowercase !== undefined && typeof tenantRequireLowercase !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate tenantRequireNumbers: boolean
+  if (tenantRequireNumbers !== undefined && typeof tenantRequireNumbers !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate tenantRequireSymbols: boolean
+  if (tenantRequireSymbols !== undefined && typeof tenantRequireSymbols !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
+
+  // Validate saTokenMaxExpiryDays: null (no limit) or integer within bounds
+  if (saTokenMaxExpiryDays !== null && saTokenMaxExpiryDays !== undefined) {
+    if (
+      typeof saTokenMaxExpiryDays !== "number" ||
+      !Number.isInteger(saTokenMaxExpiryDays) ||
+      saTokenMaxExpiryDays < SA_TOKEN_MAX_EXPIRY_MIN ||
+      saTokenMaxExpiryDays > SA_TOKEN_MAX_EXPIRY_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate jitTokenDefaultTtlSec: null (use system default) or integer within bounds
+  if (jitTokenDefaultTtlSec !== null && jitTokenDefaultTtlSec !== undefined) {
+    if (
+      typeof jitTokenDefaultTtlSec !== "number" ||
+      !Number.isInteger(jitTokenDefaultTtlSec) ||
+      jitTokenDefaultTtlSec < JIT_TOKEN_TTL_MIN ||
+      jitTokenDefaultTtlSec > JIT_TOKEN_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate jitTokenMaxTtlSec: null (no limit) or integer within bounds
+  if (jitTokenMaxTtlSec !== null && jitTokenMaxTtlSec !== undefined) {
+    if (
+      typeof jitTokenMaxTtlSec !== "number" ||
+      !Number.isInteger(jitTokenMaxTtlSec) ||
+      jitTokenMaxTtlSec < JIT_TOKEN_TTL_MIN ||
+      jitTokenMaxTtlSec > JIT_TOKEN_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate delegationDefaultTtlSec: null (use system default) or integer within bounds
+  if (delegationDefaultTtlSec !== null && delegationDefaultTtlSec !== undefined) {
+    if (
+      typeof delegationDefaultTtlSec !== "number" ||
+      !Number.isInteger(delegationDefaultTtlSec) ||
+      delegationDefaultTtlSec < DELEGATION_TTL_MIN ||
+      delegationDefaultTtlSec > DELEGATION_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate delegationMaxTtlSec: null (no limit) or integer within bounds
+  if (delegationMaxTtlSec !== null && delegationMaxTtlSec !== undefined) {
+    if (
+      typeof delegationMaxTtlSec !== "number" ||
+      !Number.isInteger(delegationMaxTtlSec) ||
+      delegationMaxTtlSec < DELEGATION_TTL_MIN ||
+      delegationMaxTtlSec > DELEGATION_TTL_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Single DB read that covers all three validation needs:
+  //   1. tailscale: check existing tailscaleTailnet when tailscaleEnabled=true without a new value
+  //   2. cross-field: lockout thresholds/durations, password expiry, requirePasskey set-once
+  //   3. self-lockout: current allowedCidrs/tailscaleEnabled to simulate the new policy
+  const needsCurrentState =
+    (tailscaleEnabled === true && tailscaleTailnet === undefined) ||
+    requirePasskey !== undefined ||
+    lockoutThreshold1 !== undefined ||
+    lockoutDuration1Minutes !== undefined ||
+    lockoutThreshold2 !== undefined ||
+    lockoutDuration2Minutes !== undefined ||
+    lockoutThreshold3 !== undefined ||
+    lockoutDuration3Minutes !== undefined ||
+    passwordMaxAgeDays !== undefined ||
+    passwordExpiryWarningDays !== undefined ||
+    jitTokenDefaultTtlSec !== undefined ||
+    jitTokenMaxTtlSec !== undefined ||
+    delegationDefaultTtlSec !== undefined ||
+    delegationMaxTtlSec !== undefined ||
+    ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
+
+  const currentTenant = needsCurrentState
+    ? await withBypassRls(prisma, async () =>
+        prisma.tenant.findUnique({
+          where: { id: membership.tenantId },
+          select: {
+            tailscaleTailnet: true,
+            tailscaleEnabled: true,
+            allowedCidrs: true,
+            requirePasskey: true,
+            lockoutThreshold1: true,
+            lockoutDuration1Minutes: true,
+            lockoutThreshold2: true,
+            lockoutDuration2Minutes: true,
+            lockoutThreshold3: true,
+            lockoutDuration3Minutes: true,
+            passwordMaxAgeDays: true,
+            passwordExpiryWarningDays: true,
+            jitTokenDefaultTtlSec: true,
+            jitTokenMaxTtlSec: true,
+            delegationDefaultTtlSec: true,
+            delegationMaxTtlSec: true,
+          },
+        }),
+      BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
+    : null;
+
+  // Validate tailscaleTailnet: required when tailscaleEnabled is true
+  if (tailscaleEnabled === true) {
+    if (tailscaleTailnet === undefined) {
+      // Not in request — check if DB already has a value
+      if (!currentTenant?.tailscaleTailnet) {
+        return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
+      }
+    } else if (!tailscaleTailnet || typeof tailscaleTailnet !== "string" || tailscaleTailnet.trim().length === 0) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "tailscaleTailnet is required when tailscaleEnabled is true" });
+    }
+  }
+
+  // Cross-field validation: lockout thresholds/durations must be strictly ascending.
+  // Merge request values with current DB values, falling back to schema defaults when DB has no value.
+  const DEFAULT_T1 = 5, DEFAULT_T2 = 10, DEFAULT_T3 = 15;
+  const DEFAULT_D1 = 15, DEFAULT_D2 = 60, DEFAULT_D3 = 1440;
+
+  const t1 = (lockoutThreshold1 !== undefined ? lockoutThreshold1 : currentTenant?.lockoutThreshold1) ?? DEFAULT_T1;
+  const t2 = (lockoutThreshold2 !== undefined ? lockoutThreshold2 : currentTenant?.lockoutThreshold2) ?? DEFAULT_T2;
+  const t3 = (lockoutThreshold3 !== undefined ? lockoutThreshold3 : currentTenant?.lockoutThreshold3) ?? DEFAULT_T3;
+  const d1 = (lockoutDuration1Minutes !== undefined ? lockoutDuration1Minutes : currentTenant?.lockoutDuration1Minutes) ?? DEFAULT_D1;
+  const d2 = (lockoutDuration2Minutes !== undefined ? lockoutDuration2Minutes : currentTenant?.lockoutDuration2Minutes) ?? DEFAULT_D2;
+  const d3 = (lockoutDuration3Minutes !== undefined ? lockoutDuration3Minutes : currentTenant?.lockoutDuration3Minutes) ?? DEFAULT_D3;
+
+  // Lockout thresholds must always be strictly ascending
+  if (t1 >= t2 || t2 >= t3) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout thresholds must be strictly ascending: threshold1 < threshold2 < threshold3" });
+  }
+
+  // Lockout durations must always be strictly ascending
+  if (d1 >= d2 || d2 >= d3) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" });
+  }
+
+  // Password expiry warning must be less than max age when both are set
+  const mergedMaxAge = passwordMaxAgeDays !== undefined ? passwordMaxAgeDays : currentTenant?.passwordMaxAgeDays;
+  const mergedWarning = passwordExpiryWarningDays !== undefined ? passwordExpiryWarningDays : currentTenant?.passwordExpiryWarningDays;
+  if (mergedMaxAge != null && mergedWarning != null && mergedWarning >= mergedMaxAge) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "passwordExpiryWarningDays must be less than passwordMaxAgeDays" });
+  }
+
+  // Cross-field validation: jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec when both set
+  // Merge request value with current DB value so partial PATCH cannot break the invariant
+  const mergedJitDefault = jitTokenDefaultTtlSec !== undefined ? jitTokenDefaultTtlSec : currentTenant?.jitTokenDefaultTtlSec ?? null;
+  const mergedJitMax = jitTokenMaxTtlSec !== undefined ? jitTokenMaxTtlSec : currentTenant?.jitTokenMaxTtlSec ?? null;
+  if (mergedJitDefault != null && mergedJitMax != null && mergedJitDefault > mergedJitMax) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec" });
+  }
+
+  // Cross-field validation: delegationDefaultTtlSec must be <= delegationMaxTtlSec when both set
+  // Merge request value with current DB value so partial PATCH cannot break the invariant
+  const mergedDelegDefault = delegationDefaultTtlSec !== undefined ? delegationDefaultTtlSec : currentTenant?.delegationDefaultTtlSec ?? null;
+  const mergedDelegMax = delegationMaxTtlSec !== undefined ? delegationMaxTtlSec : currentTenant?.delegationMaxTtlSec ?? null;
+  if (mergedDelegDefault != null && mergedDelegMax != null && mergedDelegDefault > mergedDelegMax) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "delegationDefaultTtlSec must be <= delegationMaxTtlSec" });
+  }
+
+  // requirePasskeyEnabledAt set-once logic uses the already-fetched current state
+  const currentRequirePasskey = currentTenant?.requirePasskey ?? false;
+
   // Self-lockout detection: check if the requester's IP would be allowed under the new policy
   const newAllowedCidrs = allowedCidrs !== undefined ? (allowedCidrs ?? []) : undefined;
   const newTailscaleEnabled = tailscaleEnabled !== undefined ? tailscaleEnabled : undefined;
+  if (confirmLockout !== undefined && typeof confirmLockout !== "boolean") {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+  }
   if ((newAllowedCidrs !== undefined || newTailscaleEnabled !== undefined) && !confirmLockout) {
-    // Build hypothetical policy
-    const currentTenant = await withBypassRls(prisma, async () =>
-      prisma.tenant.findUnique({
-        where: { id: membership.tenantId },
-        select: { allowedCidrs: true, tailscaleEnabled: true, tailscaleTailnet: true },
-      }),
-    BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
     const hypothetical = {
       allowedCidrs: newAllowedCidrs ?? currentTenant?.allowedCidrs ?? [],
       tailscaleEnabled: newTailscaleEnabled ?? currentTenant?.tailscaleEnabled ?? false,
@@ -241,6 +643,80 @@ async function handlePATCH(req: NextRequest) {
     updateData.requireMinPinLength = requireMinPinLength ?? null;
   }
 
+  // requirePasskey + set-once requirePasskeyEnabledAt logic
+  if (requirePasskey !== undefined) {
+    updateData.requirePasskey = requirePasskey;
+    if (requirePasskey === true && currentRequirePasskey === false) {
+      // Transition false → true: record the timestamp
+      updateData.requirePasskeyEnabledAt = new Date();
+    } else if (requirePasskey === false) {
+      // Disabled: clear the timestamp
+      updateData.requirePasskeyEnabledAt = null;
+    }
+    // Already true → true: do NOT overwrite requirePasskeyEnabledAt
+  }
+
+  if (passkeyGracePeriodDays !== undefined) {
+    updateData.passkeyGracePeriodDays = passkeyGracePeriodDays ?? null;
+  }
+  if (lockoutThreshold1 !== undefined && lockoutThreshold1 !== null) {
+    updateData.lockoutThreshold1 = lockoutThreshold1;
+  }
+  if (lockoutDuration1Minutes !== undefined && lockoutDuration1Minutes !== null) {
+    updateData.lockoutDuration1Minutes = lockoutDuration1Minutes;
+  }
+  if (lockoutThreshold2 !== undefined && lockoutThreshold2 !== null) {
+    updateData.lockoutThreshold2 = lockoutThreshold2;
+  }
+  if (lockoutDuration2Minutes !== undefined && lockoutDuration2Minutes !== null) {
+    updateData.lockoutDuration2Minutes = lockoutDuration2Minutes;
+  }
+  if (lockoutThreshold3 !== undefined && lockoutThreshold3 !== null) {
+    updateData.lockoutThreshold3 = lockoutThreshold3;
+  }
+  if (lockoutDuration3Minutes !== undefined && lockoutDuration3Minutes !== null) {
+    updateData.lockoutDuration3Minutes = lockoutDuration3Minutes;
+  }
+  if (passwordMaxAgeDays !== undefined) {
+    updateData.passwordMaxAgeDays = passwordMaxAgeDays ?? null;
+  }
+  if (passwordExpiryWarningDays !== undefined && passwordExpiryWarningDays !== null) {
+    updateData.passwordExpiryWarningDays = passwordExpiryWarningDays;
+  }
+  if (auditLogRetentionDays !== undefined) {
+    updateData.auditLogRetentionDays = auditLogRetentionDays ?? null;
+  }
+  if (tenantMinPasswordLength !== undefined && tenantMinPasswordLength !== null) {
+    updateData.tenantMinPasswordLength = tenantMinPasswordLength;
+  }
+  if (tenantRequireUppercase !== undefined) {
+    updateData.tenantRequireUppercase = tenantRequireUppercase;
+  }
+  if (tenantRequireLowercase !== undefined) {
+    updateData.tenantRequireLowercase = tenantRequireLowercase;
+  }
+  if (tenantRequireNumbers !== undefined) {
+    updateData.tenantRequireNumbers = tenantRequireNumbers;
+  }
+  if (tenantRequireSymbols !== undefined) {
+    updateData.tenantRequireSymbols = tenantRequireSymbols;
+  }
+  if (saTokenMaxExpiryDays !== undefined) {
+    updateData.saTokenMaxExpiryDays = saTokenMaxExpiryDays ?? null;
+  }
+  if (jitTokenDefaultTtlSec !== undefined) {
+    updateData.jitTokenDefaultTtlSec = jitTokenDefaultTtlSec ?? null;
+  }
+  if (jitTokenMaxTtlSec !== undefined) {
+    updateData.jitTokenMaxTtlSec = jitTokenMaxTtlSec ?? null;
+  }
+  if (delegationDefaultTtlSec !== undefined) {
+    updateData.delegationDefaultTtlSec = delegationDefaultTtlSec ?? null;
+  }
+  if (delegationMaxTtlSec !== undefined) {
+    updateData.delegationMaxTtlSec = delegationMaxTtlSec ?? null;
+  }
+
   const updated = await withBypassRls(prisma, async () =>
     prisma.tenant.update({
       where: { id: membership.tenantId },
@@ -253,12 +729,35 @@ async function handlePATCH(req: NextRequest) {
         tailscaleEnabled: true,
         tailscaleTailnet: true,
         requireMinPinLength: true,
+        requirePasskey: true,
+        requirePasskeyEnabledAt: true,
+        passkeyGracePeriodDays: true,
+        lockoutThreshold1: true,
+        lockoutDuration1Minutes: true,
+        lockoutThreshold2: true,
+        lockoutDuration2Minutes: true,
+        lockoutThreshold3: true,
+        lockoutDuration3Minutes: true,
+        passwordMaxAgeDays: true,
+        passwordExpiryWarningDays: true,
+        auditLogRetentionDays: true,
+        tenantMinPasswordLength: true,
+        tenantRequireUppercase: true,
+        tenantRequireLowercase: true,
+        tenantRequireNumbers: true,
+        tenantRequireSymbols: true,
+        saTokenMaxExpiryDays: true,
+        jitTokenDefaultTtlSec: true,
+        jitTokenMaxTtlSec: true,
+        delegationDefaultTtlSec: true,
+        delegationMaxTtlSec: true,
       },
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Bust the tenant policy cache so access restriction picks up new values immediately
   invalidateTenantPolicyCache(membership.tenantId);
+  invalidateLockoutThresholdCache(membership.tenantId);
 
   const meta = extractRequestMeta(req);
   logAudit({
@@ -274,6 +773,28 @@ async function handlePATCH(req: NextRequest) {
       tailscaleEnabled: updated.tailscaleEnabled,
       tailscaleTailnet: updated.tailscaleTailnet,
       requireMinPinLength: updated.requireMinPinLength,
+      requirePasskey: updated.requirePasskey,
+      requirePasskeyEnabledAt: updated.requirePasskeyEnabledAt,
+      passkeyGracePeriodDays: updated.passkeyGracePeriodDays,
+      lockoutThreshold1: updated.lockoutThreshold1,
+      lockoutDuration1Minutes: updated.lockoutDuration1Minutes,
+      lockoutThreshold2: updated.lockoutThreshold2,
+      lockoutDuration2Minutes: updated.lockoutDuration2Minutes,
+      lockoutThreshold3: updated.lockoutThreshold3,
+      lockoutDuration3Minutes: updated.lockoutDuration3Minutes,
+      passwordMaxAgeDays: updated.passwordMaxAgeDays,
+      passwordExpiryWarningDays: updated.passwordExpiryWarningDays,
+      auditLogRetentionDays: updated.auditLogRetentionDays,
+      tenantMinPasswordLength: updated.tenantMinPasswordLength,
+      tenantRequireUppercase: updated.tenantRequireUppercase,
+      tenantRequireLowercase: updated.tenantRequireLowercase,
+      tenantRequireNumbers: updated.tenantRequireNumbers,
+      tenantRequireSymbols: updated.tenantRequireSymbols,
+      saTokenMaxExpiryDays: updated.saTokenMaxExpiryDays,
+      jitTokenDefaultTtlSec: updated.jitTokenDefaultTtlSec,
+      jitTokenMaxTtlSec: updated.jitTokenMaxTtlSec,
+      delegationDefaultTtlSec: updated.delegationDefaultTtlSec,
+      delegationMaxTtlSec: updated.delegationMaxTtlSec,
     },
     ip: meta.ip,
     userAgent: meta.userAgent,
@@ -287,6 +808,28 @@ async function handlePATCH(req: NextRequest) {
     tailscaleEnabled: updated.tailscaleEnabled,
     tailscaleTailnet: updated.tailscaleTailnet,
     requireMinPinLength: updated.requireMinPinLength,
+    requirePasskey: updated.requirePasskey,
+    requirePasskeyEnabledAt: updated.requirePasskeyEnabledAt,
+    passkeyGracePeriodDays: updated.passkeyGracePeriodDays,
+    lockoutThreshold1: updated.lockoutThreshold1,
+    lockoutDuration1Minutes: updated.lockoutDuration1Minutes,
+    lockoutThreshold2: updated.lockoutThreshold2,
+    lockoutDuration2Minutes: updated.lockoutDuration2Minutes,
+    lockoutThreshold3: updated.lockoutThreshold3,
+    lockoutDuration3Minutes: updated.lockoutDuration3Minutes,
+    passwordMaxAgeDays: updated.passwordMaxAgeDays,
+    passwordExpiryWarningDays: updated.passwordExpiryWarningDays,
+    auditLogRetentionDays: updated.auditLogRetentionDays,
+    tenantMinPasswordLength: updated.tenantMinPasswordLength,
+    tenantRequireUppercase: updated.tenantRequireUppercase,
+    tenantRequireLowercase: updated.tenantRequireLowercase,
+    tenantRequireNumbers: updated.tenantRequireNumbers,
+    tenantRequireSymbols: updated.tenantRequireSymbols,
+    saTokenMaxExpiryDays: updated.saTokenMaxExpiryDays,
+    jitTokenDefaultTtlSec: updated.jitTokenDefaultTtlSec,
+    jitTokenMaxTtlSec: updated.jitTokenMaxTtlSec,
+    delegationDefaultTtlSec: updated.delegationDefaultTtlSec,
+    delegationMaxTtlSec: updated.delegationMaxTtlSec,
   });
 }
 

@@ -13,7 +13,9 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team-policy";
 import type { TeamRole } from "@prisma/client";
+import type { NextRequest } from "next/server";
 
 // ─── Permission Definitions ─────────────────────────────────────
 
@@ -101,27 +103,40 @@ export async function getTeamMembership(userId: string, teamId: string) {
 
 /**
  * Require that the user is a member of the team.
+ * When request is provided, also enforces the team IP restriction policy.
  * Returns the membership record, or throws a structured error.
  */
-export async function requireTeamMember(userId: string, teamId: string) {
+export async function requireTeamMember(userId: string, teamId: string, request?: NextRequest) {
   const membership = await getTeamMembership(userId, teamId);
   if (!membership) {
     // Hide team existence from non-members
     throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
+  }
+  if (request) {
+    try {
+      await withTeamIpRestriction(teamId, request, userId);
+    } catch (e) {
+      if (e instanceof PolicyViolationError) {
+        throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
+      }
+      throw e;
+    }
   }
   return membership;
 }
 
 /**
  * Require that the user has a specific permission in the team.
+ * When request is provided, also enforces the team IP restriction policy.
  * Returns the membership record, or throws a structured error.
  */
 export async function requireTeamPermission(
   userId: string,
   teamId: string,
-  permission: TeamPermission
+  permission: TeamPermission,
+  request?: NextRequest
 ) {
-  const membership = await requireTeamMember(userId, teamId);
+  const membership = await requireTeamMember(userId, teamId, request);
   if (!hasTeamPermission(membership.role, permission)) {
     throw new TeamAuthError(API_ERROR.FORBIDDEN, 403);
   }

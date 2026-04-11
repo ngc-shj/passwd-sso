@@ -20,7 +20,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(userId, teamId);
+    await requireTeamMember(userId, teamId, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

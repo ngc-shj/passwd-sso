@@ -37,6 +37,12 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
+vi.mock("@/lib/team-policy", () => ({
+  assertPolicyAllowsExport: vi.fn().mockResolvedValue(undefined),
+  PolicyViolationError: class PolicyViolationError extends Error {
+    constructor(message: string) { super(message); this.name = "PolicyViolationError"; }
+  },
+}));
 
 import { POST } from "./route";
 import { AUDIT_ACTION, AUDIT_SCOPE, TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";

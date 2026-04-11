@@ -262,6 +262,116 @@ describe("POST /api/tenant/service-accounts/[id]/tokens", () => {
     expect(json.error).toBe("SA_TOKEN_LIMIT_EXCEEDED");
   });
 
+  it("clamps expiresAt to saTokenMaxExpiryDays when requested expiry exceeds the limit", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+      tenant: { saTokenMaxExpiryDays: 30 },
+    });
+
+    let capturedExpiresAt: Date | undefined;
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        serviceAccountToken: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockImplementation(({ data }: { data: { expiresAt: Date } }) => {
+            capturedExpiresAt = data.expiresAt;
+            return Promise.resolve({
+              id: TOKEN_ID,
+              serviceAccountId: SA_ID,
+              tenantId: "tenant-1",
+              tokenHash: "hashed-token",
+              prefix: "sa_abcd",
+              name: "deploy-token",
+              scope: "passwords:read",
+              expiresAt: data.expiresAt,
+              createdAt: new Date(),
+            });
+          }),
+        },
+      };
+      return fn(tx);
+    });
+
+    const expiresAt = new Date(Date.now() + 90 * 24 * 3600 * 1000).toISOString();
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`,
+      {
+        body: {
+          name: "deploy-token",
+          scope: ["passwords:read"],
+          expiresAt,
+        },
+      },
+    );
+    const res = await POST(req, createParams({ id: SA_ID }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(capturedExpiresAt).toBeDefined();
+    const expectedMax = Date.now() + 30 * 24 * 3600 * 1000;
+    expect(capturedExpiresAt!.getTime()).toBeGreaterThan(expectedMax - 5000);
+    expect(capturedExpiresAt!.getTime()).toBeLessThanOrEqual(expectedMax + 5000);
+  });
+
+  it("passes expiresAt through unchanged when within saTokenMaxExpiryDays", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockServiceAccountFindUnique.mockResolvedValue({
+      id: SA_ID,
+      tenantId: "tenant-1",
+      isActive: true,
+      tenant: { saTokenMaxExpiryDays: 90 },
+    });
+
+    let capturedExpiresAt: Date | undefined;
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) => {
+      const tx = {
+        serviceAccountToken: {
+          count: vi.fn().mockResolvedValue(0),
+          create: vi.fn().mockImplementation(({ data }: { data: { expiresAt: Date } }) => {
+            capturedExpiresAt = data.expiresAt;
+            return Promise.resolve({
+              id: TOKEN_ID,
+              serviceAccountId: SA_ID,
+              tenantId: "tenant-1",
+              tokenHash: "hashed-token",
+              prefix: "sa_abcd",
+              name: "deploy-token",
+              scope: "passwords:read",
+              expiresAt: data.expiresAt,
+              createdAt: new Date(),
+            });
+          }),
+        },
+      };
+      return fn(tx);
+    });
+
+    const requestedExpiresAt = new Date(Date.now() + 30 * 24 * 3600 * 1000);
+    const req = createRequest(
+      "POST",
+      `http://localhost/api/tenant/service-accounts/${SA_ID}/tokens`,
+      {
+        body: {
+          name: "deploy-token",
+          scope: ["passwords:read"],
+          expiresAt: requestedExpiresAt.toISOString(),
+        },
+      },
+    );
+    const res = await POST(req, createParams({ id: SA_ID }));
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+    expect(capturedExpiresAt).toBeDefined();
+    expect(Math.abs(capturedExpiresAt!.getTime() - requestedExpiresAt.getTime())).toBeLessThan(1000);
+  });
+
   it("returns 401 for unauthenticated users", async () => {
     mockAuth.mockResolvedValue(null);
 

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const {
   mockPrismaUser,
+  mockPrismaTenant,
   mockPrismaTransaction,
   mockLogAudit,
   mockExtractRequestMeta,
@@ -16,6 +17,7 @@ const {
   };
   return {
     mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+    mockPrismaTenant: { findUnique: vi.fn() },
     mockPrismaTransaction: vi.fn(),
     mockLogAudit: vi.fn(),
     mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: null, userAgent: null }),
@@ -28,6 +30,7 @@ const {
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: mockPrismaUser,
+    tenant: mockPrismaTenant,
     $transaction: mockPrismaTransaction,
   },
 }));
@@ -54,7 +57,7 @@ vi.mock("@/lib/lockout-admin-notify", () => ({
   notifyAdminsOfLockout: mockNotifyAdminsOfLockout,
 }));
 
-import { checkLockout, recordFailure, resetLockout } from "./account-lockout";
+import { checkLockout, recordFailure, resetLockout, invalidateLockoutThresholdCache } from "./account-lockout";
 
 describe("checkLockout", () => {
   beforeEach(() => {
@@ -491,5 +494,154 @@ describe("resetLockout", () => {
       expect.objectContaining({ userId: "user-1" }),
       "vault.lockout.resetLockout.error",
     );
+  });
+});
+
+describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Invalidate any cached thresholds from other tests
+    invalidateLockoutThresholdCache("tenant-custom");
+    invalidateLockoutThresholdCache("tenant-missing");
+  });
+
+  function setupTransaction(row: {
+    failed_unlock_attempts: number;
+    last_failed_unlock_at: Date | null;
+    account_locked_until: Date | null;
+  }) {
+    mockPrismaTransaction.mockImplementation(async (fn: (tx: unknown) => Promise<unknown>) => {
+      const tx = {
+        $executeRaw: vi.fn(),
+        $queryRaw: vi.fn().mockResolvedValue([row]),
+        user: { update: vi.fn() },
+      };
+      return fn(tx);
+    });
+  }
+
+  it("applies custom thresholds when getLockoutThresholds returns per-tenant config", async () => {
+    // Custom thresholds: 3 → 30min, 7 → 2h, 12 → 24h
+    mockPrismaTenant.findUnique.mockResolvedValue({
+      lockoutThreshold1: 3,
+      lockoutDuration1Minutes: 30,
+      lockoutThreshold2: 7,
+      lockoutDuration2Minutes: 120,
+      lockoutThreshold3: 12,
+      lockoutDuration3Minutes: 1440,
+    });
+    setupTransaction({
+      failed_unlock_attempts: 2, // 2 previous → 3 after increment = hits threshold1
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    const result = await recordFailure("user-1", undefined, "tenant-custom");
+    expect(result).not.toBeNull();
+    expect(result!.attempts).toBe(3);
+    expect(result!.locked).toBe(true);
+    // 30min lock from custom threshold1
+    const expectedLockMs = 30 * 60 * 1000;
+    expect(result!.lockedUntil).toBeInstanceOf(Date);
+    expect(Math.abs(result!.lockedUntil!.getTime() - (Date.now() + expectedLockMs))).toBeLessThan(5000);
+  });
+
+  it("calls prisma.tenant.findUnique with the correct tenantId", async () => {
+    mockPrismaTenant.findUnique.mockResolvedValue({
+      lockoutThreshold1: 5,
+      lockoutDuration1Minutes: 15,
+      lockoutThreshold2: 10,
+      lockoutDuration2Minutes: 60,
+      lockoutThreshold3: 15,
+      lockoutDuration3Minutes: 1440,
+    });
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+
+    await recordFailure("user-1", undefined, "tenant-abc");
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "tenant-abc" },
+      }),
+    );
+    // Clean up cache
+    invalidateLockoutThresholdCache("tenant-abc");
+  });
+
+  it("falls back to default thresholds when tenant is not found", async () => {
+    mockPrismaTenant.findUnique.mockResolvedValue(null);
+    setupTransaction({
+      failed_unlock_attempts: 4,
+      last_failed_unlock_at: new Date(),
+      account_locked_until: null,
+    });
+
+    const result = await recordFailure("user-1", undefined, "tenant-missing");
+    expect(result).not.toBeNull();
+    // Default threshold: 5 attempts → 15min lock
+    expect(result!.attempts).toBe(5);
+    expect(result!.locked).toBe(true);
+  });
+
+  it("re-queries the DB after invalidateLockoutThresholdCache", async () => {
+    // First call: return custom thresholds, cache them
+    mockPrismaTenant.findUnique.mockResolvedValue({
+      lockoutThreshold1: 3,
+      lockoutDuration1Minutes: 30,
+      lockoutThreshold2: 7,
+      lockoutDuration2Minutes: 120,
+      lockoutThreshold3: 12,
+      lockoutDuration3Minutes: 1440,
+    });
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    await recordFailure("user-1", undefined, "tenant-custom");
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledTimes(1);
+
+    // Invalidate cache
+    invalidateLockoutThresholdCache("tenant-custom");
+
+    // Second call should re-query
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    await recordFailure("user-1", undefined, "tenant-custom");
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT re-query the DB within the cache TTL", async () => {
+    mockPrismaTenant.findUnique.mockResolvedValue({
+      lockoutThreshold1: 3,
+      lockoutDuration1Minutes: 30,
+      lockoutThreshold2: 7,
+      lockoutDuration2Minutes: 120,
+      lockoutThreshold3: 12,
+      lockoutDuration3Minutes: 1440,
+    });
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+
+    // Call twice without invalidating — second call should use cached thresholds
+    await recordFailure("user-1", undefined, "tenant-custom");
+    setupTransaction({
+      failed_unlock_attempts: 0,
+      last_failed_unlock_at: null,
+      account_locked_until: null,
+    });
+    await recordFailure("user-1", undefined, "tenant-custom");
+
+    // DB should only be queried once (first call populates cache)
+    expect(mockPrismaTenant.findUnique).toHaveBeenCalledTimes(1);
   });
 });

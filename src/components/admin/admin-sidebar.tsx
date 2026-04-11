@@ -11,7 +11,6 @@ import {
   Blocks,
   Bot,
   ChevronDown,
-  Clock,
   Crown,
   Cpu,
   Database,
@@ -23,7 +22,6 @@ import {
   Settings2,
   Shield,
   ShieldAlert,
-  ShieldBan,
   ShieldCheck,
   UserPlus,
   Users,
@@ -108,11 +106,6 @@ function useNavItems(
       href: "/admin/tenant/security",
       label: t("navSecurity"),
       icon: <Shield className="h-4 w-4 shrink-0" />,
-      children: [
-        { href: "/admin/tenant/security/session-policy", label: t("navSessionPolicy"), icon: <Clock className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/access-restriction", label: t("navAccessRestriction"), icon: <ShieldBan className="h-3.5 w-3.5 shrink-0" /> },
-        { href: "/admin/tenant/security/webhooks", label: t("navWebhooks"), icon: <Webhook className="h-3.5 w-3.5 shrink-0" /> },
-      ],
     },
     {
       href: "/admin/tenant/provisioning",

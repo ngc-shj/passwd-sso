@@ -43,6 +43,13 @@ vi.mock("@/lib/vault-context", () => ({
   useVault: () => ({
     encryptionKey: mockEncryptionKey,
     userId: "user-1",
+    tenantPolicy: {
+      minPasswordLength: 0,
+      requireUppercase: false,
+      requireLowercase: false,
+      requireNumbers: false,
+      requireSymbols: false,
+    },
   }),
 }));
 

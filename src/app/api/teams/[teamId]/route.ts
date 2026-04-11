@@ -28,7 +28,7 @@ function handleTeamTenantError(e: unknown): NextResponse | null {
 }
 
 // GET /api/teams/[teamId] — Get team details
-async function handleGET(_req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -37,7 +37,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    const membership = await requireTeamMember(session.user.id, teamId);
+    const membership = await requireTeamMember(session.user.id, teamId, req);
     const team = await withTeamTenantRls(teamId, async () =>
       prisma.team.findUnique({
         where: { id: teamId },
@@ -82,7 +82,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;
@@ -122,7 +122,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
 }
 
 // DELETE /api/teams/[teamId] — Delete team (OWNER only)
-async function handleDELETE(_req: NextRequest, { params }: Params) {
+async function handleDELETE(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -131,7 +131,7 @@ async function handleDELETE(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_DELETE, req);
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;

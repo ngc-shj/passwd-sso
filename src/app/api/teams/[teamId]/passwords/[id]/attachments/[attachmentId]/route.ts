@@ -16,7 +16,7 @@ type RouteContext = {
 
 // GET /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId] - Download encrypted attachment
 async function handleGET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: RouteContext
 ) {
   const session = await auth();
@@ -27,7 +27,7 @@ async function handleGET(
   const { teamId, id, attachmentId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_READ, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);
@@ -91,7 +91,7 @@ async function handleDELETE(
   const { teamId, id, attachmentId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

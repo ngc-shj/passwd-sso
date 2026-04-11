@@ -34,8 +34,10 @@ export function useTeamLoginFormModel({
     defaultTags,
   });
   const loginState = useTeamLoginFormState({
+    teamId,
     editData,
     teamPolicy: base.teamPolicy,
+    setPolicyViolations: base.setPolicyViolations,
   });
   const { hasChanges, loginMainFieldsProps } = buildTeamLoginFormPresenter({
     editData,
@@ -72,7 +74,7 @@ export function useTeamLoginFormModel({
     t: base.t,
     tGen: base.translationBundle.tGen,
   });
-  const submitDisabled = !base.title.trim() || !loginState.password;
+  const submitDisabled = !base.title.trim() || !loginState.password || base.policyBlocked;
 
   const {
     tagsAndFolderProps,

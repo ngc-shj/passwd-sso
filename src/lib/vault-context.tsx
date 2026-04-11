@@ -82,11 +82,20 @@ export async function notifyUnlockFailure(): Promise<void> {
 // Re-export so existing consumers can keep importing from vault-context
 export type { VaultStatus };
 
+export interface TenantPasswordPolicy {
+  minPasswordLength: number;
+  requireUppercase: boolean;
+  requireLowercase: boolean;
+  requireNumbers: boolean;
+  requireSymbols: boolean;
+}
+
 interface VaultContextValue {
   status: VaultStatus;
   encryptionKey: CryptoKey | null;
   userId: string | null;
   hasRecoveryKey: boolean;
+  tenantPolicy: TenantPasswordPolicy;
   unlock: (passphrase: string) => Promise<boolean>;
   unlockWithPasskey: () => Promise<boolean>;
   unlockWithStoredPrf: () => Promise<boolean>;
@@ -116,6 +125,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const [encryptionKey, setEncryptionKey] = useState<CryptoKey | null>(null);
   const [hasRecoveryKey, setHasRecoveryKey] = useState(false);
   const [autoLockMinutes, setAutoLockMinutes] = useState<number | null>(null);
+  const [tenantPolicy, setTenantPolicy] = useState<TenantPasswordPolicy>({
+    minPasswordLength: 0,
+    requireUppercase: false,
+    requireLowercase: false,
+    requireNumbers: false,
+    requireSymbols: false,
+  });
   const secretKeyRef = useRef<Uint8Array | null>(null);
   const keyVersionRef = useRef<number>(0);
   const accountSaltRef = useRef<Uint8Array | null>(null);
@@ -147,6 +163,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (data.vaultAutoLockMinutes != null && data.vaultAutoLockMinutes > 0) {
           setAutoLockMinutes(data.vaultAutoLockMinutes);
         }
+        // Store tenant password policy for enforcement in personal vault forms
+        setTenantPolicy({
+          minPasswordLength: data.tenantMinPasswordLength ?? 0,
+          requireUppercase: data.tenantRequireUppercase ?? false,
+          requireLowercase: data.tenantRequireLowercase ?? false,
+          requireNumbers: data.tenantRequireNumbers ?? false,
+          requireSymbols: data.tenantRequireSymbols ?? false,
+        });
         setVaultStatus((prev) => {
           // SETUP_REQUIRED always wins (vault was reset while unlocked)
           if (data.setupRequired) return VAULT_STATUS.SETUP_REQUIRED;
@@ -975,6 +999,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         encryptionKey,
         userId: session?.user?.id ?? null,
         hasRecoveryKey,
+        tenantPolicy,
         unlock,
         unlockWithPasskey,
         unlockWithStoredPrf,

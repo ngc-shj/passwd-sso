@@ -10,7 +10,7 @@ import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
 // GET /api/teams/[teamId]/passwords/[id]/history - List team entry history
-async function handleGET(_req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -19,7 +19,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   const { teamId, id } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
     if (e instanceof TeamAuthError) {
       return errorResponse(e.message, e.status);

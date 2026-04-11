@@ -28,7 +28,7 @@ function handleTeamAuthError(e: unknown): NextResponse | null {
 }
 
 // GET /api/teams/[teamId]/policy — Get team policy (defaults if none set)
-async function handleGET(_req: NextRequest, { params }: Params) {
+async function handleGET(req: NextRequest, { params }: Params) {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
@@ -37,7 +37,7 @@ async function handleGET(_req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamMember(session.user.id, teamId);
+    await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
     const err = handleTeamAuthError(e);
     if (err) return err;
@@ -72,7 +72,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   const { teamId } = await params;
 
   try {
-    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
+    await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
     const err = handleTeamAuthError(e);
     if (err) return err;

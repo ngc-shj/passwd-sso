@@ -21,10 +21,43 @@ type ProxyOptions = {
 
 const SESSION_CACHE_TTL_MS = 30_000;
 
+// Paths exempt from passkey enforcement to prevent registration loops.
+// Must include the security settings page and all WebAuthn/auth API routes.
+const PASSKEY_EXEMPT_PREFIXES = [
+  "/dashboard/settings/security",
+];
+
+function isPasskeyExemptPath(pathWithoutLocale: string): boolean {
+  return PASSKEY_EXEMPT_PREFIXES.some((prefix) => pathWithoutLocale.startsWith(prefix));
+}
+
+function isPasskeyGracePeriodExpired(
+  requirePasskeyEnabledAt: string | null | undefined,
+  passkeyGracePeriodDays: number | null | undefined,
+): boolean {
+  // No enabledAt timestamp means enforcement was just turned on; treat as immediate.
+  if (!requirePasskeyEnabledAt) return true;
+  // No grace period configured means immediate enforcement.
+  if (passkeyGracePeriodDays == null || passkeyGracePeriodDays <= 0) return true;
+
+  const enabledAt = new Date(requirePasskeyEnabledAt).getTime();
+  const gracePeriodMs = passkeyGracePeriodDays * 24 * 60 * 60 * 1000;
+  return Date.now() > enabledAt + gracePeriodMs;
+}
+
+// Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
+const PASSKEY_AUDIT_DEDUP_MS = 5 * 60 * 1000;
+const PASSKEY_AUDIT_MAP_MAX = 1000;
+const passkeyAuditEmitted = new Map<string, number>();
+
 interface SessionInfo {
   valid: boolean;
   userId?: string;
   tenantId?: string;
+  hasPasskey?: boolean;
+  requirePasskey?: boolean;
+  requirePasskeyEnabledAt?: string | null;
+  passkeyGracePeriodDays?: number | null;
 }
 
 // In-process session cache: keyed by the raw session token value (not hashed, to avoid
@@ -91,6 +124,50 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
           basePath,
         );
       }
+    }
+
+    // MFA (passkey) enforcement: redirect users without a registered passkey
+    // when the tenant requires it and the grace period has expired.
+    // Skip for the security settings page and WebAuthn/auth routes to prevent loops.
+    if (
+      session.requirePasskey &&
+      !session.hasPasskey &&
+      !isPasskeyExemptPath(pathWithoutLocale)
+    ) {
+      if (isPasskeyGracePeriodExpired(session.requirePasskeyEnabledAt, session.passkeyGracePeriodDays)) {
+        const securityUrl = request.nextUrl.clone();
+        securityUrl.pathname = `/${locale}/dashboard/settings/security`;
+
+        // Fire-and-forget audit log — deduplicated per user to avoid flood on repeated redirects
+        const userId = session.userId ?? "";
+        const lastEmitted = passkeyAuditEmitted.get(userId);
+        if (!lastEmitted || Date.now() - lastEmitted > PASSKEY_AUDIT_DEDUP_MS) {
+          if (passkeyAuditEmitted.size >= PASSKEY_AUDIT_MAP_MAX) {
+            // Evict oldest entry to prevent unbounded growth
+            const oldest = passkeyAuditEmitted.keys().next().value;
+            if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
+          }
+          passkeyAuditEmitted.set(userId, Date.now());
+          void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              cookie: request.headers.get("cookie") ?? "",
+            },
+            body: JSON.stringify({
+              action: "PASSKEY_ENFORCEMENT_BLOCKED",
+              metadata: { blockedPath: pathWithoutLocale },
+            }),
+          }).catch(() => {});
+        }
+
+        return applySecurityHeaders(
+          NextResponse.redirect(securityUrl),
+          options,
+          basePath,
+        );
+      }
+      // Within grace period: allow through; client reads /api/user/passkey-status for banner
     }
   }
 
@@ -237,7 +314,15 @@ async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
 
   const cached = sessionCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
-    return { valid: cached.valid, userId: cached.userId, tenantId: cached.tenantId };
+    return {
+      valid: cached.valid,
+      userId: cached.userId,
+      tenantId: cached.tenantId,
+      hasPasskey: cached.hasPasskey,
+      requirePasskey: cached.requirePasskey,
+      requirePasskeyEnabledAt: cached.requirePasskeyEnabledAt,
+      passkeyGracePeriodDays: cached.passkeyGracePeriodDays,
+    };
   }
   if (cached) sessionCache.delete(cacheKey);
 
@@ -268,7 +353,21 @@ async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
       }
     }
 
-    const info: SessionInfo = { valid, userId, tenantId };
+    // Extract passkey enforcement fields from session payload
+    const hasPasskey: boolean = data?.user?.hasPasskey ?? false;
+    const requirePasskey: boolean = data?.user?.requirePasskey ?? false;
+    const requirePasskeyEnabledAt: string | null = data?.user?.requirePasskeyEnabledAt ?? null;
+    const passkeyGracePeriodDays: number | null = data?.user?.passkeyGracePeriodDays ?? null;
+
+    const info: SessionInfo = {
+      valid,
+      userId,
+      tenantId,
+      hasPasskey,
+      requirePasskey,
+      requirePasskeyEnabledAt,
+      passkeyGracePeriodDays,
+    };
     setSessionCache(cacheKey, info);
     return info;
   } catch {
