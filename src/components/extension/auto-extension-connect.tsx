@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
-import { injectExtensionToken } from "@/lib/inject-extension-token";
+import { injectExtensionBridgeCode } from "@/lib/inject-extension-bridge-code";
 import {
   APP_NAME,
   API_PATH,
@@ -40,13 +40,13 @@ export function AutoExtensionConnect() {
   const connect = async () => {
     setStatus(CONNECT_STATUS.CONNECTING);
     try {
-      const res = await fetchApi(API_PATH.EXTENSION_TOKEN, { method: "POST" });
+      const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
       if (!res.ok) {
         setStatus(CONNECT_STATUS.FAILED);
         return;
       }
       const json = await res.json();
-      injectExtensionToken(json.token, Date.parse(json.expiresAt));
+      injectExtensionBridgeCode(json.code, Date.parse(json.expiresAt));
       setStatus(CONNECT_STATUS.CONNECTED);
     } catch {
       setStatus(CONNECT_STATUS.FAILED);

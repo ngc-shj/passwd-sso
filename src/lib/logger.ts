@@ -31,6 +31,7 @@ const logger = pino({
       "encryptedSecretKey",
       "token",
       "tokenHash",
+      "codeHash",
       "accessToken",
       "refreshToken",
       "idToken",

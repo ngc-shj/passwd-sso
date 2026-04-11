@@ -47,6 +47,8 @@ export default defineConfig({
         "src/lib/sentry-sanitize.ts",
         "src/lib/mcp/**/*.ts",
         "src/lib/password-policy-validation.ts",
+        "src/lib/extension-token.ts",
+        "src/lib/inject-extension-bridge-code.ts",
       ],
       exclude: [
         "src/app/api/auth/\\[...nextauth\\]/**",

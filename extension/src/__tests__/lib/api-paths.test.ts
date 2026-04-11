@@ -7,6 +7,9 @@ describe("api paths", () => {
     expect(EXT_API_PATH.EXTENSION_TOKEN_REFRESH).toBe(
       "/api/extension/token/refresh"
     );
+    expect(EXT_API_PATH.EXTENSION_TOKEN_EXCHANGE).toBe(
+      "/api/extension/token/exchange"
+    );
     expect(EXT_API_PATH.PASSWORDS).toBe("/api/passwords");
     expect(EXT_API_PATH.VAULT_UNLOCK_DATA).toBe("/api/vault/unlock/data");
     expect(EXT_API_PATH.TEAMS).toBe("/api/teams");

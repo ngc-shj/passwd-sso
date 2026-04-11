@@ -2,34 +2,109 @@
 // CRXJS copies web_accessible_resources as-is without transpilation.
 // Typed version: token-bridge-lib.ts (for tests).
 //
-// Listens for postMessage from the MAIN world relay script and forwards
-// valid token data to the background service worker.
+// Supports two message types during migration:
+//   - PASSWD_SSO_BRIDGE_CODE (new): receives a one-time code, exchanges it
+//     for a token via direct fetch to /api/extension/token/exchange, then
+//     forwards the token to background via chrome.runtime.sendMessage.
+//   - PASSWD_SSO_TOKEN_RELAY (legacy): receives a bearer token directly,
+//     forwards it to background. Kept until web app and extension both
+//     migrate to the bridge code flow exclusively.
+//
+// Constants (must stay in sync with extension/src/lib/constants.ts +
+// src/lib/constants/extension.ts on the web app side). The sync test
+// src/__tests__/i18n/extension-constants-sync.test.ts enforces this.
 
-var MSG_TYPE = "PASSWD_SSO_TOKEN_RELAY";
+var LEGACY_MSG_TYPE = "PASSWD_SSO_TOKEN_RELAY";
+var BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
+var EXCHANGE_PATH = "/api/extension/token/exchange";
 
 function isContextValid() {
   try { return !!chrome.runtime && !!chrome.runtime.id; }
   catch (e) { return false; }
 }
 
-function handlePostMessage(event) {
-  // Must come from the same window (not an iframe)
-  if (event.source !== window) return;
-  if (event.origin !== window.location.origin) return;
-  if (!event.data || event.data.type !== MSG_TYPE) return;
+function getServerUrl() {
+  return new Promise(function (resolve) {
+    try {
+      chrome.storage.local.get("serverUrl", function (result) {
+        var serverUrl = result && result.serverUrl;
+        if (typeof serverUrl !== "string" || !serverUrl) {
+          resolve(null);
+          return;
+        }
+        resolve(serverUrl);
+      });
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
 
+function forwardToken(token, expiresAtMs) {
+  chrome.runtime.sendMessage({
+    type: "SET_TOKEN",
+    token: token,
+    expiresAt: expiresAtMs,
+  });
+}
+
+function handleLegacyTokenMessage(event) {
   var token = event.data.token;
   var expiresAt = event.data.expiresAt;
   if (typeof token !== "string" || typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
     return;
   }
   if (!isContextValid()) return;
+  forwardToken(token, expiresAt);
+}
 
-  chrome.runtime.sendMessage({
-    type: "SET_TOKEN",
-    token: token,
-    expiresAt: expiresAt,
+function handleBridgeCodeMessage(event) {
+  var code = event.data.code;
+  var expiresAt = event.data.expiresAt;
+  if (typeof code !== "string" || code.length !== 64) return;
+  if (typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) return;
+  if (!isContextValid()) return;
+
+  getServerUrl().then(function (serverUrl) {
+    if (!serverUrl) return;
+    fetch(serverUrl + EXCHANGE_PATH, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code: code }),
+    }).then(function (response) {
+      if (!response.ok) return;
+      return response.json();
+    }).then(function (json) {
+      if (!json) return;
+      var token = json.token;
+      var expiresAtIso = json.expiresAt;
+      if (typeof token !== "string" || typeof expiresAtIso !== "string") return;
+      var parsed = Date.parse(expiresAtIso);
+      if (!Number.isFinite(parsed)) return;
+      forwardToken(token, parsed);
+    }).catch(function () {
+      // network / parse error — swallow, extension stays unconnected
+    });
   });
+}
+
+function handlePostMessage(event) {
+  // Must come from the same window (not an iframe)
+  if (event.source !== window) return;
+  if (event.origin !== window.location.origin) return;
+  if (!event.data) return;
+
+  if (event.data.type === BRIDGE_CODE_MSG_TYPE) {
+    handleBridgeCodeMessage(event);
+    return;
+  }
+
+  if (event.data.type === LEGACY_MSG_TYPE) {
+    // TODO: remove after web app + extension reach v0.5.x and telemetry
+    // shows zero legacy traffic for 30 days.
+    handleLegacyTokenMessage(event);
+    return;
+  }
 }
 
 if (typeof window !== "undefined") {

@@ -1,9 +1,12 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
+import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   EXTENSION_TOKEN_SCOPE,
+  EXTENSION_TOKEN_TTL_MS,
+  EXTENSION_TOKEN_MAX_ACTIVE,
   type ExtensionTokenScope,
 } from "@/lib/constants";
 
@@ -113,5 +116,67 @@ export async function validateExtensionToken(
       scopes: parseScopes(token.scope),
       expiresAt: token.expiresAt,
     },
+  };
+}
+
+// ─── Issuance ────────────────────────────────────────────────
+
+/**
+ * Issue a new extension token for a user/tenant pair.
+ *
+ * Shared between:
+ * - `POST /api/extension/token` (legacy direct issuance)
+ * - `POST /api/extension/token/exchange` (new bridge code flow)
+ *
+ * `POST /api/extension/token/refresh` does NOT use this helper because
+ * refresh requires `revoke(oldToken) + create(newToken)` to be atomic in
+ * a single transaction (see plan §Step 6).
+ *
+ * Atomicity: sets up its own `withUserTenantRls` + `prisma.$transaction`
+ * internally and enforces `EXTENSION_TOKEN_MAX_ACTIVE` (revokes the oldest
+ * unused tokens to make room) before creating the new token, all in a single
+ * transaction. Callers do NOT need to establish an RLS context before calling.
+ */
+export async function issueExtensionToken(params: {
+  userId: string;
+  tenantId: string;
+  scope: string;
+}): Promise<{ token: string; expiresAt: Date; scopeCsv: string }> {
+  const { userId, tenantId, scope } = params;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + EXTENSION_TOKEN_TTL_MS);
+  const plaintext = generateShareToken();
+  const tokenHash = hashToken(plaintext);
+
+  const created = await withUserTenantRls(userId, async () =>
+    prisma.$transaction(async (tx) => {
+      // Find active tokens (non-revoked, non-expired)
+      const active = await tx.extensionToken.findMany({
+        where: { userId, revokedAt: null, expiresAt: { gt: now } },
+        orderBy: { createdAt: "asc" },
+        select: { id: true },
+      });
+
+      // Revoke oldest if at max (need room for the new one)
+      const over = active.length + 1 - EXTENSION_TOKEN_MAX_ACTIVE;
+      if (over > 0) {
+        const toRevoke = active.slice(0, over).map((t) => t.id);
+        await tx.extensionToken.updateMany({
+          where: { id: { in: toRevoke } },
+          data: { revokedAt: now },
+        });
+      }
+
+      return tx.extensionToken.create({
+        data: { userId, tenantId, tokenHash, scope, expiresAt },
+        select: { expiresAt: true, scope: true },
+      });
+    }),
+  );
+
+  return {
+    token: plaintext,
+    expiresAt: created.expiresAt,
+    scopeCsv: created.scope,
   };
 }

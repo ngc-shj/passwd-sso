@@ -9,6 +9,10 @@ describe("API_PATH", () => {
     expect(API_PATH.EXTENSION_TOKEN_REFRESH).toBe(
       "/api/extension/token/refresh"
     );
+    expect(API_PATH.EXTENSION_TOKEN_EXCHANGE).toBe(
+      "/api/extension/token/exchange"
+    );
+    expect(API_PATH.EXTENSION_BRIDGE_CODE).toBe("/api/extension/bridge-code");
     expect(API_PATH.PASSWORDS).toBe("/api/passwords");
     expect(API_PATH.PASSWORDS_BULK_TRASH).toBe("/api/passwords/bulk-trash");
     expect(API_PATH.PASSWORDS_BULK_ARCHIVE).toBe("/api/passwords/bulk-archive");

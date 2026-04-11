@@ -204,11 +204,14 @@ async function handleApiAuth(request: NextRequest) {
   const isBearerRoute = extensionTokenRoutes.some(isBearerBypassRoute);
 
   // Handle CORS preflight for API routes.
-  // For extension Bearer routes, allow chrome-extension:// origins so that
-  // Service Worker fetch (which triggers preflight due to Authorization header)
-  // can proceed.
+  // For extension Bearer routes AND the bridge code exchange endpoint, allow
+  // chrome-extension:// origins so that the extension's fetch (which triggers
+  // a preflight due to Content-Type/Authorization headers) can proceed.
+  const isExtensionExchangeRoute = pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE;
   if (request.method === "OPTIONS") {
-    return handlePreflight(request, { allowExtension: isBearerRoute });
+    return handlePreflight(request, {
+      allowExtension: isBearerRoute || isExtensionExchangeRoute,
+    });
   }
 
   // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
@@ -224,6 +227,16 @@ async function handleApiAuth(request: NextRequest) {
     ?.startsWith("Bearer ");
 
   if (hasBearer && isBearerRoute) {
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "private, no-store");
+    return applyCorsHeaders(request, res, { allowExtension: true });
+  }
+
+  // POST /api/extension/token/exchange — bootstraps a bearer token from a
+  // one-time bridge code. No session, no Bearer. Called by the extension
+  // content script (isolated world). The route handler validates the code
+  // and atomically consumes it. CORS must allow chrome-extension origins.
+  if (pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });

@@ -10,27 +10,49 @@ const { mockFindUnique, mockUpdate } = vi.hoisted(() => ({
 const { mockWithBypassRls } = vi.hoisted(() => ({
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
+const {
+  mockFindMany,
+  mockCreate,
+  mockUpdateMany,
+  mockTransaction,
+  mockWithUserTenantRls,
+} = vi.hoisted(() => ({
+  mockFindMany: vi.fn(),
+  mockCreate: vi.fn(),
+  mockUpdateMany: vi.fn(),
+  mockTransaction: vi.fn(),
+  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+}));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     extensionToken: {
       findUnique: mockFindUnique,
+      findMany: mockFindMany,
+      create: mockCreate,
       update: mockUpdate,
+      updateMany: mockUpdateMany,
     },
+    $transaction: mockTransaction,
   },
 }));
 
 vi.mock("@/lib/crypto-server", () => ({
+  generateShareToken: () => "a".repeat(64),
   hashToken: (t: string) => `hashed_${t}`,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/tenant-context", () => ({
+  withUserTenantRls: mockWithUserTenantRls,
 }));
 
 import {
   validateExtensionToken,
   parseScopes,
   hasScope,
+  issueExtensionToken,
 } from "./extension-token";
 
 // ─── parseScopes ─────────────────────────────────────────────
@@ -179,5 +201,91 @@ describe("validateExtensionToken", () => {
         data: expect.objectContaining({ lastUsedAt: expect.any(Date) }),
       }),
     );
+  });
+});
+
+// ─── issueExtensionToken ─────────────────────────────────────
+
+describe("issueExtensionToken", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockWithUserTenantRls.mockImplementation(async (_u, fn) => fn());
+    mockTransaction.mockImplementation(async (cb: (tx: unknown) => unknown) =>
+      cb({
+        extensionToken: {
+          findMany: mockFindMany,
+          create: mockCreate,
+          updateMany: mockUpdateMany,
+        },
+      }),
+    );
+    mockFindMany.mockResolvedValue([]);
+    mockCreate.mockResolvedValue({
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      scope: "passwords:read,vault:unlock-data",
+    });
+  });
+
+  it("returns a 64-char hex token, expiresAt, and scopeCsv", async () => {
+    const result = await issueExtensionToken({
+      userId: "u1",
+      tenantId: "t1",
+      scope: "passwords:read,vault:unlock-data",
+    });
+    expect(result.token).toBe("a".repeat(64));
+    expect(result.expiresAt).toBeInstanceOf(Date);
+    expect(result.scopeCsv).toBe("passwords:read,vault:unlock-data");
+  });
+
+  it("creates the token via prisma.extensionToken.create with the hashed token", async () => {
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "t1",
+      scope: "passwords:read",
+    });
+    expect(mockCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: "u1",
+          tenantId: "t1",
+          tokenHash: "hashed_" + "a".repeat(64),
+          scope: "passwords:read",
+        }),
+      }),
+    );
+  });
+
+  it("revokes the oldest token when EXTENSION_TOKEN_MAX_ACTIVE is exceeded", async () => {
+    mockFindMany.mockResolvedValue([{ id: "t1" }, { id: "t2" }, { id: "t3" }]);
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "tenant-1",
+      scope: "passwords:read",
+    });
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: { in: ["t1"] } },
+        data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+      }),
+    );
+  });
+
+  it("does not revoke any tokens when count + 1 <= MAX", async () => {
+    mockFindMany.mockResolvedValue([{ id: "t1" }, { id: "t2" }]);
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "tenant-1",
+      scope: "passwords:read",
+    });
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("invokes prisma.$transaction exactly once per call", async () => {
+    await issueExtensionToken({
+      userId: "u1",
+      tenantId: "tenant-1",
+      scope: "passwords:read",
+    });
+    expect(mockTransaction).toHaveBeenCalledTimes(1);
   });
 });

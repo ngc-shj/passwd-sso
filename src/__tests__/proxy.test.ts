@@ -96,6 +96,28 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it("bypasses session check for /api/extension/token/exchange (no session, no Bearer)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/extension/token/exchange"),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("requires session for /api/extension/bridge-code (extension prefix is session-required)", async () => {
+    const res = await proxy(
+      createApiRequest("/api/extension/bridge-code", {
+        Cookie: "authjs.session-token=sess-bridge",
+      }),
+      dummyOptions,
+    );
+    // The session lookup must run (proves the route is NOT in the bypass list);
+    // mock returns no user → 401.
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(res.status).toBe(401);
+  });
+
   it("bypasses session check for Bearer + /api/api-keys", async () => {
     const res = await proxy(
       createApiRequest("/api/api-keys", { Authorization: "Bearer tok123" }),
