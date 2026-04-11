@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.37](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.36...passwd-sso-v0.4.37) (2026-04-11)
+
+
+### Features
+
+* expand tenant and team security policy settings ([#357](https://github.com/ngc-shj/passwd-sso/issues/357)) ([cae2b18](https://github.com/ngc-shj/passwd-sso/commit/cae2b18df277327c77fdaf1141364210d2f9436c))
+
 ## [0.4.36](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.35...passwd-sso-v0.4.36) (2026-04-06)
 
 
