@@ -99,3 +99,45 @@ Three sub-agents (functionality, security, testing) reviewed the implementation 
 | Vitest (web app) | ✅ 553 files / 6917 tests (+2 new from F-2 / M3) |
 | Vitest (extension) | ✅ 42 files / 658 tests |
 | `npx next build` | ✅ success |
+
+---
+
+## Round 2 (incremental verification)
+
+Three sub-agents re-reviewed the Round 1 fix commit `dee62641` against the Round 1 base `f5abcd43`. Strict mode: report only Critical findings.
+
+### Result
+
+All three experts: **No Critical findings**.
+
+### Verifications passed
+
+- **F-1**: doc comment on `issueExtensionToken` correctly states the helper sets up its own RLS context
+- **F-2**: try/catch around `issueExtensionToken` correctly captures the post-consume failure path with server-resolved `userId`/`tenantId`; the `!consumed` invariant branch remains pino-only (regression-tested)
+- **F-3**: `extractRequestMeta` is called exactly once in the bridge-code route
+- **F-1-S**: `codeHash` is in the pino redact `paths` array
+- **M2**: proxy bridge-code test asserts `fetchSpy` was called
+- **M3**: bridge-code test for the deleted-user (null userRecord) path uses `mockResolvedValueOnce` and asserts `extensionBridgeCode.create` was NOT called
+- **M4**: `vitest.config.ts` `coverage.include` lists both `src/lib/extension-token.ts` and `src/lib/inject-extension-bridge-code.ts`
+
+### Deferred (not blocking, recorded for future improvement)
+
+**DEFERRED-S1 — Pino nested redact gap (pre-existing, project-wide)**
+
+- **File**: `src/lib/logger.ts`
+- **Observation**: Pino's `redact.paths` only matches top-level field names. When an `err` object is logged via `getLogger().error({ err })`, nested field names inside `err.message` (e.g. a Prisma P2002 error containing `"Unique constraint failed on the fields: (\`tokenHash\`)"`) are NOT redacted.
+- **Practical impact for THIS feature**: Very low. The only context where this could leak is if `issueExtensionToken` throws a Prisma error containing the `tokenHash` field name in its message. The leaked value would be a SHA-256 hash (non-reversible), not the plaintext token.
+- **Why deferred**: This is a pre-existing pino configuration limitation in the project, not introduced by this PR. Fixing it (custom serializer for `err`, or `err.meta.*` redact paths, or stripping `err.meta` before logging) is a project-wide change that should be tracked as a separate issue.
+- **Recommendation for future**: Add a custom pino `serializer` for `err` that strips `meta` and limits `message` length, OR add `err.message`/`err.meta.*` to the redact paths.
+
+### Final Verification
+
+| Check | Result |
+|---|---|
+| Round 2 expert review | ✅ 3/3 "No Critical findings" |
+| Lint | ✅ clean |
+| Vitest (web app) | ✅ 553 files / 6917 tests |
+| Vitest (extension) | ✅ 42 files / 658 tests |
+| `npx next build` | ✅ success |
+
+**Status**: Phase 3 (Code Review) complete. Ready for PR.
