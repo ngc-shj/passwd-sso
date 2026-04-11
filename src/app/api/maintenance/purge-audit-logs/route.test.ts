@@ -157,18 +157,17 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
       { id: "tenant-1", auditLogRetentionDays: null },
       { id: "tenant-2", auditLogRetentionDays: null },
     ]);
-    // tenant-1 deletes 20, tenant-2 deletes 10, null-tenantId deletes 5
+    // tenant-1 deletes 20, tenant-2 deletes 10
     mockDeleteMany
       .mockResolvedValueOnce({ count: 20 })
-      .mockResolvedValueOnce({ count: 10 })
-      .mockResolvedValueOnce({ count: 5 });
+      .mockResolvedValueOnce({ count: 10 });
 
     const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     const res = await POST(req);
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.purged).toBe(35);
+    expect(body.purged).toBe(30);
   });
 
   it("uses default retentionDays of 365", async () => {
@@ -203,10 +202,6 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     const expected730 = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
     expect(Math.abs(tenantCutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
 
-    // Second deleteMany for null tenantId: cutoff uses requested retentionDays (365)
-    const nullCutoff = mockDeleteMany.mock.calls[1][0].where.createdAt.lt as Date;
-    const expected365 = new Date(Date.now() - 365 * 24 * 60 * 60 * 1000);
-    expect(Math.abs(nullCutoff.getTime() - expected365.getTime())).toBeLessThan(5000);
   });
 
   it("uses requested retentionDays when it exceeds tenant retention", async () => {
@@ -226,29 +221,6 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     expect(Math.abs(tenantCutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
   });
 
-  it("deletes null-tenantId entries using the requested retentionDays", async () => {
-    mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
-    mockTenantFindMany.mockResolvedValue([{ id: "tenant-1", auditLogRetentionDays: null }]);
-    mockDeleteMany
-      .mockResolvedValueOnce({ count: 0 }) // tenant-1
-      .mockResolvedValueOnce({ count: 7 }); // null tenantId
-
-    const req = createRequest(
-      { operatorId: "660e8400-e29b-41d4-a716-446655440010", retentionDays: 180 },
-      ADMIN_TOKEN,
-    );
-    const res = await POST(req);
-    expect(res.status).toBe(200);
-
-    const body = await res.json();
-    expect(body.purged).toBe(7);
-
-    // Verify the null-tenantId call uses tenantId: null filter
-    const nullTenantCall = mockDeleteMany.mock.calls.find(
-      (call) => call[0].where.tenantId === null
-    );
-    expect(nullTenantCall).toBeDefined();
-  });
 
   // ─── Dry Run ──────────────────────────────────────────────
 
@@ -257,8 +229,8 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockTenantFindMany.mockResolvedValue([
       { id: "tenant-1", auditLogRetentionDays: null },
     ]);
-    // count for tenant-1 = 8, count for null tenantId = 3
-    mockCount.mockResolvedValueOnce(8).mockResolvedValueOnce(3);
+    // count for tenant-1 = 8
+    mockCount.mockResolvedValueOnce(8);
 
     const req = createRequest(
       { operatorId: "660e8400-e29b-41d4-a716-446655440010", dryRun: true },
@@ -269,17 +241,17 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
     const body = await res.json();
     expect(body.purged).toBe(0);
-    expect(body.matched).toBe(11);
+    expect(body.matched).toBe(8);
     expect(body.dryRun).toBe(true);
 
     expect(mockDeleteMany).not.toHaveBeenCalled();
-    expect(mockCount).toHaveBeenCalledTimes(2);
+    expect(mockCount).toHaveBeenCalledTimes(1);
   });
 
   it("dry run respects tenant retention floor for count", async () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockTenantFindMany.mockResolvedValue([{ id: "tenant-1", auditLogRetentionDays: 730 }]);
-    mockCount.mockResolvedValueOnce(5).mockResolvedValueOnce(0);
+    mockCount.mockResolvedValueOnce(5);
 
     const req = createRequest(
       { operatorId: "660e8400-e29b-41d4-a716-446655440010", retentionDays: 365, dryRun: true },
@@ -315,8 +287,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     mockTenantMemberFindFirst.mockResolvedValue({ tenantId: "tenant-1", role: "ADMIN" });
     mockTenantFindMany.mockResolvedValue([{ id: "tenant-1", auditLogRetentionDays: null }]);
     mockDeleteMany
-      .mockResolvedValueOnce({ count: 5 })  // tenant-1
-      .mockResolvedValueOnce({ count: 0 }); // null tenantId
+      .mockResolvedValueOnce({ count: 5 });
 
     const req = createRequest({ operatorId: "660e8400-e29b-41d4-a716-446655440010" }, ADMIN_TOKEN);
     await POST(req);

@@ -97,24 +97,10 @@ async function handlePOST(req: NextRequest) {
     }
   }
 
-  // Handle audit logs with null tenantId using the requested retentionDays directly
-  const nullTenantCutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  // AuditLog.tenantId is non-nullable (String, not String?), so no null-tenant handling needed.
   if (dryRun) {
-    const count = await withBypassRls(prisma, async () =>
-      prisma.auditLog.count({
-        where: { tenantId: null, createdAt: { lt: nullTenantCutoff } },
-      }),
-    BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-    totalPurged += count;
     return NextResponse.json({ purged: 0, matched: totalPurged, dryRun: true });
   }
-
-  const nullResult = await withBypassRls(prisma, async () =>
-    prisma.auditLog.deleteMany({
-      where: { tenantId: null, createdAt: { lt: nullTenantCutoff } },
-    }),
-  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-  totalPurged += nullResult.count;
 
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
