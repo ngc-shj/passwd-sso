@@ -20,9 +20,20 @@ if (rawBasePath && !/^\/[\w-]+(?:\/[\w-]+)*$/.test(rawBasePath)) {
   );
 }
 
+// Dev-only: allow HMR/chunk requests from the configured hostnames.
+// Next.js 16.2+ tightened cross-origin dev resource request enforcement, which
+// breaks access via reverse proxies / Tailscale / remote tunnels. Set
+// NEXT_DEV_ALLOWED_ORIGINS="host1,host2" in .env.local to allow them.
+// Production builds ignore this setting (allowedDevOrigins is dev-only).
+const devAllowedOrigins = (process.env.NEXT_DEV_ALLOWED_ORIGINS ?? "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 const nextConfig: NextConfig = {
   basePath: rawBasePath || undefined,
   output: "standalone",
+  allowedDevOrigins: devAllowedOrigins.length > 0 ? devAllowedOrigins : undefined,
   serverExternalPackages: ["file-type", "argon2-browser", "@aws-sdk/client-secrets-manager", "@azure/keyvault-secrets", "@azure/identity", "@google-cloud/secret-manager"],
 
   env: {
