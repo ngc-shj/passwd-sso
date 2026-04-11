@@ -14,9 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
-      # Workaround: force node24 runtime for actions still pinned to node20.
-      # Remove after upgrading to release-please-action v5 (node24-native).
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
     steps:
