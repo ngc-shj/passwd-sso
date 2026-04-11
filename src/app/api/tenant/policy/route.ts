@@ -503,6 +503,10 @@ async function handlePATCH(req: NextRequest) {
     lockoutDuration3Minutes !== undefined ||
     passwordMaxAgeDays !== undefined ||
     passwordExpiryWarningDays !== undefined ||
+    jitTokenDefaultTtlSec !== undefined ||
+    jitTokenMaxTtlSec !== undefined ||
+    delegationDefaultTtlSec !== undefined ||
+    delegationMaxTtlSec !== undefined ||
     ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
 
   const currentTenant = needsCurrentState
@@ -522,6 +526,10 @@ async function handlePATCH(req: NextRequest) {
             lockoutDuration3Minutes: true,
             passwordMaxAgeDays: true,
             passwordExpiryWarningDays: true,
+            jitTokenDefaultTtlSec: true,
+            jitTokenMaxTtlSec: true,
+            delegationDefaultTtlSec: true,
+            delegationMaxTtlSec: true,
           },
         }),
       BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
@@ -569,15 +577,17 @@ async function handlePATCH(req: NextRequest) {
   }
 
   // Cross-field validation: jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec when both set
-  const mergedJitDefault = jitTokenDefaultTtlSec !== undefined ? jitTokenDefaultTtlSec : undefined;
-  const mergedJitMax = jitTokenMaxTtlSec !== undefined ? jitTokenMaxTtlSec : undefined;
+  // Merge request value with current DB value so partial PATCH cannot break the invariant
+  const mergedJitDefault = jitTokenDefaultTtlSec !== undefined ? jitTokenDefaultTtlSec : currentTenant?.jitTokenDefaultTtlSec ?? null;
+  const mergedJitMax = jitTokenMaxTtlSec !== undefined ? jitTokenMaxTtlSec : currentTenant?.jitTokenMaxTtlSec ?? null;
   if (mergedJitDefault != null && mergedJitMax != null && mergedJitDefault > mergedJitMax) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "jitTokenDefaultTtlSec must be <= jitTokenMaxTtlSec" });
   }
 
   // Cross-field validation: delegationDefaultTtlSec must be <= delegationMaxTtlSec when both set
-  const mergedDelegDefault = delegationDefaultTtlSec !== undefined ? delegationDefaultTtlSec : undefined;
-  const mergedDelegMax = delegationMaxTtlSec !== undefined ? delegationMaxTtlSec : undefined;
+  // Merge request value with current DB value so partial PATCH cannot break the invariant
+  const mergedDelegDefault = delegationDefaultTtlSec !== undefined ? delegationDefaultTtlSec : currentTenant?.delegationDefaultTtlSec ?? null;
+  const mergedDelegMax = delegationMaxTtlSec !== undefined ? delegationMaxTtlSec : currentTenant?.delegationMaxTtlSec ?? null;
   if (mergedDelegDefault != null && mergedDelegMax != null && mergedDelegDefault > mergedDelegMax) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "delegationDefaultTtlSec must be <= delegationMaxTtlSec" });
   }

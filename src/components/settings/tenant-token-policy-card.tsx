@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { Bot, Loader2 } from "lucide-react";
+import { Key, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -172,7 +172,7 @@ export function TenantTokenPolicyCard() {
 
   return (
     <Card>
-      <SectionCardHeader icon={Bot} title={t("tokenPolicyTitle")} description={t("tokenPolicyDescription")} />
+      <SectionCardHeader icon={Key} title={t("tokenPolicyTitle")} description={t("tokenPolicyDescription")} />
       <CardContent className="space-y-4">
         {/* SA Token Max Expiry */}
         <div className="flex items-center justify-between">
