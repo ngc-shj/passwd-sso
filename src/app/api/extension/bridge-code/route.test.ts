@@ -101,6 +101,16 @@ describe("POST /api/extension/bridge-code", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
+  it("returns 401 when the user record cannot be resolved (deleted user)", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockUserFindUnique.mockResolvedValueOnce(null);
+    const res = await POST(makeRequest());
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(401);
+    expect(json.error).toBe("UNAUTHORIZED");
+    expect(mockBridgeCodeCreate).not.toHaveBeenCalled();
+  });
+
   it("returns 403 when origin check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     const { NextResponse } = await import("next/server");

@@ -132,10 +132,10 @@ export async function validateExtensionToken(
  * refresh requires `revoke(oldToken) + create(newToken)` to be atomic in
  * a single transaction (see plan §Step 6).
  *
- * Atomicity: enforces `EXTENSION_TOKEN_MAX_ACTIVE` (revokes the oldest
- * unused tokens to make room) and creates the new token in a single
- * `prisma.$transaction` callback. The caller MUST already be inside a
- * `withUserTenantRls` (or equivalent RLS) context for the user.
+ * Atomicity: sets up its own `withUserTenantRls` + `prisma.$transaction`
+ * internally and enforces `EXTENSION_TOKEN_MAX_ACTIVE` (revokes the oldest
+ * unused tokens to make room) before creating the new token, all in a single
+ * transaction. Callers do NOT need to establish an RLS context before calling.
  */
 export async function issueExtensionToken(params: {
   userId: string;

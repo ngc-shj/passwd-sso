@@ -210,6 +210,7 @@
   "PASSKEY_ENFORCEMENT_BLOCKED": "Access blocked: passkey not enrolled",
   "EXTENSION_BRIDGE_CODE_ISSUE": "Extension bridge code issued",
   "EXTENSION_TOKEN_EXCHANGE_SUCCESS": "Extension token exchange successful",
+  "EXTENSION_TOKEN_EXCHANGE_FAILURE": "Extension token exchange failed",
   "groupDelegation": "Delegation",
   "delegationListMeta": "Listed {entryCount} delegated entries",
   "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",

@@ -245,5 +245,39 @@ describe("POST /api/extension/token/exchange", () => {
       }),
       expect.any(String),
     );
+    // No userId/tenantId in this branch — pino-only, no logAudit
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  // ── Issuance failure (post-consume) ──
+  it("emits EXTENSION_TOKEN_EXCHANGE_FAILURE audit when issueExtensionToken throws", async () => {
+    mockBridgeCodeUpdateMany.mockResolvedValueOnce({ count: 1 });
+    mockBridgeCodeFindUnique.mockResolvedValueOnce({
+      userId: "11111111-1111-1111-1111-111111111111",
+      tenantId: "22222222-2222-2222-2222-222222222222",
+      scope: "passwords:read",
+    });
+    // Make $transaction throw to simulate issueExtensionToken failure
+    mockTransaction.mockImplementationOnce(async () => {
+      throw new Error("simulated DB failure during token issuance");
+    });
+
+    const res = await POST(makeRequest());
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(500);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "EXTENSION_TOKEN_EXCHANGE_FAILURE",
+        scope: "PERSONAL",
+        userId: "11111111-1111-1111-1111-111111111111",
+        tenantId: "22222222-2222-2222-2222-222222222222",
+        metadata: expect.objectContaining({ reason: "issue_failed" }),
+      }),
+    );
+    expect(mockError).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "issue_failed" }),
+      expect.any(String),
+    );
   });
 });

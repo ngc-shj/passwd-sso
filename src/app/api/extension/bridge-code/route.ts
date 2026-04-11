@@ -17,7 +17,6 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { extractClientIp } from "@/lib/ip-access";
 import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import {
@@ -70,6 +69,9 @@ async function handlePOST(req: NextRequest) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + BRIDGE_CODE_TTL_MS);
 
+  // Extract request metadata once and reuse for both DB record + audit emit
+  const meta = extractRequestMeta(req);
+
   // Atomic: enforce BRIDGE_CODE_MAX_ACTIVE per user (revoke oldest unused)
   // and create the new code in a single withBypassRls / $transaction.
   await withBypassRls(prisma, async () => {
@@ -93,14 +95,13 @@ async function handlePOST(req: NextRequest) {
         tenantId: userRecord.tenantId,
         scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
         expiresAt,
-        ip: extractClientIp(req),
-        userAgent: req.headers.get("user-agent") ?? null,
+        ip: meta.ip,
+        userAgent: meta.userAgent,
       },
     });
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   // Audit (success path uses logAudit; userId/tenantId both resolved)
-  const meta = extractRequestMeta(req);
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EXTENSION_BRIDGE_CODE_ISSUE,

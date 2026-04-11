@@ -126,6 +126,8 @@ async function handlePOST(req: NextRequest) {
   if (!consumed) {
     // System invariant violation: the UPDATE just succeeded but findUnique
     // returned null. Log loudly so we can debug if this ever fires.
+    // Cannot emit logAudit here because we have no resolvable userId/tenantId
+    // (the consumed record literally just disappeared).
     getLogger().error(
       {
         event: "extension_token_exchange_invariant_violation",
@@ -136,12 +138,38 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
   }
 
-  // Issue ExtensionToken via shared helper (same logic as legacy POST /api/extension/token)
-  const issued = await issueExtensionToken({
-    userId: consumed.userId,
-    tenantId: consumed.tenantId,
-    scope: consumed.scope,
-  });
+  // Issue ExtensionToken via shared helper (same logic as legacy POST /api/extension/token).
+  // Wrap in try/catch so a token-issuance failure on this branch (where we DO have a
+  // resolvable userId/tenantId from the consumed code record) is recorded as an audit
+  // event, not just a swallowed 500.
+  let issued: Awaited<ReturnType<typeof issueExtensionToken>>;
+  try {
+    issued = await issueExtensionToken({
+      userId: consumed.userId,
+      tenantId: consumed.tenantId,
+      scope: consumed.scope,
+    });
+  } catch (err) {
+    logAudit({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_FAILURE,
+      userId: consumed.userId,
+      tenantId: consumed.tenantId,
+      ip,
+      userAgent: req.headers.get("user-agent"),
+      metadata: { reason: "issue_failed" },
+    });
+    getLogger().error(
+      {
+        event: "extension_token_exchange_failure",
+        reason: "issue_failed",
+        userId: consumed.userId,
+        err,
+      },
+      "extension token exchange failed: issueExtensionToken threw",
+    );
+    return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
+  }
 
   // Audit success: userId and tenantId both come from the consumed code record
   logAudit({
