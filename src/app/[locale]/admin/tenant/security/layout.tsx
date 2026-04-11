@@ -4,6 +4,7 @@ import { useTranslations } from "next-intl";
 import {
   Archive,
   Clock,
+  Globe,
   KeyRound,
   Lock,
   Shield,
@@ -39,7 +40,7 @@ export default function TenantSecurityLayout({ children }: { children: React.Rea
     {
       href: "/admin/tenant/security/access-restriction",
       label: t("navGroupNetwork"),
-      icon: ShieldBan,
+      icon: Globe,
       children: [
         { href: "/admin/tenant/security/access-restriction", label: t("navAccessRestriction"), icon: ShieldBan },
         { href: "/admin/tenant/security/webhooks", label: t("navWebhooks"), icon: Webhook },
