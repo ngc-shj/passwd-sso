@@ -29,16 +29,13 @@ vi.mock("@/lib/audit-retry", () => ({
   bufferSize: () => 0,
 }));
 
-vi.mock("@/lib/audit-logger", () => ({
-  auditLogger: { info: mockAuditInfo, enabled: true },
-  METADATA_BLOCKLIST: new Set([
-    "password", "passphrase", "secret", "secretKey",
-    "encryptedBlob", "encryptedOverview", "encryptedData", "encryptedSecretKey",
-    "encryptedTeamKey", "masterPasswordServerHash",
-    "token", "tokenHash", "accessToken", "refreshToken", "idToken",
-    "accountSalt", "passphraseVerifierHmac",
-  ]),
-}));
+vi.mock("@/lib/audit-logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
+  return {
+    ...actual,
+    auditLogger: { info: mockAuditInfo, enabled: true },
+  };
+});
 
 import { logAudit, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit";
 

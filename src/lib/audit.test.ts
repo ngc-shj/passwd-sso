@@ -41,28 +41,13 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ error: vi.fn() }),
 }));
 
-vi.mock("@/lib/audit-logger", () => ({
-  auditLogger: { info: mockAuditLoggerInfo },
-  METADATA_BLOCKLIST: new Set<string>([
-    "password",
-    "passphrase",
-    "secret",
-    "secretKey",
-    "encryptedBlob",
-    "encryptedOverview",
-    "encryptedData",
-    "encryptedSecretKey",
-    "encryptedTeamKey",
-    "masterPasswordServerHash",
-    "token",
-    "tokenHash",
-    "accessToken",
-    "refreshToken",
-    "idToken",
-    "accountSalt",
-    "passphraseVerifierHmac",
-  ]),
-}));
+vi.mock("@/lib/audit-logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
+  return {
+    ...actual,
+    auditLogger: { info: mockAuditLoggerInfo },
+  };
+});
 
 import { logAudit, logAuditBatch } from "./audit";
 
