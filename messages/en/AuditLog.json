@@ -208,6 +208,8 @@
   "MCP_CONNECTION_REVOKE": "MCP connection revoked",
   "MCP_CONNECTION_REVOKE_ALL": "All MCP connections revoked",
   "PASSKEY_ENFORCEMENT_BLOCKED": "Access blocked: passkey not enrolled",
+  "EXTENSION_BRIDGE_CODE_ISSUE": "Extension bridge code issued",
+  "EXTENSION_TOKEN_EXCHANGE_SUCCESS": "Extension token exchange successful",
   "groupDelegation": "Delegation",
   "delegationListMeta": "Listed {entryCount} delegated entries",
   "delegationSearchMeta": "Searched \"{query}\" — {entryCount} results",

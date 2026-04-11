@@ -35,7 +35,15 @@ export type { InvitationStatusValue } from "./invitation";
 export { CONNECT_STATUS } from "./connect-status";
 export type { ConnectStatus } from "./connect-status";
 
-export { TOKEN_ELEMENT_ID, TOKEN_READY_EVENT, TOKEN_BRIDGE_MSG_TYPE, EXT_CONNECT_PARAM } from "./extension";
+export {
+  TOKEN_ELEMENT_ID,
+  TOKEN_READY_EVENT,
+  TOKEN_BRIDGE_MSG_TYPE,
+  BRIDGE_CODE_MSG_TYPE,
+  BRIDGE_CODE_TTL_MS,
+  BRIDGE_CODE_MAX_ACTIVE,
+  EXT_CONNECT_PARAM,
+} from "./extension";
 export { API_PATH, apiPath } from "./api-path";
 export { LOCAL_STORAGE_KEY } from "./storage-key";
 export { AUDIT_TARGET_TYPE } from "./audit-target";

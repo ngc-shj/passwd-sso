@@ -875,6 +875,69 @@ Document:
 - Why PKCE Stage 4 was deferred (link to Considerations §5)
 - The deprecation timeline for the legacy flow
 
+## Phase 2 Impact Analysis Findings
+
+Added during Phase 2 Step 2-1 impact analysis. These are deviations/additions that emerged from investigating the actual codebase before implementing.
+
+### IA-1: `proxy.ts` requires modification (NOT in original plan)
+
+**Discovery**: `src/proxy.ts:259` includes `pathname.startsWith(API_PATH.EXTENSION)` in the session-required block, which means **all** `/api/extension/*` routes require an Auth.js session by default.
+
+**Impact**:
+- `/api/extension/bridge-code` — fine (this endpoint requires a session)
+- `/api/extension/token/exchange` — **broken without an explicit bypass** (this endpoint must be callable without a session)
+
+**Resolution**: Add `/api/extension/token/exchange` to a new public-bypass block in `src/proxy.ts`, modeled after the share-link verify-access pattern (`src/proxy.ts:232-241`). The exchange endpoint must:
+1. Bypass session check entirely
+2. Allow chrome-extension:// origins in CORS preflight (`handlePreflight(request, { allowExtension: true })`)
+3. Apply CORS headers via `applyCorsHeaders(request, res, { allowExtension: true })`
+
+**Required test additions** in `src/__tests__/proxy.test.ts`:
+- Exchange endpoint without session/Bearer → bypassed (no 401)
+- Exchange endpoint OPTIONS preflight from chrome-extension origin → 204 with CORS headers
+- bridge-code endpoint without session → 401 (existing EXTENSION prefix behavior preserved)
+
+### IA-2: API_PATH constant additions
+
+**`src/lib/constants/api-path.ts`** — add:
+- `EXTENSION_BRIDGE_CODE: "/api/extension/bridge-code"`
+- `EXTENSION_TOKEN_EXCHANGE: "/api/extension/token/exchange"`
+
+**`extension/src/lib/api-paths.ts`** — add:
+- `EXTENSION_TOKEN_EXCHANGE: "/api/extension/token/exchange"`
+
+**Test files to update for path constants**:
+- `src/lib/constants/api-path.test.ts` — assert new constants
+- `extension/src/__tests__/lib/api-paths.test.ts` — assert new constant
+
+### IA-3: Web app caller migration sites (single site)
+
+**Only one web app caller of the legacy flow exists**: `src/components/extension/auto-extension-connect.tsx:43-49`. The caller pattern is:
+```typescript
+const res = await fetchApi(API_PATH.EXTENSION_TOKEN, { method: "POST" });
+const json = await res.json();
+injectExtensionToken(json.token, Date.parse(json.expiresAt));
+```
+
+To migrate, change to:
+```typescript
+const res = await fetchApi(API_PATH.EXTENSION_BRIDGE_CODE, { method: "POST" });
+const json = await res.json();
+injectExtensionBridgeCode(json.code, Date.parse(json.expiresAt));
+```
+
+Test file: `src/components/extension/auto-extension-connect.test.tsx` — update assertions for the new endpoint and inject function.
+
+### IA-4: `getLogger()` test mocking — log return shape
+
+The plan §Step 5 uses `getLogger().warn(...)` and `getLogger().error(...)`. The existing `csp-report/route.test.ts:7-13` pattern is the reference. The mock pattern from §Step 10 is correct, but verify when implementing that `mockError` is wired into the returned logger object alongside `mockWarn`.
+
+### IA-5: Existing `inject-extension-token.test.ts` rename verification
+
+The file currently exists at `src/lib/inject-extension-token.test.ts`. Use `git mv` to rename it to `inject-extension-bridge-code.test.ts`. Note: the rewrite will replace nearly all content, so git rename detection may treat it as delete+create — note this in the PR description.
+
+---
+
 ## Implementation Checklist
 
 ### Files to modify

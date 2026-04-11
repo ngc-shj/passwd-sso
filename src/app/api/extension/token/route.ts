@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { validateExtensionToken } from "@/lib/extension-token";
+import { issueExtensionToken, validateExtensionToken } from "@/lib/extension-token";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import {
-  EXTENSION_TOKEN_DEFAULT_SCOPES,
-  EXTENSION_TOKEN_TTL_MS,
-  EXTENSION_TOKEN_MAX_ACTIVE,
-} from "@/lib/constants";
+import { EXTENSION_TOKEN_DEFAULT_SCOPES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
@@ -43,11 +38,6 @@ async function handlePOST() {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + EXTENSION_TOKEN_TTL_MS);
-  const plaintext = generateShareToken();
-  const tokenHash = hashToken(plaintext);
-  const scopeCsv = EXTENSION_TOKEN_DEFAULT_SCOPES.join(",");
   const actor = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },
@@ -58,36 +48,27 @@ async function handlePOST() {
     return unauthorized();
   }
 
-  const created = await withUserTenantRls(session.user.id, async () =>
-    prisma.$transaction(async (tx) => {
-      // Find active tokens (non-revoked, non-expired)
-      const active = await tx.extensionToken.findMany({
-        where: { userId: session.user.id, revokedAt: null, expiresAt: { gt: now } },
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
-      });
-
-      // Revoke oldest if at max (need room for the new one)
-      const over = active.length + 1 - EXTENSION_TOKEN_MAX_ACTIVE;
-      if (over > 0) {
-        const toRevoke = active.slice(0, over).map((t) => t.id);
-        await tx.extensionToken.updateMany({
-          where: { id: { in: toRevoke } },
-          data: { revokedAt: now },
-        });
-      }
-
-      return tx.extensionToken.create({
-        data: { userId: session.user.id, tenantId: actor.tenantId, tokenHash, scope: scopeCsv, expiresAt },
-        select: { id: true, expiresAt: true, scope: true },
-      });
-    }),
+  // Migration metric (Step 11): emit a counter so we can track when the legacy
+  // direct-issuance endpoint stops being called and the bridge code flow has
+  // fully replaced it.
+  logger.info(
+    {
+      event: "extension_token_legacy_issuance",
+      userId: session.user.id,
+    },
+    "legacy direct extension token issuance — track for migration completion",
   );
 
+  const issued = await issueExtensionToken({
+    userId: session.user.id,
+    tenantId: actor.tenantId,
+    scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
+  });
+
   const body = {
-    token: plaintext,
-    expiresAt: created.expiresAt.toISOString(),
-    scope: created.scope.split(","),
+    token: issued.token,
+    expiresAt: issued.expiresAt.toISOString(),
+    scope: issued.scopeCsv.split(","),
   };
 
   const parsed = TokenIssueResponseSchema.safeParse(body);

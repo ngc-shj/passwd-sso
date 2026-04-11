@@ -6,6 +6,13 @@ export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
 // New token bridge: postMessage (web app) → content script (ISOLATED world)
 export const TOKEN_BRIDGE_MSG_TYPE = "PASSWD_SSO_TOKEN_RELAY";
 
+// Bridge code flow: postMessage (web app) → content script → exchange endpoint.
+// Mirror values in src/lib/constants/extension.ts (web app side); a sync test
+// validates equality between the two repos.
+export const BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
+export const BRIDGE_CODE_TTL_MS = 60 * 1000;
+export const BRIDGE_CODE_MAX_ACTIVE = 3;
+
 // ── Session storage ──
 export const SESSION_KEY = "authState";
 

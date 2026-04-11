@@ -138,7 +138,8 @@ model User {
   emergencyGrantsAsGrantee EmergencyAccessGrant[] @relation("emergencyGrantsAsGrantee")
 
   // Extension tokens
-  extensionTokens ExtensionToken[]
+  extensionTokens     ExtensionToken[]
+  extensionBridgeCodes ExtensionBridgeCode[]
 
   // Admin vault resets
   adminVaultResetsAsTarget    AdminVaultReset[] @relation("adminVaultResetTarget")
@@ -190,6 +191,26 @@ model ExtensionToken {
   @@index([tenantId])
   @@index([expiresAt])
   @@map("extension_tokens")
+}
+
+model ExtensionBridgeCode {
+  id        String    @id @default(uuid(4)) @db.Uuid
+  codeHash  String    @unique @map("code_hash") @db.VarChar(64)
+  userId    String    @map("user_id") @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  scope     String    @db.VarChar(255)
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  ip        String?   @db.VarChar(64)
+  userAgent String?   @map("user_agent") @db.VarChar(512)
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([userId, usedAt])
+  @@index([expiresAt])
+  @@map("extension_bridge_codes")
 }
 
 model ScimToken {
@@ -403,6 +424,7 @@ model Tenant {
   accounts                   Account[]
   sessions                   Session[]
   extensionTokens            ExtensionToken[]
+  extensionBridgeCodes       ExtensionBridgeCode[]
   tags                       Tag[]
   vaultKeys                  VaultKey[]
   passwordEntries            PasswordEntry[]
@@ -876,6 +898,8 @@ enum AuditAction {
   MCP_CONNECTION_REVOKE
   MCP_CONNECTION_REVOKE_ALL
   PASSKEY_ENFORCEMENT_BLOCKED
+  EXTENSION_BRIDGE_CODE_ISSUE
+  EXTENSION_TOKEN_EXCHANGE_SUCCESS
 }
 
 enum AuditScope {

@@ -17,15 +17,15 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockInjectToken } = vi.hoisted(() => ({
-  mockInjectToken: vi.fn(),
+const { mockInjectBridgeCode } = vi.hoisted(() => ({
+  mockInjectBridgeCode: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
-vi.mock("@/lib/inject-extension-token", () => ({
-  injectExtensionToken: mockInjectToken,
+vi.mock("@/lib/inject-extension-bridge-code", () => ({
+  injectExtensionBridgeCode: mockInjectBridgeCode,
 }));
 
 import { AutoExtensionConnect, isOverlayActive } from "./auto-extension-connect";
@@ -77,7 +77,7 @@ describe("AutoExtensionConnect", () => {
   it("removes ext_connect from URL when present", async () => {
     setSearchParams("?ext_connect=1");
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ token: "t", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
     );
 
     render(<AutoExtensionConnect />);
@@ -90,7 +90,7 @@ describe("AutoExtensionConnect", () => {
   it("preserves other query params when removing ext_connect", async () => {
     setSearchParams("?ext_connect=1&foo=bar");
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ token: "t", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
     );
 
     render(<AutoExtensionConnect />);
@@ -103,7 +103,10 @@ describe("AutoExtensionConnect", () => {
   it("shows connecting state, then connected on fetch success", async () => {
     setSearchParams("?ext_connect=1");
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ token: "tok123", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(
+        JSON.stringify({ code: "b".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }),
+        { status: 200 },
+      ),
     );
 
     render(<AutoExtensionConnect />);
@@ -116,7 +119,7 @@ describe("AutoExtensionConnect", () => {
       expect(screen.getByText("connectedTitle")).toBeInTheDocument();
     });
     expect(screen.getByText("connectedDescription")).toBeInTheDocument();
-    expect(mockInjectToken).toHaveBeenCalledWith("tok123", expect.any(Number));
+    expect(mockInjectBridgeCode).toHaveBeenCalledWith("b".repeat(64), expect.any(Number));
   });
 
   it("shows failed state on fetch error", async () => {
@@ -154,7 +157,7 @@ describe("AutoExtensionConnect", () => {
 
     // Now retry with success
     fetchSpy.mockResolvedValueOnce(
-      new Response(JSON.stringify({ token: "t2", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(JSON.stringify({ code: "c".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
     );
 
     const user = userEvent.setup();
@@ -168,7 +171,7 @@ describe("AutoExtensionConnect", () => {
   it("'Go to dashboard' button returns to IDLE (renders nothing)", async () => {
     setSearchParams("?ext_connect=1");
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ token: "t", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
     );
 
     const { container } = render(<AutoExtensionConnect />);
@@ -187,7 +190,7 @@ describe("AutoExtensionConnect", () => {
   it("displays APP_NAME in branding section", async () => {
     setSearchParams("?ext_connect=1");
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ token: "t", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
     );
 
     render(<AutoExtensionConnect />);
@@ -203,7 +206,7 @@ describe("AutoExtensionConnect", () => {
   it("sets data-overlay-active on overlay div when CONNECTED", async () => {
     setSearchParams("?ext_connect=1");
     fetchSpy.mockResolvedValue(
-      new Response(JSON.stringify({ token: "t", expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
+      new Response(JSON.stringify({ code: "a".repeat(64), expiresAt: "2099-01-01T00:00:00Z" }), { status: 200 }),
     );
 
     render(<AutoExtensionConnect />);

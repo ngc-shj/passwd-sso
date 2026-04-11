@@ -208,6 +208,8 @@
   "MCP_CONNECTION_REVOKE": "MCP接続を取り消し",
   "MCP_CONNECTION_REVOKE_ALL": "すべてのMCP接続を取り消し",
   "PASSKEY_ENFORCEMENT_BLOCKED": "パスキー未登録のためアクセスをブロック",
+  "EXTENSION_BRIDGE_CODE_ISSUE": "拡張機能ブリッジコードを発行",
+  "EXTENSION_TOKEN_EXCHANGE_SUCCESS": "拡張機能トークン交換に成功",
   "groupDelegation": "委任",
   "delegationListMeta": "委任済み {entryCount} 件を一覧表示",
   "delegationSearchMeta": "「{query}」を検索 — {entryCount} 件",
