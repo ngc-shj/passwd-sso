@@ -28,6 +28,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/audit-retry.ts", ["auditLog"]],
   ["src/lib/scim-token.ts", ["scimToken"]],
   ["src/lib/extension-token.ts", ["extensionToken"]],
+  ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
+  ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
   ["src/app/api/maintenance/purge-history/route.ts", ["tenantMember", "passwordEntryHistory"]],
   ["src/app/api/teams/route.ts", ["teamMember"]],
