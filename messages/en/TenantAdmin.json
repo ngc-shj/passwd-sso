@@ -144,7 +144,7 @@
   "retentionPolicyLoadFailed": "Failed to load retention policy.",
   "retentionPolicySaveFailed": "Failed to update retention policy.",
   "tokenPolicyTitle": "Token Policy",
-  "tokenPolicyDescription": "Configure expiry limits for service account tokens and JIT access tokens.",
+  "tokenPolicyDescription": "Configure expiry limits for service account (SA) tokens and Just-In-Time (JIT) access tokens.",
   "saTokenMaxExpiryEnabled": "Limit SA Token Expiry",
   "saTokenMaxExpiryEnabledHelp": "When enabled, service account tokens cannot be created with an expiry beyond the specified number of days.",
   "saTokenMaxExpiryDays": "Maximum Expiry (days)",
