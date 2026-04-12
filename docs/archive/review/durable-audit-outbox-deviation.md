@@ -34,4 +34,16 @@ Created: 2026-04-12
 - **Reason**: Making userId nullable is a schema change that affects many existing queries and is deferred to Phase 2. Phase 1 worker correctly skips these edge cases.
 - **Impact scope**: Worker — rare edge case (no SYSTEM actor events in Phase 1)
 
+### DEV-6: Security-critical call sites use separate transactions (not same-tx atomic)
+- **Plan description**: Plan F1 + checklist states these sites achieve "business write ⇔ audit row" atomicity via `logAuditInTx`
+- **Actual implementation**: SHARE_CREATE, SHARE_REVOKE, VAULT_UNLOCK_FAILED, VAULT_LOCKOUT_TRIGGERED all call `logAuditInTx` in a separate `withBypassRls` transaction (tx2) AFTER the business mutation's transaction (tx1) has committed. If tx2 fails, the business write exists without an outbox row.
+- **Reason**: The business mutations use tenant-scoped or AUTH_FLOW-purpose RLS modes (`withUserTenantRls`, `withBypassRls(..., AUTH_FLOW)`) that are incompatible with `BYPASS_PURPOSE.AUDIT_WRITE` in a single transaction. Merging them requires refactoring the RLS context model, which is out of scope for Phase 1.
+- **Impact scope**: The actual improvement over pre-outbox behavior is: synchronous awaited outbox enqueue (not fire-and-forget), with immediate error surfacing. True same-tx atomicity requires a future refactoring of `withBypassRls` to support multiple purposes in one transaction.
+
+### DEV-7: webhook-dispatcher.ts backoff migration reverted
+- **Plan description**: Plan R1 specifies migrating webhook-dispatcher RETRY_DELAYS to use `computeBackoffMs` from `backoff.ts`
+- **Actual implementation**: Reverted to original hardcoded `[1_000, 5_000, 25_000]` array
+- **Reason**: `computeBackoffMs` with `baseMs=1000, capMs=25000` produces `[1000, 2000, 4000]` — different values than the original. The webhook retry curve is intentionally steeper and not a standard exponential backoff.
+- **Impact scope**: Two backoff implementations coexist. The shared helper is used only by the outbox worker.
+
 ---

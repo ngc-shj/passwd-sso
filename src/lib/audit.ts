@@ -19,7 +19,7 @@ import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client"
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
-import type { AuditOutboxPayload } from "@/lib/audit-outbox";
+import { enqueueAudit, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit-outbox";
 
 /** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -215,7 +215,6 @@ async function flushFifo(): Promise<void> {
           userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         };
 
-        const { enqueueAudit } = await import("@/lib/audit-outbox");
         await enqueueAudit(tenantId, payload);
       } catch (err) {
         entry.retryCount++;
@@ -289,7 +288,7 @@ export async function logAuditInTx(
     userAgent: safeUserAgent,
   };
 
-  const { enqueueAuditInTx } = await import("@/lib/audit-outbox");
+  // enqueueAuditInTx is a static import at the top of the file
   await enqueueAuditInTx(tx, tenantId, payload);
 }
 

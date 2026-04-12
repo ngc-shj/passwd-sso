@@ -30,6 +30,7 @@ if [[ -z "$MIGRATION_DATABASE_URL" ]]; then
 fi
 
 psql "$MIGRATION_DATABASE_URL" \
-  -c "ALTER ROLE passwd_outbox_worker WITH PASSWORD '${PASSWD_OUTBOX_WORKER_PASSWORD}';"
+  -v new_password="$PASSWD_OUTBOX_WORKER_PASSWORD" \
+  -c "ALTER ROLE passwd_outbox_worker WITH PASSWORD :'new_password';"
 
 echo "[set-outbox-worker-password] OK — password updated for passwd_outbox_worker"
