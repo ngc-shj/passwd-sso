@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
 
@@ -781,5 +781,451 @@ describe("ON CONFLICT DO NOTHING dedup", () => {
         call[0].includes("status = 'SENT'"),
     );
     expect(sentUpdate).toBeDefined();
+  }, 15000);
+});
+
+// ─── WEBHOOK_DISPATCH_SUPPRESS ────────────────────────────────────────────────
+//
+// dispatchWebhookForRow checks OUTBOX_BYPASS_AUDIT_ACTIONS first, then
+// WEBHOOK_DISPATCH_SUPPRESS. These sets overlap for AUDIT_OUTBOX_* actions but
+// WEBHOOK_DISPATCH_SUPPRESS also includes actions like AUDIT_OUTBOX_METRICS_VIEW
+// and AUDIT_OUTBOX_PURGE_EXECUTED that are NOT in OUTBOX_BYPASS_AUDIT_ACTIONS.
+// We test both guard paths here.
+
+describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
+  beforeEach(resetMocks);
+
+  it("skips webhook dispatch for actions in WEBHOOK_DISPATCH_SUPPRESS but NOT in OUTBOX_BYPASS_AUDIT_ACTIONS", async () => {
+    // AUDIT_OUTBOX_METRICS_VIEW is in SUPPRESS but NOT in BYPASS (admin endpoint action)
+    const suppressOnlyAction = AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW;
+    expect(WEBHOOK_DISPATCH_SUPPRESS.has(suppressOnlyAction)).toBe(true);
+    expect(OUTBOX_BYPASS_AUDIT_ACTIONS.has(suppressOnlyAction)).toBe(false);
+
+    const row = makeRow({
+      payload: {
+        scope: AUDIT_SCOPE.TENANT,
+        action: suppressOnlyAction,
+        userId: USER_ID,
+        actorType: ACTOR_TYPE.HUMAN,
+        serviceAccountId: null,
+        teamId: null,
+        targetType: null,
+        targetId: null,
+        metadata: null,
+        ip: null,
+        userAgent: null,
+      },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    // Flush microtask queue so any fire-and-forget dispatch calls settle
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  }, 15000);
+
+  it("skips webhook dispatch for AUDIT_OUTBOX_REAPED (in both suppression sets, TENANT scope)", async () => {
+    const row = makeRow({
+      payload: {
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
+        userId: USER_ID,
+        actorType: ACTOR_TYPE.HUMAN,
+        serviceAccountId: null,
+        teamId: null,
+        targetType: null,
+        targetId: null,
+        metadata: null,
+        ip: null,
+        userAgent: null,
+      },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  }, 15000);
+
+  it("skips webhook dispatch for AUDIT_OUTBOX_DEAD_LETTER (in both suppression sets, TEAM scope with teamId)", async () => {
+    // Even with TEAM scope + teamId, WEBHOOK_DISPATCH_SUPPRESS must prevent dispatch
+    const row = makeRow({
+      payload: {
+        scope: AUDIT_SCOPE.TEAM,
+        action: AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
+        userId: USER_ID,
+        actorType: ACTOR_TYPE.HUMAN,
+        serviceAccountId: null,
+        teamId: TEAM_ID,
+        targetType: null,
+        targetId: null,
+        metadata: null,
+        ip: null,
+        userAgent: null,
+      },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  }, 15000);
+
+  it("skips webhook dispatch for AUDIT_OUTBOX_RETENTION_PURGED (in both suppression sets, TENANT scope)", async () => {
+    const row = makeRow({
+      payload: {
+        scope: AUDIT_SCOPE.TENANT,
+        action: AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED,
+        userId: USER_ID,
+        actorType: ACTOR_TYPE.HUMAN,
+        serviceAccountId: null,
+        teamId: null,
+        targetType: null,
+        targetId: null,
+        metadata: null,
+        ip: null,
+        userAgent: null,
+      },
+    });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+
+    expect(mockDispatchWebhook).not.toHaveBeenCalled();
+    expect(mockDispatchTenantWebhook).not.toHaveBeenCalled();
+  }, 15000);
+});
+
+// ─── Reaper invocation ────────────────────────────────────────────────────────
+//
+// runReaper() is called inside the worker loop when REAPER_INTERVAL_MS has
+// elapsed since the last run. Because REAPER_INTERVAL_MS defaults to 30 s (in
+// the test env AUDIT_OUTBOX.REAPER_INTERVAL_MS is whatever envInt resolves to),
+// the reaper fires on the FIRST loop iteration (lastReaperRun starts at 0, so
+// now - 0 >= threshold is always true on the first tick).
+//
+// reapStuckRows uses $transaction with $queryRawUnsafe internally.
+// purgeRetention also uses $transaction with $queryRawUnsafe.
+// We observe their SQL via mockQueryRawUnsafe argument inspection.
+
+describe("reaper — invoked on first loop tick", () => {
+  beforeEach(resetMocks);
+
+  it("reapStuckRows UPDATE query is issued on the first loop iteration", async () => {
+    // The reaper always fires on the first tick (lastReaperRun = 0).
+    // reapStuckRows issues: UPDATE audit_outbox SET status = 'PENDING' ... WHERE status = 'PROCESSING'
+    // We verify that SQL appears among the $queryRawUnsafe calls.
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const reapCall = mockQueryRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("status = 'PROCESSING'"),
+    );
+    expect(reapCall).toBeDefined();
+  }, 15000);
+
+  it("reapStuckRows does not write a direct audit log when no rows are reaped (empty result)", async () => {
+    // mockQueryRawUnsafe already returns [] by default.
+    // With 0 reaped rows, writeDirectAuditLog should NOT be called for AUDIT_OUTBOX_REAPED.
+    // writeDirectAuditLog emits an INSERT via $executeRawUnsafe with AUDIT_OUTBOX_REAPED action.
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    await runWorkerOnce(worker);
+
+    const reapedInsert = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("INSERT INTO audit_logs") &&
+        call[3] === AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
+    );
+    expect(reapedInsert).toBeUndefined();
+  }, 15000);
+
+  it("reapStuckRows writes a direct audit log for each reaped row", async () => {
+    // Arrange: reapStuckRows' $queryRawUnsafe returns two reaped rows.
+    // The claimBatch $queryRawUnsafe (for PENDING rows) continues to return [].
+    // We distinguish the two calls by SQL content in a custom mockTransaction impl.
+
+    const REAPED_ROW_1 = "aaaaaaaa-0000-4000-8000-000000000001";
+    const REAPED_ROW_2 = "aaaaaaaa-0000-4000-8000-000000000002";
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+
+    let txCallCount = 0;
+    mockTransaction.mockImplementation(
+      async function (fn: (tx: unknown) => Promise<unknown>) {
+        txCallCount++;
+
+        // tx 1 = claimBatch (PENDING check): returns []
+        // tx 2 = reapStuckRows (PROCESSING check): returns two reaped rows
+        // tx 3 = writeDirectAuditLog for REAPED_ROW_1 (REAPED)
+        // tx 4 = writeDirectAuditLog for REAPED_ROW_2 (REAPED)
+        // tx 5 = purgeRetention (DELETE CTE): returns 0 purged
+        // tx 6 = next claimBatch iteration — stop here
+
+        if (txCallCount === 6) {
+          worker.stop();
+          return [];
+        }
+
+        const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
+          if (txCallCount === 2) {
+            // reapStuckRows — return two stuck rows (both below max_attempts)
+            return [
+              { id: REAPED_ROW_1, tenant_id: TENANT_ID, attempt_count: 1, new_status: "PENDING" },
+              { id: REAPED_ROW_2, tenant_id: TENANT_ID, attempt_count: 2, new_status: "PENDING" },
+            ];
+          }
+          if (txCallCount === 5) {
+            // purgeRetention — return 0 purged
+            return [{ purged: BigInt(0), sample_tenant_id: null }];
+          }
+          // claimBatch and direct-audit transactions return []
+          return mockQueryRawUnsafe(sql, ...args);
+        });
+
+        return fn({
+          $executeRaw: mockExecuteRaw,
+          $queryRawUnsafe: txQueryRaw,
+          $executeRawUnsafe: mockExecuteRawUnsafe,
+        });
+      },
+    );
+
+    await worker.start();
+
+    // writeDirectAuditLog inserts with AUDIT_OUTBOX_REAPED as the action (param index 3)
+    const reapedInserts = mockExecuteRawUnsafe.mock.calls.filter(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("INSERT INTO audit_logs") &&
+        call[3] === AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
+    );
+    expect(reapedInserts).toHaveLength(2);
+
+    // Verify outboxId appears in the metadata JSON for each insert
+    const metadataArgs = reapedInserts.map((call) => JSON.parse(call[5] as string));
+    expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_1)).toBe(true);
+    expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_2)).toBe(true);
+  }, 15000);
+
+  it("purgeRetention writes a direct audit log when rows are purged", async () => {
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+
+    let txCallCount = 0;
+    mockTransaction.mockImplementation(
+      async function (fn: (tx: unknown) => Promise<unknown>) {
+        txCallCount++;
+
+        // tx 1 = claimBatch: []
+        // tx 2 = reapStuckRows: 0 reaped (no PROCESSING rows)
+        // tx 3 = purgeRetention: 5 rows purged
+        // tx 4 = writeDirectAuditLog for AUDIT_OUTBOX_RETENTION_PURGED: INSERT
+        // tx 5 = next claimBatch — stop
+
+        if (txCallCount === 5) {
+          worker.stop();
+          return [];
+        }
+
+        const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
+          if (txCallCount === 2) {
+            // reapStuckRows — 0 reaped
+            return [];
+          }
+          if (txCallCount === 3) {
+            // purgeRetention — 5 rows deleted with a sample tenant
+            return [{ purged: BigInt(5), sample_tenant_id: TENANT_ID }];
+          }
+          return mockQueryRawUnsafe(sql, ...args);
+        });
+
+        return fn({
+          $executeRaw: mockExecuteRaw,
+          $queryRawUnsafe: txQueryRaw,
+          $executeRawUnsafe: mockExecuteRawUnsafe,
+        });
+      },
+    );
+
+    await worker.start();
+
+    // writeDirectAuditLog for AUDIT_OUTBOX_RETENTION_PURGED inserts with that action at param 3
+    const purgeInsert = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("INSERT INTO audit_logs") &&
+        call[3] === AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED,
+    );
+    expect(purgeInsert).toBeDefined();
+
+    // metadata JSON should include purgedCount: 5 (param index 5 after removing user_id)
+    const metadata = JSON.parse(purgeInsert![5] as string);
+    expect(metadata.purgedCount).toBe(5);
+  }, 15000);
+
+  it("reaper errors do not crash the worker loop", async () => {
+    // If reapStuckRows throws, the worker should swallow the error (runReaper catches it)
+    // and continue processing the next batch iteration normally.
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+
+    let txCallCount = 0;
+    mockTransaction.mockImplementation(
+      async function (fn: (tx: unknown) => Promise<unknown>) {
+        txCallCount++;
+
+        // tx 1 = claimBatch: []
+        // tx 2 = reapStuckRows: throw (caught by runReaper)
+        // tx 3 = purgeRetention: runs independently (separate try/catch in runReaper)
+        // tx 4 = next claimBatch — stop
+        if (txCallCount === 2) {
+          throw new Error("reaper db error");
+        }
+        if (txCallCount === 4) {
+          worker.stop();
+          return [];
+        }
+
+        const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
+          if (txCallCount === 3) {
+            // purgeRetention — 0 purged, explicit shape matching actual return
+            return [{ purged: BigInt(0), sample_tenant_id: null }];
+          }
+          return mockQueryRawUnsafe(sql, ...args);
+        });
+
+        return fn({
+          $executeRaw: mockExecuteRaw,
+          $queryRawUnsafe: txQueryRaw,
+          $executeRawUnsafe: mockExecuteRawUnsafe,
+        });
+      },
+    );
+
+    await expect(worker.start()).resolves.toBeUndefined();
+
+    // The reaper error should have been logged
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.objectContaining({ err: expect.any(Error) }),
+      "worker.reaper.stuck_reset_failed",
+    );
+  }, 15000);
+});
+
+// ─── recordError — AUDIT_OUTBOX_DEAD_LETTER via writeDirectAuditLog ──────────
+
+describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () => {
+  beforeEach(resetMocks);
+
+  it("writeDirectAuditLog is called with AUDIT_OUTBOX_DEAD_LETTER when row is dead-lettered", async () => {
+    // When attempt_count + 1 >= max_attempts, recordError must call writeDirectAuditLog
+    // which issues an INSERT INTO audit_logs with action = AUDIT_OUTBOX_DEAD_LETTER.
+    const row = makeRow({ attempt_count: 7, max_attempts: 8 });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    let txCallCount = 0;
+    mockTransaction.mockImplementation(
+      async function (fn: (tx: unknown) => Promise<unknown>) {
+        txCallCount++;
+        // tx 1 = claimBatch (returns [row])
+        // tx 2 = deliverRow — throw to trigger recordError
+        // tx 3 = recordError (UPDATE to FAILED)
+        // tx 4 = writeDirectAuditLog (DEAD_LETTER INSERT)
+        // tx 5 = reapStuckRows
+        // tx 6 = purgeRetention
+        // tx 7 = next claimBatch — stop
+        if (txCallCount === 2) {
+          throw new Error("deliver failed");
+        }
+        if (txCallCount === 7) {
+          worker.stop();
+          return [];
+        }
+        return fn({
+          $executeRaw: mockExecuteRaw,
+          $queryRawUnsafe: mockQueryRawUnsafe,
+          $executeRawUnsafe: mockExecuteRawUnsafe,
+        });
+      },
+    );
+
+    await worker.start();
+
+    // writeDirectAuditLog inserts with AUDIT_OUTBOX_DEAD_LETTER at param index 3
+    const deadLetterInsert = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("INSERT INTO audit_logs") &&
+        call[3] === AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
+    );
+    expect(deadLetterInsert).toBeDefined();
+  }, 15000);
+
+  it("writeDirectAuditLog is NOT called when row is not yet dead-lettered (attempt_count < max_attempts)", async () => {
+    const row = makeRow({ attempt_count: 2, max_attempts: 8 });
+
+    mockQueryRawUnsafe.mockResolvedValueOnce([row]);
+
+    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
+    let txCallCount = 0;
+    mockTransaction.mockImplementation(
+      async function (fn: (tx: unknown) => Promise<unknown>) {
+        txCallCount++;
+        // tx 1 = claimBatch (returns [row])
+        // tx 2 = deliverRow — throw
+        // tx 3 = recordError (UPDATE to PENDING, not dead)
+        // tx 4 = reapStuckRows
+        // tx 5 = purgeRetention
+        // tx 6 = next claimBatch — stop
+        if (txCallCount === 2) {
+          throw new Error("transient error");
+        }
+        if (txCallCount === 6) {
+          worker.stop();
+          return [];
+        }
+        return fn({
+          $executeRaw: mockExecuteRaw,
+          $queryRawUnsafe: mockQueryRawUnsafe,
+          $executeRawUnsafe: mockExecuteRawUnsafe,
+        });
+      },
+    );
+
+    await worker.start();
+
+    // No AUDIT_OUTBOX_DEAD_LETTER insert expected
+    const deadLetterInsert = mockExecuteRawUnsafe.mock.calls.find(
+      (call) =>
+        typeof call[0] === "string" &&
+        call[0].includes("INSERT INTO audit_logs") &&
+        call[3] === AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
+    );
+    expect(deadLetterInsert).toBeUndefined();
   }, 15000);
 });

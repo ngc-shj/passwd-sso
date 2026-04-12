@@ -4,7 +4,14 @@ import pg from "pg";
 import { getLogger } from "@/lib/logger";
 import { deadLetterLogger } from "@/lib/audit-logger";
 import { computeBackoffMs, withFullJitter } from "@/lib/backoff";
-import { AUDIT_OUTBOX, AUDIT_SCOPE, ACTOR_TYPE, OUTBOX_BYPASS_AUDIT_ACTIONS } from "@/lib/constants/audit";
+import {
+  AUDIT_OUTBOX,
+  AUDIT_SCOPE,
+  AUDIT_ACTION,
+  ACTOR_TYPE,
+  OUTBOX_BYPASS_AUDIT_ACTIONS,
+  WEBHOOK_DISPATCH_SUPPRESS,
+} from "@/lib/constants/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID } from "@/lib/constants/app";
 
@@ -161,6 +168,47 @@ async function deliverRow(
   });
 }
 
+/**
+ * Write a SYSTEM-actor audit event directly to audit_logs, bypassing the outbox.
+ * Used by reaper and dead-letter logging to avoid recursion.
+ */
+async function writeDirectAuditLog(
+  prisma: PrismaClient,
+  tenantId: string,
+  action: string,
+  metadata: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_logs (
+          id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
+        ) VALUES (
+          gen_random_uuid(),
+          $1::uuid,
+          $2::"AuditScope",
+          $3::"AuditAction",
+          NULL,
+          $4::"ActorType",
+          $5::jsonb,
+          now()
+        )`,
+        tenantId,
+        AUDIT_SCOPE.TENANT,
+        action,
+        ACTOR_TYPE.SYSTEM,
+        JSON.stringify(metadata),
+      );
+    });
+  } catch (err) {
+    getLogger().warn(
+      { err, tenantId, action },
+      "worker.direct_audit_log_write_failed",
+    );
+  }
+}
+
 async function recordError(
   prisma: PrismaClient,
   row: AuditOutboxRow,
@@ -210,6 +258,25 @@ async function recordError(
       "worker.error_recovery_tx_failed",
     );
   }
+
+  // Emit AUDIT_OUTBOX_DEAD_LETTER when row is dead-lettered
+  if (isDead) {
+    await writeDirectAuditLog(prisma, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
+      outboxId: row.id,
+      action: parsePayloadAction(row.payload),
+      attemptCount: newAttemptCount,
+      lastError: errorMsg.slice(0, 256),
+    });
+  }
+}
+
+/** Extract action from raw payload without full parsing. */
+function parsePayloadAction(raw: unknown): string {
+  if (raw !== null && typeof raw === "object") {
+    const p = raw as Record<string, unknown>;
+    if (typeof p.action === "string") return p.action;
+  }
+  return "unknown";
 }
 
 async function dispatchWebhookForRow(
@@ -217,6 +284,9 @@ async function dispatchWebhookForRow(
   tenantId: string,
 ): Promise<void> {
   if (OUTBOX_BYPASS_AUDIT_ACTIONS.has(payload.action)) {
+    return;
+  }
+  if (WEBHOOK_DISPATCH_SUPPRESS.has(payload.action)) {
     return;
   }
   try {
@@ -247,6 +317,129 @@ async function dispatchWebhookForRow(
     );
   }
 }
+
+// ─── Reaper ─────────────────────────────────────────────────────
+
+/**
+ * Reset stuck PROCESSING rows back to PENDING for retry.
+ * Rows stuck longer than PROCESSING_TIMEOUT_MS are assumed abandoned.
+ */
+async function reapStuckRows(prisma: PrismaClient): Promise<number> {
+  const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
+
+  // Reset stuck PROCESSING rows: those under max_attempts go back to PENDING,
+  // those at or over max_attempts transition to FAILED (dead-letter).
+  const reaped = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    const rows = await tx.$queryRawUnsafe<{
+      id: string;
+      tenant_id: string;
+      attempt_count: number;
+      new_status: string;
+    }[]>(
+      `UPDATE audit_outbox
+       SET status = CASE
+             WHEN attempt_count + 1 >= max_attempts THEN 'FAILED'::"AuditOutboxStatus"
+             ELSE 'PENDING'::"AuditOutboxStatus"
+           END,
+           processing_started_at = NULL,
+           attempt_count = attempt_count + 1,
+           last_error = LEFT('[reaped after timeout, attempt ' || (attempt_count + 1)::text || ']', 1024)
+       WHERE id IN (
+         SELECT id FROM audit_outbox
+         WHERE status = 'PROCESSING'
+           AND processing_started_at < now() - make_interval(secs => $1)
+         FOR UPDATE SKIP LOCKED
+       )
+       RETURNING id, tenant_id, attempt_count, status::text AS new_status`,
+      timeoutSeconds,
+    );
+    return rows;
+  });
+
+  const log = getLogger();
+  for (const row of reaped) {
+    if (row.new_status === "FAILED") {
+      log.warn({ outboxId: row.id, attemptCount: row.attempt_count }, "worker.reaped_dead_letter");
+      deadLetterLogger.warn(
+        { outboxId: row.id, tenantId: row.tenant_id, attemptCount: row.attempt_count },
+        "outbox row reaped and dead-lettered",
+      );
+      await writeDirectAuditLog(prisma, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER, {
+        outboxId: row.id,
+        attemptCount: row.attempt_count,
+        reason: "reaped_max_attempts",
+      });
+    } else {
+      log.info({ outboxId: row.id, attemptCount: row.attempt_count }, "worker.reaped");
+      await writeDirectAuditLog(prisma, row.tenant_id, AUDIT_ACTION.AUDIT_OUTBOX_REAPED, {
+        outboxId: row.id,
+        attemptCount: row.attempt_count,
+      });
+    }
+  }
+
+  return reaped.length;
+}
+
+/**
+ * Purge SENT rows older than RETENTION_HOURS and FAILED rows older than FAILED_RETENTION_DAYS.
+ */
+async function purgeRetention(prisma: PrismaClient): Promise<void> {
+  const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
+  const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
+
+  const result = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
+      `WITH deleted AS (
+        DELETE FROM audit_outbox
+        WHERE (status = 'SENT'   AND sent_at    < now() - make_interval(hours => $1))
+           OR (status = 'FAILED' AND created_at < now() - make_interval(days  => $2))
+        RETURNING id, tenant_id
+      )
+      SELECT COUNT(*) AS purged, MIN(tenant_id::text) AS sample_tenant_id FROM deleted`,
+      retentionHours,
+      failedRetentionDays,
+    );
+    return {
+      purged: Number(rows[0]?.purged ?? 0),
+      sampleTenantId: rows[0]?.sample_tenant_id ?? null,
+    };
+  });
+
+  if (result.purged > 0 && result.sampleTenantId) {
+    getLogger().info({ purged: result.purged }, "worker.retention_purged");
+    await writeDirectAuditLog(prisma, result.sampleTenantId, AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED, {
+      purgedCount: result.purged,
+      retentionHours,
+      failedRetentionDays,
+    });
+  }
+}
+
+/**
+ * Run the reaper: reset stuck PROCESSING rows and purge expired rows.
+ */
+async function runReaper(prisma: PrismaClient): Promise<void> {
+  const log = getLogger();
+  try {
+    const reaped = await reapStuckRows(prisma);
+    if (reaped > 0) {
+      log.info({ reaped }, "worker.reaper.stuck_reset");
+    }
+  } catch (err) {
+    log.error({ err }, "worker.reaper.stuck_reset_failed");
+  }
+
+  try {
+    await purgeRetention(prisma);
+  } catch (err) {
+    log.error({ err }, "worker.reaper.retention_purge_failed");
+  }
+}
+
+// ��── Worker ─────────────────────────────────────────────────────
 
 export function createWorker(config: WorkerConfig) {
   const { databaseUrl } = config;
@@ -365,6 +558,7 @@ export function createWorker(config: WorkerConfig) {
   }
 
   let sleepResolve: (() => void) | null = null;
+  let lastReaperRun = 0;
 
   async function loop(): Promise<void> {
     const log = getLogger();
@@ -372,6 +566,13 @@ export function createWorker(config: WorkerConfig) {
 
     while (running) {
       const claimed = await processBatch();
+
+      // Run reaper at REAPER_INTERVAL_MS intervals
+      const now = Date.now();
+      if (now - lastReaperRun >= AUDIT_OUTBOX.REAPER_INTERVAL_MS) {
+        lastReaperRun = now;
+        await runReaper(workerPrisma);
+      }
 
       if (!running) break;
 

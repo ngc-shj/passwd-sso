@@ -902,6 +902,11 @@ enum AuditAction {
   EXTENSION_BRIDGE_CODE_ISSUE
   EXTENSION_TOKEN_EXCHANGE_SUCCESS
   EXTENSION_TOKEN_EXCHANGE_FAILURE
+  AUDIT_OUTBOX_REAPED
+  AUDIT_OUTBOX_DEAD_LETTER
+  AUDIT_OUTBOX_RETENTION_PURGED
+  AUDIT_OUTBOX_METRICS_VIEW
+  AUDIT_OUTBOX_PURGE_EXECUTED
 }
 
 enum AuditScope {
@@ -929,7 +934,7 @@ model AuditLog {
   tenantId         String      @map("tenant_id") @db.Uuid
   scope            AuditScope
   action           AuditAction
-  userId           String      @map("user_id") @db.Uuid
+  userId           String?     @map("user_id") @db.Uuid
   actorType        ActorType   @default(HUMAN) @map("actor_type")
   serviceAccountId String?     @map("service_account_id") @db.Uuid
   teamId           String?     @map("team_id") @db.Uuid
@@ -941,7 +946,7 @@ model AuditLog {
   createdAt        DateTime    @default(now()) @map("created_at")
   outboxId         String?     @unique @map("outbox_id") @db.Uuid
 
-  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user           User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
   serviceAccount ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
   team           Team?           @relation(fields: [teamId], references: [id], onDelete: SetNull)
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)

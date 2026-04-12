@@ -2,9 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-const { mockAuditInfo, mockDrainBuffer, mockEnqueueAudit } = vi.hoisted(() => ({
+const { mockAuditInfo, mockEnqueueAudit } = vi.hoisted(() => ({
   mockAuditInfo: vi.fn(),
-  mockDrainBuffer: vi.fn().mockResolvedValue(undefined),
   mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -19,14 +18,9 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...(await importOriginal()) as Record<string, unknown>,
 }));
 
-vi.mock("@/lib/audit-retry", () => ({
-  enqueue: vi.fn(),
-  drainBuffer: mockDrainBuffer,
-  bufferSize: () => 0,
-}));
-
 vi.mock("@/lib/audit-outbox", () => ({
   enqueueAudit: mockEnqueueAudit,
+  enqueueAuditInTx: vi.fn(),
 }));
 
 vi.mock("@/lib/audit-logger", async (importOriginal) => {

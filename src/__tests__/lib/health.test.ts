@@ -145,7 +145,7 @@ describe("health checks", () => {
       mockGetRedis.mockReturnValue(null);
       const result = await runHealthChecks();
       expect(Object.keys(result)).toEqual(["status", "timestamp", "checks"]);
-      expect(Object.keys(result.checks)).toEqual(["database", "redis"]);
+      expect(Object.keys(result.checks)).toEqual(["database", "redis", "auditOutbox"]);
       expect(Object.keys(result.checks.database)).toEqual([
         "status",
         "responseTimeMs",
