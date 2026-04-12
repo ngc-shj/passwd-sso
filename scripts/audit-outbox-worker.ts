@@ -1,6 +1,7 @@
 #!/usr/bin/env tsx
 import { config } from "dotenv";
 config({ path: ".env.local" });
+config();
 
 import { createWorker } from "@/workers/audit-outbox-worker";
 
