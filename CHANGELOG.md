@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.39](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.38...passwd-sso-v0.4.39) (2026-04-12)
+
+
+### Features
+
+* durable audit outbox — Phase 1 ([#366](https://github.com/ngc-shj/passwd-sso/issues/366)) ([0ed24a3](https://github.com/ngc-shj/passwd-sso/commit/0ed24a3862999a8c374e095ea32fef13da4b1a46))
+* extension bridge code exchange — replace bearer token postMessage ([#364](https://github.com/ngc-shj/passwd-sso/issues/364)) ([5a96fb7](https://github.com/ngc-shj/passwd-sso/commit/5a96fb7f48985a0b12170b111c6e60dfcfceb386))
+
+
+### Bug Fixes
+
+* **docker:** patch HIGH CVEs flagged by Trivy container scan ([#365](https://github.com/ngc-shj/passwd-sso/issues/365)) ([64108f5](https://github.com/ngc-shj/passwd-sso/commit/64108f5cc980253fa8415932c4c8c29209961788))
+* restore dev server after next 16.2.3 bump ([#362](https://github.com/ngc-shj/passwd-sso/issues/362)) ([17693ff](https://github.com/ngc-shj/passwd-sso/commit/17693ff26aba2cd244269d8cf0c29794445dbdae))
+
 ## [0.4.38](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.37...passwd-sso-v0.4.38) (2026-04-11)
 
 
