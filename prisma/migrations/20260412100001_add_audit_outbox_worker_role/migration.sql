@@ -10,6 +10,8 @@ GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
 
 -- Defense-in-depth: revoke all schema access before explicit grants
 REVOKE ALL ON SCHEMA public FROM passwd_outbox_worker;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_outbox_worker;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_outbox_worker;
 
 -- Minimal schema access
 GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
