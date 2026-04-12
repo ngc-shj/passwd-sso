@@ -154,4 +154,25 @@ describe("audit constants", () => {
       Object.values(TEAM_WEBHOOK_EVENT_GROUPS).flat(),
     );
   });
+
+  it("every action belongs to at least one scope group (PERSONAL, TEAM, or TENANT)", () => {
+    const allGrouped = new Set([
+      ...Object.values(AUDIT_ACTION_GROUPS_PERSONAL).flat(),
+      ...Object.values(AUDIT_ACTION_GROUPS_TEAM).flat(),
+      ...Object.values(AUDIT_ACTION_GROUPS_TENANT).flat(),
+    ]);
+    const ungrouped = AUDIT_ACTION_VALUES.filter((a) => !allGrouped.has(a));
+    expect(ungrouped).toEqual([]);
+  });
+
+  it("MAINTENANCE group exists only in TENANT scope", () => {
+    expect(AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeDefined();
+    expect(AUDIT_ACTION_GROUPS_PERSONAL[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
+    expect(AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
+  });
+
+  it("MAINTENANCE group is excluded from webhook event groups", () => {
+    expect(TENANT_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
+    expect(TEAM_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.MAINTENANCE]).toBeUndefined();
+  });
 });

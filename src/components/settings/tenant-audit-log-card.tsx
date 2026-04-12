@@ -90,6 +90,7 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.MCP_CLIENT]: "groupMcpClient",
   [AUDIT_ACTION_GROUP.DELEGATION]: "groupDelegation",
   [AUDIT_ACTION_GROUP.TENANT_WEBHOOK]: "groupTenantWebhook",
+  [AUDIT_ACTION_GROUP.MAINTENANCE]: "groupMaintenance",
 };
 
 interface TenantAuditLogCardProps {
