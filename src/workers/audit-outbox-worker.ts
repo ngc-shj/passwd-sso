@@ -388,14 +388,15 @@ export function createWorker(config: WorkerConfig) {
   }
 
   function registerShutdown(): void {
-    const stop = () => {
+    const stop = (signal: string) => {
       if (!running) return;
       running = false;
-      getLogger().info("worker.shutdown_signal");
+      process.stderr.write(`[audit-outbox-worker] ${signal} received, shutting down...\n`);
+      getLogger().info({ signal }, "worker.shutdown_signal");
       sleepResolve?.();
     };
-    process.once("SIGTERM", stop);
-    process.once("SIGINT", stop);
+    process.once("SIGTERM", () => stop("SIGTERM"));
+    process.once("SIGINT", () => stop("SIGINT"));
   }
 
   return {
@@ -420,6 +421,7 @@ export function createWorker(config: WorkerConfig) {
       }
 
       getLogger().info("worker.shutdown_complete");
+      process.stderr.write("[audit-outbox-worker] shutdown complete\n");
     },
 
     stop(): void {
