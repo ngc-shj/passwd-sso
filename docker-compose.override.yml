@@ -25,7 +25,8 @@ services:
     env_file:
       - .env.local
     environment:
-      - DATABASE_URL=postgresql://passwd_outbox_worker:passwd_outbox_pass@db:5432/passwd_sso
+      - OUTBOX_WORKER_DATABASE_URL=postgresql://passwd_outbox_worker:passwd_outbox_pass@db:5432/passwd_sso
+      - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
     depends_on:
       db:
         condition: service_healthy

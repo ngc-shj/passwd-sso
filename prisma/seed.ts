@@ -1,8 +1,9 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
-import { loadEnv } from "@/lib/load-env";
-loadEnv();
+import { config } from "dotenv";
+config({ path: ".env.local" });
+config();
 
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = new PrismaPg(pool);
