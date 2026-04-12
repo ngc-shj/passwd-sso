@@ -21,6 +21,13 @@ Admin scripts:
 ```bash
 ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<uuid> scripts/purge-history.sh                    # System-wide history purge
 ADMIN_API_TOKEN=<hex64> OPERATOR_ID=<uuid> TARGET_VERSION=<int> scripts/rotate-master-key.sh  # Rotate ShareLink master key
+PASSWD_OUTBOX_WORKER_PASSWORD=<pass> MIGRATION_DATABASE_URL=<url> scripts/set-outbox-worker-password.sh  # Set worker DB role password
+```
+
+Audit outbox worker (separate process):
+```bash
+npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_DATABASE_URL)
+npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 
 Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.yml up`
@@ -355,6 +362,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/user/locale` | PUT | Update user locale preference |
 | `/api/admin/rotate-master-key` | POST | Rotate server master key (admin-only, bearer token) |
 | `/api/maintenance/purge-history` | POST | System-wide history purge (admin-only, bearer token) |
+| `/api/maintenance/purge-audit-logs` | POST | System-wide audit log purge (admin-only, bearer token) |
 | `/api/maintenance/dcr-cleanup` | POST | Clean up expired DCR clients (admin-only) |
 
 ### i18n
@@ -393,11 +401,13 @@ All password data is encrypted **client-side** before reaching the server. The s
 
 ### Docker Services
 
-Five containers: `app` (Next.js, connects as `passwd_app` — NOSUPERUSER), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration, connects as `passwd_user` — SUPERUSER)
+Six containers: `app` (Next.js, connects as `passwd_app` — NOSUPERUSER), `db` (PostgreSQL 16), `jackson` (BoxyHQ SAML Jackson), `redis` (Redis 7), `migrate` (one-shot Prisma migration, connects as `passwd_user` — SUPERUSER), `audit-outbox-worker` (outbox drain worker, connects as `passwd_outbox_worker` — NOSUPERUSER, least privilege)
 
-Dev override adds: `mailpit` (local email testing on port 8025)
+Dev override adds: `mailpit` (local email testing on port 8025), `audit-outbox-worker` (outbox drain)
 
-**Database role separation**: The `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) so RLS is enforced in dev. The `migrate` service connects as `passwd_user` (SUPERUSER, table owner) for DDL. For local `npm run db:migrate`, set `MIGRATION_DATABASE_URL` in `.env.local` pointing to `passwd_user`.
+**Database role separation**: The `app` service connects as `passwd_app` (NOSUPERUSER, NOBYPASSRLS) so RLS is enforced in dev. The `migrate` service connects as `passwd_user` (SUPERUSER, table owner) for DDL. The `audit-outbox-worker` service connects as `passwd_outbox_worker` (NOSUPERUSER, NOBYPASSRLS, least privilege — SELECT/UPDATE/DELETE on `audit_outbox`, INSERT on `audit_logs`, SELECT on `tenants` only). For local `npm run db:migrate`, set `MIGRATION_DATABASE_URL` in `.env.local` pointing to `passwd_user`.
+
+**Audit outbox**: Audit events are written to `audit_outbox` table in the same DB transaction as business logic. A separate worker process drains pending rows into `audit_logs`. The worker runs as `npm run worker:audit-outbox` (dev) or as the `audit-outbox-worker` Docker service. Without the worker, audit events accumulate in `audit_outbox` with status `PENDING` — the web app continues to function normally.
 
 ## Versioning
 
