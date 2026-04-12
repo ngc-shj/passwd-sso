@@ -2,12 +2,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, createParams, parseResponse } from "../../helpers/request-builder";
 
-const { mockAuth, mockFindUnique, mockUpdate, mockWithUserTenantRls } = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockFindUnique: vi.fn(),
-  mockUpdate: vi.fn(),
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-}));
+const { mockTx, mockAuth, mockFindUnique, mockUpdate, mockWithUserTenantRls, mockWithBypassRls, mockLogAuditInTx } = vi.hoisted(() => {
+  const tx = {};
+  return {
+    mockTx: tx,
+    mockAuth: vi.fn(),
+    mockFindUnique: vi.fn(),
+    mockUpdate: vi.fn(),
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn(tx)),
+    mockLogAuditInTx: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -17,11 +23,14 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 
 import { DELETE } from "@/app/api/share-links/[id]/route";
@@ -97,6 +106,7 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "ENTRY_SHARE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
+      tenantId: "tenant-1",
       teamPasswordEntryId: null,
     });
     mockUpdate.mockResolvedValue({});
@@ -120,17 +130,18 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "TEXT",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
+      tenantId: "tenant-1",
       teamPasswordEntryId: null,
     });
     mockUpdate.mockResolvedValue({});
-
-    const { logAudit } = await import("@/lib/audit");
 
     const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
     const res = await DELETE(req as never, createParams({ id: "s1" }));
 
     expect(res.status).toBe(200);
-    expect(logAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({
         action: "SEND_REVOKE",
       })
@@ -144,18 +155,19 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "ENTRY_SHARE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
+      tenantId: "tenant-1",
       teamPasswordEntryId: "tpe-1",
       teamPasswordEntry: { teamId: "team-1" },
     });
     mockUpdate.mockResolvedValue({});
 
-    const { logAudit } = await import("@/lib/audit");
-
     const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
     const res = await DELETE(req as never, createParams({ id: "s1" }));
 
     expect(res.status).toBe(200);
-    expect(logAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({
         teamId: "team-1",
       }),
@@ -169,17 +181,18 @@ describe("DELETE /api/share-links/[id]", () => {
       shareType: "FILE",
       createdById: DEFAULT_SESSION.user.id,
       revokedAt: null,
+      tenantId: "tenant-1",
       teamPasswordEntryId: null,
     });
     mockUpdate.mockResolvedValue({});
-
-    const { logAudit } = await import("@/lib/audit");
 
     const req = createRequest("DELETE", "http://localhost/api/share-links/s1");
     const res = await DELETE(req as never, createParams({ id: "s1" }));
 
     expect(res.status).toBe(200);
-    expect(logAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({
         action: "SEND_REVOKE",
       })

@@ -2,19 +2,26 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
 const {
+  mockTx,
   mockAuth,
   mockPrismaPasswordShare,
   mockWithUserTenantRls,
-  mockLogAudit,
-} = vi.hoisted(() => ({
-  mockAuth: vi.fn(),
-  mockPrismaPasswordShare: {
-    findUnique: vi.fn(),
-    update: vi.fn(),
-  },
-  mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-  mockLogAudit: vi.fn(),
-}));
+  mockWithBypassRls,
+  mockLogAuditInTx,
+} = vi.hoisted(() => {
+  const tx = {};
+  return {
+    mockTx: tx,
+    mockAuth: vi.fn(),
+    mockPrismaPasswordShare: {
+      findUnique: vi.fn(),
+      update: vi.fn(),
+    },
+    mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn(tx)),
+    mockLogAuditInTx: vi.fn(),
+  };
+});
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
@@ -24,8 +31,11 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: {
@@ -47,6 +57,7 @@ const MOCK_SHARE = {
   shareType: "PASSWORD",
   createdById: "user-1",
   revokedAt: null,
+  tenantId: "tenant-1",
   teamPasswordEntryId: null,
   teamPasswordEntry: null,
 };
@@ -122,7 +133,9 @@ describe("DELETE /api/share-links/[id]", () => {
       createRequest("DELETE", `http://localhost:3000/api/share-links/${SHARE_ID}`),
       createParams({ id: SHARE_ID }),
     );
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({ action: "SHARE_REVOKE" }),
     );
   });
@@ -136,7 +149,9 @@ describe("DELETE /api/share-links/[id]", () => {
       createRequest("DELETE", `http://localhost:3000/api/share-links/${SHARE_ID}`),
       createParams({ id: SHARE_ID }),
     );
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({ action: "SEND_REVOKE" }),
     );
   });

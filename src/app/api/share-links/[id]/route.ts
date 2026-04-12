@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 
 type Params = { params: Promise<{ id: string }> };
@@ -27,6 +28,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
         shareType: true,
         createdById: true,
         revokedAt: true,
+        tenantId: true,
         teamPasswordEntryId: true,
         teamPasswordEntry: { select: { teamId: true } },
       },
@@ -50,20 +52,22 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     }),
   );
 
-  // Audit log
+  // Atomic audit: SHARE_REVOKE / SEND_REVOKE
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
-    scope: teamPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
-    action: share.shareType === "TEXT" || share.shareType === "FILE"
-      ? AUDIT_ACTION.SEND_REVOKE
-      : AUDIT_ACTION.SHARE_REVOKE,
-    userId: session.user.id,
-    teamId: share.teamPasswordEntry?.teamId,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
-    targetId: share.id,
-    ip,
-    userAgent,
-  });
+  await withBypassRls(prisma, async (tx) => {
+    await logAuditInTx(tx, share.tenantId, {
+      scope: teamPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+      action: share.shareType === "TEXT" || share.shareType === "FILE"
+        ? AUDIT_ACTION.SEND_REVOKE
+        : AUDIT_ACTION.SHARE_REVOKE,
+      userId: session.user.id,
+      teamId: share.teamPasswordEntry?.teamId,
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
+      targetId: share.id,
+      ip,
+      userAgent,
+    });
+  }, BYPASS_PURPOSE.AUDIT_WRITE);
 
   return NextResponse.json({ ok: true });
 }

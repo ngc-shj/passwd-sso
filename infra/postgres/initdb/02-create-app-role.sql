@@ -23,8 +23,8 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app')
 -- Revoke default PUBLIC privileges on public schema (defense-in-depth)
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
--- Grant access to the application database
-GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
+-- Grant access to the application database (use current_database() to avoid hardcoding DB name)
+DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_app', current_database()); END $$;
 GRANT USAGE ON SCHEMA public TO passwd_app;
 
 -- Grant DML on all existing and future tables
@@ -34,3 +34,42 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE O
 -- Grant sequence usage (for auto-increment / serial columns)
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
+
+-- Create dedicated audit outbox worker role
+-- Password is read from PASSWD_OUTBOX_WORKER_PASSWORD env var.
+-- \getenv sets a psql client-side variable (NOT a GUC), expanded by :'varname'.
+
+\getenv passwd_outbox_worker_password PASSWD_OUTBOX_WORKER_PASSWORD
+
+-- Guard: only create if role doesn't already exist
+SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_outbox_worker')
+  THEN 'true' ELSE 'false' END AS should_create_worker \gset
+
+\if :should_create_worker
+  \if :{?passwd_outbox_worker_password}
+    CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD :'passwd_outbox_worker_password';
+  \else
+    -- Fallback for local dev when PASSWD_OUTBOX_WORKER_PASSWORD is not set
+    CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD 'passwd_outbox_pass';
+  \endif
+\endif
+
+-- Defense-in-depth: revoke all schema access before explicit grants
+REVOKE ALL ON SCHEMA public FROM passwd_outbox_worker;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_outbox_worker;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_outbox_worker;
+
+-- Grant database and schema access (use current_database() to avoid hardcoding DB name)
+DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_outbox_worker', current_database()); END $$;
+GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
+
+-- Minimum table privileges: claim + deliver + delete SENT/FAILED rows from outbox,
+-- insert delivered rows into audit_logs, read tenant for FK validation.
+GRANT SELECT, UPDATE, DELETE ON audit_outbox TO passwd_outbox_worker;
+-- SELECT needed for ON CONFLICT (outbox_id) DO NOTHING dedup check
+GRANT SELECT, INSERT ON audit_logs TO passwd_outbox_worker;
+-- FK-referenced tables: SELECT needed for referential integrity checks under RLS
+GRANT SELECT ON tenants TO passwd_outbox_worker;
+GRANT SELECT ON users TO passwd_outbox_worker;
+GRANT SELECT ON teams TO passwd_outbox_worker;
+GRANT SELECT ON service_accounts TO passwd_outbox_worker;

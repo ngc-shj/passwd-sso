@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockLogAudit, mockLogAuditBatch, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockAuditCreate: vi.fn(),
   mockAuditCreateMany: vi.fn(),
+  mockLogAudit: vi.fn(),
+  mockLogAuditBatch: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -34,6 +36,14 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return {
+    ...actual,
+    logAudit: mockLogAudit,
+    logAuditBatch: mockLogAuditBatch,
+  };
+});
 
 import { POST } from "./route";
 
@@ -194,46 +204,41 @@ describe("POST /api/passwords/bulk-trash", () => {
 
     await POST(createRequest("POST", URL, { body: { ids: [id1, id2] } }));
 
-    // 1 parent log via logAudit (create), per-entry logs via logAuditBatch (createMany)
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    // 1 parent log via logAudit, per-entry logs via logAuditBatch
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_BULK_TRASH",
-          targetId: null,
-          metadata: expect.objectContaining({
-            bulk: true,
-            requestedCount: 2,
-            movedCount: 2,
-            entryIds: [id1, id2],
-          }),
+        action: "ENTRY_BULK_TRASH",
+        metadata: expect.objectContaining({
+          bulk: true,
+          requestedCount: 2,
+          movedCount: 2,
+          entryIds: [id1, id2],
         }),
       })
     );
 
-    // Per-entry logs batched into a single createMany
-    expect(mockAuditCreateMany).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            action: "ENTRY_TRASH",
-            targetId: id1,
-            metadata: expect.objectContaining({
-              source: "bulk-trash",
-              parentAction: "ENTRY_BULK_TRASH",
-            }),
+    // Per-entry logs via a single logAuditBatch call
+    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditBatch).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ENTRY_TRASH",
+          targetId: id1,
+          metadata: expect.objectContaining({
+            source: "bulk-trash",
+            parentAction: "ENTRY_BULK_TRASH",
           }),
-          expect.objectContaining({
-            action: "ENTRY_TRASH",
-            targetId: id2,
-            metadata: expect.objectContaining({
-              source: "bulk-trash",
-              parentAction: "ENTRY_BULK_TRASH",
-            }),
+        }),
+        expect.objectContaining({
+          action: "ENTRY_TRASH",
+          targetId: id2,
+          metadata: expect.objectContaining({
+            source: "bulk-trash",
+            parentAction: "ENTRY_BULK_TRASH",
           }),
-        ]),
-      })
+        }),
+      ])
     );
   });
 });

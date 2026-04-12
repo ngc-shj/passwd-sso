@@ -69,7 +69,9 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (!verifyAccessPassword(password, share.accessPasswordHash)) {
-    // Log failed attempt
+    // Non-atomic audit: userId="anonymous" is not a valid UUID,
+    // so this cannot use logAuditInTx (worker INSERT would fail on ::uuid cast).
+    // Falls through the FIFO flusher path where tenantId is already resolved.
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
@@ -84,7 +86,7 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
   }
 
-  // Log successful verification
+  // Non-atomic audit: same userId="anonymous" limitation as above.
   logAudit({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,

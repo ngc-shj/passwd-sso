@@ -16,6 +16,12 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 RUN npx prisma generate
 RUN npx next build
+RUN npx esbuild scripts/audit-outbox-worker.ts \
+      --bundle --platform=node --target=node20 \
+      --outfile=dist/audit-outbox-worker.js \
+      --external:pg --external:@prisma/client --external:@prisma/adapter-pg \
+      --tsconfig=tsconfig.json \
+      --alias:@=./src
 
 # Stage 3: Production image
 FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS runner
@@ -95,6 +101,22 @@ RUN TAR_VER=7.5.11 && \
 # Copy @prisma runtime adapters (overlay on top of prisma's @prisma packages)
 COPY --from=builder /app/node_modules/@prisma/adapter-pg ./node_modules/@prisma/adapter-pg
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+
+# Audit outbox worker (bundled by esbuild; pg + deps are external)
+COPY --from=builder --chown=nextjs:nodejs /app/dist/audit-outbox-worker.js ./dist/audit-outbox-worker.js
+COPY --from=builder /app/node_modules/pg ./node_modules/pg
+COPY --from=builder /app/node_modules/pg-connection-string ./node_modules/pg-connection-string
+COPY --from=builder /app/node_modules/pg-int8 ./node_modules/pg-int8
+COPY --from=builder /app/node_modules/pg-pool ./node_modules/pg-pool
+COPY --from=builder /app/node_modules/pg-protocol ./node_modules/pg-protocol
+COPY --from=builder /app/node_modules/pg-types ./node_modules/pg-types
+COPY --from=builder /app/node_modules/pgpass ./node_modules/pgpass
+COPY --from=builder /app/node_modules/postgres-array ./node_modules/postgres-array
+COPY --from=builder /app/node_modules/postgres-bytea ./node_modules/postgres-bytea
+COPY --from=builder /app/node_modules/postgres-date ./node_modules/postgres-date
+COPY --from=builder /app/node_modules/postgres-interval ./node_modules/postgres-interval
+COPY --from=builder /app/node_modules/split2 ./node_modules/split2
+COPY --from=builder /app/node_modules/xtend ./node_modules/xtend
 
 USER nextjs
 

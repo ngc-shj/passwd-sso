@@ -26,6 +26,7 @@ const ALLOWED_USAGE = new Map([
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit.ts", ["team", "user", "auditLog"]],
   ["src/lib/audit-retry.ts", ["auditLog"]],
+  ["src/lib/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/scim-token.ts", ["scimToken"]],
   ["src/lib/extension-token.ts", ["extensionToken"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
@@ -36,7 +37,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   ["src/app/api/teams/[teamId]/members/route.ts", ["tenantMember"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
-  ["src/lib/account-lockout.ts", ["user", "tenant"]],
+  ["src/lib/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
   ["src/lib/lockout-admin-notify.ts", ["user", "tenantMember"]],
   ["src/lib/new-device-detection.ts", ["session", "user"]],
   ["src/lib/notification.ts", ["user", "notification"]],
@@ -56,6 +57,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenantMember", "tenant", "auditLog"]],
   ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],
+  ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
+  ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE
   ["src/app/api/share-links/verify-access/route.ts", ["passwordShare"]],
   ["src/app/api/share-links/[id]/content/route.ts", ["passwordShare", "shareAccessLog"]],
   ["src/app/s/[token]/page.tsx", ["passwordShare", "shareAccessLog"]],

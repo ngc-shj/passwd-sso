@@ -3,13 +3,15 @@ import { DEFAULT_SESSION } from "../../helpers/mock-auth";
 import { createRequest, parseResponse } from "../../helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockWithUserTenantRls } = vi.hoisted(
+const { mockAuth, mockCreate, mockFindMany, mockFindUnique, mockWithUserTenantRls, mockWithBypassRls, mockLogAuditInTx } = vi.hoisted(
   () => ({
     mockAuth: vi.fn(),
     mockCreate: vi.fn(),
     mockFindMany: vi.fn(),
     mockFindUnique: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn({})),
+    mockLogAuditInTx: vi.fn(),
   })
 );
 
@@ -44,12 +46,15 @@ vi.mock("@/lib/team-auth", () => ({
   },
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   withTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+}));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/team-policy", () => ({
   assertPolicyAllowsSharing: vi.fn(),
@@ -146,6 +151,7 @@ describe("POST /api/share-links", () => {
     mockFindUnique.mockResolvedValue({
       userId: DEFAULT_SESSION.user.id,
       entryType: ENTRY_TYPE.LOGIN,
+      tenantId: "tenant-1",
     });
     mockCreate.mockResolvedValue({
       id: "share-1",
@@ -197,7 +203,7 @@ describe("POST /api/share-links", () => {
 
   it("creates E2E team share link with client-encrypted data", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockFindUnique.mockResolvedValue({ teamId: "team-123" });
+    mockFindUnique.mockResolvedValue({ teamId: "team-123", tenantId: "tenant-1" });
     mockCreate.mockResolvedValue({
       id: "share-e2e",
       expiresAt: new Date(Date.now() + 86400000),

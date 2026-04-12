@@ -1,12 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockLogAudit, mockLogAuditBatch, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockAuditCreate: vi.fn(),
   mockAuditCreateMany: vi.fn(),
+  mockLogAudit: vi.fn(),
+  mockLogAuditBatch: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -34,6 +36,14 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return {
+    ...actual,
+    logAudit: mockLogAudit,
+    logAuditBatch: mockLogAuditBatch,
+  };
+});
 
 import { POST } from "./route";
 
@@ -220,49 +230,44 @@ describe("POST /api/passwords/bulk-archive", () => {
 
     await POST(createRequest("POST", URL, { body: { ids: [id1, id2] } }));
 
-    // 1 parent log via logAudit (create), per-entry logs via logAuditBatch (createMany)
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    // 1 parent log via logAudit, per-entry logs via logAuditBatch
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_BULK_ARCHIVE",
-          targetId: null,
-          metadata: expect.objectContaining({
-            bulk: true,
-            operation: "archive",
-            requestedCount: 2,
-            processedCount: 2,
-            archivedCount: 2,
-            unarchivedCount: 0,
-            entryIds: [id1, id2],
-          }),
+        action: "ENTRY_BULK_ARCHIVE",
+        metadata: expect.objectContaining({
+          bulk: true,
+          operation: "archive",
+          requestedCount: 2,
+          processedCount: 2,
+          archivedCount: 2,
+          unarchivedCount: 0,
+          entryIds: [id1, id2],
         }),
       })
     );
 
-    // Per-entry logs batched into a single createMany call
-    expect(mockAuditCreateMany).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            action: "ENTRY_UPDATE",
-            targetId: id1,
-            metadata: expect.objectContaining({
-              source: "bulk-archive",
-              parentAction: "ENTRY_BULK_ARCHIVE",
-            }),
+    // Per-entry logs via a single logAuditBatch call
+    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditBatch).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ENTRY_UPDATE",
+          targetId: id1,
+          metadata: expect.objectContaining({
+            source: "bulk-archive",
+            parentAction: "ENTRY_BULK_ARCHIVE",
           }),
-          expect.objectContaining({
-            action: "ENTRY_UPDATE",
-            targetId: id2,
-            metadata: expect.objectContaining({
-              source: "bulk-archive",
-              parentAction: "ENTRY_BULK_ARCHIVE",
-            }),
+        }),
+        expect.objectContaining({
+          action: "ENTRY_UPDATE",
+          targetId: id2,
+          metadata: expect.objectContaining({
+            source: "bulk-archive",
+            parentAction: "ENTRY_BULK_ARCHIVE",
           }),
-        ]),
-      })
+        }),
+      ])
     );
   });
 
@@ -275,35 +280,31 @@ describe("POST /api/passwords/bulk-archive", () => {
       body: { ids: [id1], operation: "unarchive" },
     }));
 
-    // 1 parent log via logAudit (create), per-entry logs via logAuditBatch (createMany)
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    // 1 parent log via logAudit, per-entry logs via logAuditBatch
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_BULK_UNARCHIVE",
-          metadata: expect.objectContaining({
-            operation: "unarchive",
-            archivedCount: 0,
-            unarchivedCount: 1,
-          }),
+        action: "ENTRY_BULK_UNARCHIVE",
+        metadata: expect.objectContaining({
+          operation: "unarchive",
+          archivedCount: 0,
+          unarchivedCount: 1,
         }),
       })
     );
 
-    expect(mockAuditCreateMany).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.arrayContaining([
-          expect.objectContaining({
-            action: "ENTRY_UPDATE",
-            targetId: id1,
-            metadata: expect.objectContaining({
-              source: "bulk-archive",
-              parentAction: "ENTRY_BULK_UNARCHIVE",
-            }),
+    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditBatch).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "ENTRY_UPDATE",
+          targetId: id1,
+          metadata: expect.objectContaining({
+            source: "bulk-archive",
+            parentAction: "ENTRY_BULK_UNARCHIVE",
           }),
-        ]),
-      })
+        }),
+      ])
     );
   });
 
@@ -320,29 +321,25 @@ describe("POST /api/passwords/bulk-archive", () => {
       body: { ids: [id1, id2, id3] },
     }));
 
-    // 1 parent via logAudit (create), 3 per-entry batched via logAuditBatch (createMany)
-    expect(mockAuditCreate).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    // 1 parent via logAudit, 3 per-entry batched via logAuditBatch
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_BULK_ARCHIVE",
-          metadata: expect.objectContaining({
-            entryIds: [id1, id2, id3],
-          }),
+        action: "ENTRY_BULK_ARCHIVE",
+        metadata: expect.objectContaining({
+          entryIds: [id1, id2, id3],
         }),
       })
     );
 
-    // All 3 per-entry logs in a single createMany
-    expect(mockAuditCreateMany).toHaveBeenCalledTimes(1);
-    expect(mockAuditCreateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.arrayContaining([
-          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id1 }),
-          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id2 }),
-          expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id3 }),
-        ]),
-      })
+    // All 3 per-entry logs in a single logAuditBatch call
+    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditBatch).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id1 }),
+        expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id2 }),
+        expect.objectContaining({ action: "ENTRY_UPDATE", targetId: id3 }),
+      ])
     );
   });
 
@@ -360,9 +357,9 @@ describe("POST /api/passwords/bulk-archive", () => {
       })
     );
 
-    await vi.waitFor(() => expect(mockAuditCreateMany).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mockLogAuditBatch).toHaveBeenCalled());
 
-    const batchData: Record<string, unknown>[] = mockAuditCreateMany.mock.calls[0][0].data;
+    const batchData: Record<string, unknown>[] = mockLogAuditBatch.mock.calls[0][0];
 
     // Exactly 3 per-entry records — one per processed entry
     expect(batchData).toHaveLength(3);
@@ -374,8 +371,6 @@ describe("POST /api/passwords/bulk-archive", () => {
           scope: "PERSONAL",
           action: "ENTRY_UPDATE",
           userId: "user-1",
-          tenantId: "tenant-1", // resolved, never null
-          teamId: null,
           targetType: "PasswordEntry",
           metadata: expect.objectContaining({
             source: "bulk-archive",

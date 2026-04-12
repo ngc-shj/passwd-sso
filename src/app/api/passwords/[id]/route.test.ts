@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockWithUserTenantRls, mockWithBypassRls, mockRateLimiterCheck } = vi.hoisted(() => ({
+const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUser, mockPrismaFolder, mockPrismaTag, mockPrismaTransaction, mockAuditCreate, mockLogAudit, mockWithUserTenantRls, mockWithBypassRls, mockRateLimiterCheck } = vi.hoisted(() => ({
   mockCheckAuth: vi.fn(),
   mockPrismaPasswordEntry: {
     findUnique: vi.fn(),
@@ -19,6 +19,7 @@ const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUse
   mockPrismaTag: { count: vi.fn() },
   mockPrismaTransaction: vi.fn(),
   mockAuditCreate: vi.fn(),
+  mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
@@ -44,6 +45,13 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return {
+    ...actual,
+    logAudit: mockLogAudit,
+  };
+});
 import { NextResponse } from "next/server";
 
 import { GET, PUT, DELETE } from "./route";
@@ -693,11 +701,9 @@ describe("DELETE /api/passwords/[id]", () => {
       }),
     );
     expect(mockPrismaPasswordEntry.delete).not.toHaveBeenCalled();
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_TRASH",
-        }),
+        action: "ENTRY_TRASH",
       })
     );
   });
@@ -716,11 +722,9 @@ describe("DELETE /api/passwords/[id]", () => {
     expect(res.status).toBe(200);
     expect(json.success).toBe(true);
     expect(mockPrismaPasswordEntry.delete).toHaveBeenCalledWith({ where: { id: PW_ID } });
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_PERMANENT_DELETE",
-        }),
+        action: "ENTRY_PERMANENT_DELETE",
       })
     );
   });

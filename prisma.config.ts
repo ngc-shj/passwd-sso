@@ -1,7 +1,6 @@
 import { config } from "dotenv";
 import { defineConfig, env } from "prisma/config";
 
-// Load .env.local (Next.js convention), then fall back to .env
 config({ path: ".env.local" });
 config();
 

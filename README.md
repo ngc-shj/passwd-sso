@@ -62,6 +62,7 @@ A self-hosted password manager with SSO authentication, end-to-end encryption, a
 - **Travel Mode** — Hide sensitive entries when crossing borders; remote disable restores access
 - **Network Access Restriction** — CIDR allowlist and Tailscale integration per tenant
 - **Audit Logs & Webhooks** — Personal/team/tenant logs with filters, CSV/JSONL download, webhook delivery
+- **Durable Audit Outbox** — Transactional outbox guarantees audit events are never silently lost; background worker drains to audit_logs with at-least-once delivery, dedup, and dead-letter handling
 - **Audit Log Forwarding** — Structured JSON output via Fluent Bit sidecar for external collection
 - **Break Glass** — Tenant admin emergency access to personal audit logs with time-limited grants
 - **Error Tracking** — Sentry with recursive sensitive data scrubbing
@@ -221,6 +222,11 @@ Edit `.env.local` — key variables:
 | `RESEND_API_KEY` | Required when `EMAIL_PROVIDER=resend` |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | Required when `EMAIL_PROVIDER=smtp` |
 | `DB_POOL_MAX`, `DB_POOL_*` | (Optional) PostgreSQL connection pool tuning |
+| `OUTBOX_WORKER_DATABASE_URL` | (Optional) Worker DB connection (`passwd_outbox_worker` role). Required for `npm run worker:audit-outbox` |
+| `PASSWD_OUTBOX_WORKER_PASSWORD` | (Optional) Worker DB role password. Used by initdb on first boot; for existing clusters use `scripts/set-outbox-worker-password.sh` |
+| `OUTBOX_BATCH_SIZE`, `OUTBOX_*` | (Optional) Audit outbox worker tuning. See `.env.example` for all options |
+| `ADMIN_API_TOKEN` | (Optional) Bearer token for admin/maintenance endpoints. `openssl rand -hex 32` |
+| `NEXT_DEV_ALLOWED_ORIGINS` | (Optional) Allowed origins for dev server (e.g., Tailscale hostname) |
 | `NEXT_PUBLIC_CHROME_STORE_URL` | (Optional) Chrome Web Store URL for extension distribution |
 | `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_DSN` | (Optional) Sentry DSN for error tracking |
 | `SENTRY_AUTH_TOKEN` | (Optional) Sentry auth token for source map upload |

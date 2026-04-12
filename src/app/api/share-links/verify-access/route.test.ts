@@ -10,16 +10,18 @@ const {
   mockLogAudit,
   mockIpCheck,
   mockTokenCheck,
-} = vi.hoisted(() => ({
-  mockPasswordShareFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
-  mockHashToken: vi.fn((t: string) => `hashed_${t}`),
-  mockVerifyAccessPassword: vi.fn(),
-  mockCreateShareAccessToken: vi.fn().mockReturnValue("access-token-xyz"),
-  mockLogAudit: vi.fn(),
-  mockIpCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockTokenCheck: vi.fn().mockResolvedValue({ allowed: true }),
-}));
+} = vi.hoisted(() => {
+  return {
+    mockPasswordShareFindUnique: vi.fn(),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+    mockHashToken: vi.fn((t: string) => `hashed_${t}`),
+    mockVerifyAccessPassword: vi.fn(),
+    mockCreateShareAccessToken: vi.fn().mockReturnValue("access-token-xyz"),
+    mockLogAudit: vi.fn(),
+    mockIpCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockTokenCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -222,7 +224,7 @@ describe("POST /api/share-links/verify-access", () => {
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
     expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_FAILED" }),
+      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_FAILED", tenantId: "tenant-1" }),
     );
   });
 
@@ -237,7 +239,7 @@ describe("POST /api/share-links/verify-access", () => {
     expect(json.accessToken).toBe("access-token-xyz");
     expect(mockCreateShareAccessToken).toHaveBeenCalledWith("share-1");
     expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_SUCCESS" }),
+      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_SUCCESS", tenantId: "tenant-1" }),
     );
   });
 
