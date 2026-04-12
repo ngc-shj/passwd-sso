@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-outbox-worker
+  labels:
+    app: passwd-sso
+    component: audit-outbox-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: passwd-sso
+      component: audit-outbox-worker
+  template:
+    metadata:
+      labels:
+        app: passwd-sso
+        component: audit-outbox-worker
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: worker
+          image: passwd-sso:latest
+          command: ["node", "dist/audit-outbox-worker.js"]
+          env:
+            - name: OUTBOX_WORKER_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: passwd-sso-secrets
+                  key: outbox-worker-database-url
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: passwd-sso-secrets
+                  key: database-url
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          livenessProbe:
+            exec:
+              command: ["node", "-e", "process.exit(0)"]
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          startupProbe:
+            exec:
+              command: ["node", "-e", "process.exit(0)"]
+            failureThreshold: 3
+            periodSeconds: 5
