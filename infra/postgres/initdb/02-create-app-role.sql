@@ -23,8 +23,8 @@ SELECT CASE WHEN NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app')
 -- Revoke default PUBLIC privileges on public schema (defense-in-depth)
 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 
--- Grant access to the application database
-GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
+-- Grant access to the application database (use current_database() to avoid hardcoding DB name)
+DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_app', current_database()); END $$;
 GRANT USAGE ON SCHEMA public TO passwd_app;
 
 -- Grant DML on all existing and future tables
@@ -59,8 +59,8 @@ REVOKE ALL ON SCHEMA public FROM passwd_outbox_worker;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_outbox_worker;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_outbox_worker;
 
--- Grant database and schema access
-GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
+-- Grant database and schema access (use current_database() to avoid hardcoding DB name)
+DO $$ BEGIN EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_outbox_worker', current_database()); END $$;
 GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
 
 -- Minimum table privileges: claim + deliver + delete SENT/FAILED rows from outbox,

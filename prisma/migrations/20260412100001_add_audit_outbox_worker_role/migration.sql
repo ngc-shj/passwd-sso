@@ -5,8 +5,10 @@ DO $$ BEGIN
   END IF;
 END $$;
 
--- Grant database access
-GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
+-- Grant database access (use current_database() to avoid hardcoding DB name)
+DO $$ BEGIN
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO passwd_outbox_worker', current_database());
+END $$;
 
 -- Defense-in-depth: revoke all schema access before explicit grants
 REVOKE ALL ON SCHEMA public FROM passwd_outbox_worker;
