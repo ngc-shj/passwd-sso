@@ -867,12 +867,12 @@ These are flagged for the expert agents to evaluate explicitly:
 ## Implementation Checklist (Phase 1 only)
 
 ### Files to create
-- [ ] `src/lib/audit-outbox.ts` — `enqueueAuditInTx()`, `enqueueAudit()`
-- [ ] `src/lib/backoff.ts` — `computeBackoffMs()`, `withFullJitter()`
-- [ ] `src/workers/audit-outbox-worker.ts` — worker loop body
-- [ ] `scripts/audit-outbox-worker.ts` — worker entrypoint
-- [ ] `scripts/set-outbox-worker-password.sh` — prod password rollout
-- [ ] `vitest.integration.config.ts` — real-DB test config
+- [x] `src/lib/audit-outbox.ts` — `enqueueAuditInTx()`, `enqueueAudit()`
+- [x] `src/lib/backoff.ts` — `computeBackoffMs()`, `withFullJitter()`
+- [x] `src/workers/audit-outbox-worker.ts` — worker loop body
+- [x] `scripts/audit-outbox-worker.ts` — worker entrypoint
+- [x] `scripts/set-outbox-worker-password.sh` — prod password rollout
+- [x] `vitest.integration.config.ts` — real-DB test config
 - [ ] `src/__tests__/db-integration/audit-outbox-atomicity.integration.test.ts`
 - [ ] `src/__tests__/db-integration/audit-logaudit-non-atomic.integration.test.ts`
 - [ ] `src/__tests__/db-integration/audit-outbox-state-machine.integration.test.ts`
@@ -881,19 +881,19 @@ These are flagged for the expert agents to evaluate explicitly:
 - [ ] `src/__tests__/db-integration/audit-outbox-worker-role.integration.test.ts`
 - [ ] `src/__tests__/db-integration/audit-outbox-dedup.integration.test.ts`
 - [ ] `src/__tests__/db-integration/audit-outbox-reentrant-guard.integration.test.ts`
-- [ ] `src/__tests__/audit.mocked.test.ts` (renamed from `audit.test.ts`)
-- [ ] `src/__tests__/audit-fifo-flusher.test.ts`
+- [x] `src/__tests__/audit.mocked.test.ts` (renamed from `audit.test.ts`)
+- [x] `src/__tests__/audit-fifo-flusher.test.ts`
 
 ### Files to modify
-- [ ] `prisma/schema.prisma` — add `AuditOutboxStatus` enum, `AuditOutbox` model, `outboxId` on `AuditLog`, `auditOutbox` relation on `Tenant`
-- [ ] `src/lib/tenant-rls.ts` — refactor `withBypassRls` signature to pass `tx` to callback (backward-compatible)
-- [ ] `src/lib/audit.ts` — rewrite `logAudit`/`logAuditBatch` to FIFO flusher + export `logAuditInTx`; add `OUTBOX_BYPASS_AUDIT_ACTIONS` to `WEBHOOK_DISPATCH_SUPPRESS`
-- [ ] `src/lib/audit-retry.ts` — no changes (kept but unused on success path in Phase 1)
-- [ ] `src/lib/constants/audit.ts` — add `AUDIT_OUTBOX` namespace with all configurable constants
-- [ ] `src/lib/webhook-dispatcher.ts` — migrate `RETRY_DELAYS` to use `computeBackoffMs` from `backoff.ts`
-- [ ] `infra/postgres/initdb/02-create-app-role.sql` — add `passwd_outbox_worker` role section
-- [ ] `package.json` — add `worker:audit-outbox` and `test:integration` scripts
-- [ ] `vitest.config.ts` — add `exclude: ["src/**/*.integration.test.ts"]`
+- [x] `prisma/schema.prisma` — add `AuditOutboxStatus` enum, `AuditOutbox` model, `outboxId` on `AuditLog`, `auditOutbox` relation on `Tenant`
+- [x] `src/lib/tenant-rls.ts` — refactor `withBypassRls` signature to pass `tx` to callback (backward-compatible)
+- [x] `src/lib/audit.ts` — rewrite `logAudit`/`logAuditBatch` to FIFO flusher + export `logAuditInTx`; add `OUTBOX_BYPASS_AUDIT_ACTIONS` to `WEBHOOK_DISPATCH_SUPPRESS`
+- [x] `src/lib/audit-retry.ts` — changed to use enqueueAudit
+- [x] `src/lib/constants/audit.ts` — add `AUDIT_OUTBOX` namespace with all configurable constants
+- [x] `src/lib/webhook-dispatcher.ts` — (reverted backoff migration per F4; RETRY_DELAYS kept as original literal)
+- [x] `infra/postgres/initdb/02-create-app-role.sql` — add `passwd_outbox_worker` role section
+- [x] `package.json` — add `worker:audit-outbox` and `test:integration` scripts
+- [x] `vitest.config.ts` — add `exclude: ["src/**/*.integration.test.ts"]`
 - [ ] `docker-compose.yml` — add `audit-outbox-worker` service
 - [ ] `.github/workflows/ci.yml` — add `audit-outbox-integration` job
 
@@ -918,11 +918,11 @@ These are flagged for the expert agents to evaluate explicitly:
 - Test file convention: `.integration.test.ts` suffix for real-DB, `src/__tests__/db-integration/` directory
 
 ### Security-critical call sites to migrate to logAuditInTx in Phase 1
-- [ ] `src/lib/account-lockout.ts:274` — VAULT_UNLOCK_FAILED
-- [ ] `src/lib/account-lockout.ts:291` — VAULT_LOCKOUT_TRIGGERED
-- [ ] `src/app/api/share-links/verify-access/route.ts:73` — SHARE_ACCESS_VERIFY_FAILED
-- [ ] `src/app/api/share-links/verify-access/route.ts:88` — SHARE_ACCESS_VERIFY_SUCCESS
-- [ ] `src/app/api/share-links/route.ts:190` — SHARE_CREATE
-- [ ] `src/app/api/share-links/[id]/route.ts:59` — SHARE_REVOKE
+- [x] `src/lib/account-lockout.ts:274` — VAULT_UNLOCK_FAILED
+- [x] `src/lib/account-lockout.ts:291` — VAULT_LOCKOUT_TRIGGERED
+- [x] `src/app/api/share-links/verify-access/route.ts:73` — SHARE_ACCESS_VERIFY_FAILED (reverted to logAudit due to non-UUID userId)
+- [x] `src/app/api/share-links/verify-access/route.ts:88` — SHARE_ACCESS_VERIFY_SUCCESS (reverted to logAudit)
+- [x] `src/app/api/share-links/route.ts:190` — SHARE_CREATE
+- [x] `src/app/api/share-links/[id]/route.ts:59` — SHARE_REVOKE
 - [ ] DEFERRED: `src/auth.ts:340` — AUTH_LOGIN (NextAuth event callback, no transaction scope available)
 - [ ] DEFERRED: `src/auth.ts:352` — AUTH_LOGOUT (NextAuth event callback, no transaction scope available)
