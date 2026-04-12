@@ -294,7 +294,6 @@ describe("parsePayload — happy path", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // deliverRow triggered means parsePayload returned successfully
     const insertCall = mockExecuteRawUnsafe.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
@@ -441,35 +440,32 @@ describe("claimBatch", () => {
 describe("setBypassRlsGucs", () => {
   beforeEach(resetMocks);
 
-  it("uses tagged template $executeRaw (not $executeRawUnsafe) for GUC setup", async () => {
+  it("sets bypass GUCs via $executeRaw tagged template in each transaction", async () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // $executeRaw must be called for tagged-template GUC calls
-    expect(mockExecuteRaw).toHaveBeenCalled();
-    // Each setBypassRlsGucs call issues 3 GUC SET commands
-    expect(mockExecuteRaw.mock.calls.length).toBeGreaterThanOrEqual(3);
-  }, 15000);
+    // Tagged template calls: first arg is TemplateStringsArray, rest are interpolated values
+    // Reconstruct SQL by joining strings with placeholder markers
+    function reconstructSql(call: unknown[]): string {
+      const strings = call[0] as { raw?: string[] };
+      if (!strings?.raw) return "";
+      return strings.raw.join("$");
+    }
 
-  it("sets bypass_purpose to AUDIT_WRITE via $executeRaw tagged template", async () => {
-    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
-    await runWorkerOnce(worker);
-
-    // Tagged template: call[0] is TemplateStringsArray, subsequent args are interpolated values
-    const hasBypassPurpose = mockExecuteRaw.mock.calls.some(
+    const gucCalls = mockExecuteRaw.mock.calls.map(reconstructSql)
+      .filter((sql) => sql.includes("set_config"));
+    expect(gucCalls.length).toBeGreaterThanOrEqual(3);
+    expect(gucCalls.some((s) => s.includes("bypass_rls"))).toBe(true);
+    // bypass_purpose and tenant_id are interpolated values ($1, $2), not in the template strings
+    // Verify they were passed as the second argument
+    const purposeCall = mockExecuteRaw.mock.calls.find(
       (call) => call[1] === BYPASS_PURPOSE.AUDIT_WRITE,
     );
-    expect(hasBypassPurpose).toBe(true);
-  }, 15000);
-
-  it("sets tenant_id to NIL_UUID via $executeRaw tagged template", async () => {
-    const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
-    await runWorkerOnce(worker);
-
-    const hasNilUuid = mockExecuteRaw.mock.calls.some(
+    expect(purposeCall).toBeDefined();
+    const tenantIdCall = mockExecuteRaw.mock.calls.find(
       (call) => call[1] === NIL_UUID,
     );
-    expect(hasNilUuid).toBe(true);
+    expect(tenantIdCall).toBeDefined();
   }, 15000);
 });
 
@@ -770,10 +766,10 @@ describe("ON CONFLICT DO NOTHING dedup", () => {
     const row = makeRow();
 
     mockQueryRawUnsafe.mockResolvedValueOnce([row]);
-    // $executeRawUnsafe returns 0 (no-op on conflict) then 1 for SENT update
+    // GUCs go through $executeRaw (tagged template), not $executeRawUnsafe
     mockExecuteRawUnsafe
-      .mockResolvedValueOnce(0)  // INSERT ON CONFLICT DO NOTHING — 0 rows
-      .mockResolvedValueOnce(1); // UPDATE to SENT — 1 row
+      .mockResolvedValueOnce(0)         // INSERT ON CONFLICT DO NOTHING — 0 rows
+      .mockResolvedValueOnce(1);        // UPDATE to SENT — 1 row
 
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);

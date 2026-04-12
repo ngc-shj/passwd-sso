@@ -43,15 +43,11 @@ interface WorkerConfig {
   pollIntervalMs?: number;
 }
 
-// GUCs use $executeRawUnsafe with string literals (not tagged templates)
-// because Prisma's tagged template $executeRaw parameterizes values as $1::text,
-// which can cause set_config's boolean 3rd arg to receive a text value.
-// All interpolated values are compile-time constants — no injection risk.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accepts PrismaClient or TransactionClient
 async function setBypassRlsGucs(client: any): Promise<void> {
-  await client.$executeRawUnsafe(`SELECT set_config('app.bypass_rls', 'on', true)`);
-  await client.$executeRawUnsafe(`SELECT set_config('app.bypass_purpose', '${BYPASS_PURPOSE.AUDIT_WRITE}', true)`);
-  await client.$executeRawUnsafe(`SELECT set_config('app.tenant_id', '${NIL_UUID}', true)`);
+  await client.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  await client.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
+  await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
 }
 
 function parsePayload(raw: unknown): AuditOutboxPayload {
@@ -409,7 +405,7 @@ export function createWorker(config: WorkerConfig) {
       registerShutdown();
 
       try {
-        await workerPrisma.$queryRawUnsafe("SELECT 1");
+        await workerPrisma.$executeRawUnsafe("SELECT 1");
       } catch {
         // Connection check — if this fails the loop will handle it
       }
