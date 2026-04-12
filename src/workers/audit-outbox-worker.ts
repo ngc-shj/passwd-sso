@@ -364,6 +364,8 @@ export function createWorker(config: WorkerConfig) {
     return rows.length;
   }
 
+  let sleepResolve: (() => void) | null = null;
+
   async function loop(): Promise<void> {
     const log = getLogger();
     log.info({ batchSize, pollIntervalMs }, "worker.loop_start");
@@ -374,7 +376,10 @@ export function createWorker(config: WorkerConfig) {
       if (!running) break;
 
       if (claimed === 0) {
-        await new Promise<void>((resolve) => setTimeout(resolve, pollIntervalMs));
+        await new Promise<void>((resolve) => {
+          sleepResolve = resolve;
+          setTimeout(() => { sleepResolve = null; resolve(); }, pollIntervalMs);
+        });
       }
     }
 
@@ -385,8 +390,9 @@ export function createWorker(config: WorkerConfig) {
   function registerShutdown(): void {
     const stop = () => {
       if (!running) return;
-      getLogger().info("worker.shutdown_signal");
       running = false;
+      getLogger().info("worker.shutdown_signal");
+      sleepResolve?.();
     };
     process.once("SIGTERM", stop);
     process.once("SIGINT", stop);
