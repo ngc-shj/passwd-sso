@@ -14,6 +14,9 @@ import {
 } from "@/lib/constants/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID } from "@/lib/constants/app";
+import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
+import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
+import { sanitizeErrorForStorage } from "@/lib/external-http";
 
 // Raw shape returned from the claim query
 interface AuditOutboxRow {
@@ -169,6 +172,50 @@ async function deliverRow(
 }
 
 /**
+ * Create audit_deliveries rows for each active delivery target.
+ * Called after a row is successfully delivered to audit_logs (DB target).
+ */
+async function fanOutDeliveries(
+  prisma: PrismaClient,
+  outboxId: string,
+  tenantId: string,
+  payload: AuditOutboxPayload,
+): Promise<void> {
+  // Query active delivery targets for this tenant
+  const targets = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.auditDeliveryTarget.findMany({
+      where: { tenantId, isActive: true, kind: { not: "DB" } },
+    });
+  });
+
+  if (targets.length === 0) return;
+
+  // Create delivery rows (upsert for idempotency)
+  for (const target of targets) {
+    try {
+      await prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await tx.auditDelivery.upsert({
+          where: { outboxId_targetId: { outboxId, targetId: target.id } },
+          create: {
+            outboxId,
+            targetId: target.id,
+            tenantId,
+            status: "PENDING",
+          },
+          update: {}, // no-op if already exists
+        });
+      });
+    } catch (err) {
+      getLogger().error({ outboxId, targetId: target.id, err }, "failed to create delivery row");
+    }
+  }
+
+  void payload; // payload reserved for future per-target filtering
+}
+
+/**
  * Write a SYSTEM-actor audit event directly to audit_logs, bypassing the outbox.
  * Used by reaper and dead-letter logging to avoid recursion.
  */
@@ -279,6 +326,213 @@ function parsePayloadAction(raw: unknown): string {
   return "unknown";
 }
 
+/**
+ * Claim and process a batch of pending delivery rows.
+ * Uses the same FOR UPDATE SKIP LOCKED pattern as outbox claim.
+ */
+async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Promise<number> {
+  // Claim batch of pending deliveries
+  const claimed = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$queryRawUnsafe<Array<{ id: string }>>(
+      `UPDATE "audit_deliveries"
+       SET "status" = 'PROCESSING',
+           "processing_started_at" = now()
+       WHERE "id" IN (
+         SELECT "id" FROM "audit_deliveries"
+         WHERE "status" = 'PENDING'
+           AND "next_retry_at" <= now()
+         ORDER BY "created_at" ASC
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+       )
+       AND "status" = 'PENDING'
+       RETURNING "id"`,
+      batchSize,
+    );
+  });
+
+  if (claimed.length === 0) return 0;
+
+  // Fetch full delivery rows with target config
+  const deliveries = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.auditDelivery.findMany({
+      where: { id: { in: claimed.map((r) => r.id) } },
+      include: {
+        target: true,
+        outbox: true,
+      },
+    });
+  });
+
+  for (const delivery of deliveries) {
+    await processOneDelivery(prisma, delivery);
+  }
+
+  return claimed.length;
+}
+
+async function processOneDelivery(
+  workerPrisma: PrismaClient,
+  delivery: {
+    id: string;
+    tenantId: string;
+    attemptCount: number;
+    maxAttempts: number;
+    target: {
+      id: string;
+      kind: string;
+      tenantId: string;
+      configEncrypted: string;
+      configIv: string;
+      configAuthTag: string;
+      masterKeyVersion: number;
+      failCount: number;
+    };
+    outbox: {
+      id: string;
+      createdAt: Date;
+      payload: unknown;
+    };
+  },
+): Promise<void> {
+  if (!delivery.target || !delivery.outbox) return;
+
+  const kind = delivery.target.kind;
+  const deliverFn = DELIVERERS[kind];
+  if (!deliverFn) {
+    getLogger().error({ deliveryId: delivery.id, kind }, "no deliverer for target kind");
+    return;
+  }
+
+  try {
+    // Decrypt target config
+    const masterKey = getMasterKeyByVersion(delivery.target.masterKeyVersion);
+    const aad = Buffer.concat([
+      Buffer.from(delivery.target.id.replace(/-/g, ""), "hex"),
+      Buffer.from(delivery.target.tenantId.replace(/-/g, ""), "hex"),
+    ]);
+    const configJson = decryptServerData(
+      {
+        ciphertext: delivery.target.configEncrypted,
+        iv: delivery.target.configIv,
+        authTag: delivery.target.configAuthTag,
+      },
+      masterKey,
+      aad,
+    );
+    const config: TargetConfig = JSON.parse(configJson);
+
+    // Build delivery payload from outbox payload
+    const outboxPayload = delivery.outbox.payload as Record<string, unknown>;
+    const deliveryPayload: DeliveryPayload = {
+      id: delivery.outbox.id,
+      tenantId: delivery.tenantId,
+      action: (outboxPayload.action as string) ?? "",
+      scope: (outboxPayload.scope as string) ?? "",
+      userId: (outboxPayload.userId as string | null) ?? null,
+      actorType: (outboxPayload.actorType as string) ?? "",
+      metadata: (outboxPayload.metadata as Record<string, unknown>) ?? {},
+      createdAt: delivery.outbox.createdAt.toISOString(),
+    };
+
+    await deliverFn.deliver(config, deliveryPayload);
+
+    // Mark as SENT
+    await workerPrisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.auditDelivery.update({
+        where: { id: delivery.id },
+        data: { status: "SENT", lastError: null },
+      });
+      await tx.auditDeliveryTarget.update({
+        where: { id: delivery.target.id },
+        data: {
+          lastDeliveredAt: new Date(),
+          failCount: 0,
+          lastError: null,
+        },
+      });
+    });
+
+    getLogger().info({ deliveryId: delivery.id, kind }, "delivery succeeded");
+  } catch (err) {
+    await recordDeliveryError(workerPrisma, delivery, err);
+  }
+}
+
+async function recordDeliveryError(
+  workerPrisma: PrismaClient,
+  delivery: {
+    id: string;
+    tenantId: string;
+    attemptCount: number;
+    maxAttempts: number;
+    target: { id: string; failCount: number };
+  },
+  err: unknown,
+): Promise<void> {
+  const message = sanitizeErrorForStorage(
+    err instanceof Error ? err.message : String(err),
+  );
+  const newAttemptCount = delivery.attemptCount + 1;
+  const isDead = newAttemptCount >= delivery.maxAttempts;
+
+  if (isDead) {
+    await workerPrisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.auditDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "FAILED",
+          attemptCount: newAttemptCount,
+          lastError: message.slice(0, 1024),
+          processingStartedAt: null,
+        },
+      });
+      await tx.auditDeliveryTarget.update({
+        where: { id: delivery.target.id },
+        data: {
+          failCount: delivery.target.failCount + 1,
+          lastError: message.slice(0, 1024),
+        },
+      });
+    });
+
+    // Write dead-letter audit event directly (bypass outbox — avoids recursion)
+    await writeDirectAuditLog(workerPrisma, delivery.tenantId, AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER, {
+      deliveryId: delivery.id,
+      targetId: delivery.target.id,
+      error: message.slice(0, 256),
+    });
+
+    getLogger().warn({ deliveryId: delivery.id }, "delivery dead-lettered");
+  } else {
+    const backoffMs = computeBackoffMs(newAttemptCount);
+    const nextRetry = new Date(Date.now() + withFullJitter(backoffMs));
+
+    await workerPrisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.auditDelivery.update({
+        where: { id: delivery.id },
+        data: {
+          status: "PENDING",
+          attemptCount: newAttemptCount,
+          nextRetryAt: nextRetry,
+          lastError: message.slice(0, 1024),
+          processingStartedAt: null,
+        },
+      });
+    });
+
+    getLogger().info(
+      { deliveryId: delivery.id, attempt: newAttemptCount, nextRetry: nextRetry.toISOString() },
+      "delivery will retry",
+    );
+  }
+}
+
 async function dispatchWebhookForRow(
   payload: AuditOutboxPayload,
   tenantId: string,
@@ -383,18 +637,61 @@ async function reapStuckRows(prisma: PrismaClient): Promise<number> {
 }
 
 /**
+ * Reset stuck PROCESSING delivery rows back to PENDING or FAILED.
+ * Rows stuck longer than PROCESSING_TIMEOUT_MS are assumed abandoned.
+ */
+async function reapStuckDeliveries(prisma: PrismaClient): Promise<number> {
+  const timeout = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS;
+  const cutoff = new Date(Date.now() - timeout);
+
+  const result = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$executeRawUnsafe(
+      `UPDATE "audit_deliveries"
+       SET "status" = CASE
+         WHEN "attempt_count" + 1 >= "max_attempts" THEN 'FAILED'::"AuditDeliveryStatus"
+         ELSE 'PENDING'::"AuditDeliveryStatus"
+       END,
+       "attempt_count" = "attempt_count" + 1,
+       "processing_started_at" = NULL,
+       "last_error" = 'reaped: processing timeout exceeded'
+       WHERE "status" = 'PROCESSING'
+         AND "processing_started_at" < $1`,
+      cutoff,
+    );
+  });
+
+  if (result > 0) {
+    getLogger().info({ count: result }, "reaped stuck delivery rows");
+  }
+
+  return result as number;
+}
+
+/**
  * Purge SENT rows older than RETENTION_HOURS and FAILED rows older than FAILED_RETENTION_DAYS.
  */
 async function purgeRetention(prisma: PrismaClient): Promise<void> {
   const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
   const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
 
+  const sentCutoff = new Date(Date.now() - retentionHours * 3_600_000);
+  const failedCutoff = new Date(Date.now() - failedRetentionDays * 86_400_000);
+
   const result = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     const rows = await tx.$queryRawUnsafe<{ purged: bigint; sample_tenant_id: string | null }[]>(
       `WITH deleted AS (
         DELETE FROM audit_outbox
-        WHERE (status = 'SENT'   AND sent_at    < now() - make_interval(hours => $1))
+        WHERE (
+          status = 'SENT'
+          AND sent_at < now() - make_interval(hours => $1)
+          AND NOT EXISTS (
+            SELECT 1 FROM "audit_deliveries"
+            WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
+              AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
+          )
+        )
            OR (status = 'FAILED' AND created_at < now() - make_interval(days  => $2))
         RETURNING id, tenant_id
       )
@@ -416,6 +713,32 @@ async function purgeRetention(prisma: PrismaClient): Promise<void> {
       failedRetentionDays,
     });
   }
+
+  // Purge terminal delivery rows
+  const deliverySentPurged = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$executeRawUnsafe(
+      `DELETE FROM "audit_deliveries"
+       WHERE "status" = 'SENT'
+         AND "created_at" < $1`,
+      sentCutoff,
+    );
+  });
+  const deliveryFailedPurged = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    return tx.$executeRawUnsafe(
+      `DELETE FROM "audit_deliveries"
+       WHERE "status" = 'FAILED'
+         AND "created_at" < $1`,
+      failedCutoff,
+    );
+  });
+  if ((deliverySentPurged as number) > 0 || (deliveryFailedPurged as number) > 0) {
+    getLogger().info(
+      { deliverySent: deliverySentPurged, deliveryFailed: deliveryFailedPurged },
+      "purged delivery retention rows",
+    );
+  }
 }
 
 /**
@@ -430,6 +753,12 @@ async function runReaper(prisma: PrismaClient): Promise<void> {
     }
   } catch (err) {
     log.error({ err }, "worker.reaper.stuck_reset_failed");
+  }
+
+  try {
+    await reapStuckDeliveries(prisma);
+  } catch (err) {
+    log.error({ err }, "worker.reaper.stuck_deliveries_reset_failed");
   }
 
   try {
@@ -532,6 +861,8 @@ export function createWorker(config: WorkerConfig) {
           "worker.delivered",
         );
         void dispatchWebhookForRow(payload, row.tenant_id);
+        // Phase 3: fan out to non-DB delivery targets
+        void fanOutDeliveries(workerPrisma, row.id, row.tenant_id, payload);
       } catch (err) {
         log.warn(
           { err, outboxId: row.id, action: payload.action },
@@ -567,6 +898,17 @@ export function createWorker(config: WorkerConfig) {
     while (running) {
       const claimed = await processBatch();
 
+      // Phase 3: process pending deliveries
+      let deliveryClaimed = 0;
+      try {
+        deliveryClaimed = await processDeliveryBatch(workerPrisma, batchSize);
+        if (deliveryClaimed > 0) {
+          log.debug({ deliveryClaimed }, "processed delivery batch");
+        }
+      } catch (err) {
+        log.error({ err }, "worker.delivery_batch_failed");
+      }
+
       // Run reaper at REAPER_INTERVAL_MS intervals
       const now = Date.now();
       if (now - lastReaperRun >= AUDIT_OUTBOX.REAPER_INTERVAL_MS) {
@@ -576,7 +918,7 @@ export function createWorker(config: WorkerConfig) {
 
       if (!running) break;
 
-      if (claimed === 0) {
+      if (claimed === 0 && deliveryClaimed === 0) {
         await new Promise<void>((resolve) => {
           sleepResolve = resolve;
           setTimeout(() => { sleepResolve = null; resolve(); }, pollIntervalMs);

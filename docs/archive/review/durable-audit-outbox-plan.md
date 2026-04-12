@@ -492,7 +492,7 @@ enum AuditDeliveryTargetKind {
   DB
   WEBHOOK
   SIEM_HEC      // Splunk / Datadog HEC HTTP endpoint
-  S3_OBJECT     // S3 / GCS / R2 object storage via REST PUT
+  S3_OBJECT     // S3-compatible object storage via SigV4 REST PUT (AWS S3, GCS interop, R2, MinIO)
 }
 
 model AuditDeliveryTarget {
@@ -983,3 +983,49 @@ These are flagged for the expert agents to evaluate explicitly:
 - [x] `src/app/api/share-links/[id]/route.ts:59` — SHARE_REVOKE
 - [ ] DEFERRED: `src/auth.ts:340` — AUTH_LOGIN (NextAuth event callback, no transaction scope available)
 - [ ] DEFERRED: `src/auth.ts:352` — AUTH_LOGOUT (NextAuth event callback, no transaction scope available)
+
+## Implementation Checklist (Phase 3)
+
+### Files to create
+- [ ] `src/lib/external-http.ts` — extracted SSRF helpers, `validateAndFetch`, sanitization, `BLOCKED_CIDR_REPRESENTATIVES`
+- [ ] `src/workers/audit-delivery.ts` — `deliverWebhook`, `deliverSiemHec`, `deliverS3Object`
+- [ ] `src/__tests__/external-http-ssrf.test.ts` — SSRF rejection tests with guard assertion
+- [ ] `src/__tests__/db-integration/audit-delivery-fanout.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-delivery-failure-isolation.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-delivery-rls.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-delivery-pii-sanitization.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-delivery-stuck-reaper.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-delivery-retention-purge.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-worker-role.integration.test.ts`
+- [ ] `src/workers/audit-delivery.test.ts` — deliverer unit tests (webhook, SIEM HEC, S3)
+
+### Files to modify
+- [ ] `src/lib/webhook-dispatcher.ts` — re-export extracted symbols from `external-http.ts`
+- [ ] `prisma/schema.prisma` — add `AuditDeliveryTargetKind`, `AuditDeliveryStatus` enums, `AuditDeliveryTarget`, `AuditDelivery` models, back-relations on `AuditOutbox` and `Tenant`
+- [ ] `prisma/migrations/<ts>_add_audit_delivery_targets/migration.sql` — tables, RLS, FORCE RLS, tenant_isolation policies, worker grants, indexes
+- [ ] `src/lib/constants/audit.ts` — add `AUDIT_DELIVERY_FAILED`, `AUDIT_DELIVERY_DEAD_LETTER` actions, update `OUTBOX_BYPASS_AUDIT_ACTIONS`, `WEBHOOK_DISPATCH_SUPPRESS`, `AUDIT_ACTION_GROUP.MAINTENANCE`, `AUDIT_ACTION_VALUES`
+- [ ] `messages/en/AuditLog.json` — add i18n labels for new actions
+- [ ] `messages/ja/AuditLog.json` — add i18n labels for new actions
+- [ ] `src/workers/audit-outbox-worker.ts` — add delivery fan-out (second pass), extend reaper for delivery rows, extend purge for delivery retention
+- [ ] `infra/postgres/initdb/02-create-app-role.sql` — add grants for `audit_delivery_targets` and `audit_deliveries`
+- [ ] `scripts/check-bypass-rls.mjs` — add Phase 3 files to allowlist
+
+### Shared utilities to reuse (R1 compliance)
+- `src/lib/webhook-dispatcher.ts:107-183` — SSRF helpers (extract, don't reimplement)
+- `src/lib/webhook-dispatcher.ts:63-72` — `WEBHOOK_METADATA_BLOCKLIST` (rename+extend, don't duplicate)
+- `src/lib/webhook-dispatcher.ts:81-100` — `sanitizeWebhookData` (extract+rename, don't duplicate)
+- `src/lib/crypto-server.ts:60-82` — `encryptServerData` (reuse with AAD)
+- `src/lib/crypto-server.ts:85-104` — `decryptServerData` (reuse with AAD)
+- `src/lib/backoff.ts` — `computeBackoffMs`, `withFullJitter` (reuse for delivery retries)
+- `src/lib/rate-limit.ts` — `createRateLimiter` (reuse for per-target rate limiting)
+- `src/lib/ip-access.ts` — `isIpInCidr` (already used by SSRF helpers)
+- `src/lib/tenant-rls.ts` — `withBypassRls`, `BYPASS_PURPOSE` (reuse for delivery fan-out)
+- `src/lib/constants/audit.ts:644-654` — `AUDIT_OUTBOX` constants (reuse for delivery timeouts)
+
+### Patterns to follow consistently
+- Outbox claim pattern: `FOR UPDATE SKIP LOCKED` (from `claimBatch()` at worker:84-107)
+- Stuck reaper pattern: reset `PROCESSING` → `PENDING` after timeout (from `reapStuckRows()` at worker:327-383)
+- Direct audit logging pattern: `writeDirectAuditLog()` for meta-events (from worker:175-210)
+- Bypass RLS pattern: `setBypassRlsGucs()` per transaction (from worker:54-58)
+- Re-export pattern: extract to new module, re-export from original (preserve API)
+- Webhook encryption pattern: `String` types for encrypted/iv/authTag (from TeamWebhook schema)

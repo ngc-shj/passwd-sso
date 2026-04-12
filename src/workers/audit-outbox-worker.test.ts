@@ -32,6 +32,9 @@ const {
     $executeRaw: mockExecuteRaw,
     $queryRawUnsafe: mockQueryRawUnsafe,
     $executeRawUnsafe: mockExecuteRawUnsafe,
+    // Phase 3: delivery model stubs (fanOutDeliveries runs fire-and-forget)
+    auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+    auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
   };
 
   const mockTransaction = vi.fn(
@@ -121,9 +124,27 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
-vi.mock("@/lib/audit-logger", () => ({
-  deadLetterLogger: { warn: mockDeadLetterWarn },
-  auditLogger: { info: vi.fn(), enabled: false },
+vi.mock("@/lib/audit-logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
+  return {
+    ...actual,
+    deadLetterLogger: { warn: mockDeadLetterWarn },
+    auditLogger: { info: vi.fn(), enabled: false },
+  };
+});
+
+// Phase 3: mock delivery dependencies so existing tests are unaffected
+vi.mock("@/workers/audit-delivery", () => ({
+  DELIVERERS: {},
+}));
+
+vi.mock("@/lib/crypto-server", () => ({
+  decryptServerData: vi.fn().mockReturnValue("{}"),
+  getMasterKeyByVersion: vi.fn().mockReturnValue(Buffer.alloc(32)),
+}));
+
+vi.mock("@/lib/external-http", () => ({
+  sanitizeErrorForStorage: vi.fn((msg: string) => msg),
 }));
 
 vi.mock("@/lib/backoff", () => ({
@@ -204,13 +225,20 @@ type TxFn = (tx: any) => Promise<unknown>;
  * $queryRawUnsafe.
  */
 function makeOneShotTxImpl(stopFn: () => void): (fn: TxFn) => Promise<unknown> {
-  let firstClaimDone = false;
+  let outboxClaimCount = 0;
   return async function (fn: TxFn) {
     const txQueryRaw = vi.fn(async (...args: unknown[]) => {
-      if (!firstClaimDone) {
+      const sql = typeof args[0] === "string" ? args[0] : "";
+      // Distinguish outbox claims from delivery claims by SQL target table
+      if (sql.includes("audit_outbox")) {
+        outboxClaimCount++;
+        if (outboxClaimCount > 1) {
+          stopFn();
+          return [];
+        }
         return mockQueryRawUnsafe(...args);
       }
-      stopFn();
+      // Delivery claims or other queries — return empty
       return [];
     });
 
@@ -218,11 +246,10 @@ function makeOneShotTxImpl(stopFn: () => void): (fn: TxFn) => Promise<unknown> {
       $executeRaw: mockExecuteRaw,
       $queryRawUnsafe: txQueryRaw,
       $executeRawUnsafe: mockExecuteRawUnsafe,
+      auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+      auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
     });
 
-    if (txQueryRaw.mock.calls.length > 0) {
-      firstClaimDone = true;
-    }
     return result;
   };
 }
@@ -241,6 +268,9 @@ function resetMocks() {
       $executeRaw: mockExecuteRaw,
       $queryRawUnsafe: mockQueryRawUnsafe,
       $executeRawUnsafe: mockExecuteRawUnsafe,
+      // Phase 3: delivery model stubs
+      auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+      auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
     });
   });
   mockComputeBackoffMs.mockReturnValue(1000);
@@ -978,31 +1008,35 @@ describe("reaper — invoked on first loop tick", () => {
       async function (fn: (tx: unknown) => Promise<unknown>) {
         txCallCount++;
 
-        // tx 1 = claimBatch (PENDING check): returns []
-        // tx 2 = reapStuckRows (PROCESSING check): returns two reaped rows
-        // tx 3 = writeDirectAuditLog for REAPED_ROW_1 (REAPED)
-        // tx 4 = writeDirectAuditLog for REAPED_ROW_2 (REAPED)
-        // tx 5 = purgeRetention (DELETE CTE): returns 0 purged
-        // tx 6 = next claimBatch iteration — stop here
+        // Phase 3 flow:
+        // tx 1 = claimBatch (outbox PENDING check): returns []
+        // tx 2 = processDeliveryBatch (delivery claim): returns []
+        // tx 3 = reapStuckRows (PROCESSING check): returns two reaped rows
+        // tx 4 = reapStuckDeliveries
+        // tx 5 = writeDirectAuditLog for REAPED_ROW_1 (REAPED)
+        // tx 6 = writeDirectAuditLog for REAPED_ROW_2 (REAPED)
+        // tx 7 = purgeRetention (DELETE CTE): returns 0 purged
+        // tx 8-9 = delivery retention purge
+        // tx 10 = next claimBatch iteration — stop here
 
-        if (txCallCount === 6) {
+        if (txCallCount >= 10) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 2) {
+          if (txCallCount === 3) {
             // reapStuckRows — return two stuck rows (both below max_attempts)
             return [
               { id: REAPED_ROW_1, tenant_id: TENANT_ID, attempt_count: 1, new_status: "PENDING" },
               { id: REAPED_ROW_2, tenant_id: TENANT_ID, attempt_count: 2, new_status: "PENDING" },
             ];
           }
-          if (txCallCount === 5) {
+          if (txCallCount === 7) {
             // purgeRetention — return 0 purged
             return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
-          // claimBatch and direct-audit transactions return []
+          // claimBatch, delivery claim, and direct-audit transactions return []
           return mockQueryRawUnsafe(sql, ...args);
         });
 
@@ -1010,6 +1044,8 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: txQueryRaw,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -1039,23 +1075,27 @@ describe("reaper — invoked on first loop tick", () => {
       async function (fn: (tx: unknown) => Promise<unknown>) {
         txCallCount++;
 
+        // Phase 3 flow:
         // tx 1 = claimBatch: []
-        // tx 2 = reapStuckRows: 0 reaped (no PROCESSING rows)
-        // tx 3 = purgeRetention: 5 rows purged
-        // tx 4 = writeDirectAuditLog for AUDIT_OUTBOX_RETENTION_PURGED: INSERT
-        // tx 5 = next claimBatch — stop
+        // tx 2 = processDeliveryBatch: []
+        // tx 3 = reapStuckRows: 0 reaped
+        // tx 4 = reapStuckDeliveries
+        // tx 5 = purgeRetention: 5 rows purged
+        // tx 6-7 = delivery retention purge
+        // tx 8 = writeDirectAuditLog for AUDIT_OUTBOX_RETENTION_PURGED
+        // tx 9 = next claimBatch — stop
 
-        if (txCallCount === 5) {
+        if (txCallCount >= 9) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 2) {
+          if (txCallCount === 3) {
             // reapStuckRows — 0 reaped
             return [];
           }
-          if (txCallCount === 3) {
+          if (txCallCount === 5) {
             // purgeRetention — 5 rows deleted with a sample tenant
             return [{ purged: BigInt(5), sample_tenant_id: TENANT_ID }];
           }
@@ -1066,6 +1106,8 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: txQueryRaw,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -1097,21 +1139,24 @@ describe("reaper — invoked on first loop tick", () => {
       async function (fn: (tx: unknown) => Promise<unknown>) {
         txCallCount++;
 
+        // Phase 3 flow:
         // tx 1 = claimBatch: []
-        // tx 2 = reapStuckRows: throw (caught by runReaper)
-        // tx 3 = purgeRetention: runs independently (separate try/catch in runReaper)
-        // tx 4 = next claimBatch — stop
-        if (txCallCount === 2) {
+        // tx 2 = processDeliveryBatch: []
+        // tx 3 = reapStuckRows: throw (caught by runReaper)
+        // tx 4 = reapStuckDeliveries / purgeRetention: runs independently
+        // ...
+        // tx >= 8 = next claimBatch — stop
+        if (txCallCount === 3) {
           throw new Error("reaper db error");
         }
-        if (txCallCount === 4) {
+        if (txCallCount >= 8) {
           worker.stop();
           return [];
         }
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
-          if (txCallCount === 3) {
-            // purgeRetention — 0 purged, explicit shape matching actual return
+          if (txCallCount === 5) {
+            // purgeRetention — 0 purged
             return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
           return mockQueryRawUnsafe(sql, ...args);
@@ -1121,6 +1166,8 @@ describe("reaper — invoked on first loop tick", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: txQueryRaw,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
