@@ -19,7 +19,7 @@ type TenantRlsContext = {
   bypass: boolean;
 };
 
-const tenantRlsStorage = new AsyncLocalStorage<TenantRlsContext>();
+export const tenantRlsStorage = new AsyncLocalStorage<TenantRlsContext>();
 
 export function getTenantRlsContext(): TenantRlsContext | undefined {
   return tenantRlsStorage.getStore();
@@ -28,18 +28,18 @@ export function getTenantRlsContext(): TenantRlsContext | undefined {
 export async function withTenantRls<T>(
   prisma: PrismaClient,
   tenantId: string,
-  fn: () => Promise<T>,
+  fn: ((tx: Prisma.TransactionClient) => Promise<T>) | (() => Promise<T>),
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-    return tenantRlsStorage.run({ tx, tenantId, bypass: false }, fn);
+    return tenantRlsStorage.run({ tx, tenantId, bypass: false }, () => fn(tx));
   });
 }
 
 
 export async function withBypassRls<T>(
   prisma: PrismaClient,
-  fn: () => Promise<T>,
+  fn: ((tx: Prisma.TransactionClient) => Promise<T>) | (() => Promise<T>),
   purpose: BypassPurpose,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
@@ -47,6 +47,6 @@ export async function withBypassRls<T>(
     await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${purpose}, true)`;
     // Set a valid UUID to prevent cast errors when PG evaluates both OR branches
     await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
-    return tenantRlsStorage.run({ tx, tenantId: null, bypass: true }, fn);
+    return tenantRlsStorage.run({ tx, tenantId: null, bypass: true }, () => fn(tx));
   });
 }

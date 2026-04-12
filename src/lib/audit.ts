@@ -2,21 +2,24 @@
  * Server-side audit logging helpers.
  *
  * logAudit() is async nonblocking — it never throws and never blocks the response.
- * Dual-write: PostgreSQL AuditLog table + structured JSON to stdout (via pino).
+ * Dual-write: PostgreSQL AuditLog table (via outbox) + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
  */
 
 import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { deadLetterLogger } from "@/lib/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { tenantRlsStorage, getTenantRlsContext } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
-import { enqueue, drainBuffer, bufferSize, type BufferedAuditEntry } from "@/lib/audit-retry";
-import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
+import { drainBuffer, bufferSize } from "@/lib/audit-retry";
+import { AUDIT_OUTBOX } from "@/lib/constants/audit";
+import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
+import type { AuditOutboxPayload } from "@/lib/audit-outbox";
 
 /** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -27,14 +30,8 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
     : { _truncated: true, _originalSize: json.length };
 }
 
-/**
- * Audit actions that must NOT trigger webhook dispatch.
- * Prevents infinite loops: delivery failure → logAudit → dispatch → failure → ...
- */
-const WEBHOOK_DISPATCH_SUPPRESS: ReadonlySet<AuditAction> = new Set<AuditAction>([
-  "WEBHOOK_DELIVERY_FAILED" as AuditAction,
-  "TENANT_WEBHOOK_DELIVERY_FAILED" as AuditAction,
-]);
+// Re-export from constants for backward compatibility
+export { OUTBOX_BYPASS_AUDIT_ACTIONS } from "@/lib/constants/audit";
 
 export interface AuditLogParams {
   scope: AuditScope;
@@ -92,100 +89,210 @@ export function sanitizeMetadata(value: unknown): unknown {
   return value;
 }
 
+// ─── Process-local FIFO queue ────────────────────────────────────
+
+interface FifoEntry {
+  params: AuditLogParams;
+  retryCount: number;
+}
+
+const fifoQueue: FifoEntry[] = [];
+
+function pushToFifo(params: AuditLogParams): void {
+  if (fifoQueue.length >= AUDIT_OUTBOX.FIFO_MAX_SIZE) {
+    const dropped = fifoQueue.shift();
+    if (dropped) {
+      deadLetterLogger.warn(
+        { auditEntry: dropped.params, reason: "fifo_overflow" },
+        "audit.dead_letter",
+      );
+    }
+  }
+  fifoQueue.push({ params, retryCount: 0 });
+}
+
+// ─── Tenant resolution helper ────────────────────────────────────
+
+async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
+  let resolvedTenantId: string | null = params.tenantId ?? null;
+  if (!resolvedTenantId && params.teamId) {
+    const team = await prisma.team.findUnique({
+      where: { id: params.teamId },
+      select: { tenantId: true },
+    });
+    resolvedTenantId = team?.tenantId ?? null;
+  }
+  if (!resolvedTenantId) {
+    const user = await prisma.user.findUnique({
+      where: { id: params.userId },
+      select: { tenantId: true },
+    });
+    resolvedTenantId = user?.tenantId ?? null;
+  }
+  return resolvedTenantId;
+}
+
+// ─── FIFO flusher ────────────────────────────────────────────────
+
+async function flushFifo(): Promise<void> {
+  if (fifoQueue.length === 0) return;
+
+  await tenantRlsStorage.run(undefined as never, async () => {
+    const batch = fifoQueue.splice(0, 100);
+    for (const entry of batch) {
+      const { params } = entry;
+      try {
+        const safeMetadata = truncateMetadata(params.metadata);
+        const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+
+        let tenantId: string | null = null;
+        try {
+          tenantId = await resolveTenantId(params);
+        } catch (err) {
+          getLogger().warn({ err }, "audit flusher: tenantId resolution failed");
+        }
+
+        if (!tenantId) {
+          deadLetterLogger.warn(
+            { auditEntry: params, reason: "tenant_not_found" },
+            "audit.dead_letter",
+          );
+          continue;
+        }
+
+        const payload: AuditOutboxPayload = {
+          scope: params.scope,
+          action: params.action,
+          userId: params.userId,
+          actorType: params.actorType ?? "HUMAN",
+          serviceAccountId: params.serviceAccountId ?? null,
+          teamId: params.teamId ?? null,
+          targetType: params.targetType ?? null,
+          targetId: params.targetId ?? null,
+          metadata: sanitized ?? null,
+          ip: params.ip ?? null,
+          userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+        };
+
+        const { enqueueAudit } = await import("@/lib/audit-outbox");
+        await enqueueAudit(tenantId, payload);
+      } catch (err) {
+        entry.retryCount++;
+        if (entry.retryCount >= AUDIT_OUTBOX.FIFO_MAX_RETRIES) {
+          deadLetterLogger.warn(
+            { auditEntry: params, reason: "max_retries_exceeded", error: String(err) },
+            "audit.dead_letter",
+          );
+        } else {
+          fifoQueue.unshift(entry);
+        }
+        getLogger().warn({ err, retryCount: entry.retryCount }, "audit fifo flush failed");
+      }
+    }
+  });
+}
+
+const flusherInterval = setInterval(() => {
+  void flushFifo().catch(() => {});
+}, AUDIT_OUTBOX.FLUSH_INTERVAL_MS);
+
+if (typeof flusherInterval.unref === "function") {
+  flusherInterval.unref();
+}
+
+async function flushWithTimeout(timeoutMs: number): Promise<void> {
+  await Promise.race([
+    flushFifo(),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
+process.on("SIGTERM", () => {
+  void flushWithTimeout(5000).finally(() => process.exit(0));
+});
+
+process.on("SIGINT", () => {
+  void flushWithTimeout(5000).finally(() => process.exit(0));
+});
+
+process.on("beforeExit", () => {
+  void flushFifo().catch(() => {});
+});
+
+// ─── logAuditInTx ────────────────────────────────────────────────
+
+/**
+ * Write an audit log entry inside an existing Prisma transaction.
+ * Provides F1 atomicity: business write ⇔ audit row in the same transaction.
+ */
+export async function logAuditInTx(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  params: AuditLogParams,
+): Promise<void> {
+  const safeMetadata = truncateMetadata(params.metadata);
+  const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+  const safeUserAgent = params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
+
+  const payload: AuditOutboxPayload = {
+    scope: params.scope,
+    action: params.action,
+    userId: params.userId,
+    actorType: params.actorType ?? "HUMAN",
+    serviceAccountId: params.serviceAccountId ?? null,
+    teamId: params.teamId ?? null,
+    targetType: params.targetType ?? null,
+    targetId: params.targetId ?? null,
+    metadata: sanitized ?? null,
+    ip: params.ip ?? null,
+    userAgent: safeUserAgent,
+  };
+
+  const { enqueueAuditInTx } = await import("@/lib/audit-outbox");
+  await enqueueAuditInTx(tx, tenantId, payload);
+}
+
+// ─── logAudit ────────────────────────────────────────────────────
+
 /**
  * Write an audit log entry. Async nonblocking: errors are silently caught.
  *
- * Dual-write:
- * 1. PostgreSQL AuditLog table (existing, unchanged)
- * 2. Structured JSON to stdout via pino (for Fluent Bit forwarding)
+ * @deprecated Use logAuditInTx(tx, tenantId, params) for atomicity guarantees.
+ * logAudit() enqueues to a process-local FIFO and writes to the outbox
+ * asynchronously via a background flusher. There is NO atomicity guarantee
+ * between the business write and the audit row.
  */
 export function logAudit(params: AuditLogParams): void {
   const { scope, action, userId, actorType, serviceAccountId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
 
-  const safeMetadata = truncateMetadata(metadata);
+  if (getTenantRlsContext()) {
+    getLogger().warn(
+      { action, scope },
+      "logAudit() called inside withTenantRls/withBypassRls — prefer logAuditInTx for atomicity",
+    );
+  }
 
+  const safeMetadata = truncateMetadata(metadata);
   const safeUserAgent = userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
 
   // --- Piggyback flush: drain buffered retry entries (fire-and-forget) ---
   if (bufferSize() > 0) void drainBuffer().catch(() => {});
 
-  // --- DB write + webhook dispatch ---
-  void (async () => {
-    // Resolve tenantId inside transaction, then dispatch webhook after commit
-    let resolvedTenantId: string | null = null;
-
-    try {
-      await withBypassRls(prisma, async () => {
-        resolvedTenantId = tenantId ?? null;
-        if (!resolvedTenantId && teamId) {
-          const team = await prisma.team.findUnique({
-            where: { id: teamId },
-            select: { tenantId: true },
-          });
-          resolvedTenantId = team?.tenantId ?? null;
-        }
-        if (!resolvedTenantId) {
-          const user = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { tenantId: true },
-          });
-          resolvedTenantId = user?.tenantId ?? null;
-        }
-        if (!resolvedTenantId) return;
-
-        await prisma.auditLog.create({
-          data: {
-            scope,
-            action,
-            userId,
-            actorType: actorType ?? "HUMAN",
-            serviceAccountId: serviceAccountId ?? null,
-            tenantId: resolvedTenantId,
-            teamId: teamId ?? null,
-            targetType: targetType ?? null,
-            targetId: targetId ?? null,
-            metadata: safeMetadata as never ?? undefined,
-            ip: ip ?? null,
-            userAgent: safeUserAgent,
-          },
-        });
-      }, BYPASS_PURPOSE.AUDIT_WRITE);
-    } catch (err) {
-      getLogger().error({ err }, "audit log write failed — enqueuing for retry");
-      // Enqueue for retry if tenantId was resolved; otherwise cannot retry
-      if (resolvedTenantId) {
-        enqueue({
-          scope,
-          action,
-          userId,
-          actorType: actorType ?? "HUMAN",
-          serviceAccountId: serviceAccountId ?? null,
-          tenantId: resolvedTenantId,
-          teamId: teamId ?? null,
-          targetType: targetType ?? null,
-          targetId: targetId ?? null,
-          metadata: safeMetadata,
-          ip: ip ?? null,
-          userAgent: safeUserAgent,
-          retryCount: 0,
-        });
-      }
-      return; // Skip webhook dispatch on DB failure
-    }
-
-    // --- Webhook dispatch (after transaction commits) ---
-    // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
-    if (resolvedTenantId && !WEBHOOK_DISPATCH_SUPPRESS.has(action)) {
-      const { dispatchWebhook, dispatchTenantWebhook } = await import("@/lib/webhook-dispatcher");
-      const webhookData = safeMetadata ?? {};
-      const timestamp = new Date().toISOString();
-      if (scope === "TEAM" && teamId) {
-        void dispatchWebhook({ type: action, teamId, timestamp, data: webhookData });
-      } else if (scope === "TENANT") {
-        void dispatchTenantWebhook({ type: action, tenantId: resolvedTenantId, timestamp, data: webhookData });
-      }
-    }
-  })();
+  // --- Push to FIFO for background outbox enqueue ---
+  pushToFifo({
+    scope,
+    action,
+    userId,
+    actorType,
+    serviceAccountId,
+    tenantId,
+    teamId,
+    targetType,
+    targetId,
+    metadata: safeMetadata,
+    ip,
+    userAgent: safeUserAgent,
+  });
 
   // --- Structured JSON emit for external forwarding ---
   // auditLogger.enabled is false when AUDIT_LOG_FORWARD !== "true",
@@ -214,19 +321,13 @@ export function logAudit(params: AuditLogParams): void {
   }
 }
 
+// ─── logAuditBatch ───────────────────────────────────────────────
+
 /**
- * Write multiple audit log entries in a single DB round-trip.
+ * Write multiple audit log entries.
  * Async nonblocking: errors are silently caught.
  *
- * **Contract**: All entries in `paramsList` must share the same `userId` and
- * `teamId` (if set). tenantId is resolved once from the first entry and applied
- * to the entire batch. Mixing different users/teams in a single batch will
- * produce incorrect tenantId assignments.
- *
- * Optimization over calling logAudit() in a loop:
- * - tenantId resolved once (not per entry)
- * - single withBypassRls call wrapping one createMany (not N create calls)
- * - pino emit still happens per entry (no behavioral change for log forwarding)
+ * @deprecated Use logAuditInTx(tx, tenantId, params) per entry for atomicity guarantees.
  */
 export function logAuditBatch(paramsList: AuditLogParams[]): void {
   if (paramsList.length === 0) return;
@@ -234,88 +335,25 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
   // --- Piggyback flush: drain buffered retry entries (fire-and-forget) ---
   if (bufferSize() > 0) void drainBuffer().catch(() => {});
 
-  // --- DB write: resolve tenantId once, then createMany, then dispatch ---
-  void (async () => {
-    let resolvedTenantId: string | null = null;
+  for (const params of paramsList) {
+    const safeMetadata = truncateMetadata(params.metadata);
+    const safeUserAgent = params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
 
-    try {
-      await withBypassRls(prisma, async () => {
-        const first = paramsList[0];
-        resolvedTenantId = first.tenantId ?? null;
-        if (!resolvedTenantId && first.teamId) {
-          const team = await prisma.team.findUnique({
-            where: { id: first.teamId },
-            select: { tenantId: true },
-          });
-          resolvedTenantId = team?.tenantId ?? null;
-        }
-        if (!resolvedTenantId) {
-          const user = await prisma.user.findUnique({
-            where: { id: first.userId },
-            select: { tenantId: true },
-          });
-          resolvedTenantId = user?.tenantId ?? null;
-        }
-        if (!resolvedTenantId) return;
-
-        await prisma.auditLog.createMany({
-          data: paramsList.map((p) => ({
-            scope: p.scope,
-            action: p.action,
-            userId: p.userId,
-            actorType: p.actorType ?? "HUMAN",
-            serviceAccountId: p.serviceAccountId ?? null,
-            tenantId: resolvedTenantId!,
-            teamId: p.teamId ?? null,
-            targetType: p.targetType ?? null,
-            targetId: p.targetId ?? null,
-            metadata: truncateMetadata(p.metadata) as never ?? undefined,
-            ip: p.ip ?? null,
-            userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-          })),
-        });
-      }, BYPASS_PURPOSE.AUDIT_WRITE);
-    } catch (err) {
-      getLogger().error({ err }, "audit log batch write failed — enqueuing for retry");
-      // Enqueue each entry individually for retry if tenantId was resolved
-      if (resolvedTenantId) {
-        for (const p of paramsList) {
-          enqueue({
-            scope: p.scope,
-            action: p.action,
-            userId: p.userId,
-            actorType: p.actorType ?? "HUMAN",
-            serviceAccountId: p.serviceAccountId ?? null,
-            tenantId: resolvedTenantId,
-            teamId: p.teamId ?? null,
-            targetType: p.targetType ?? null,
-            targetId: p.targetId ?? null,
-            metadata: truncateMetadata(p.metadata),
-            ip: p.ip ?? null,
-            userAgent: p.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-            retryCount: 0,
-          } satisfies BufferedAuditEntry);
-        }
-      }
-      return; // Skip webhook dispatch on DB failure
-    }
-
-    // --- Webhook dispatch per entry (after transaction commits) ---
-    // Lazy import to break circular dependency: audit.ts ↔ webhook-dispatcher.ts
-    if (resolvedTenantId) {
-      const { dispatchWebhook, dispatchTenantWebhook } = await import("@/lib/webhook-dispatcher");
-      const timestamp = new Date().toISOString();
-      for (const p of paramsList) {
-        if (WEBHOOK_DISPATCH_SUPPRESS.has(p.action)) continue;
-        const webhookMeta = truncateMetadata(p.metadata) ?? {};
-        if (p.scope === "TEAM" && p.teamId) {
-          void dispatchWebhook({ type: p.action, teamId: p.teamId, timestamp, data: webhookMeta });
-        } else if (p.scope === "TENANT" && resolvedTenantId) {
-          void dispatchTenantWebhook({ type: p.action, tenantId: resolvedTenantId, timestamp, data: webhookMeta });
-        }
-      }
-    }
-  })();
+    pushToFifo({
+      scope: params.scope,
+      action: params.action,
+      userId: params.userId,
+      actorType: params.actorType,
+      serviceAccountId: params.serviceAccountId,
+      tenantId: params.tenantId,
+      teamId: params.teamId,
+      targetType: params.targetType,
+      targetId: params.targetId,
+      metadata: safeMetadata,
+      ip: params.ip,
+      userAgent: safeUserAgent,
+    });
+  }
 
   // --- Structured JSON emit per entry for external forwarding ---
   for (const p of paramsList) {
@@ -343,6 +381,8 @@ export function logAuditBatch(paramsList: AuditLogParams[]): void {
   }
 }
 
+// ─── extractRequestMeta ──────────────────────────────────────────
+
 /**
  * Extract IP address, User-Agent, and Accept-Language from a NextRequest.
  */
@@ -355,4 +395,16 @@ export function extractRequestMeta(req: NextRequest): {
   const userAgent = req.headers.get("user-agent");
   const acceptLanguage = req.headers.get("accept-language");
   return { ip, userAgent, acceptLanguage };
+}
+
+// ─── Test helpers (tree-shaken in production via dead-code elimination) ───────
+
+/** @internal Exposed for unit tests only. Returns the current FIFO queue length. */
+export function _getFifoSize(): number {
+  return fifoQueue.length;
+}
+
+/** @internal Exposed for unit tests only. Manually triggers a FIFO flush. */
+export async function _flushFifoForTest(): Promise<void> {
+  await flushFifo();
 }

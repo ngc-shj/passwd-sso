@@ -12,7 +12,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAudit, logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { notifyAdminsOfLockout } from "@/lib/lockout-admin-notify";
@@ -266,40 +266,67 @@ export async function recordFailure(
     }),
     BYPASS_PURPOSE.AUTH_FLOW);
 
-    // Async nonblocking audit: VAULT_UNLOCK_FAILED (every failure)
-    // NOTE: logAudit() internally swallows exceptions, so this catch is
-    // unlikely to fire. Kept as a safety net in case logAudit's contract changes.
+    // Atomic audit: VAULT_UNLOCK_FAILED (every failure)
     try {
       const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
-      logAudit({
-        scope: AUDIT_SCOPE.PERSONAL,
-        action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
-        userId,
-        metadata: { attempts: result.attempts },
-        ip: meta.ip,
-        userAgent: meta.userAgent,
-      });
+      if (resolvedTenantId) {
+        await withBypassRls(prisma, async (tx) => {
+          await logAuditInTx(tx, resolvedTenantId!, {
+            scope: AUDIT_SCOPE.PERSONAL,
+            action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
+            userId,
+            metadata: { attempts: result.attempts },
+            ip: meta.ip,
+            userAgent: meta.userAgent,
+          });
+        }, BYPASS_PURPOSE.AUDIT_WRITE);
+      } else {
+        logAudit({
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
+          userId,
+          metadata: { attempts: result.attempts },
+          ip: meta.ip,
+          userAgent: meta.userAgent,
+        });
+      }
     } catch (auditErr) {
       getLogger().error({ err: auditErr, userId }, "audit.vaultUnlockFailed.error");
     }
 
-    // Async nonblocking audit: VAULT_LOCKOUT_TRIGGERED (threshold crossed)
-    // NOTE: Same as above — logAudit() swallows internally; catch kept as safety net.
+    // Atomic audit: VAULT_LOCKOUT_TRIGGERED (threshold crossed)
     if (result.lockMinutes !== null) {
       try {
         const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
-        logAudit({
-          scope: AUDIT_SCOPE.PERSONAL,
-          action: AUDIT_ACTION.VAULT_LOCKOUT_TRIGGERED,
-          userId,
-          metadata: {
-            attempts: result.attempts,
-            lockMinutes: result.lockMinutes,
-            lockedUntil: result.lockedUntil?.toISOString() ?? null,
-          },
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-        });
+        if (resolvedTenantId) {
+          await withBypassRls(prisma, async (tx) => {
+            await logAuditInTx(tx, resolvedTenantId!, {
+              scope: AUDIT_SCOPE.PERSONAL,
+              action: AUDIT_ACTION.VAULT_LOCKOUT_TRIGGERED,
+              userId,
+              metadata: {
+                attempts: result.attempts,
+                lockMinutes: result.lockMinutes,
+                lockedUntil: result.lockedUntil?.toISOString() ?? null,
+              },
+              ip: meta.ip,
+              userAgent: meta.userAgent,
+            });
+          }, BYPASS_PURPOSE.AUDIT_WRITE);
+        } else {
+          logAudit({
+            scope: AUDIT_SCOPE.PERSONAL,
+            action: AUDIT_ACTION.VAULT_LOCKOUT_TRIGGERED,
+            userId,
+            metadata: {
+              attempts: result.attempts,
+              lockMinutes: result.lockMinutes,
+              lockedUntil: result.lockedUntil?.toISOString() ?? null,
+            },
+            ip: meta.ip,
+            userAgent: meta.userAgent,
+          });
+        }
         if (result.thresholdCrossed) {
           void notifyAdminsOfLockout({
             userId,

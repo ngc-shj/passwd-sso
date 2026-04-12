@@ -10,6 +10,7 @@ export default defineConfig({
       "e2e/helpers/*.test.ts",
       "scripts/__tests__/**/*.test.mjs",
     ],
+    exclude: ["src/**/*.integration.test.ts"],
     setupFiles: ["src/__tests__/setup.ts"],
     coverage: {
       provider: "v8",

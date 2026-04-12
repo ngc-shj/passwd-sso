@@ -864,6 +864,65 @@ These are flagged for the expert agents to evaluate explicitly:
 - **Q6 (functionality)**: Should we pre-populate the `audit_delivery_targets` row schema with a `kind=DB` always-on row per tenant, or special-case DB in the worker code? Current plan: special-case.
 - ~~**Q7 (resolved)**: Use two-Prisma-client + Deferred barrier pattern in vitest. No separate harness needed.~~
 
-## Implementation Checklist
+## Implementation Checklist (Phase 1 only)
 
-(To be filled in during Phase 2 of the multi-agent-review skill, after the plan is finalized.)
+### Files to create
+- [ ] `src/lib/audit-outbox.ts` — `enqueueAuditInTx()`, `enqueueAudit()`
+- [ ] `src/lib/backoff.ts` — `computeBackoffMs()`, `withFullJitter()`
+- [ ] `src/workers/audit-outbox-worker.ts` — worker loop body
+- [ ] `scripts/audit-outbox-worker.ts` — worker entrypoint
+- [ ] `scripts/set-outbox-worker-password.sh` — prod password rollout
+- [ ] `vitest.integration.config.ts` — real-DB test config
+- [ ] `src/__tests__/db-integration/audit-outbox-atomicity.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-logaudit-non-atomic.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-state-machine.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-skip-locked.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-rls.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-worker-role.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-dedup.integration.test.ts`
+- [ ] `src/__tests__/db-integration/audit-outbox-reentrant-guard.integration.test.ts`
+- [ ] `src/__tests__/audit.mocked.test.ts` (renamed from `audit.test.ts`)
+- [ ] `src/__tests__/audit-fifo-flusher.test.ts`
+
+### Files to modify
+- [ ] `prisma/schema.prisma` — add `AuditOutboxStatus` enum, `AuditOutbox` model, `outboxId` on `AuditLog`, `auditOutbox` relation on `Tenant`
+- [ ] `src/lib/tenant-rls.ts` — refactor `withBypassRls` signature to pass `tx` to callback (backward-compatible)
+- [ ] `src/lib/audit.ts` — rewrite `logAudit`/`logAuditBatch` to FIFO flusher + export `logAuditInTx`; add `OUTBOX_BYPASS_AUDIT_ACTIONS` to `WEBHOOK_DISPATCH_SUPPRESS`
+- [ ] `src/lib/audit-retry.ts` — no changes (kept but unused on success path in Phase 1)
+- [ ] `src/lib/constants/audit.ts` — add `AUDIT_OUTBOX` namespace with all configurable constants
+- [ ] `src/lib/webhook-dispatcher.ts` — migrate `RETRY_DELAYS` to use `computeBackoffMs` from `backoff.ts`
+- [ ] `infra/postgres/initdb/02-create-app-role.sql` — add `passwd_outbox_worker` role section
+- [ ] `package.json` — add `worker:audit-outbox` and `test:integration` scripts
+- [ ] `vitest.config.ts` — add `exclude: ["src/**/*.integration.test.ts"]`
+- [ ] `docker-compose.yml` — add `audit-outbox-worker` service
+- [ ] `.github/workflows/ci.yml` — add `audit-outbox-integration` job
+
+### Shared utilities to reuse (R1 compliance)
+- `src/lib/tenant-rls.ts:40-52` — `withBypassRls()`, `BYPASS_PURPOSE.AUDIT_WRITE`
+- `src/lib/tenant-rls.ts:22` — `tenantRlsStorage` (AsyncLocalStorage, for flusher isolation)
+- `src/lib/audit.ts:73-93` — `sanitizeMetadata()` (reuse, do not reimplement)
+- `src/lib/audit.ts:22-28` — `truncateMetadata()` (reuse, do not reimplement)
+- `src/lib/audit-logger.ts:22-41` — `METADATA_BLOCKLIST` (reuse, do not reimplement)
+- `src/lib/audit-logger.ts` — `deadLetterLogger` (reuse for FIFO overflow)
+- `src/lib/logger.ts` — `getLogger()` (reuse for structured logging)
+- `src/lib/rate-limit.ts` — `createRateLimiter()` (reuse for metrics endpoint)
+- `src/lib/admin-token.ts` — `verifyAdminToken()` (reuse for admin endpoints)
+- `src/lib/constants/audit.ts` — `AUDIT_ACTION`, `AUDIT_SCOPE`, `AUDIT_ACTION_VALUES`
+- `src/lib/validations/common.server.ts` — `METADATA_MAX_BYTES`, `USER_AGENT_MAX_LENGTH`
+
+### Patterns to follow consistently
+- Maintenance endpoint auth pattern: `verifyAdminToken` → `createRateLimiter` → `withBypassRls` → `logAudit` → JSON (from `purge-audit-logs/route.ts`)
+- Migration pattern: `ALTER TYPE "EnumName" ADD VALUE 'VALUE'` one per statement (from `20260411123230_add_extension_bridge_codes`)
+- Docker service pattern: `depends_on: db: condition: service_healthy` + `restart: unless-stopped`
+- CI job pattern: GitHub Actions `services: postgres:` (from `rls-smoke` job)
+- Test file convention: `.integration.test.ts` suffix for real-DB, `src/__tests__/db-integration/` directory
+
+### Security-critical call sites to migrate to logAuditInTx in Phase 1
+- [ ] `src/lib/account-lockout.ts:274` — VAULT_UNLOCK_FAILED
+- [ ] `src/lib/account-lockout.ts:291` — VAULT_LOCKOUT_TRIGGERED
+- [ ] `src/app/api/share-links/verify-access/route.ts:73` — SHARE_ACCESS_VERIFY_FAILED
+- [ ] `src/app/api/share-links/verify-access/route.ts:88` — SHARE_ACCESS_VERIFY_SUCCESS
+- [ ] `src/app/api/share-links/route.ts:190` — SHARE_CREATE
+- [ ] `src/app/api/share-links/[id]/route.ts:59` — SHARE_REVOKE
+- [ ] DEFERRED: `src/auth.ts:340` — AUTH_LOGIN (NextAuth event callback, no transaction scope available)
+- [ ] DEFERRED: `src/auth.ts:352` — AUTH_LOGOUT (NextAuth event callback, no transaction scope available)

@@ -3,6 +3,7 @@ import {
   getTenantRlsContext,
   withTenantRls,
   withBypassRls,
+  BYPASS_PURPOSE,
 } from "@/lib/tenant-rls";
 import type { PrismaClient } from "@prisma/client";
 
@@ -87,7 +88,7 @@ describe("withBypassRls", () => {
   it("runs the callback inside a transaction", async () => {
     const { prisma } = makeMockPrisma();
     const fn = vi.fn().mockResolvedValue("bypass-result");
-    const result = await withBypassRls(prisma, fn);
+    const result = await withBypassRls(prisma, fn, BYPASS_PURPOSE.AUDIT_WRITE);
     expect(result).toBe("bypass-result");
     expect(fn).toHaveBeenCalledOnce();
   });
@@ -98,7 +99,7 @@ describe("withBypassRls", () => {
     await withBypassRls(prisma, async () => {
       capturedCtx = getTenantRlsContext();
       return undefined;
-    });
+    }, BYPASS_PURPOSE.AUDIT_WRITE);
     expect(capturedCtx).toMatchObject({
       tenantId: null,
       bypass: true,
@@ -108,7 +109,7 @@ describe("withBypassRls", () => {
 
   it("context is cleared after the call completes (no leak)", async () => {
     const { prisma } = makeMockPrisma();
-    await withBypassRls(prisma, async () => undefined);
+    await withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE);
     const ctx = getTenantRlsContext();
     expect(ctx).toBeUndefined();
   });
@@ -118,14 +119,14 @@ describe("withBypassRls", () => {
     await expect(
       withBypassRls(prisma, async () => {
         throw new Error("bypass inner error");
-      })
+      }, BYPASS_PURPOSE.AUDIT_WRITE)
     ).rejects.toThrow("bypass inner error");
   });
 
   it("calls set_config with bypass_rls flag", async () => {
     const mockExecuteRaw = vi.fn().mockResolvedValue(undefined);
     const { prisma } = makeMockPrisma({ $executeRaw: mockExecuteRaw });
-    await withBypassRls(prisma, async () => undefined);
+    await withBypassRls(prisma, async () => undefined, BYPASS_PURPOSE.AUDIT_WRITE);
     expect(mockExecuteRaw).toHaveBeenCalled();
   });
 });

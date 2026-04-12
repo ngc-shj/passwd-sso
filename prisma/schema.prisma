@@ -439,6 +439,7 @@ model Tenant {
   passwordShares             PasswordShare[]
   shareAccessLogs            ShareAccessLog[]
   auditLogs                  AuditLog[]
+  auditOutbox                AuditOutbox[]
   attachments                Attachment[]
   emergencyAccessGrants      EmergencyAccessGrant[]
   folders                    Folder[]
@@ -916,6 +917,13 @@ enum ActorType {
   SYSTEM
 }
 
+enum AuditOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
 model AuditLog {
   id               String      @id @default(uuid(4)) @db.Uuid
   tenantId         String      @map("tenant_id") @db.Uuid
@@ -931,6 +939,7 @@ model AuditLog {
   ip               String?     @db.VarChar(45)
   userAgent        String?     @map("user_agent") @db.VarChar(512)
   createdAt        DateTime    @default(now()) @map("created_at")
+  outboxId         String?     @unique @map("outbox_id") @db.Uuid
 
   user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   serviceAccount ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
@@ -943,6 +952,27 @@ model AuditLog {
   @@index([tenantId, actorType, createdAt(sort: Desc)])
   @@index([action])
   @@map("audit_logs")
+}
+
+model AuditOutbox {
+  id                  String            @id @default(uuid(4)) @db.Uuid
+  tenantId            String            @map("tenant_id") @db.Uuid
+  payload             Json
+  status              AuditOutboxStatus @default(PENDING)
+  attemptCount        Int               @default(0) @map("attempt_count")
+  maxAttempts         Int               @default(8) @map("max_attempts")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  nextRetryAt         DateTime          @default(now()) @map("next_retry_at")
+  processingStartedAt DateTime?         @map("processing_started_at")
+  sentAt              DateTime?         @map("sent_at")
+  lastError           String?           @map("last_error") @db.VarChar(1024)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([status, nextRetryAt])
+  @@index([tenantId, status, createdAt])
+  @@index([status, processingStartedAt])
+  @@map("audit_outbox")
 }
 
 // ─── Access Request Models (JIT) ────────────────────────────

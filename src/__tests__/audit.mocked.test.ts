@@ -2,31 +2,31 @@ import { describe, it, expect, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
-const { mockCreate, mockAuditInfo, mockTeamFindUnique, mockUserFindUnique, mockWithBypassRls, mockEnqueue, mockDrainBuffer } = vi.hoisted(() => ({
-  mockCreate: vi.fn(),
+const { mockAuditInfo, mockDrainBuffer, mockEnqueueAudit } = vi.hoisted(() => ({
   mockAuditInfo: vi.fn(),
-  mockTeamFindUnique: vi.fn(),
-  mockUserFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
-  mockEnqueue: vi.fn(),
   mockDrainBuffer: vi.fn().mockResolvedValue(undefined),
+  mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    auditLog: { create: mockCreate },
-    team: { findUnique: mockTeamFindUnique },
-    user: { findUnique: mockUserFindUnique },
+    team: { findUnique: vi.fn() },
+    user: { findUnique: vi.fn() },
   },
 }));
-vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
-  withBypassRls: mockWithBypassRls,
+
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
+  ...(await importOriginal()) as Record<string, unknown>,
 }));
 
 vi.mock("@/lib/audit-retry", () => ({
-  enqueue: mockEnqueue,
+  enqueue: vi.fn(),
   drainBuffer: mockDrainBuffer,
   bufferSize: () => 0,
+}));
+
+vi.mock("@/lib/audit-outbox", () => ({
+  enqueueAudit: mockEnqueueAudit,
 }));
 
 vi.mock("@/lib/audit-logger", async (importOriginal) => {
@@ -39,40 +39,38 @@ vi.mock("@/lib/audit-logger", async (importOriginal) => {
 
 import { logAudit, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit";
 
-async function flushAsyncWork() {
-  await Promise.resolve();
-  await Promise.resolve();
-}
-
 describe("logAudit", () => {
-  it("creates an audit log entry", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockResolvedValue({});
+  it("pushes entry to FIFO and emits pino log synchronously", () => {
+    mockAuditInfo.mockReturnValue(undefined);
 
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "user-1",
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        scope: AUDIT_SCOPE.PERSONAL,
-        action: AUDIT_ACTION.AUTH_LOGIN,
-        userId: "user-1",
-        teamId: null,
-        targetType: null,
-        targetId: null,
-        ip: null,
-        userAgent: null,
+    // pino emit happens synchronously in logAudit
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.AUTH_LOGIN,
+          userId: "user-1",
+          actorType: "HUMAN",
+          serviceAccountId: null,
+          teamId: null,
+          targetType: null,
+          targetId: null,
+          ip: null,
+          userAgent: null,
+        }),
       }),
-    });
+      "audit.AUTH_LOGIN",
+    );
   });
 
-  it("passes optional fields when provided", async () => {
-    mockTeamFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockResolvedValue({});
+  it("passes optional fields to the pino logger", () => {
+    mockAuditInfo.mockReturnValue(undefined);
 
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
@@ -85,29 +83,27 @@ describe("logAudit", () => {
       ip: "192.168.1.1",
       userAgent: "TestAgent/1.0",
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: {
-        scope: AUDIT_SCOPE.TEAM,
-        action: AUDIT_ACTION.ENTRY_CREATE,
-        userId: "user-1",
-        actorType: "HUMAN",
-        serviceAccountId: null,
-        tenantId: "tenant-1",
-        teamId: "team-1",
-        targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-        targetId: "entry-1",
-        metadata: { key: "value" },
-        ip: "192.168.1.1",
-        userAgent: "TestAgent/1.0",
-      },
-    });
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          scope: AUDIT_SCOPE.TEAM,
+          action: AUDIT_ACTION.ENTRY_CREATE,
+          userId: "user-1",
+          teamId: "team-1",
+          targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+          targetId: "entry-1",
+          metadata: { key: "value" },
+          ip: "192.168.1.1",
+          userAgent: "TestAgent/1.0",
+        }),
+      }),
+      "audit.ENTRY_CREATE",
+    );
   });
 
-  it("truncates metadata larger than 10KB", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockResolvedValue({});
+  it("truncates metadata larger than 10KB before emitting pino log", () => {
+    mockAuditInfo.mockReturnValue(undefined);
 
     const largeMetadata: Record<string, unknown> = {
       data: "x".repeat(15_000),
@@ -119,22 +115,23 @@ describe("logAudit", () => {
       userId: "user-1",
       metadata: largeMetadata,
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        metadata: expect.objectContaining({
-          _truncated: true,
-          _originalSize: expect.any(Number),
+    // pino receives sanitized (truncated) metadata
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          metadata: expect.objectContaining({
+            _truncated: true,
+            _originalSize: expect.any(Number),
+          }),
         }),
       }),
-    });
+      "audit.ENTRY_UPDATE",
+    );
   });
 
-  it("truncates user-agent to 512 chars", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockResolvedValue({});
-
+  it("truncates user-agent to 512 chars", () => {
+    mockAuditInfo.mockReturnValue(undefined);
     const longUA = "A".repeat(1000);
 
     logAudit({
@@ -143,86 +140,18 @@ describe("logAudit", () => {
       userId: "user-1",
       userAgent: longUA,
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        userAgent: "A".repeat(512),
-      }),
-    });
-  });
-
-  it("does not throw when prisma.create rejects and enqueues for retry", async () => {
-    // withBypassRls runs the callback (which resolves tenantId) then the create fails
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockRejectedValueOnce(new Error("DB error"));
-
-    expect(() =>
-      logAudit({
-        scope: AUDIT_SCOPE.PERSONAL,
-        action: AUDIT_ACTION.AUTH_LOGIN,
-        userId: "user-1",
-      })
-    ).not.toThrow();
-
-    // Wait for the async IIFE: withBypassRls callback → user lookup → create rejects → catch → enqueue
-    await flushAsyncWork();
-    await flushAsyncWork();
-    await flushAsyncWork();
-
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      expect.objectContaining({
-        action: AUDIT_ACTION.AUTH_LOGIN,
-        userId: "user-1",
-        retryCount: 0,
-      }),
-    );
-  });
-
-  it("calls auditLogger.info alongside DB write", async () => {
-    mockTeamFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockResolvedValue({});
-    mockAuditInfo.mockReturnValue(undefined);
-
-    logAudit({
-      scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.ENTRY_CREATE,
-      userId: "user-1",
-      teamId: "team-1",
-      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-      targetId: "entry-1",
-      metadata: { filename: "test.csv" },
-      ip: "10.0.0.1",
-      userAgent: "TestAgent/2.0",
-    });
-    await flushAsyncWork();
-
-    // DB write
-    expect(mockCreate).toHaveBeenCalled();
-
-    // pino emit
     expect(mockAuditInfo).toHaveBeenCalledWith(
-      {
-        audit: {
-          scope: AUDIT_SCOPE.PERSONAL,
-          action: AUDIT_ACTION.ENTRY_CREATE,
-          userId: "user-1",
-          actorType: "HUMAN",
-          serviceAccountId: null,
-          teamId: "team-1",
-          targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-          targetId: "entry-1",
-          metadata: { filename: "test.csv" },
-          ip: "10.0.0.1",
-          userAgent: "TestAgent/2.0",
-        },
-      },
-      "audit.ENTRY_CREATE",
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          userAgent: "A".repeat(512),
+        }),
+      }),
+      "audit.AUTH_LOGIN",
     );
   });
 
   it("does not throw when auditLogger.info throws", () => {
-    mockCreate.mockResolvedValue({});
     mockAuditInfo.mockImplementation(() => {
       throw new Error("pino error");
     });
@@ -236,9 +165,7 @@ describe("logAudit", () => {
     ).not.toThrow();
   });
 
-  it("passes actorType SERVICE_ACCOUNT and serviceAccountId to DB and logger", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
-    mockCreate.mockResolvedValue({});
+  it("passes actorType SERVICE_ACCOUNT and serviceAccountId to pino logger", () => {
     mockAuditInfo.mockReturnValue(undefined);
 
     logAudit({
@@ -248,14 +175,7 @@ describe("logAudit", () => {
       actorType: "SERVICE_ACCOUNT",
       serviceAccountId: "sa-1",
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actorType: "SERVICE_ACCOUNT",
-        serviceAccountId: "sa-1",
-      }),
-    });
     expect(mockAuditInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         audit: expect.objectContaining({

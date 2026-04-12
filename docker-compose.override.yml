@@ -14,6 +14,26 @@ services:
     ports:
       - "6379:6379"
 
+  audit-outbox-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
+    env_file:
+      - .env.local
+    environment:
+      - DATABASE_URL=postgresql://passwd_outbox_worker:passwd_outbox_pass@db:5432/passwd_sso
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    command: ["node", "scripts/audit-outbox-worker.js"]
+    restart: unless-stopped
+    networks:
+      - internal
+
   mailpit:
     image: axllent/mailpit:latest
     ports:

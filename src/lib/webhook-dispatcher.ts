@@ -21,6 +21,7 @@ import { Agent as UndiciAgent } from "undici";
 import { isIpInCidr } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
+import { computeBackoffMs } from "@/lib/backoff";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -53,7 +54,9 @@ interface WebhookRecord {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const RETRY_DELAYS = [1_000, 5_000, 25_000];
+const RETRY_DELAYS = Array.from({ length: WEBHOOK_MAX_RETRIES - 1 }, (_, i) =>
+  computeBackoffMs(i, { baseMs: 1000, capMs: 25_000 }),
+);
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
 /**

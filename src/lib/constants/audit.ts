@@ -613,3 +613,31 @@ export const AUDIT_METADATA_KEY = {
 } as const;
 
 export const AUDIT_ACTION_EMERGENCY_PREFIX = "EMERGENCY_";
+
+function envInt(name: string, defaultVal: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === "") return defaultVal;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0) return defaultVal;
+  return parsed;
+}
+
+export const AUDIT_OUTBOX = {
+  BATCH_SIZE: envInt("OUTBOX_BATCH_SIZE", 500),
+  POLL_INTERVAL_MS: envInt("OUTBOX_POLL_INTERVAL_MS", 1000),
+  PROCESSING_TIMEOUT_MS: envInt("OUTBOX_PROCESSING_TIMEOUT_MS", 300_000),
+  MAX_ATTEMPTS: envInt("OUTBOX_MAX_ATTEMPTS", 8),
+  RETENTION_HOURS: envInt("OUTBOX_RETENTION_HOURS", 24),
+  FAILED_RETENTION_DAYS: envInt("OUTBOX_FAILED_RETENTION_DAYS", 90),
+  READY_PENDING_THRESHOLD: envInt("OUTBOX_READY_PENDING_THRESHOLD", 10_000),
+  READY_OLDEST_THRESHOLD: envInt("OUTBOX_READY_OLDEST_THRESHOLD_SECS", 600),
+  FLUSH_INTERVAL_MS: envInt("OUTBOX_FLUSH_INTERVAL_MS", 250),
+  REAPER_INTERVAL_MS: envInt("OUTBOX_REAPER_INTERVAL_MS", 30_000),
+  FIFO_MAX_SIZE: 200,
+  FIFO_MAX_RETRIES: 3,
+} as const;
+
+export const OUTBOX_BYPASS_AUDIT_ACTIONS: ReadonlySet<string> = new Set([
+  AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
+  AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
+]);

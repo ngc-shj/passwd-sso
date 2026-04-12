@@ -12,6 +12,7 @@ const {
   mockExtTokenUpdate,
   mockPrismaUser,
   mockAuditCreate,
+  mockLogAudit,
   mockWithUserTenantRls,
   mockWithBypassRls,
   mockRateLimiterCheck,
@@ -29,6 +30,7 @@ const {
   mockExtTokenUpdate: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockAuditCreate: vi.fn(),
+  mockLogAudit: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
@@ -67,6 +69,13 @@ vi.mock("@/lib/logger", () => {
     default: { info: noop, warn: noop, error: noop, child: vi.fn().mockReturnValue(child) },
     requestContext: { run: (_s: unknown, fn: () => unknown) => fn(), getStore: () => undefined },
     getLogger: () => child,
+  };
+});
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return {
+    ...actual,
+    logAudit: mockLogAudit,
   };
 });
 
@@ -505,15 +514,13 @@ describe("POST /api/passwords", () => {
     }));
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          action: "ENTRY_CREATE",
-          metadata: {
-            source: "import",
-            parentAction: "ENTRY_IMPORT",
-          },
-        }),
+        action: "ENTRY_CREATE",
+        metadata: {
+          source: "import",
+          parentAction: "ENTRY_IMPORT",
+        },
       }),
     );
   });
@@ -540,15 +547,13 @@ describe("POST /api/passwords", () => {
     }));
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          metadata: {
-            source: "import",
-            filename: "passwd-sso-import.csv",
-            parentAction: "ENTRY_IMPORT",
-          },
-        }),
+        metadata: {
+          source: "import",
+          filename: "passwd-sso-import.csv",
+          parentAction: "ENTRY_IMPORT",
+        },
       }),
     );
   });
@@ -575,12 +580,10 @@ describe("POST /api/passwords", () => {
     }));
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          metadata: expect.objectContaining({
-            filename: ".._.._etc_passwd",
-          }),
+        metadata: expect.objectContaining({
+          filename: ".._.._etc_passwd",
         }),
       }),
     );
@@ -608,12 +611,10 @@ describe("POST /api/passwords", () => {
     }));
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          metadata: expect.objectContaining({
-            filename: ".._.._etc_passwd",
-          }),
+        metadata: expect.objectContaining({
+          filename: ".._.._etc_passwd",
         }),
       }),
     );
@@ -676,12 +677,10 @@ describe("POST /api/passwords", () => {
     } as never);
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          metadata: expect.objectContaining({
-            filename: "filename.csv",
-          }),
+        metadata: expect.objectContaining({
+          filename: "filename.csv",
         }),
       }),
     );
@@ -714,14 +713,12 @@ describe("POST /api/passwords", () => {
     } as never);
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          metadata: {
-            source: "import",
-            parentAction: "ENTRY_IMPORT",
-          },
-        }),
+        metadata: {
+          source: "import",
+          parentAction: "ENTRY_IMPORT",
+        },
       }),
     );
   });
@@ -749,12 +746,10 @@ describe("POST /api/passwords", () => {
     }));
 
     expect(res.status).toBe(201);
-    expect(mockAuditCreate).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({
-          metadata: expect.objectContaining({
-            filename: "a".repeat(255),
-          }),
+        metadata: expect.objectContaining({
+          filename: "a".repeat(255),
         }),
       }),
     );

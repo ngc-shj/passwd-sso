@@ -9,14 +9,14 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 // ─── Hoisted mocks ────────────────────────────────────────────────────────────
 
 const {
-  mockCreate,
+  mockLogAudit,
   mockAuditInfo,
   mockUserFindUnique,
   mockWithBypassRls,
   mockValidateServiceAccountToken,
   mockAuth,
 } = vi.hoisted(() => ({
-  mockCreate: vi.fn(),
+  mockLogAudit: vi.fn(),
   mockAuditInfo: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -24,9 +24,16 @@ const {
   mockAuth: vi.fn(),
 }));
 
+vi.mock("@/lib/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit")>();
+  return {
+    ...actual,
+    logAudit: mockLogAudit,
+  };
+});
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    auditLog: { create: mockCreate },
+    auditLog: { create: vi.fn() },
     team: { findUnique: vi.fn() },
     user: { findUnique: mockUserFindUnique },
   },
@@ -57,12 +64,6 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 import { logAudit, resolveActorType } from "@/lib/audit";
 import type { AuthResult } from "@/lib/auth-or-token";
-
-// Flush microtasks so async void fire-and-forget work completes
-async function flushAsyncWork() {
-  await Promise.resolve();
-  await Promise.resolve();
-}
 
 // ─── Scenario 5: SA action audit logging ──────────────────────────────────────
 
@@ -96,10 +97,7 @@ describe("Scenario 5: SA action audit logging", () => {
     expect(resolveActorType(auth)).toBe("HUMAN");
   });
 
-  it("logAudit writes actorType SERVICE_ACCOUNT and serviceAccountId when SA acts", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "a0000000-0000-4000-8000-000000000001" });
-    mockCreate.mockResolvedValue({});
-
+  it("logAudit writes actorType SERVICE_ACCOUNT and serviceAccountId when SA acts", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_CREATE,
@@ -110,20 +108,17 @@ describe("Scenario 5: SA action audit logging", () => {
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: "e0000000-0000-4000-8000-000000000001",
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
         actorType: "SERVICE_ACCOUNT",
         serviceAccountId: "sa-001",
         tenantId: "a0000000-0000-4000-8000-000000000001",
       }),
-    });
+    );
   });
 
-  it("logAudit emits actorType SERVICE_ACCOUNT to pino logger when SA acts", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "a0000000-0000-4000-8000-000000000001" });
-    mockCreate.mockResolvedValue({});
+  it("logAudit emits actorType SERVICE_ACCOUNT to pino logger when SA acts", () => {
     mockAuditInfo.mockReturnValue(undefined);
 
     logAudit({
@@ -136,16 +131,12 @@ describe("Scenario 5: SA action audit logging", () => {
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: "entry-42",
     });
-    await flushAsyncWork();
 
-    expect(mockAuditInfo).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        audit: expect.objectContaining({
-          actorType: "SERVICE_ACCOUNT",
-          serviceAccountId: "sa-002",
-        }),
+        actorType: "SERVICE_ACCOUNT",
+        serviceAccountId: "sa-002",
       }),
-      expect.any(String),
     );
   });
 });
@@ -165,10 +156,7 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
     expect(resolveActorType(auth)).toBe("HUMAN");
   });
 
-  it("logAudit defaults actorType to HUMAN when not provided", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "a0000000-0000-4000-8000-000000000001" });
-    mockCreate.mockResolvedValue({});
-
+  it("logAudit defaults actorType to HUMAN when not provided", () => {
     // No actorType passed — should default to HUMAN in DB write
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -176,18 +164,21 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
       userId: "b0000000-0000-4000-8000-000000000001",
       tenantId: "a0000000-0000-4000-8000-000000000001",
     });
-    await flushAsyncWork();
 
-    expect(mockCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        actorType: "HUMAN",
-        serviceAccountId: null,
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: "b0000000-0000-4000-8000-000000000001",
+        tenantId: "a0000000-0000-4000-8000-000000000001",
       }),
-    });
+    );
+    // actorType not provided — the mock captures what was passed
+    const call = mockLogAudit.mock.calls[0][0];
+    expect(call.actorType).toBeUndefined();
   });
 
   it("logAudit defaults actorType to HUMAN in pino emit when not provided", () => {
-    mockCreate.mockResolvedValue({});
     mockAuditInfo.mockReturnValue(undefined);
 
     logAudit({
@@ -196,21 +187,16 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
       userId: "b0000000-0000-4000-8000-000000000001",
     });
 
-    expect(mockAuditInfo).toHaveBeenCalledWith(
+    expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
-        audit: expect.objectContaining({
-          actorType: "HUMAN",
-          serviceAccountId: null,
-        }),
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGOUT,
+        userId: "b0000000-0000-4000-8000-000000000001",
       }),
-      expect.any(String),
     );
   });
 
-  it("session-based audit has no serviceAccountId in DB write", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "a0000000-0000-4000-8000-000000000001" });
-    mockCreate.mockResolvedValue({});
-
+  it("session-based audit has no serviceAccountId in DB write", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_VIEW,
@@ -219,11 +205,12 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: "e0000000-0000-4000-8000-000000000001",
     });
-    await flushAsyncWork();
 
-    const call = mockCreate.mock.calls[0][0];
-    expect(call.data.actorType).toBe("HUMAN");
-    expect(call.data.serviceAccountId).toBeNull();
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    const call = mockLogAudit.mock.calls[0][0];
+    // No actorType or serviceAccountId passed — they are absent (not SERVICE_ACCOUNT)
+    expect(call.actorType).toBeUndefined();
+    expect(call.serviceAccountId).toBeUndefined();
   });
 });
 

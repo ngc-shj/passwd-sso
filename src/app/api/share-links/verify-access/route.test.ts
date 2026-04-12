@@ -2,24 +2,29 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
 
 const {
+  mockTx,
   mockPasswordShareFindUnique,
   mockWithBypassRls,
   mockHashToken,
   mockVerifyAccessPassword,
   mockCreateShareAccessToken,
-  mockLogAudit,
+  mockLogAuditInTx,
   mockIpCheck,
   mockTokenCheck,
-} = vi.hoisted(() => ({
-  mockPasswordShareFindUnique: vi.fn(),
-  mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
-  mockHashToken: vi.fn((t: string) => `hashed_${t}`),
-  mockVerifyAccessPassword: vi.fn(),
-  mockCreateShareAccessToken: vi.fn().mockReturnValue("access-token-xyz"),
-  mockLogAudit: vi.fn(),
-  mockIpCheck: vi.fn().mockResolvedValue({ allowed: true }),
-  mockTokenCheck: vi.fn().mockResolvedValue({ allowed: true }),
-}));
+} = vi.hoisted(() => {
+  const tx = {};
+  return {
+    mockTx: tx,
+    mockPasswordShareFindUnique: vi.fn(),
+    mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: (tx: unknown) => unknown) => fn(tx)),
+    mockHashToken: vi.fn((t: string) => `hashed_${t}`),
+    mockVerifyAccessPassword: vi.fn(),
+    mockCreateShareAccessToken: vi.fn().mockReturnValue("access-token-xyz"),
+    mockLogAuditInTx: vi.fn(),
+    mockIpCheck: vi.fn().mockResolvedValue({ allowed: true }),
+    mockTokenCheck: vi.fn().mockResolvedValue({ allowed: true }),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -46,7 +51,7 @@ vi.mock("@/lib/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/logger", () => {
@@ -221,7 +226,9 @@ describe("POST /api/share-links/verify-access", () => {
     );
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_FAILED" }),
     );
   });
@@ -236,7 +243,9 @@ describe("POST /api/share-links/verify-access", () => {
     expect(status).toBe(200);
     expect(json.accessToken).toBe("access-token-xyz");
     expect(mockCreateShareAccessToken).toHaveBeenCalledWith("share-1");
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTx,
+      "tenant-1",
       expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_SUCCESS" }),
     );
   });
