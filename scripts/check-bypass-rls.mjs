@@ -25,7 +25,6 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit.ts", ["team", "user", "auditLog"]],
-  ["src/lib/audit-retry.ts", ["auditLog"]],
   ["src/lib/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/scim-token.ts", ["scimToken"]],
   ["src/lib/extension-token.ts", ["extensionToken"]],
@@ -56,6 +55,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/access-restriction.ts", ["tenant"]],
   ["src/lib/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenantMember", "tenant", "auditLog"]],
+  ["src/app/api/maintenance/audit-outbox-metrics/route.ts", ["tenantMember"]],
+  ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", ["tenantMember"]],
   ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],
   ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
   ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE
