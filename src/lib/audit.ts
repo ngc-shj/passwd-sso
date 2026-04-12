@@ -176,6 +176,33 @@ async function flushFifo(): Promise<void> {
           userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         };
 
+        // Non-UUID userId (e.g., "anonymous" for unauthenticated share-link access)
+        // cannot be inserted by the worker (::uuid cast fails). Write directly to
+        // audit_logs via legacy path, bypassing the outbox.
+        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!UUID_RE.test(params.userId)) {
+          const { withBypassRls: bypassRls, BYPASS_PURPOSE: BP } = await import("@/lib/tenant-rls");
+          await bypassRls(prisma, async () => {
+            await prisma.auditLog.create({
+              data: {
+                scope: payload.scope,
+                action: payload.action,
+                userId: params.userId,
+                actorType: payload.actorType,
+                serviceAccountId: payload.serviceAccountId,
+                tenantId,
+                teamId: payload.teamId,
+                targetType: payload.targetType,
+                targetId: payload.targetId,
+                metadata: payload.metadata as never ?? undefined,
+                ip: payload.ip,
+                userAgent: payload.userAgent,
+              },
+            });
+          }, BP.AUDIT_WRITE);
+          continue;
+        }
+
         const { enqueueAudit } = await import("@/lib/audit-outbox");
         await enqueueAudit(tenantId, payload);
       } catch (err) {

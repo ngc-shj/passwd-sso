@@ -78,7 +78,7 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
     });
     expect(_getFifoSize()).toBe(before + 1);
   });
@@ -89,7 +89,7 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
     });
 
     await _flushFifoForTest();
@@ -99,7 +99,7 @@ describe("FIFO flusher", () => {
       expect.objectContaining({
         scope: AUDIT_SCOPE.PERSONAL,
         action: AUDIT_ACTION.AUTH_LOGIN,
-        userId: "user-1",
+        userId: "00000000-0000-4000-8000-000000000001",
         actorType: "HUMAN",
       }),
     );
@@ -113,18 +113,18 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_CREATE,
-      userId: "user-42",
+      userId: "00000000-0000-4000-8000-000000000042",
       // no tenantId supplied
     });
 
     await _flushFifoForTest();
 
     expect(mockUserFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "user-42" } }),
+      expect.objectContaining({ where: { id: "00000000-0000-4000-8000-000000000042" } }),
     );
     expect(mockEnqueueAudit).toHaveBeenCalledWith(
       "tenant-from-user",
-      expect.objectContaining({ userId: "user-42" }),
+      expect.objectContaining({ userId: "00000000-0000-4000-8000-000000000042" }),
     );
   });
 
@@ -134,7 +134,7 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_CREATE,
-      userId: "user-1",
+      userId: "00000000-0000-4000-8000-000000000001",
       teamId: "team-99",
       // no tenantId supplied
     });
@@ -157,7 +157,7 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
-      userId: "ghost-user",
+      userId: "00000000-0000-4000-8000-0000000000ff",
     });
 
     await _flushFifoForTest();
@@ -175,8 +175,8 @@ describe("FIFO flusher", () => {
       .mockRejectedValueOnce(new Error("outbox error"))
       .mockResolvedValue(undefined);
 
-    logAudit({ scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: "user-a" });
-    logAudit({ scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGOUT, userId: "user-b" });
+    logAudit({ scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGIN, userId: "00000000-0000-4000-8000-00000000000a" });
+    logAudit({ scope: AUDIT_SCOPE.PERSONAL, action: AUDIT_ACTION.AUTH_LOGOUT, userId: "00000000-0000-4000-8000-00000000000b" });
 
     await _flushFifoForTest();
 
@@ -195,7 +195,7 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
-      userId: "user-retry",
+      userId: "00000000-0000-4000-8000-000000000099",
     });
 
     // Flush FIFO_MAX_RETRIES+1 times to exhaust retries
@@ -215,7 +215,7 @@ describe("FIFO flusher", () => {
       logAudit({
         scope: AUDIT_SCOPE.PERSONAL,
         action: AUDIT_ACTION.AUTH_LOGIN,
-        userId: `user-${i}`,
+        userId: "00000000-0000-4000-8000-000000000001",
         tenantId: "tenant-1",
       });
     }
@@ -248,7 +248,7 @@ describe("FIFO flusher", () => {
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGOUT,
-      userId: "user-sigterm",
+      userId: "00000000-0000-4000-8000-0000000000cc",
     });
 
     // Emit SIGTERM to trigger the handler registered in audit.ts
@@ -263,7 +263,7 @@ describe("FIFO flusher", () => {
       "tenant-1",
       expect.objectContaining({
         action: AUDIT_ACTION.AUTH_LOGOUT,
-        userId: "user-sigterm",
+        userId: "00000000-0000-4000-8000-0000000000cc",
       }),
     );
 

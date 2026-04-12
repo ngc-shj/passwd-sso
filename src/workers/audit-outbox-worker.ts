@@ -94,7 +94,7 @@ async function claimBatch(
       )
       AND status = 'PENDING'
       RETURNING *
-    `);
+    `, batchSize);
     return rows;
   });
 }
