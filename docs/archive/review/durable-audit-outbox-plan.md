@@ -58,7 +58,7 @@ Survey results (file:line):
 | F8 | Phase 3: SSRF defense for SIEM/storage URLs reuses extracted helpers from `webhook-dispatcher.ts`. |
 | F9 | Phase 4 (optional, behind tenant flag): hash chain (`prev_hash`, `event_hash`, `chain_seq`) per tenant, with concurrent-insert-safe ordering. |
 | F10 | **Source-compatibility only**: the 187 existing `logAudit()` call sites must continue to **compile and run** without per-call-site changes. `logAudit` keeps the same `(params) => void` signature. **However, F1's atomicity guarantee (business write ⇔ audit row) is NOT provided by the void-returning `logAudit`** — it is only available via the new `logAuditInTx(tx, params)`. `logAudit` is marked `@deprecated` in JSDoc with a pointer to `logAuditInTx`. Phase 1 also migrates the **security-critical** call sites (`CREDENTIAL_ACCESS`, `VAULT_UNLOCK`, `SHARE_LINK_ACCESSED`, `AUTH_LOGIN`, `AUTH_LOGOUT` groups) to `logAuditInTx`; the remaining call sites are tracked in a follow-up sweep. |
-| F11 | Webhook re-entry suppression (R13) extends to outbox **starting from Phase 1** (T10/S16 fix — not deferred to Phase 2): the `OUTBOX_BYPASS_AUDIT_ACTIONS` set and bypass logic are wired in Phase 1 (initially containing `WEBHOOK_DELIVERY_FAILED` and `TENANT_WEBHOOK_DELIVERY_FAILED`). Phase 2 adds the four `AUDIT_OUTBOX_*` actions. Outbox-internal audit actions MUST NOT enqueue further outbox rows and MUST NOT trigger webhook delivery. |
+| F11 | Webhook re-entry suppression (R13) extends to outbox **starting from Phase 1** (T10/S16 fix — not deferred to Phase 2): the `OUTBOX_BYPASS_AUDIT_ACTIONS` set and bypass logic are wired in Phase 1 (initially containing `WEBHOOK_DELIVERY_FAILED` and `TENANT_WEBHOOK_DELIVERY_FAILED`). Phase 2 adds 3 worker-emitted actions (`AUDIT_OUTBOX_REAPED`, `AUDIT_OUTBOX_DEAD_LETTER`, `AUDIT_OUTBOX_RETENTION_PURGED`) to the bypass set. The 2 admin-endpoint actions (`AUDIT_OUTBOX_METRICS_VIEW`, `AUDIT_OUTBOX_PURGE_EXECUTED`) flow through the normal outbox and are NOT in the bypass set but ARE in `WEBHOOK_DISPATCH_SUPPRESS`. See §2.1 canonical table. |
 | F12 | The outbox row stores its own `target_tenant_id` (the tenant the eventual `audit_logs` row belongs to) explicitly — no late tenantId resolution in the worker. |
 | F13 | Existing audit tests (`src/__tests__/audit.test.ts`, `src/lib/audit-retry.test.ts`) and the integration test `src/__tests__/integration/audit-and-isolation.test.ts` must continue to pass after API-internal rewrite, OR be updated to match the new contract. |
 
@@ -84,7 +84,7 @@ Survey results (file:line):
 | TM5 | Hash chain race / concurrent insert reordering (Phase 4) | Per-tenant `SELECT … FOR UPDATE` on the chain anchor row, OR a tenant-scoped `chain_seq` integer column that is allocated by the worker (single writer per tenant per chain), not at enqueue time. We will use the **worker-allocated chain_seq** approach because enqueue happens on a hot path; design defers chain computation to the single-writer worker. |
 | TM6 | Stuck `processing` row blocks the queue indefinitely | Reaper job (Phase 2) resets `processing` rows whose `processing_started_at < now() - processing_timeout` back to `pending` and increments `attempt_count`. |
 | TM7 | Replay / double-delivery on worker crash mid-flight | At-least-once delivery is acceptable for audit logs (idempotent insert into `audit_logs` keyed by outbox `id` — see schema below). Worker treats `audit_logs.outboxId` unique constraint as the dedup boundary. |
-| TM8 | Re-entrant outbox loop: outbox failure → audit log → outbox enqueue → ... | New outbox-internal audit actions (`AUDIT_OUTBOX_DELIVERY_FAILED`, `AUDIT_OUTBOX_DEAD_LETTER`, `AUDIT_OUTBOX_REAPED`) added to a hard-coded `OUTBOX_BYPASS_AUDIT_ACTIONS` set; for these, the worker writes directly to `audit_logs` (skipping the outbox) **and** the webhook suppress set is extended. |
+| TM8 | Re-entrant outbox loop: outbox failure → audit log → outbox enqueue → ... | Worker-emitted meta-events (`AUDIT_OUTBOX_REAPED`, `AUDIT_OUTBOX_DEAD_LETTER`, `AUDIT_OUTBOX_RETENTION_PURGED`) are in `OUTBOX_BYPASS_AUDIT_ACTIONS` — the worker writes these directly to `audit_logs` (skipping the outbox). All 5 `AUDIT_OUTBOX_*` actions (including admin-endpoint-emitted `METRICS_VIEW` and `PURGE_EXECUTED`) are in `WEBHOOK_DISPATCH_SUPPRESS`. See §2.1 canonical table for the definitive membership. |
 | TM9 | Worker DB role privilege escalation through Postgres function calls | The role has only DML on the two specific tables; no `EXECUTE` on schema functions, no `USAGE` on extensions. |
 | TM10 | Outbox table grows unboundedly | Phase 2 reaper purges `sent` rows older than `outbox_retention_hours` (default 24 h) **AND** `failed` rows older than `outbox_failed_retention_days` (default 90 d). The 90 d default for failed rows preserves them long enough for an operator to investigate and (if needed) replay; a longer-lived dead-letter sink is a separate admin export. Both retention windows are env-overridable. A new admin endpoint `POST /api/maintenance/audit-outbox-purge-failed` exists for operator-driven explicit purges. |
 
@@ -152,6 +152,7 @@ Two raw-SQL migrations under `prisma/migrations/`, following the convention from
    - `CREATE INDEX` for the three indexes above.
    - `ALTER TABLE "audit_logs" ADD COLUMN "outbox_id" UUID;`
    - `CREATE UNIQUE INDEX "audit_logs_outbox_id_key" ON "audit_logs" ("outbox_id");`
+   - `ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_outbox_id_actor_type_check" CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM');` — DB-level enforcement that only SYSTEM-actor rows (worker meta-events) may have NULL `outboxId` (S28 fix).
    - `ALTER TABLE "audit_outbox" ENABLE ROW LEVEL SECURITY;`
    - `ALTER TABLE "audit_outbox" FORCE ROW LEVEL SECURITY;`
    - RLS policy `audit_outbox_tenant_isolation` mirroring `audit_logs_tenant_isolation` (`USING / WITH CHECK` on `app.bypass_rls = 'on' OR tenant_id = current_setting('app.tenant_id')`).
@@ -161,7 +162,21 @@ Two raw-SQL migrations under `prisma/migrations/`, following the convention from
    - `DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_outbox_worker') THEN CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE; END IF; END $$;`
    - `GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;`
    - `GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;`
-   - `GRANT SELECT, UPDATE, DELETE ON TABLE "audit_outbox" TO passwd_outbox_worker;` — DELETE is needed by the Phase 2 reaper to purge SENT/FAILED rows. **MANDATORY**: add a `BEFORE DELETE` trigger constraining DELETE to `status IN ('SENT','FAILED')` — prevents a compromised worker from deleting PENDING rows (audit evidence destruction). This is the sole DB-level defense for TM1; it is NOT optional (F25/S20 fix). Integration test asserts `DELETE WHERE status='PENDING'` raises an exception.
+   - `GRANT SELECT, UPDATE, DELETE ON TABLE "audit_outbox" TO passwd_outbox_worker;` — DELETE is needed by the Phase 2 reaper to purge SENT/FAILED rows. **MANDATORY**: add a `BEFORE DELETE` trigger constraining DELETE to `status IN ('SENT','FAILED')` — prevents a compromised worker from deleting PENDING rows (audit evidence destruction). This is the sole DB-level defense for TM1; it is NOT optional (F25/S20 fix). Concrete DDL (S29 fix):
+     ```sql
+     CREATE OR REPLACE FUNCTION audit_outbox_before_delete_guard() RETURNS trigger AS $$
+     BEGIN
+       IF OLD.status NOT IN ('SENT', 'FAILED') THEN
+         RAISE EXCEPTION 'Cannot delete audit_outbox row with status=%', OLD.status;
+       END IF;
+       RETURN OLD;
+     END;
+     $$ LANGUAGE plpgsql;
+     CREATE TRIGGER trg_audit_outbox_before_delete
+       BEFORE DELETE ON audit_outbox FOR EACH ROW
+       EXECUTE FUNCTION audit_outbox_before_delete_guard();
+     ```
+     Integration test asserts `DELETE WHERE status='PENDING'` raises an exception.
    - `GRANT INSERT ON TABLE "audit_logs" TO passwd_outbox_worker;`
    - `GRANT SELECT ON TABLE "tenants" TO passwd_outbox_worker;` (for tenantId FK validation only).
    - **No sequence grants**: UUID PKs do not require sequences. Omitting `USAGE, SELECT ON ALL SEQUENCES` is a deliberate least-privilege decision per TM1/TM9.
@@ -169,6 +184,7 @@ Two raw-SQL migrations under `prisma/migrations/`, following the convention from
    - Note: `passwd_outbox_worker` is **not** a tenant member; the worker always operates via `withBypassRls(...)` so RLS bypass is required at runtime via the GUC, identical to `passwd_app`.
    - Update `infra/postgres/initdb/02-create-app-role.sql` with a parallel section creating `passwd_outbox_worker` so dev environments get the role on first boot (password via `\getenv PASSWD_OUTBOX_WORKER_PASSWORD`, fallback to `passwd_outbox_pass` for local dev — identical pattern to `passwd_app`).
    - **S26 fix**: the initdb section for `passwd_outbox_worker` MUST include `REVOKE ALL ON SCHEMA public FROM passwd_outbox_worker;` BEFORE the explicit GRANTs, mirroring the existing `REVOKE CREATE ON SCHEMA public FROM PUBLIC;` (line 24) defense-in-depth pattern.
+   - **S30 fix**: also add `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM passwd_outbox_worker;` and `ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM passwd_outbox_worker;` to prevent future table/sequence additions from automatically granting access to the worker role.
    - **F11 fix — Production password rollout**: add `scripts/set-outbox-worker-password.sh` (mirroring `scripts/purge-history.sh` pattern) that connects as superuser and runs `ALTER ROLE passwd_outbox_worker WITH PASSWORD '...'`. The script reads the password from `PASSWD_OUTBOX_WORKER_PASSWORD` env var. Document in `docs/operations/audit-outbox-worker.md`. This is the concrete step for existing clusters where initdb has already run.
 
 #### 1.3 New helper: `enqueueAudit()` and `enqueueAuditBatch()`
@@ -318,16 +334,16 @@ The worker is a small Node script that:
    **Transaction 2 (Deliver)**: for EACH claimed row, in its own transaction:
    - **Insert**: `INSERT INTO audit_logs (..., outbox_id, created_at) VALUES (..., $outboxId, $row.created_at) ON CONFLICT (outbox_id) DO NOTHING` (raw SQL). **The `ON CONFLICT DO NOTHING` is the dedup mechanism** (F8/S10 fix). **`created_at` is copied from the outbox row, not `now()`** (F15 fix) — preserves business-event time.
    - **On success**: update outbox row to `SENT` + `sentAt = now()`. If `ON CONFLICT DO NOTHING` returned 0 rows affected, still mark `SENT` (already delivered = success).
-   - **On error**: increment `attempt_count`, set `next_retry_at = now() + backoff(attempt_count)`, set `status = PENDING` (ready for next claim cycle). If `attempt_count >= max_attempts`, set `status = FAILED` (dead-letter). **Because the claim (tx 1) already committed**, these fields persist even if tx 2 rolls back.
+   - **On error (Transaction 3 — independent error-recovery tx)**: if tx 2 fails, open a NEW transaction to increment `attempt_count`, set `next_retry_at = now() + backoff(attempt_count)`, set `status = PENDING` (ready for next claim cycle). If `attempt_count >= max_attempts`, set `status = FAILED` (dead-letter). **This MUST be a separate tx 3** because tx 2's rollback would undo any state changes made within it (F26 fix). If tx 3 also fails (DB completely down), the row stays `PROCESSING` and will be caught by the reaper after `processing_timeout`.
    - **Webhook dispatch**: runs AFTER tx 2 commits (not inside). Reuses `dispatchWebhook`/`dispatchTenantWebhook` (which sanitize internally via `WEBHOOK_METADATA_BLOCKLIST`). Lazy import preserved.
-   - **R13 bypass set (moved from Phase 2 to Phase 1, per T10/S16 fix)**: the worker checks `OUTBOX_BYPASS_AUDIT_ACTIONS` before enqueuing any worker-emitted meta-events. In Phase 1 the set contains `WEBHOOK_DELIVERY_FAILED` and `TENANT_WEBHOOK_DELIVERY_FAILED` (matching the existing suppress set). Phase 2 adds the `AUDIT_OUTBOX_*` actions + `AUDIT_OUTBOX_PURGE_EXECUTED`. The bypass logic is wired in Phase 1 so Phase 2 deployment ordering is safe.
+   - **R13 bypass set (moved from Phase 2 to Phase 1, per T10/S16 fix)**: the worker checks `OUTBOX_BYPASS_AUDIT_ACTIONS` before enqueuing any worker-emitted meta-events. In Phase 1 the set contains `WEBHOOK_DELIVERY_FAILED` and `TENANT_WEBHOOK_DELIVERY_FAILED` (matching the existing suppress set). Phase 2 adds 3 worker-emitted actions to the bypass set (`REAPED`, `DEAD_LETTER`, `RETENTION_PURGED`). The 2 admin-endpoint actions (`METRICS_VIEW`, `PURGE_EXECUTED`) are NOT in the bypass set — they flow through the normal outbox path (see §2.1 canonical table). The bypass logic is wired in Phase 1 so Phase 2 deployment ordering is safe.
 3. Backoff: exponential with full jitter, capped at 1 hour. (`min(2^attempt * 1s + random(0..1s), 3600s)`)
    - **R1 — shared utility extraction**: there is no project-wide backoff helper today (verified: only [`src/lib/webhook-dispatcher.ts:56`](../../src/lib/webhook-dispatcher.ts) defines a local `RETRY_DELAYS` constant). Phase 1 introduces a single shared helper [`src/lib/backoff.ts`](../../src/lib/backoff.ts) (`computeBackoffMs(attempt, opts)` and `withFullJitter(ms)`). Both the new outbox worker AND the existing webhook-dispatcher are migrated to use it (the latter as a small refactor in the same PR — webhook-dispatcher's existing `RETRY_DELAYS` becomes a thin wrapper that calls `computeBackoffMs` with capped attempts). This avoids reimplementing backoff and avoids creating a Phase-1 fork that another PR has to clean up.
 4. Sleeps `WORKER_POLL_INTERVAL_MS` (default 1000) when no rows claimed, otherwise immediately re-polls until a poll returns 0.
 5. SIGTERM / SIGINT: drain in-flight, then exit.
 6. **Concurrency**: rows in `PROCESSING` are owned by exactly one worker by virtue of `SKIP LOCKED` + the row state machine. Multiple workers can run concurrently safely.
 
-**R2 — Constants live in one module**: all numeric constants (`OUTBOX_BATCH_SIZE` (default **500**, chosen so that at 1 s poll interval, N1's ≥1000 events/sec is achievable with 2 polls), `OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_PROCESSING_TIMEOUT_MS`, `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_RETENTION_HOURS`, `OUTBOX_FAILED_RETENTION_DAYS`, `READY_PENDING_THRESHOLD`, `READY_OLDEST_THRESHOLD`, `OUTBOX_FLUSH_INTERVAL_MS`) are defined in [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts) (the existing audit constants module) under a new `AUDIT_OUTBOX` namespace. The worker and the metrics endpoint import from there. Each constant has an env-var override resolved once at module load via a small `envInt(name, default)` helper. **No magic numbers in worker or route handler files.**
+**R2 — Constants live in one module**: all numeric constants (`OUTBOX_BATCH_SIZE` (default **500**, chosen so that at 1 s poll interval, N1's ≥1000 events/sec is achievable with 2 polls), `OUTBOX_POLL_INTERVAL_MS`, `OUTBOX_PROCESSING_TIMEOUT_MS`, `OUTBOX_MAX_ATTEMPTS`, `OUTBOX_RETENTION_HOURS`, `OUTBOX_FAILED_RETENTION_DAYS`, `READY_PENDING_THRESHOLD`, `READY_OLDEST_THRESHOLD`, `OUTBOX_FLUSH_INTERVAL_MS`, `OUTBOX_REAPER_INTERVAL_MS` (default 30000)) are defined in [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts) (the existing audit constants module) under a new `AUDIT_OUTBOX` namespace. The worker and the metrics endpoint import from there. Each constant has an env-var override resolved once at module load via a small `envInt(name, default)` helper. **No magic numbers in worker or route handler files.**
 
 **Worker invocation model**: because there is no existing background-process infra, the worker runs as:
 - **Production**: a separate Node process (k8s `Deployment` with replicas=1, or `CronJob` for batched runs). Plan ships the script + a sample k8s manifest in [`infra/k8s/audit-outbox-worker.yaml`](../../infra/k8s/audit-outbox-worker.yaml). Choosing Deployment (long-running poll loop) over CronJob keeps latency low; CronJob is fine for environments that prefer it.
@@ -361,10 +377,10 @@ New entries added to `enum AuditAction` in [`prisma/schema.prisma`](../../prisma
 **TM8 threat model section must match this canonical set.** The TM8 example list (`AUDIT_OUTBOX_DELIVERY_FAILED`, `AUDIT_OUTBOX_DEAD_LETTER`, `AUDIT_OUTBOX_REAPED`) is hereby replaced by this table.
 
 Implementation checklist for each action (R12):
-- [`prisma/schema.prisma`](../../prisma/schema.prisma): `enum AuditAction` add value (4 separate `ALTER TYPE ... ADD VALUE` statements per the existing migration convention)
+- [`prisma/schema.prisma`](../../prisma/schema.prisma): `enum AuditAction` add value (5 separate `ALTER TYPE ... ADD VALUE` statements — one per action — per the existing migration convention)
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `AUDIT_ACTION` object + `AUDIT_ACTION_VALUES` array
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): new `AUDIT_ACTION_GROUP.MAINTENANCE = "group:maintenance"`
-- [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.MAINTENANCE]` array (all 4 actions)
+- [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.MAINTENANCE]` array (all 5 actions)
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `AUDIT_ACTION_GROUPS_PERSONAL` and `AUDIT_ACTION_GROUPS_TEAM` — **MUST NOT include** the MAINTENANCE group (these are tenant-scope system events only)
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `TENANT_WEBHOOK_EVENT_GROUPS` — **MUST exclude** `MAINTENANCE` (R11/R13 — not subscribable; prevents loop)
 - [`messages/en/AuditLog.json`](../../messages/en/AuditLog.json) + [`messages/ja/AuditLog.json`](../../messages/ja/AuditLog.json): action labels + group label `groupMaintenance`
@@ -376,8 +392,8 @@ The outbox **enqueue** path also gains a sibling suppress set: `OUTBOX_BYPASS_AU
 
 **R13 — Suppression-set audit (mandatory checklist)**: every audit-action filter set in the codebase must be reviewed when adding `AUDIT_OUTBOX_*` actions. The known sets to update or verify (search for the new actions and ensure they appear or are explicitly excluded as required):
 
-- [`src/lib/audit.ts`](../../src/lib/audit.ts): `WEBHOOK_DISPATCH_SUPPRESS` — **MUST include** all four `AUDIT_OUTBOX_*` actions.
-- [`src/lib/audit.ts`](../../src/lib/audit.ts) **new**: `OUTBOX_BYPASS_AUDIT_ACTIONS` — **MUST include** all four.
+- [`src/lib/audit.ts`](../../src/lib/audit.ts): `WEBHOOK_DISPATCH_SUPPRESS` — **MUST include** all 5 `AUDIT_OUTBOX_*` actions (REAPED, DEAD_LETTER, RETENTION_PURGED, METRICS_VIEW, PURGE_EXECUTED).
+- [`src/lib/audit.ts`](../../src/lib/audit.ts) **new**: `OUTBOX_BYPASS_AUDIT_ACTIONS` — **MUST include** the 3 worker-emitted actions only (REAPED, DEAD_LETTER, RETENTION_PURGED). MUST NOT include METRICS_VIEW or PURGE_EXECUTED (these are admin-endpoint actions that flow through the normal outbox).
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `TENANT_WEBHOOK_EVENT_GROUPS` — **MUST exclude** the new `MAINTENANCE` group entirely (the group containing the four actions).
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `TEAM_WEBHOOK_EVENT_GROUPS` — N/A (TEAM scope only; MAINTENANCE is TENANT scope), but verify nothing accidentally adds MAINTENANCE here.
 - [`src/lib/constants/audit.ts`](../../src/lib/constants/audit.ts): `TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS` and `TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS` — derived from group arrays; verify the flatten step does not include MAINTENANCE.
@@ -613,7 +629,7 @@ Canonicalization function: stable JCS (RFC 8785) over `payload_json` plus the ro
 
 **S13/S19 — chain ordering limitation (documented explicitly)**: `chain_seq` represents **ingestion order** (order of worker processing), NOT strict temporal order of the underlying business events. A compromised worker can reorder events within a claim batch and produce a valid, self-consistent chain. The chain only detects **post-insertion tampering** (modifying a row after the hash was computed), NOT pre-insertion reordering by the chain authority (the worker). The verify endpoint additionally checks `created_at` monotonic non-decreasing ordering alongside `chain_seq` — a violation indicates either worker compromise or a bug.
 
-A new admin endpoint `GET /api/maintenance/audit-chain-verify?tenantId=...&from=...&to=...` re-walks the chain to detect tampering.
+A new admin endpoint `GET /api/maintenance/audit-chain-verify?tenantId=...&from=...&to=...` re-walks the chain to detect tampering. **S32 fix**: follows the standard admin envelope — `verifyAdminToken`, `createRateLimiter(windowMs: 60_000, max: 3)`, operator membership check, Zod validation on query params (`tenantId: z.string().uuid()`, `from/to: z.coerce.date().optional()`), result pagination capped at 10,000 rows per request to prevent DoS.
 
 #### 4.3 External notarization (out of scope for plan, noted)
 
@@ -667,7 +683,7 @@ Multiple replicas are safe by design (TM7 + `FOR UPDATE SKIP LOCKED`); productio
 24. (Out of scope for the loaded review, but listed for completeness): tenant CRUD endpoints for `audit_delivery_targets`.
 
 ### Phase 4
-25. Add `model AuditChainAnchor`, columns on `AuditLog`, flag on `Tenant`. Migration `<ts>_add_audit_chain`.
+25. Add `model AuditChainAnchor`, columns on `AuditLog`, flag on `Tenant`. Migration `<ts>_add_audit_chain`. **S31 fix**: include `ENABLE / FORCE ROW LEVEL SECURITY` + `audit_chain_anchors_tenant_isolation` policy (same USING/WITH CHECK as `audit_outbox_tenant_isolation`).
 26. Implement `src/lib/audit-chain.ts` with JCS canonicalization (vendor RFC 8785 minimal impl or use `canonicalize` package; library choice deferred to implementation).
 27. Worker integration: when `tenant.auditChainEnabled`, the worker uses the chain insertion path (single transaction with `FOR UPDATE` on the anchor row).
 28. Implement `GET /api/maintenance/audit-chain-verify` admin endpoint that walks the chain and reports the first tampered row (or "OK").
@@ -719,12 +735,13 @@ The most important property — **business write succeeds ⇔ audit row exists i
 | `audit-i18n-coverage.test.ts` | Mocked | Every entry in `AUDIT_ACTION_VALUES` has a label in both `en` and `ja` JSON files. **(T29 fix)**: also asserts every `AUDIT_ACTION_GROUP` value (including `groupMaintenance`) has a label in both locale files. |
 | `audit-outbox-reaper.integration.test.ts` | Real DB | Row stuck in `processing` for > timeout is reset to `pending` (reaper uses `FOR UPDATE SKIP LOCKED` per T19 fix); `AUDIT_OUTBOX_REAPED` row written directly to `audit_logs`. |
 | `audit-outbox-reaper-noninterference.integration.test.ts` | Real DB | **(T19 fix)**: starts worker claim, starts reaper in parallel, asserts reaper does not touch in-flight row. |
-| `audit-outbox-retention-purge.integration.test.ts` | Real DB | `sent` rows older than `OUTBOX_RETENTION_HOURS` deleted; `failed` rows older than `OUTBOX_FAILED_RETENTION_DAYS` deleted; `failed` rows newer than threshold NOT deleted. |
+| `audit-outbox-retention-purge.integration.test.ts` | Real DB | `sent` rows older than `OUTBOX_RETENTION_HOURS` deleted; `failed` rows older than `OUTBOX_FAILED_RETENTION_DAYS` deleted; `failed` rows newer than threshold NOT deleted; `PROCESSING` and `PENDING` rows NOT deleted regardless of age (T33 fix). |
 | `audit-outbox-metrics-endpoint.test.ts` | Mocked | Metrics endpoint requires `verifyAdminToken`, operator membership, returns expected JSON shape. Asserts `mockLogAudit` called with `action: AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW` imported from `@/lib/constants/audit` (T12/RT3 fix). |
 | `audit-outbox-metrics-endpoint.integration.test.ts` | Real DB | **(T12 fix)**: does NOT mock `logAudit`; asserts actual `audit_logs` row written with correct action. |
 | `audit-outbox-readiness.test.ts` | Mocked | Readiness probe returns 503 when `pending > threshold` AND when `oldestPendingAgeSeconds > threshold` (T26 fix — both conditions tested). |
 | `audit-outbox-userId-system.integration.test.ts` | Real DB | Worker-written SYSTEM event has `userId = NULL` and `actorType = SYSTEM`; CHECK constraint rejects `userId = NULL` with non-SYSTEM actorType. (S9 fix) |
-| `audit-bypass-coverage.test.ts` | Mocked | **(T21 fix)**: asserts every action whose name starts with `AUDIT_OUTBOX_` is present in `WEBHOOK_DISPATCH_SUPPRESS`; asserts `OUTBOX_BYPASS_AUDIT_ACTIONS` contains exactly the 3 worker-emitted actions (REAPED, DEAD_LETTER, RETENTION_PURGED) and NOT the admin-endpoint actions (METRICS_VIEW, PURGE_EXECUTED). Enforces the R13 suppression checklist. |
+| `audit-outbox-before-delete-trigger.integration.test.ts` | Real DB | **(T31 fix)**: connects as `passwd_outbox_worker`; asserts `DELETE WHERE status='PENDING'` raises exception; asserts `DELETE WHERE status='PROCESSING'` raises exception; asserts `DELETE WHERE status='SENT'` succeeds; asserts `DELETE WHERE status='FAILED'` succeeds. Verifies the mandatory `BEFORE DELETE` trigger (TM1 defense). |
+| `audit-bypass-coverage.test.ts` | Mocked | **(T21 fix)**: asserts every action whose name starts with `AUDIT_OUTBOX_` is present in `WEBHOOK_DISPATCH_SUPPRESS`; asserts `OUTBOX_BYPASS_AUDIT_ACTIONS` contains exactly the 3 worker-emitted actions (REAPED, DEAD_LETTER, RETENTION_PURGED) AND the 2 Phase 1 initial members (`WEBHOOK_DELIVERY_FAILED`, `TENANT_WEBHOOK_DELIVERY_FAILED`) (T32 fix); asserts it does NOT contain the admin-endpoint actions (METRICS_VIEW, PURGE_EXECUTED). Enforces the R13 suppression checklist. |
 | `audit-outbox-null-invariant.integration.test.ts` | Real DB | **(T23 fix)**: only rows with `action IN OUTBOX_BYPASS_AUDIT_ACTIONS` may have `outboxId = NULL` in `audit_logs`. Insert with NULL outboxId + non-bypass action → constraint violation or failing assertion. |
 | `audit-outbox-purge-failed-endpoint.test.ts` | Mocked | **(T25 fix)**: purge-failed endpoint requires `verifyAdminToken`, operator membership, Zod validation on body; emits `AUDIT_OUTBOX_PURGE_EXECUTED` via `logAudit`. |
 | `audit-outbox-purge-failed-endpoint.integration.test.ts` | Real DB | **(T25 fix)**: purge-failed endpoint deletes only FAILED rows matching criteria; does not delete PENDING/PROCESSING/SENT rows. |

@@ -1,7 +1,7 @@
 # Plan Review: durable-audit-outbox
 
 Date: 2026-04-12T12:00:00+09:00
-Review round: 2 (final)
+Review round: 3 (final)
 
 ## Changes from Previous Round
 
@@ -336,4 +336,47 @@ Round 1 findings: Critical 7 / Major 29 / Minor 15 → ALL resolved in plan upda
 
 All 24 findings resolved. No new Critical findings. Convergence achieved — plan ready for commit.
 
-Total review effort: 2 rounds × 3 experts + 1 Opus escalation = 7 expert passes.
+Total review effort (rounds 1–2): 2 rounds × 3 experts + 1 Opus escalation = 7 expert passes.
+
+---
+
+## Round 3 Results
+
+Date: 2026-04-12
+Round 2 findings: Critical 0 / Major 13 / Minor 11 → ALL resolved.
+
+### Round 3 Findings (new)
+
+**Functionality (F26–F29)**: 2 Major, 2 Minor
+- F26 (Major): tx2 error recovery rollback → resolved (independent tx3 for error state update)
+- F27 (Major): bypass set stale text in 3 places → resolved (aligned §1.6, F11, TM8 with §2.1 canonical table)
+- F28 (Minor): REAPER_INTERVAL_MS not in constants list → resolved (added)
+- F29 (Minor): "4 actions" → "5 actions" count → resolved (all references updated)
+
+**Security (S27–S32)**: 0 Major, 6 Minor
+- S27 (Minor): bypass set text stale ≈ F27 → resolved (same fix)
+- S28 (Minor): outboxId NULL invariant needs CHECK constraint → resolved (added to migration)
+- S29 (Minor): BEFORE DELETE trigger DDL → resolved (concrete DDL added to plan)
+- S30 (Minor): ALTER DEFAULT PRIVILEGES REVOKE → resolved (added to initdb)
+- S31 (Minor): Phase 4 audit_chain_anchors RLS → resolved (added to step 25)
+- S32 (Minor): audit-chain-verify auth envelope → resolved (full admin envelope specified)
+
+**Testing (T30–T33)**: 2 Major, 2 Minor
+- T30 (Major): stale bypass text ≈ F27/S27 → resolved (same fix)
+- T31 (Major): BEFORE DELETE trigger test missing → resolved (test added to Phase 2 table)
+- T32 (Minor): bypass coverage test missing Phase 1 members → resolved (added to assertion)
+- T33 (Minor): retention purge test PROCESSING safety → resolved (assertion added)
+
+### Round 3 Summary
+
+All 14 findings resolved. No Critical findings in rounds 2 or 3 — convergence achieved.
+
+| Round | Critical | Major | Minor | Total |
+|-------|----------|-------|-------|-------|
+| 1     | 7        | 29    | 15    | 51    |
+| 2     | 0        | 13    | 11    | 24    |
+| 3     | 0        | 4     | 10    | 14    |
+
+Cumulative: 89 findings raised, all resolved. Plan ready for implementation.
+
+Total review effort: 3 rounds × 3 experts + 1 Opus security escalation = 10 expert passes.
