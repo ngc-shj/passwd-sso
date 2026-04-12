@@ -32,6 +32,7 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
 
 // Re-export from constants for backward compatibility
 export { OUTBOX_BYPASS_AUDIT_ACTIONS } from "@/lib/constants/audit";
+import { UUID_RE } from "@/lib/constants/app";
 
 export interface AuditLogParams {
   scope: AuditScope;
@@ -146,7 +147,45 @@ async function flushFifo(): Promise<void> {
       try {
         const safeMetadata = truncateMetadata(params.metadata);
         const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+        const isUuidUserId = UUID_RE.test(params.userId);
 
+        // Non-UUID userId (e.g., "anonymous" for unauthenticated share-link
+        // access) cannot be inserted by the worker (::uuid cast fails).
+        // These go directly to audit_logs bypassing the outbox.
+        // tenantId must be explicitly provided — user.findUnique("anonymous")
+        // would return null and dead-letter the entry (F16 fix).
+        if (!isUuidUserId) {
+          const tenantId = params.tenantId ?? null;
+          if (!tenantId) {
+            deadLetterLogger.warn(
+              { auditEntry: params, reason: "non_uuid_userId_no_tenantId" },
+              "audit.dead_letter",
+            );
+            continue;
+          }
+          const { withBypassRls: bypassRls, BYPASS_PURPOSE: BP } = await import("@/lib/tenant-rls");
+          await bypassRls(prisma, async () => {
+            await prisma.auditLog.create({
+              data: {
+                scope: params.scope,
+                action: params.action,
+                userId: params.userId,
+                actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
+                serviceAccountId: params.serviceAccountId ?? null,
+                tenantId,
+                teamId: params.teamId ?? null,
+                targetType: params.targetType ?? null,
+                targetId: params.targetId ?? null,
+                metadata: (sanitized as Prisma.InputJsonValue) ?? undefined,
+                ip: params.ip ?? null,
+                userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+              },
+            });
+          }, BP.AUDIT_WRITE);
+          continue;
+        }
+
+        // Standard UUID userId path — resolve tenantId + enqueue to outbox
         let tenantId: string | null = null;
         try {
           tenantId = await resolveTenantId(params);
@@ -175,33 +214,6 @@ async function flushFifo(): Promise<void> {
           ip: params.ip ?? null,
           userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
         };
-
-        // Non-UUID userId (e.g., "anonymous" for unauthenticated share-link access)
-        // cannot be inserted by the worker (::uuid cast fails). Write directly to
-        // audit_logs via legacy path, bypassing the outbox.
-        const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!UUID_RE.test(params.userId)) {
-          const { withBypassRls: bypassRls, BYPASS_PURPOSE: BP } = await import("@/lib/tenant-rls");
-          await bypassRls(prisma, async () => {
-            await prisma.auditLog.create({
-              data: {
-                scope: payload.scope,
-                action: payload.action,
-                userId: params.userId,
-                actorType: payload.actorType,
-                serviceAccountId: payload.serviceAccountId,
-                tenantId,
-                teamId: payload.teamId,
-                targetType: payload.targetType,
-                targetId: payload.targetId,
-                metadata: payload.metadata as never ?? undefined,
-                ip: payload.ip,
-                userAgent: payload.userAgent,
-              },
-            });
-          }, BP.AUDIT_WRITE);
-          continue;
-        }
 
         const { enqueueAudit } = await import("@/lib/audit-outbox");
         await enqueueAudit(tenantId, payload);
@@ -436,4 +448,9 @@ export function _getFifoSize(): number {
 /** @internal Exposed for unit tests only. Manually triggers a FIFO flush. */
 export async function _flushFifoForTest(): Promise<void> {
   await flushFifo();
+}
+
+/** @internal Exposed for unit tests only. Clears the FIFO queue. */
+export function _clearFifoForTest(): void {
+  fifoQueue.length = 0;
 }

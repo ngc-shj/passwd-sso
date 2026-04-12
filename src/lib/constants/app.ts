@@ -15,3 +15,5 @@ export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "passwd-sso";
  * - Sentinel for anonymous / non-existent user lookups
  */
 export const NIL_UUID = "00000000-0000-0000-0000-000000000000";
+
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

@@ -101,14 +101,17 @@ describe("audit-retry", () => {
       expect(bufferSize()).toBeLessThan(sizeBefore);
     });
 
-    it("re-enqueues on transient failure", async () => {
+    it("re-enqueues on transient failure with incremented retryCount", async () => {
       mockEnqueueAudit.mockRejectedValueOnce(new Error("connection lost"));
-      enqueue(makeEntry());
+      const entry = makeEntry({ retryCount: 0 });
+      enqueue(entry);
 
       await drainBuffer();
 
-      // Entry should be re-enqueued with incremented retryCount
+      // Entry should be re-enqueued
       expect(bufferSize()).toBeGreaterThan(0);
+      // retryCount must have been incremented (prevents infinite retry without progress)
+      expect(entry.retryCount).toBe(1);
     });
 
     it("sends to dead-letter after max retries", async () => {

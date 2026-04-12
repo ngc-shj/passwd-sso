@@ -60,11 +60,12 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-import { logAudit, _getFifoSize, _flushFifoForTest } from "@/lib/audit";
+import { logAudit, _getFifoSize, _flushFifoForTest, _clearFifoForTest } from "@/lib/audit";
 
 describe("FIFO flusher", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    _clearFifoForTest();
     mockEnqueueAudit.mockResolvedValue(undefined);
   });
 

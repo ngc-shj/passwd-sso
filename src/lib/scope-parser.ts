@@ -14,6 +14,7 @@
  */
 
 import { z } from "zod";
+import { UUID_RE } from "@/lib/constants/app";
 
 export interface ParsedScope {
   resource: string;
@@ -22,7 +23,6 @@ export interface ParsedScope {
   raw: string;
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const qualifierSchema = z.string().refine(
   (q) => {
