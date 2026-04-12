@@ -11,8 +11,6 @@
  * Retry path performs DB write only — no webhook dispatch (prevents duplicates).
  */
 
-import { prisma } from "@/lib/prisma";
-import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 import { deadLetterLogger } from "@/lib/audit-logger";
 import type { AuditScope, AuditAction, ActorType } from "@prisma/client";
