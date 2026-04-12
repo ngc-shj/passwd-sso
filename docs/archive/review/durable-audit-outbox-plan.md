@@ -472,9 +472,16 @@ The pre-outbox emergency buffer in `audit.ts` (introduced in Phase 1.4) is also 
 
 ### Phase 3 — Multiple delivery targets
 
-#### 3.1 Refactor: extract SSRF helpers
+#### 3.1 Refactor: extract SSRF helpers + sanitization
 
 [`src/lib/webhook-dispatcher.ts:107-183`](../../src/lib/webhook-dispatcher.ts) — move `BLOCKED_CIDRS`, `isPrivateIp`, `resolveAndValidateIps`, `createPinnedDispatcher` into a new shared module [`src/lib/external-http.ts`](../../src/lib/external-http.ts) and re-export them from `webhook-dispatcher.ts` to keep its current internal API unchanged.
+
+**P3-F3/S6 fix**: Also extract into `external-http.ts`:
+- `EXTERNAL_DELIVERY_METADATA_BLOCKLIST` (renamed from `WEBHOOK_METADATA_BLOCKLIST`, extended with PII keys). `webhook-dispatcher.ts` re-exports the old name as an alias for backward compatibility.
+- `sanitizeForExternalDelivery(value)` (extracted from `sanitizeWebhookData`). All Phase 3 deliverers MUST call this before outbound HTTP.
+- `validateAndFetch(url, options)` — wrapper that enforces `redirect: "error"`, `validateExternalUrl()`, and `createPinnedDispatcher()`. Phase 3 deliverers MUST NOT call raw `fetch()` directly.
+- `BLOCKED_CIDR_REPRESENTATIVES` — array mapping each CIDR to test representative IPv4/IPv6 addresses. Exported for test consumption.
+- `sanitizeErrorForStorage(error)` — strips URL query parameters, credential patterns (`token=`, `key=`, `Bearer `) from error messages before storage in `lastError` columns.
 
 This eliminates the R1 risk (reimplementation of SSRF defense) and is a prerequisite for Phase 3.
 
@@ -492,11 +499,10 @@ model AuditDeliveryTarget {
   id        String                  @id @default(uuid(4)) @db.Uuid
   tenantId  String                  @map("tenant_id") @db.Uuid
   kind      AuditDeliveryTargetKind
-  // Encrypted target config (URL, auth token, bucket name).
-  // Reuse the same envelope encryption as TeamWebhook.secretEncrypted.
-  configEncrypted Bytes  @map("config_encrypted")
-  configIv        Bytes  @map("config_iv")
-  configAuthTag   Bytes  @map("config_auth_tag")
+  // P3-F7 fix: Use String (not Bytes) to match existing TeamWebhook encryption pattern.
+  configEncrypted String  @map("config_encrypted")
+  configIv        String  @map("config_iv")
+  configAuthTag   String  @map("config_auth_tag")
   masterKeyVersion Int   @map("master_key_version")
   isActive  Boolean @default(true) @map("is_active")
   createdAt DateTime @default(now()) @map("created_at")
@@ -505,9 +511,6 @@ model AuditDeliveryTarget {
   lastDeliveredAt DateTime? @map("last_delivered_at")
 
   // Cascade: tenant config rows belong to the tenant lifecycle, like TeamWebhook.
-  // The outbox row's tenant FK is Restrict (above) which is what blocks tenant
-  // deletion until audit history is archived; deleting the target config rows
-  // when a tenant is force-purged is correct.
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   deliveries AuditDelivery[]
 
@@ -515,8 +518,10 @@ model AuditDeliveryTarget {
   @@map("audit_delivery_targets")
 }
 
+// P3-F1 fix: Add PROCESSING state for stuck-detection (mirrors AuditOutboxStatus pattern).
 enum AuditDeliveryStatus {
   PENDING
+  PROCESSING
   SENT
   FAILED
 }
@@ -525,16 +530,29 @@ model AuditDelivery {
   id              String              @id @default(uuid(4)) @db.Uuid
   outboxId        String              @map("outbox_id") @db.Uuid
   targetId        String              @map("target_id") @db.Uuid
+  // P3-S3 fix: Denormalized tenantId for RLS policy (populated from outbox row at insert time).
+  tenantId        String              @map("tenant_id") @db.Uuid
   status          AuditDeliveryStatus @default(PENDING)
   attemptCount    Int                 @default(0) @map("attempt_count")
+  // P3-F4 fix: Add maxAttempts for dead-letter boundary (matches outbox pattern).
+  maxAttempts     Int                 @default(8) @map("max_attempts")
   nextRetryAt     DateTime            @default(now()) @map("next_retry_at")
+  // P3-F1 fix: Track processing start for stuck-row reaper.
+  processingStartedAt DateTime?       @map("processing_started_at")
   lastError       String?             @map("last_error") @db.VarChar(1024)
   createdAt       DateTime            @default(now()) @map("created_at")
 
-  outbox AuditOutbox        @relation(fields: [outboxId], references: [id], onDelete: Cascade)
-  target AuditDeliveryTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  // P3-F2 fix: Restrict (not Cascade) — delivery rows must not be destroyed
+  // by outbox retention purge while deliveries are still pending/processing.
+  outbox AuditOutbox        @relation(fields: [outboxId], references: [id], onDelete: Restrict)
+  // P3-F5 fix: Restrict — target deletion blocked while delivery rows exist.
+  // Targets should be soft-deleted (isActive = false) instead of hard-deleted.
+  target AuditDeliveryTarget @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@unique([outboxId, targetId])  // dedup
+  // P3-F8 fix: Include tenantId in index for tenant-scoped worker queries.
+  @@index([tenantId, status, nextRetryAt])
   @@index([status, nextRetryAt])
   @@map("audit_deliveries")
 }
@@ -542,14 +560,21 @@ model AuditDelivery {
 
 The DB target ("write to audit_logs") is special-cased and does NOT need an `audit_delivery_targets` row — it's the always-on first target. `audit_deliveries` rows are only created for kinds `WEBHOOK`, `SIEM_HEC`, `S3_OBJECT`.
 
-**S3 fix — RLS on Phase 3 tables**: both `audit_delivery_targets` and `audit_deliveries` MUST have `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` + `tenant_isolation` policies in the Phase 3 migration. `audit_delivery_targets` has a `tenantId` column so the policy mirrors `audit_outbox_tenant_isolation`. `audit_deliveries` needs a **denormalized `tenantId String @map("tenant_id") @db.Uuid`** column (populated from the outbox row at insert time) for a cheap RLS policy without JOIN.
+**S3 fix — RLS on Phase 3 tables**: both `audit_delivery_targets` and `audit_deliveries` MUST have `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY` + `tenant_isolation` policies in the Phase 3 migration. `audit_delivery_targets` has a `tenantId` column so the policy mirrors `audit_outbox_tenant_isolation`. `audit_deliveries` has a denormalized `tenantId` column (see schema above) for the same cheap RLS policy.
 
 **S4 fix — Phase 3 worker grants**: the Phase 3 migration must add:
 ```sql
 GRANT SELECT ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
 ```
-DELETE is needed for delivery-row purge. Integration test must verify these grants.
+DELETE is needed for delivery-row purge. **P3-T5 fix**: Integration test `audit-outbox-worker-role.integration.test.ts` must be **created** (not updated — the file does not exist yet) to assert all Phase 1+2+3 grants in a single test.
+
+**P3-S4 fix — RLS bypass scope**: the delivery fan-out and second delivery loop in the worker MUST run within the same `setBypassRlsGucs()` scope as the existing outbox processing path. Document this in step 22.
+
+**P3-F6 fix — Prisma back-relations**: step 20 must also add:
+- `deliveries AuditDelivery[]` on `AuditOutbox` model
+- `auditDeliveryTargets AuditDeliveryTarget[]` on `Tenant` model
+- `auditDeliveries AuditDelivery[]` on `Tenant` model
 
 #### 3.3 Worker fan-out logic
 
@@ -565,11 +590,38 @@ const DELIVERERS: Record<Exclude<AuditDeliveryTargetKind, "DB">, DeliverFn> = {
 };
 ```
 
-All three delivery functions pass URLs through `validateExternalUrl()` from `external-http.ts` (TM3), then use raw `fetch()` with the pinned dispatcher from `createPinnedDispatcher()`. **Do NOT use vendor SDKs** (`@aws-sdk/client-s3`, Splunk SDK, etc.) for user-provided endpoints — they perform their own DNS resolution, bypassing the SSRF pinning defense (S5 fix). For S3: build and sign PUT requests manually using SigV4 with the validated URL. For SIEM HEC: raw POST with the HEC auth token. Document in `external-http.ts`: "Any HTTP client that performs its own DNS resolution bypasses this module's SSRF defense."
+All three delivery functions use `validateAndFetch()` from `external-http.ts` (TM3), which enforces `redirect: "error"` (P3-S6 fix), SSRF validation, and DNS pinning internally. **Do NOT use vendor SDKs** (`@aws-sdk/client-s3`, Splunk SDK, etc.) for user-provided endpoints — they perform their own DNS resolution, bypassing the SSRF pinning defense (S5 fix). **Do NOT call raw `fetch()` directly** — always go through `validateAndFetch()`.
+
+**P3-S2 fix — S3 SigV4 requirements**:
+- Build and sign PUT requests manually using SigV4 with the validated URL
+- MUST use `x-amz-content-sha256` with actual payload SHA-256 hash (prohibit `UNSIGNED-PAYLOAD`)
+- MUST use `Authorization` header signing (NOT presigned URL — presigned URLs leak credentials in `lastError`)
+- Validate implementation against AWS official SigV4 test vectors
+- Recommend AWS STS AssumeRole + ephemeral tokens over long-lived Access Key + Secret Key (P3-S7 note)
+
+For SIEM HEC: raw POST with the HEC auth token via `Authorization: Splunk <token>` header (NOT query parameter).
+
+**P3-S5 fix — `lastError` sanitization**: all deliverers MUST pass error messages through `sanitizeErrorForStorage()` from `external-http.ts` before writing to `lastError` columns. This strips URL query parameters and credential patterns.
+
+**P3-S1 fix — AAD for `configEncrypted`**: `encryptServerData` / `decryptServerData` calls for `AuditDeliveryTarget.configEncrypted` MUST pass AAD = `Buffer.concat([Buffer.from(targetId), Buffer.from(tenantId)])`. This binds the ciphertext to the specific target + tenant, preventing cross-tenant config transplant.
+
+Document in `external-http.ts`: "Any HTTP client that performs its own DNS resolution bypasses this module's SSRF defense."
 
 #### 3.4 Per-target failure isolation
 
 A target's `audit_deliveries` rows fail independently. The outbox row (`audit_outbox.status`) remains `SENT` once the DB target succeeds — fan-out failures do NOT roll back the audit_logs row. This is the "DB writes still succeed when SIEM is down" property.
+
+**P3-F1 fix — Stuck delivery reaper**: the worker's reaper loop (Phase 2 `reapStuckRows`) is extended to also reset `PROCESSING` delivery rows whose `processingStartedAt < now() - PROCESSING_TIMEOUT_MS` back to `PENDING` (incrementing `attemptCount`). Delivery rows that exceed `maxAttempts` transition to `FAILED`. The reaper emits `AUDIT_DELIVERY_DEAD_LETTER` meta-event via `writeDirectAuditLog()` (bypasses outbox).
+
+**P3-F2 fix — Retention purge and delivery lifecycle**: `purgeRetention()` must NOT delete an outbox row if it has any `audit_deliveries` rows in `PENDING` or `PROCESSING` status. Extended purge query: `WHERE status = 'SENT' AND sent_at < retention_cutoff AND NOT EXISTS (SELECT 1 FROM audit_deliveries WHERE outbox_id = audit_outbox.id AND status IN ('PENDING', 'PROCESSING'))`. Delivery rows in terminal states (`SENT`, `FAILED`) with their own retention are purged by a separate `purgeDeliveryRetention()` step (same retention windows as outbox: 24h for SENT, 90d for FAILED).
+
+**P3-F5 fix — Target soft-delete only**: `AuditDeliveryTarget` deletion is soft-delete only (`isActive = false`). Hard delete is blocked by `onDelete: Restrict` on `AuditDelivery.targetId`. Phase 3.5 CRUD endpoints must enforce this.
+
+**P3-F9-A fix — Delivery failure meta-events**: Phase 3 adds two new audit actions:
+- `AUDIT_DELIVERY_FAILED` — emitted when a delivery row transitions to `FAILED` (dead-letter)
+- `AUDIT_DELIVERY_DEAD_LETTER` — emitted by the reaper when a stuck delivery row exceeds `maxAttempts`
+
+Both actions are added to `OUTBOX_BYPASS_AUDIT_ACTIONS` (written directly to `audit_logs` by the worker, bypassing outbox) AND `WEBHOOK_DISPATCH_SUPPRESS` (no external webhook dispatch). This prevents R13 re-entrant loops. Constants, i18n labels, and `AUDIT_ACTION_GROUP.MAINTENANCE` membership must be updated.
 
 #### 3.5 Tenant config CRUD endpoints (out of scope for Phase 3 review iteration)
 
@@ -675,12 +727,12 @@ Multiple replicas are safe by design (TM7 + `FOR UPDATE SKIP LOCKED`); productio
 18. Delete `src/lib/audit-retry.ts` and `src/lib/audit-retry.test.ts`. Remove all imports. Remove pre-outbox emergency buffer from `src/lib/audit.ts`.
 
 ### Phase 3
-19. Extract SSRF helpers from `src/lib/webhook-dispatcher.ts` to new `src/lib/external-http.ts`. Re-export from `webhook-dispatcher.ts` to preserve internal use sites. Add unit tests for the extracted module.
-20. Add `enum AuditDeliveryTargetKind`, `enum AuditDeliveryStatus`, models `AuditDeliveryTarget`, `AuditDelivery` to schema. Migration `<ts>_add_audit_delivery_targets`.
-21. Implement `deliverWebhook`, `deliverSiemHec`, `deliverS3Object` in `src/workers/audit-delivery.ts`. All three call `validateExternalUrl()` from `external-http.ts`.
-22. Extend the worker loop with a second pass: after marking an outbox row `SENT`, query active targets for the tenant and create `audit_deliveries` rows. A second loop processes those rows.
-23. Tests: deliverer unit tests, SSRF rejection, per-target failure isolation, fan-out integration test.
-24. (Out of scope for the loaded review, but listed for completeness): tenant CRUD endpoints for `audit_delivery_targets`.
+19. Extract SSRF helpers + sanitization from `src/lib/webhook-dispatcher.ts` to new `src/lib/external-http.ts`. Include: `BLOCKED_CIDRS`, `BLOCKED_CIDR_REPRESENTATIVES` (P3-T2), `isPrivateIp`, `resolveAndValidateIps`, `createPinnedDispatcher`, `validateAndFetch` (wrapper enforcing `redirect: "error"`, P3-S6), `EXTERNAL_DELIVERY_METADATA_BLOCKLIST` (renamed from `WEBHOOK_METADATA_BLOCKLIST` + PII keys, P3-F3), `sanitizeForExternalDelivery`, `sanitizeErrorForStorage` (P3-S5). Re-export from `webhook-dispatcher.ts` to preserve internal use sites. Add unit tests — `BLOCKED_CIDRS` MUST be exported (P3-T1 done-criteria).
+20. Add `enum AuditDeliveryTargetKind`, `enum AuditDeliveryStatus` (with `PROCESSING`, P3-F1), models `AuditDeliveryTarget` (String encryption fields, P3-F7), `AuditDelivery` (with denormalized `tenantId` P3-S3, `maxAttempts` P3-F4, `processingStartedAt` P3-F1, `onDelete: Restrict` FKs P3-F2/F5) to schema. Add back-relations: `deliveries AuditDelivery[]` on `AuditOutbox`, `auditDeliveryTargets AuditDeliveryTarget[]` + `auditDeliveries AuditDelivery[]` on `Tenant` (P3-F6). Migration `<ts>_add_audit_delivery_targets` with RLS + FORCE RLS + tenant_isolation policies on both tables. Worker grants (P3-S4). Add 2 new audit actions: `AUDIT_DELIVERY_FAILED`, `AUDIT_DELIVERY_DEAD_LETTER` to `enum AuditAction`, constants, i18n, bypass sets, suppress sets (P3-F9-A). **Create** (not update) `audit-outbox-worker-role.integration.test.ts` asserting all Phase 1+2+3 grants (P3-T5).
+21. Implement `deliverWebhook`, `deliverSiemHec`, `deliverS3Object` in `src/workers/audit-delivery.ts`. All three call `validateAndFetch()` (NOT raw `fetch`). S3 SigV4: `Authorization` header with actual payload hash (P3-S2). SIEM HEC: `Authorization: Splunk <token>` header. `configEncrypted` decryption MUST pass AAD (P3-S1). `lastError` writes MUST use `sanitizeErrorForStorage()` (P3-S5). Payload sanitized with `sanitizeForExternalDelivery()` before outbound HTTP.
+22. Extend the worker loop with a second pass: after marking an outbox row `SENT`, query active targets for the tenant and create `audit_deliveries` rows. A second loop processes those rows with `FOR UPDATE SKIP LOCKED`. Delivery fan-out and second loop MUST run within `setBypassRlsGucs()` scope (P3-S4). Extend reaper to reset stuck `PROCESSING` delivery rows and dead-letter exceeded `maxAttempts` rows (P3-F1). Extend `purgeRetention()` to skip outbox rows with pending deliveries (P3-F2). Add `purgeDeliveryRetention()` for terminal delivery rows.
+23. Tests: deliverer unit tests per deliverer (P3-T6: `audit-deliverer-webhook.test.ts`, `audit-deliverer-siem-hec.test.ts`, `audit-deliverer-s3-object.test.ts`), SSRF rejection with guard assertion (P3-T1), per-target failure isolation, fan-out integration test. Rate limiter API defined: per-target `window_ms` and `max` using `createRateLimiter` pattern, excess deliveries remain `PENDING` with future `nextRetryAt` (P3-T4). Test key count assertions use imported `EXTERNAL_DELIVERY_METADATA_BLOCKLIST.size` (P3-T3).
+24. (Out of scope for the loaded review, but listed for completeness): tenant CRUD endpoints for `audit_delivery_targets`. Note: targets support soft-delete only (`isActive = false`, P3-F5).
 
 ### Phase 4
 25. Add `model AuditChainAnchor`, columns on `AuditLog`, flag on `Tenant`. Migration `<ts>_add_audit_chain`. **S31 fix**: include `ENABLE / FORCE ROW LEVEL SECURITY` + `audit_chain_anchors_tenant_isolation` policy (same USING/WITH CHECK as `audit_outbox_tenant_isolation`).
@@ -750,14 +802,19 @@ The most important property — **business write succeeds ⇔ audit row exists i
 
 | Test | DB/Mock | What it verifies |
 |---|---|---|
-| `external-http-ssrf.test.ts` | Mocked DNS | **(T14 fix)**: `describe.each` iterating ALL entries in `BLOCKED_CIDRS` (imported from `external-http.ts`, RT3); asserts both IPv4 and IPv6 representatives rejected; count assertion `>= BLOCKED_CIDRS.length * 2`. After extraction, BOTH `webhook-dispatcher.test.ts` and this new test must pass. |
+| `external-http-ssrf.test.ts` | Mocked DNS | **(T14 fix)**: `describe.each` iterating ALL entries in `BLOCKED_CIDRS` (imported from `external-http.ts`, RT3) using `BLOCKED_CIDR_REPRESENTATIVES` (P3-T2); asserts both IPv4 and IPv6 representatives rejected; count assertion `>= BLOCKED_CIDRS.length * 2`. **P3-T1 fix**: guard assertion `expect(BLOCKED_CIDRS.length).toBeGreaterThan(0)` at test top to prevent false-positive from empty `describe.each`. After extraction, BOTH `webhook-dispatcher.test.ts` and this new test must pass. |
+| `audit-deliverer-webhook.test.ts` | Mocked HTTP | **(P3-T6 fix)**: `deliverWebhook` unit test — verifies HTTP headers, Content-Type, sanitized payload, `validateAndFetch` usage. |
+| `audit-deliverer-siem-hec.test.ts` | Mocked HTTP | **(P3-T6 fix)**: `deliverSiemHec` unit test — verifies `Authorization: Splunk <token>` header, Content-Type `application/json`, payload sanitization. |
+| `audit-deliverer-s3-object.test.ts` | Mocked HTTP | **(P3-T6 fix)**: `deliverS3Object` unit test — verifies SigV4 `Authorization` header, `x-amz-content-sha256` with actual hash (NOT `UNSIGNED-PAYLOAD`), payload format. Validate against AWS SigV4 test vectors. |
 | `audit-delivery-fanout.integration.test.ts` | Real DB | One outbox row → N `audit_deliveries` rows; each fails/succeeds independently. |
 | `audit-delivery-failure-isolation.integration.test.ts` | Real DB | SIEM target failure does not block S3 target success. |
 | `audit-outbox-worker-fanout.integration.test.ts` | Real DB + Mocked HTTP | **(T17 fix — explicit hybrid annotation)**: Worker calls correct deliverer for each kind, passes payload sanitized with `EXTERNAL_DELIVERY_METADATA_BLOCKLIST` (S2 fix verification). |
-| `audit-delivery-rate-limit.test.ts` | Mocked | **(T15 fix)**: N > max requests → deliverer called ≤ max within window; excess re-queued, not dropped. |
+| `audit-delivery-rate-limit.integration.test.ts` | Real DB | **(P3-T4 fix — reclassified to integration)**: N > max requests per target within window → excess deliveries remain `PENDING` with future `nextRetryAt`, not dropped. Uses `createRateLimiter` pattern with configurable `window_ms` and `max`. |
 | `audit-delivery-rls.integration.test.ts` | Real DB | (S3 fix) Cross-tenant read/write on `audit_delivery_targets` and `audit_deliveries` blocked by RLS. |
-| `audit-delivery-pii-sanitization.integration.test.ts` | Real DB + Mocked HTTP | (S2 fix) Event with all 22 blocklisted keys in metadata → none appear in outbound HTTP payload for WEBHOOK/SIEM_HEC/S3_OBJECT targets. |
-| Update `audit-outbox-worker-role.integration.test.ts` | Real DB | **(T24 fix)**: Phase 3 adds grants for `audit_delivery_targets` and `audit_deliveries`. The privilege enumeration assertion must be updated to include the new expected grants. Document this explicitly in Phase 3 step 20. |
+| `audit-delivery-pii-sanitization.integration.test.ts` | Real DB + Mocked HTTP | (S2 fix) Event with all blocklisted keys in metadata → none appear in outbound HTTP payload for WEBHOOK/SIEM_HEC/S3_OBJECT targets. **(P3-T3 fix)**: assert count against `EXTERNAL_DELIVERY_METADATA_BLOCKLIST.size` (imported constant), not hardcoded number. |
+| `audit-delivery-stuck-reaper.integration.test.ts` | Real DB | **(P3-F1 fix)**: `PROCESSING` delivery rows older than `PROCESSING_TIMEOUT_MS` are reset to `PENDING`; rows exceeding `maxAttempts` transition to `FAILED` and emit `AUDIT_DELIVERY_DEAD_LETTER` meta-event. |
+| `audit-delivery-retention-purge.integration.test.ts` | Real DB | **(P3-F2 fix)**: outbox rows with pending deliveries are NOT purged; terminal delivery rows are purged by `purgeDeliveryRetention()`. |
+| Create `audit-outbox-worker-role.integration.test.ts` | Real DB | **(P3-T5 fix)**: **New file** — asserts all Phase 1+2+3 grants for `passwd_outbox_worker`: `audit_outbox` (SELECT/UPDATE/DELETE), `audit_logs` (INSERT), `tenants` (SELECT), `audit_delivery_targets` (SELECT), `audit_deliveries` (SELECT/INSERT/UPDATE/DELETE). |
 
 ### Phase 4 tests
 
