@@ -7,10 +7,9 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { auditLogger, METADATA_BLOCKLIST } from "@/lib/audit-logger";
-import { deadLetterLogger } from "@/lib/audit-logger";
+import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
-import { tenantRlsStorage, getTenantRlsContext } from "@/lib/tenant-rls";
+import { tenantRlsStorage, getTenantRlsContext, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
 import { drainBuffer, bufferSize } from "@/lib/audit-retry";
@@ -118,7 +117,6 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
   if (params.tenantId) return params.tenantId;
 
   // teams and users tables have FORCE RLS — must bypass to resolve tenantId
-  const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
   return withBypassRls(prisma, async () => {
     if (params.teamId) {
       const team = await prisma.team.findUnique({
@@ -135,6 +133,26 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
   }, BYPASS_PURPOSE.AUDIT_WRITE);
 }
 
+// ─── AuditLogParams → AuditOutboxPayload mapping ─────────────────
+
+function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
+  const safeMetadata = truncateMetadata(params.metadata);
+  const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+  return {
+    scope: params.scope,
+    action: params.action,
+    userId: params.userId,
+    actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
+    serviceAccountId: params.serviceAccountId ?? null,
+    teamId: params.teamId ?? null,
+    targetType: params.targetType ?? null,
+    targetId: params.targetId ?? null,
+    metadata: sanitized ?? null,
+    ip: params.ip ?? null,
+    userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+  };
+}
+
 // ─── FIFO flusher ────────────────────────────────────────────────
 
 async function flushFifo(): Promise<void> {
@@ -145,8 +163,6 @@ async function flushFifo(): Promise<void> {
     for (const entry of batch) {
       const { params } = entry;
       try {
-        const safeMetadata = truncateMetadata(params.metadata);
-        const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
         const isUuidUserId = UUID_RE.test(params.userId);
 
         // Non-UUID userId (e.g., "anonymous" for unauthenticated share-link
@@ -163,25 +179,25 @@ async function flushFifo(): Promise<void> {
             );
             continue;
           }
-          const { withBypassRls: bypassRls, BYPASS_PURPOSE: BP } = await import("@/lib/tenant-rls");
-          await bypassRls(prisma, async () => {
+          const p = buildOutboxPayload(params);
+          await withBypassRls(prisma, async () => {
             await prisma.auditLog.create({
               data: {
-                scope: params.scope,
-                action: params.action,
-                userId: params.userId,
-                actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
-                serviceAccountId: params.serviceAccountId ?? null,
+                scope: p.scope,
+                action: p.action,
+                userId: p.userId!,
+                actorType: p.actorType,
+                serviceAccountId: p.serviceAccountId,
                 tenantId,
-                teamId: params.teamId ?? null,
-                targetType: params.targetType ?? null,
-                targetId: params.targetId ?? null,
-                metadata: (sanitized as Prisma.InputJsonValue) ?? undefined,
-                ip: params.ip ?? null,
-                userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+                teamId: p.teamId,
+                targetType: p.targetType,
+                targetId: p.targetId,
+                metadata: (p.metadata as Prisma.InputJsonValue) ?? undefined,
+                ip: p.ip,
+                userAgent: p.userAgent,
               },
             });
-          }, BP.AUDIT_WRITE);
+          }, BYPASS_PURPOSE.AUDIT_WRITE);
           continue;
         }
 
@@ -201,21 +217,7 @@ async function flushFifo(): Promise<void> {
           continue;
         }
 
-        const payload: AuditOutboxPayload = {
-          scope: params.scope,
-          action: params.action,
-          userId: params.userId,
-          actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
-          serviceAccountId: params.serviceAccountId ?? null,
-          teamId: params.teamId ?? null,
-          targetType: params.targetType ?? null,
-          targetId: params.targetId ?? null,
-          metadata: sanitized ?? null,
-          ip: params.ip ?? null,
-          userAgent: params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
-        };
-
-        await enqueueAudit(tenantId, payload);
+        await enqueueAudit(tenantId, buildOutboxPayload(params));
       } catch (err) {
         entry.retryCount++;
         if (entry.retryCount >= AUDIT_OUTBOX.FIFO_MAX_RETRIES) {
@@ -270,26 +272,8 @@ export async function logAuditInTx(
   tenantId: string,
   params: AuditLogParams,
 ): Promise<void> {
-  const safeMetadata = truncateMetadata(params.metadata);
-  const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
-  const safeUserAgent = params.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
-
-  const payload: AuditOutboxPayload = {
-    scope: params.scope,
-    action: params.action,
-    userId: params.userId,
-    actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
-    serviceAccountId: params.serviceAccountId ?? null,
-    teamId: params.teamId ?? null,
-    targetType: params.targetType ?? null,
-    targetId: params.targetId ?? null,
-    metadata: sanitized ?? null,
-    ip: params.ip ?? null,
-    userAgent: safeUserAgent,
-  };
-
   // enqueueAuditInTx is a static import at the top of the file
-  await enqueueAuditInTx(tx, tenantId, payload);
+  await enqueueAuditInTx(tx, tenantId, buildOutboxPayload(params));
 }
 
 // ─── logAudit ────────────────────────────────────────────────────
