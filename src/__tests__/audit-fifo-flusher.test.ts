@@ -149,4 +149,21 @@ describe("logAuditAsync", () => {
       "audit.dead_letter",
     );
   });
+
+  it("propagates enqueueAudit rejection without throwing", async () => {
+    mockUserFindUnique.mockResolvedValue({
+      id: "00000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-1",
+    });
+    mockEnqueueAudit.mockRejectedValueOnce(new Error("outbox write failed"));
+
+    // logAuditAsync should propagate the rejection (caller decides how to handle)
+    await expect(
+      logAuditAsync({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: "00000000-0000-4000-8000-000000000001",
+      }),
+    ).rejects.toThrow("outbox write failed");
+  });
 });

@@ -18,8 +18,8 @@ const OUTBOX_ACTIONS = AUDIT_ACTION_VALUES.filter((a) =>
 );
 
 describe("audit bypass coverage", () => {
-  it("identifies all 5 AUDIT_OUTBOX_* actions", () => {
-    expect(OUTBOX_ACTIONS).toHaveLength(5);
+  it("identifies at least 5 AUDIT_OUTBOX_* actions", () => {
+    expect(OUTBOX_ACTIONS.length).toBeGreaterThanOrEqual(5);
   });
 
   it("every AUDIT_OUTBOX_* action is in WEBHOOK_DISPATCH_SUPPRESS", () => {

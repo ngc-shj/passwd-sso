@@ -796,13 +796,10 @@ describe("webhook dispatch — WEBHOOK_DISPATCH_SUPPRESS", () => {
   beforeEach(resetMocks);
 
   it("skips webhook dispatch for actions in WEBHOOK_DISPATCH_SUPPRESS but NOT in OUTBOX_BYPASS_AUDIT_ACTIONS", async () => {
-    // Find an action that is in WEBHOOK_DISPATCH_SUPPRESS but not OUTBOX_BYPASS_AUDIT_ACTIONS
-    const suppressOnlyAction = [...WEBHOOK_DISPATCH_SUPPRESS].find(
-      (a) => !OUTBOX_BYPASS_AUDIT_ACTIONS.has(a),
-    );
-
-    // Guard: this test requires at least one action in SUPPRESS but not in BYPASS
-    expect(suppressOnlyAction).toBeDefined();
+    // AUDIT_OUTBOX_METRICS_VIEW is in SUPPRESS but NOT in BYPASS (admin endpoint action)
+    const suppressOnlyAction = AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW;
+    expect(WEBHOOK_DISPATCH_SUPPRESS.has(suppressOnlyAction)).toBe(true);
+    expect(OUTBOX_BYPASS_AUDIT_ACTIONS.has(suppressOnlyAction)).toBe(false);
 
     const row = makeRow({
       payload: {
@@ -983,9 +980,9 @@ describe("reaper — invoked on first loop tick", () => {
 
         // tx 1 = claimBatch (PENDING check): returns []
         // tx 2 = reapStuckRows (PROCESSING check): returns two reaped rows
-        // tx 3 = purgeRetention (DELETE CTE): returns []
-        // tx 4 = writeDirectAuditLog for REAPED_ROW_1: INSERT
-        // tx 5 = writeDirectAuditLog for REAPED_ROW_2: INSERT
+        // tx 3 = writeDirectAuditLog for REAPED_ROW_1 (REAPED)
+        // tx 4 = writeDirectAuditLog for REAPED_ROW_2 (REAPED)
+        // tx 5 = purgeRetention (DELETE CTE): returns 0 purged
         // tx 6 = next claimBatch iteration — stop here
 
         if (txCallCount === 6) {
@@ -1002,7 +999,7 @@ describe("reaper — invoked on first loop tick", () => {
             ];
           }
           if (txCallCount === 5) {
-            // purgeRetention — return 0 purged (txs 3+4 are writeDirectAuditLog for each reaped row)
+            // purgeRetention — return 0 purged
             return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
           // claimBatch and direct-audit transactions return []
@@ -1101,9 +1098,9 @@ describe("reaper — invoked on first loop tick", () => {
         txCallCount++;
 
         // tx 1 = claimBatch: []
-        // tx 2 = reapStuckRows: throw
-        // (purgeRetention tx 3 may or may not run depending on impl — runReaper catches each)
-        // Stop on tx 4 (next claimBatch)
+        // tx 2 = reapStuckRows: throw (caught by runReaper)
+        // tx 3 = purgeRetention: runs independently (separate try/catch in runReaper)
+        // tx 4 = next claimBatch — stop
         if (txCallCount === 2) {
           throw new Error("reaper db error");
         }
@@ -1114,8 +1111,8 @@ describe("reaper — invoked on first loop tick", () => {
 
         const txQueryRaw = vi.fn(async (sql: string, ...args: unknown[]) => {
           if (txCallCount === 3) {
-            // purgeRetention — 0 purged
-            return [{ purged: BigInt(0) }];
+            // purgeRetention — 0 purged, explicit shape matching actual return
+            return [{ purged: BigInt(0), sample_tenant_id: null }];
           }
           return mockQueryRawUnsafe(sql, ...args);
         });
