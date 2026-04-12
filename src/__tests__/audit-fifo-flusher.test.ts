@@ -5,13 +5,17 @@ const {
   mockEnqueueAudit,
   mockDeadLetterWarn,
   mockUserFindUnique,
+  mockUserFindMany,
   mockTeamFindUnique,
+  mockTeamFindMany,
   mockDrainBuffer,
 } = vi.hoisted(() => ({
   mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
   mockDeadLetterWarn: vi.fn(),
   mockUserFindUnique: vi.fn(),
+  mockUserFindMany: vi.fn(),
   mockTeamFindUnique: vi.fn(),
+  mockTeamFindMany: vi.fn(),
   mockDrainBuffer: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -21,8 +25,8 @@ vi.mock("@/lib/audit-outbox", () => ({
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    team: { findUnique: mockTeamFindUnique },
-    user: { findUnique: mockUserFindUnique },
+    team: { findUnique: mockTeamFindUnique, findMany: mockTeamFindMany },
+    user: { findUnique: mockUserFindUnique, findMany: mockUserFindMany },
   },
 }));
 
@@ -85,7 +89,7 @@ describe("FIFO flusher", () => {
   });
 
   it("_flushFifoForTest drains FIFO and calls enqueueAudit", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockUserFindMany.mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000001", tenantId: "tenant-1" }]);
 
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -109,7 +113,7 @@ describe("FIFO flusher", () => {
   });
 
   it("flusher resolves tenantId from userId when not provided", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-from-user" });
+    mockUserFindMany.mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000042", tenantId: "tenant-from-user" }]);
 
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -120,8 +124,8 @@ describe("FIFO flusher", () => {
 
     await _flushFifoForTest();
 
-    expect(mockUserFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "00000000-0000-4000-8000-000000000042" } }),
+    expect(mockUserFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ["00000000-0000-4000-8000-000000000042"] } } }),
     );
     expect(mockEnqueueAudit).toHaveBeenCalledWith(
       "tenant-from-user",
@@ -130,7 +134,7 @@ describe("FIFO flusher", () => {
   });
 
   it("flusher resolves tenantId from teamId when provided", async () => {
-    mockTeamFindUnique.mockResolvedValue({ tenantId: "tenant-from-team" });
+    mockTeamFindMany.mockResolvedValue([{ id: "team-99", tenantId: "tenant-from-team" }]);
 
     logAudit({
       scope: AUDIT_SCOPE.TEAM,
@@ -142,8 +146,8 @@ describe("FIFO flusher", () => {
 
     await _flushFifoForTest();
 
-    expect(mockTeamFindUnique).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: "team-99" } }),
+    expect(mockTeamFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ["team-99"] } } }),
     );
     expect(mockEnqueueAudit).toHaveBeenCalledWith(
       "tenant-from-team",
@@ -152,8 +156,8 @@ describe("FIFO flusher", () => {
   });
 
   it("dead-letters entry when tenantId cannot be resolved", async () => {
-    mockUserFindUnique.mockResolvedValue(null);
-    mockTeamFindUnique.mockResolvedValue(null);
+    mockUserFindMany.mockResolvedValue([]);
+    mockTeamFindMany.mockResolvedValue([]);
 
     logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
@@ -171,7 +175,10 @@ describe("FIFO flusher", () => {
   });
 
   it("per-entry failure isolation — second entry processed even if first throws", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockUserFindMany.mockResolvedValue([
+      { id: "00000000-0000-4000-8000-00000000000a", tenantId: "tenant-1" },
+      { id: "00000000-0000-4000-8000-00000000000b", tenantId: "tenant-1" },
+    ]);
     mockEnqueueAudit
       .mockRejectedValueOnce(new Error("outbox error"))
       .mockResolvedValue(undefined);
@@ -190,7 +197,7 @@ describe("FIFO flusher", () => {
   });
 
   it("dead-letters entry after FIFO_MAX_RETRIES failures", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockUserFindMany.mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000099", tenantId: "tenant-1" }]);
     mockEnqueueAudit.mockRejectedValue(new Error("persistent outbox error"));
 
     logAudit({
@@ -229,7 +236,7 @@ describe("FIFO flusher", () => {
   });
 
   it("SIGTERM handler triggers flush — enqueueAudit called", async () => {
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockUserFindMany.mockResolvedValue([{ id: "00000000-0000-4000-8000-000000000001", tenantId: "tenant-1" }]);
 
     // Drain any FIFO entries left over from previous tests (overflow test leaves FIFO_MAX_SIZE entries)
     mockEnqueueAudit.mockResolvedValue(undefined);
@@ -237,7 +244,7 @@ describe("FIFO flusher", () => {
       await _flushFifoForTest();
     }
     vi.clearAllMocks();
-    mockUserFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockUserFindMany.mockResolvedValue([{ id: "00000000-0000-4000-8000-0000000000cc", tenantId: "tenant-1" }]);
     mockEnqueueAudit.mockResolvedValue(undefined);
 
     // Prevent process.exit(0) from actually terminating the test runner

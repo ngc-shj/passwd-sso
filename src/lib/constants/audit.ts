@@ -621,13 +621,7 @@ export const AUDIT_METADATA_KEY = {
 
 export const AUDIT_ACTION_EMERGENCY_PREFIX = "EMERGENCY_";
 
-function envInt(name: string, defaultVal: number): number {
-  const raw = process.env[name];
-  if (raw === undefined || raw === "") return defaultVal;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed < 0) return defaultVal;
-  return parsed;
-}
+import { envInt } from "@/lib/env-utils";
 
 export const AUDIT_OUTBOX = {
   BATCH_SIZE: envInt("OUTBOX_BATCH_SIZE", 500),

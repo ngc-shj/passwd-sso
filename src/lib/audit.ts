@@ -113,24 +113,60 @@ function pushToFifo(params: AuditLogParams): void {
 
 // ─── Tenant resolution helper ────────────────────────────────────
 
-async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
-  if (params.tenantId) return params.tenantId;
+/**
+ * Batch-resolve tenantIds for entries that don't have one.
+ * Single DB round-trip per entity type instead of N+1.
+ */
+async function resolveTenantIds(
+  entries: { params: AuditLogParams }[],
+): Promise<Map<AuditLogParams, string | null>> {
+  const result = new Map<AuditLogParams, string | null>();
+  const needTeamLookup: string[] = [];
+  const needUserLookup: string[] = [];
 
-  // teams and users tables have FORCE RLS — must bypass to resolve tenantId
-  return withBypassRls(prisma, async () => {
-    if (params.teamId) {
-      const team = await prisma.team.findUnique({
-        where: { id: params.teamId },
-        select: { tenantId: true },
-      });
-      if (team?.tenantId) return team.tenantId;
+  for (const { params } of entries) {
+    if (params.tenantId) {
+      result.set(params, params.tenantId);
+    } else if (params.teamId) {
+      needTeamLookup.push(params.teamId);
+    } else {
+      needUserLookup.push(params.userId);
     }
-    const user = await prisma.user.findUnique({
-      where: { id: params.userId },
-      select: { tenantId: true },
-    });
-    return user?.tenantId ?? null;
+  }
+
+  if (needTeamLookup.length === 0 && needUserLookup.length === 0) return result;
+
+  await withBypassRls(prisma, async () => {
+    if (needTeamLookup.length > 0) {
+      const uniqueTeamIds = [...new Set(needTeamLookup)];
+      const teams = await prisma.team.findMany({
+        where: { id: { in: uniqueTeamIds } },
+        select: { id: true, tenantId: true },
+      });
+      const teamMap = new Map(teams.map((t) => [t.id, t.tenantId]));
+      for (const { params } of entries) {
+        if (!params.tenantId && params.teamId) {
+          result.set(params, teamMap.get(params.teamId) ?? null);
+        }
+      }
+    }
+
+    if (needUserLookup.length > 0) {
+      const uniqueUserIds = [...new Set(needUserLookup)];
+      const users = await prisma.user.findMany({
+        where: { id: { in: uniqueUserIds } },
+        select: { id: true, tenantId: true },
+      });
+      const userMap = new Map(users.map((u) => [u.id, u.tenantId]));
+      for (const { params } of entries) {
+        if (!params.tenantId && !params.teamId) {
+          result.set(params, userMap.get(params.userId) ?? null);
+        }
+      }
+    }
   }, BYPASS_PURPOSE.AUDIT_WRITE);
+
+  return result;
 }
 
 // ─── AuditLogParams → AuditOutboxPayload mapping ─────────────────
@@ -160,55 +196,58 @@ async function flushFifo(): Promise<void> {
 
   await tenantRlsStorage.run(undefined as never, async () => {
     const batch = fifoQueue.splice(0, 100);
-    for (const entry of batch) {
-      const { params } = entry;
-      try {
-        const isUuidUserId = UUID_RE.test(params.userId);
 
-        // Non-UUID userId (e.g., "anonymous" for unauthenticated share-link
-        // access) cannot be inserted by the worker (::uuid cast fails).
-        // These go directly to audit_logs bypassing the outbox.
-        // tenantId must be explicitly provided — user.findUnique("anonymous")
-        // would return null and dead-letter the entry (F16 fix).
-        if (!isUuidUserId) {
-          const tenantId = params.tenantId ?? null;
-          if (!tenantId) {
-            deadLetterLogger.warn(
-              { auditEntry: params, reason: "non_uuid_userId_no_tenantId" },
-              "audit.dead_letter",
-            );
-            continue;
-          }
-          const p = buildOutboxPayload(params);
+    // Separate non-UUID userId entries (legacy direct-write path)
+    const uuidEntries: typeof batch = [];
+    for (const entry of batch) {
+      if (!UUID_RE.test(entry.params.userId)) {
+        // Non-UUID userId (e.g., "anonymous") bypasses the outbox
+        const tenantId = entry.params.tenantId ?? null;
+        if (!tenantId) {
+          deadLetterLogger.warn(
+            { auditEntry: entry.params, reason: "non_uuid_userId_no_tenantId" },
+            "audit.dead_letter",
+          );
+          continue;
+        }
+        try {
+          const p = buildOutboxPayload(entry.params);
           await withBypassRls(prisma, async () => {
             await prisma.auditLog.create({
               data: {
-                scope: p.scope,
-                action: p.action,
-                userId: p.userId!,
-                actorType: p.actorType,
-                serviceAccountId: p.serviceAccountId,
-                tenantId,
-                teamId: p.teamId,
-                targetType: p.targetType,
+                scope: p.scope, action: p.action, userId: p.userId!,
+                actorType: p.actorType, serviceAccountId: p.serviceAccountId,
+                tenantId, teamId: p.teamId, targetType: p.targetType,
                 targetId: p.targetId,
                 metadata: (p.metadata as Prisma.InputJsonValue) ?? undefined,
-                ip: p.ip,
-                userAgent: p.userAgent,
+                ip: p.ip, userAgent: p.userAgent,
               },
             });
           }, BYPASS_PURPOSE.AUDIT_WRITE);
-          continue;
-        }
-
-        // Standard UUID userId path — resolve tenantId + enqueue to outbox
-        let tenantId: string | null = null;
-        try {
-          tenantId = await resolveTenantId(params);
         } catch (err) {
-          getLogger().warn({ err }, "audit flusher: tenantId resolution failed");
+          getLogger().warn({ err }, "audit flusher: non-UUID direct write failed");
         }
+      } else {
+        uuidEntries.push(entry);
+      }
+    }
 
+    if (uuidEntries.length === 0) return;
+
+    // Batch-resolve tenantIds (1-2 queries instead of N)
+    let tenantMap: Map<AuditLogParams, string | null>;
+    try {
+      tenantMap = await resolveTenantIds(uuidEntries);
+    } catch (err) {
+      getLogger().warn({ err }, "audit flusher: batch tenantId resolution failed");
+      for (const entry of uuidEntries) fifoQueue.unshift(entry);
+      return;
+    }
+
+    for (const entry of uuidEntries) {
+      const { params } = entry;
+      try {
+        const tenantId = tenantMap.get(params) ?? null;
         if (!tenantId) {
           deadLetterLogger.warn(
             { auditEntry: params, reason: "tenant_not_found" },
