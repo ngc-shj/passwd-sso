@@ -4,7 +4,7 @@ import pg from "pg";
 import { getLogger } from "@/lib/logger";
 import { deadLetterLogger } from "@/lib/audit-logger";
 import { computeBackoffMs, withFullJitter } from "@/lib/backoff";
-import { AUDIT_OUTBOX, OUTBOX_BYPASS_AUDIT_ACTIONS } from "@/lib/constants/audit";
+import { AUDIT_OUTBOX, AUDIT_SCOPE, ACTOR_TYPE, OUTBOX_BYPASS_AUDIT_ACTIONS } from "@/lib/constants/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID } from "@/lib/constants/app";
 
@@ -43,16 +43,11 @@ interface WorkerConfig {
   pollIntervalMs?: number;
 }
 
-async function setBypassRlsGucs(prisma: PrismaClient): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `SELECT set_config('app.bypass_rls', 'on', true)`,
-  );
-  await prisma.$executeRawUnsafe(
-    `SELECT set_config('app.bypass_purpose', '${BYPASS_PURPOSE.AUDIT_WRITE}', true)`,
-  );
-  await prisma.$executeRawUnsafe(
-    `SELECT set_config('app.tenant_id', '${NIL_UUID}', true)`,
-  );
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- accepts PrismaClient or TransactionClient
+async function setBypassRlsGucs(client: any): Promise<void> {
+  await client.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+  await client.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
+  await client.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
 }
 
 function parsePayload(raw: unknown): AuditOutboxPayload {
@@ -61,10 +56,10 @@ function parsePayload(raw: unknown): AuditOutboxPayload {
   }
   const p = raw as Record<string, unknown>;
   return {
-    scope: typeof p.scope === "string" ? p.scope : "PERSONAL",
+    scope: typeof p.scope === "string" ? p.scope : AUDIT_SCOPE.PERSONAL,
     action: typeof p.action === "string" ? p.action : "",
     userId: typeof p.userId === "string" ? p.userId : null,
-    actorType: typeof p.actorType === "string" ? p.actorType : "HUMAN",
+    actorType: typeof p.actorType === "string" ? p.actorType : ACTOR_TYPE.HUMAN,
     serviceAccountId:
       typeof p.serviceAccountId === "string" ? p.serviceAccountId : null,
     teamId: typeof p.teamId === "string" ? p.teamId : null,
@@ -84,15 +79,7 @@ async function claimBatch(
   batchSize: number,
 ): Promise<AuditOutboxRow[]> {
   return prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.bypass_rls', 'on', true)`,
-    );
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.bypass_purpose', '${BYPASS_PURPOSE.AUDIT_WRITE}', true)`,
-    );
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.tenant_id', '${NIL_UUID}', true)`,
-    );
+    await setBypassRlsGucs(tx);
     const rows = await tx.$queryRawUnsafe<AuditOutboxRow[]>(`
       UPDATE audit_outbox
       SET status = 'PROCESSING',
@@ -102,7 +89,7 @@ async function claimBatch(
         WHERE status = 'PENDING'
           AND next_retry_at <= now()
         ORDER BY created_at ASC
-        LIMIT ${batchSize}
+        LIMIT $1
         FOR UPDATE SKIP LOCKED
       )
       AND status = 'PENDING'
@@ -118,15 +105,7 @@ async function deliverRow(
   payload: AuditOutboxPayload,
 ): Promise<void> {
   await prisma.$transaction(async (tx) => {
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.bypass_rls', 'on', true)`,
-    );
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.bypass_purpose', '${BYPASS_PURPOSE.AUDIT_WRITE}', true)`,
-    );
-    await tx.$executeRawUnsafe(
-      `SELECT set_config('app.tenant_id', '${NIL_UUID}', true)`,
-    );
+    await setBypassRlsGucs(tx);
 
     const metadataJson =
       payload.metadata !== null ? JSON.stringify(payload.metadata) : null;
@@ -195,15 +174,7 @@ async function recordError(
 
   try {
     await prisma.$transaction(async (tx) => {
-      await tx.$executeRawUnsafe(
-        `SELECT set_config('app.bypass_rls', 'on', true)`,
-      );
-      await tx.$executeRawUnsafe(
-        `SELECT set_config('app.bypass_purpose', '${BYPASS_PURPOSE.AUDIT_WRITE}', true)`,
-      );
-      await tx.$executeRawUnsafe(
-        `SELECT set_config('app.tenant_id', '${NIL_UUID}', true)`,
-      );
+      await setBypassRlsGucs(tx);
 
       if (isDead) {
         await tx.$executeRawUnsafe(
@@ -254,20 +225,21 @@ async function dispatchWebhookForRow(
     );
     const timestamp = new Date().toISOString();
     const webhookData = (payload.metadata ?? {}) as Record<string, unknown>;
-    if (payload.teamId) {
+    if (payload.scope === AUDIT_SCOPE.TEAM && payload.teamId) {
       void dispatchWebhook({
         type: payload.action,
         teamId: payload.teamId,
         timestamp,
         data: webhookData,
       });
+    } else if (payload.scope === AUDIT_SCOPE.TENANT) {
+      void dispatchTenantWebhook({
+        type: payload.action,
+        tenantId,
+        timestamp,
+        data: webhookData,
+      });
     }
-    void dispatchTenantWebhook({
-      type: payload.action,
-      tenantId,
-      timestamp,
-      data: webhookData,
-    });
   } catch (err) {
     getLogger().warn(
       { err, tenantId, action: payload.action },
@@ -330,7 +302,7 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
-      if (payload.userId === null && payload.actorType !== "SYSTEM") {
+      if (payload.userId === null && payload.actorType !== ACTOR_TYPE.SYSTEM) {
         log.warn(
           { outboxId: row.id, action: payload.action, actorType: payload.actorType },
           "worker.null_userid_non_system_skipped",

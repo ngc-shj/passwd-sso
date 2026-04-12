@@ -76,24 +76,20 @@ export async function drainBuffer(): Promise<void> {
 
   for (const entry of batch) {
     try {
-      await withBypassRls(prisma, async () => {
-        await prisma.auditLog.create({
-          data: {
-            scope: entry.scope,
-            action: entry.action,
-            userId: entry.userId,
-            actorType: entry.actorType,
-            serviceAccountId: entry.serviceAccountId,
-            tenantId: entry.tenantId,
-            teamId: entry.teamId,
-            targetType: entry.targetType,
-            targetId: entry.targetId,
-            metadata: entry.metadata as never ?? undefined,
-            ip: entry.ip,
-            userAgent: entry.userAgent,
-          },
-        });
-      }, BYPASS_PURPOSE.AUDIT_WRITE);
+      const { enqueueAudit } = await import("@/lib/audit-outbox");
+      await enqueueAudit(entry.tenantId, {
+        scope: entry.scope,
+        action: entry.action,
+        userId: entry.userId,
+        actorType: entry.actorType,
+        serviceAccountId: entry.serviceAccountId,
+        teamId: entry.teamId,
+        targetType: entry.targetType,
+        targetId: entry.targetId,
+        metadata: entry.metadata ?? null,
+        ip: entry.ip,
+        userAgent: entry.userAgent,
+      });
     } catch (err) {
       entry.retryCount++;
       if (entry.retryCount >= MAX_RETRIES) {

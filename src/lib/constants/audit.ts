@@ -1,4 +1,11 @@
-import type { AuditAction, AuditScope } from "@prisma/client";
+import type { AuditAction, AuditScope, ActorType } from "@prisma/client";
+
+export const ACTOR_TYPE = {
+  HUMAN: "HUMAN",
+  SERVICE_ACCOUNT: "SERVICE_ACCOUNT",
+  MCP_AGENT: "MCP_AGENT",
+  SYSTEM: "SYSTEM",
+} as const satisfies Record<ActorType, ActorType>;
 
 export const AUDIT_SCOPE = {
   PERSONAL: "PERSONAL",

@@ -14,7 +14,7 @@ import { tenantRlsStorage, getTenantRlsContext } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
 import { getLogger } from "@/lib/logger";
 import { drainBuffer, bufferSize } from "@/lib/audit-retry";
-import { AUDIT_OUTBOX } from "@/lib/constants/audit";
+import { AUDIT_OUTBOX, ACTOR_TYPE } from "@/lib/constants/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
@@ -54,11 +54,11 @@ export function resolveActorType(auth: AuthResult): ActorType {
     case "session":
     case "token":
     case "api_key":
-      return "HUMAN";
+      return ACTOR_TYPE.HUMAN;
     case "service_account":
-      return "SERVICE_ACCOUNT";
+      return ACTOR_TYPE.SERVICE_ACCOUNT;
     case "mcp_token":
-      return "MCP_AGENT";
+      return ACTOR_TYPE.MCP_AGENT;
   }
 }
 
@@ -114,22 +114,24 @@ function pushToFifo(params: AuditLogParams): void {
 // ─── Tenant resolution helper ────────────────────────────────────
 
 async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
-  let resolvedTenantId: string | null = params.tenantId ?? null;
-  if (!resolvedTenantId && params.teamId) {
-    const team = await prisma.team.findUnique({
-      where: { id: params.teamId },
-      select: { tenantId: true },
-    });
-    resolvedTenantId = team?.tenantId ?? null;
-  }
-  if (!resolvedTenantId) {
+  if (params.tenantId) return params.tenantId;
+
+  // teams and users tables have FORCE RLS — must bypass to resolve tenantId
+  const { withBypassRls, BYPASS_PURPOSE } = await import("@/lib/tenant-rls");
+  return withBypassRls(prisma, async () => {
+    if (params.teamId) {
+      const team = await prisma.team.findUnique({
+        where: { id: params.teamId },
+        select: { tenantId: true },
+      });
+      if (team?.tenantId) return team.tenantId;
+    }
     const user = await prisma.user.findUnique({
       where: { id: params.userId },
       select: { tenantId: true },
     });
-    resolvedTenantId = user?.tenantId ?? null;
-  }
-  return resolvedTenantId;
+    return user?.tenantId ?? null;
+  }, BYPASS_PURPOSE.AUDIT_WRITE);
 }
 
 // ─── FIFO flusher ────────────────────────────────────────────────
@@ -164,7 +166,7 @@ async function flushFifo(): Promise<void> {
           scope: params.scope,
           action: params.action,
           userId: params.userId,
-          actorType: params.actorType ?? "HUMAN",
+          actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
           serviceAccountId: params.serviceAccountId ?? null,
           teamId: params.teamId ?? null,
           targetType: params.targetType ?? null,
@@ -238,7 +240,7 @@ export async function logAuditInTx(
     scope: params.scope,
     action: params.action,
     userId: params.userId,
-    actorType: params.actorType ?? "HUMAN",
+    actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
     serviceAccountId: params.serviceAccountId ?? null,
     teamId: params.teamId ?? null,
     targetType: params.targetType ?? null,
@@ -304,7 +306,7 @@ export function logAudit(params: AuditLogParams): void {
           scope,
           action,
           userId,
-          actorType: actorType ?? "HUMAN",
+          actorType: actorType ?? ACTOR_TYPE.HUMAN,
           serviceAccountId: serviceAccountId ?? null,
           teamId: teamId ?? null,
           targetType: targetType ?? null,

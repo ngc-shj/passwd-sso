@@ -6,7 +6,7 @@ import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
 import { createShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAuditInTx, extractRequestMeta } from "@/lib/audit";
+import { logAudit, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -69,28 +69,12 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (!verifyAccessPassword(password, share.accessPasswordHash)) {
-    // Atomic audit: SHARE_ACCESS_VERIFY_FAILED
-    await withBypassRls(prisma, async (tx) => {
-      await logAuditInTx(tx, share.tenantId, {
-        scope: AUDIT_SCOPE.PERSONAL,
-        action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-        userId: "anonymous",
-        tenantId: share.tenantId,
-        targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
-        targetId: share.id,
-        metadata: { ip },
-        ...reqMeta,
-      });
-    }, BYPASS_PURPOSE.AUDIT_WRITE);
-
-    return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
-  }
-
-  // Atomic audit: SHARE_ACCESS_VERIFY_SUCCESS
-  await withBypassRls(prisma, async (tx) => {
-    await logAuditInTx(tx, share.tenantId, {
+    // Non-atomic audit: userId="anonymous" is not a valid UUID,
+    // so this cannot use logAuditInTx (worker INSERT would fail on ::uuid cast).
+    // Falls through the FIFO flusher path where tenantId is already resolved.
+    logAudit({
       scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
+      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
       userId: "anonymous",
       tenantId: share.tenantId,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
@@ -98,7 +82,21 @@ async function handlePOST(req: NextRequest) {
       metadata: { ip },
       ...reqMeta,
     });
-  }, BYPASS_PURPOSE.AUDIT_WRITE);
+
+    return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
+  }
+
+  // Non-atomic audit: same userId="anonymous" limitation as above.
+  logAudit({
+    scope: AUDIT_SCOPE.PERSONAL,
+    action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
+    userId: "anonymous",
+    tenantId: share.tenantId,
+    targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
+    targetId: share.id,
+    metadata: { ip },
+    ...reqMeta,
+  });
 
   const accessToken = createShareAccessToken(share.id);
 

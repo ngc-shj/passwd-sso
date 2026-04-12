@@ -1,11 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { mockCreate, mockWithBypassRls, mockDeadLetterWarn } = vi.hoisted(() => ({
+const { mockCreate, mockEnqueueAudit, mockWithBypassRls, mockDeadLetterWarn } = vi.hoisted(() => ({
   mockCreate: vi.fn(),
+  mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
   mockWithBypassRls: vi.fn(
     async (_prisma: unknown, fn: () => unknown, _purpose: unknown) => fn(),
   ),
   mockDeadLetterWarn: vi.fn(),
+}));
+
+vi.mock("@/lib/audit-outbox", () => ({
+  enqueueAudit: (...args: unknown[]) => mockEnqueueAudit(...args),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -86,18 +91,18 @@ describe("audit-retry", () => {
 
   describe("drainBuffer", () => {
     it("writes buffered entries to DB", async () => {
-      mockCreate.mockResolvedValue({});
+      mockEnqueueAudit.mockResolvedValue(undefined);
       enqueue(makeEntry());
       const sizeBefore = bufferSize();
 
       await drainBuffer();
 
-      expect(mockCreate).toHaveBeenCalledTimes(sizeBefore);
+      expect(mockEnqueueAudit).toHaveBeenCalledTimes(sizeBefore);
       expect(bufferSize()).toBeLessThan(sizeBefore);
     });
 
     it("re-enqueues on transient failure", async () => {
-      mockCreate.mockRejectedValueOnce(new Error("connection lost"));
+      mockEnqueueAudit.mockRejectedValueOnce(new Error("connection lost"));
       enqueue(makeEntry());
 
       await drainBuffer();
@@ -107,7 +112,7 @@ describe("audit-retry", () => {
     });
 
     it("sends to dead-letter after max retries", async () => {
-      mockCreate.mockRejectedValue(new Error("persistent failure"));
+      mockEnqueueAudit.mockRejectedValue(new Error("persistent failure"));
       enqueue(makeEntry({ retryCount: 2 })); // one more failure = 3 total
 
       await drainBuffer();
@@ -121,21 +126,21 @@ describe("audit-retry", () => {
     it("does nothing when buffer is empty", async () => {
       // Drain any existing entries first
       while (bufferSize() > 0) await drainBuffer();
-      mockCreate.mockClear();
+      mockEnqueueAudit.mockClear();
 
       await drainBuffer();
-      expect(mockCreate).not.toHaveBeenCalled();
+      expect(mockEnqueueAudit).not.toHaveBeenCalled();
     });
 
     it("drains at most 10 entries per call", async () => {
-      mockCreate.mockResolvedValue({});
+      mockEnqueueAudit.mockResolvedValue(undefined);
       for (let i = 0; i < 15; i++) {
         enqueue(makeEntry({ userId: `user-${i}` }));
       }
 
       await drainBuffer();
 
-      expect(mockCreate).toHaveBeenCalledTimes(10);
+      expect(mockEnqueueAudit).toHaveBeenCalledTimes(10);
       expect(bufferSize()).toBeGreaterThanOrEqual(5);
     });
   });

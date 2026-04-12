@@ -18,8 +18,10 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
+      target: deps
+    volumes:
+      - .:/app
+      - /app/node_modules
     env_file:
       - .env.local
     environment:
@@ -29,7 +31,7 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
-    command: ["node", "scripts/audit-outbox-worker.js"]
+    command: ["npx", "tsx", "scripts/audit-outbox-worker.ts"]
     restart: unless-stopped
     networks:
       - internal

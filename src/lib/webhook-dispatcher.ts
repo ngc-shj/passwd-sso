@@ -54,9 +54,7 @@ interface WebhookRecord {
 
 // ─── Constants ──────────────────────────────────────────────────
 
-const RETRY_DELAYS = Array.from({ length: WEBHOOK_MAX_RETRIES - 1 }, (_, i) =>
-  computeBackoffMs(i, { baseMs: 1000, capMs: 25_000 }),
-);
+const RETRY_DELAYS = [1_000, 5_000, 25_000];
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
 /**

@@ -48,6 +48,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
     run: (_store: unknown, fn: () => unknown) => fn(),
   },
   getTenantRlsContext: () => null,
+  // withBypassRls must call the callback directly so resolveTenantId works in tests
+  withBypassRls: (_prisma: unknown, fn: () => unknown, _purpose: unknown) => fn(),
 }));
 
 vi.mock("@/lib/logger", () => ({

@@ -37,8 +37,11 @@ ALTER TABLE "audit_logs" ADD COLUMN "outbox_id" UUID;
 CREATE UNIQUE INDEX "audit_logs_outbox_id_key" ON "audit_logs"("outbox_id");
 
 -- AddConstraint
+-- NOT VALID: existing rows have outbox_id=NULL + actor_type=HUMAN (pre-outbox era).
+-- The constraint applies only to new inserts. A future VALIDATE CONSTRAINT can
+-- be run after all legacy rows are backfilled or archived.
 ALTER TABLE "audit_logs" ADD CONSTRAINT "audit_logs_outbox_id_actor_type_check"
-  CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM');
+  CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM') NOT VALID;
 
 -- Enable Row Level Security for tenant isolation
 ALTER TABLE "audit_outbox" ENABLE ROW LEVEL SECURITY;
