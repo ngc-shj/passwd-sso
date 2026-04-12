@@ -229,8 +229,9 @@ function makeOneShotTxImpl(stopFn: () => void): (fn: TxFn) => Promise<unknown> {
   return async function (fn: TxFn) {
     const txQueryRaw = vi.fn(async (...args: unknown[]) => {
       const sql = typeof args[0] === "string" ? args[0] : "";
-      // Distinguish outbox claims from delivery claims by SQL target table
-      if (sql.includes("audit_outbox")) {
+      // Identify outbox claim by its unique SQL pattern: UPDATE audit_outbox + PENDING + SKIP LOCKED
+      const isOutboxClaim = sql.includes("audit_outbox") && sql.includes("PENDING") && sql.includes("SKIP LOCKED");
+      if (isOutboxClaim) {
         outboxClaimCount++;
         if (outboxClaimCount > 1) {
           stopFn();
@@ -238,7 +239,11 @@ function makeOneShotTxImpl(stopFn: () => void): (fn: TxFn) => Promise<unknown> {
         }
         return mockQueryRawUnsafe(...args);
       }
-      // Delivery claims or other queries — return empty
+      // Delivery claims, reaper, purge, or other queries — return empty/default
+      if (sql.includes("DELETE FROM audit_outbox")) {
+        // purgeRetention CTE — return 0 purged
+        return [{ purged: BigInt(0), sample_tenant_id: null }];
+      }
       return [];
     });
 
@@ -528,6 +533,8 @@ describe("error paths", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: mockQueryRawUnsafe,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -565,6 +572,8 @@ describe("error paths", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: mockQueryRawUnsafe,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -595,6 +604,8 @@ describe("error paths", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: mockQueryRawUnsafe,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -625,6 +636,8 @@ describe("error paths", () => {
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: mockQueryRawUnsafe,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -1217,6 +1230,8 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: mockQueryRawUnsafe,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );
@@ -1260,6 +1275,8 @@ describe("recordError — AUDIT_OUTBOX_DEAD_LETTER written on dead-letter", () =
           $executeRaw: mockExecuteRaw,
           $queryRawUnsafe: mockQueryRawUnsafe,
           $executeRawUnsafe: mockExecuteRawUnsafe,
+          auditDeliveryTarget: { findMany: vi.fn().mockResolvedValue([]) },
+          auditDelivery: { upsert: vi.fn().mockResolvedValue({}), findMany: vi.fn().mockResolvedValue([]), update: vi.fn().mockResolvedValue({}) },
         });
       },
     );

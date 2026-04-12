@@ -403,6 +403,8 @@ async function processOneDelivery(
   const deliverFn = DELIVERERS[kind];
   if (!deliverFn) {
     getLogger().error({ deliveryId: delivery.id, kind }, "no deliverer for target kind");
+    // F-P3-2 fix: immediately record error instead of leaving row in PROCESSING
+    await recordDeliveryError(workerPrisma, delivery, new Error(`Unknown delivery target kind: ${kind}`));
     return;
   }
 
@@ -661,11 +663,12 @@ async function reapStuckDeliveries(prisma: PrismaClient): Promise<number> {
     );
   });
 
-  if (result > 0) {
-    getLogger().info({ count: result }, "reaped stuck delivery rows");
+  const count = Number(result);
+  if (count > 0) {
+    getLogger().info({ count }, "reaped stuck delivery rows");
   }
 
-  return result as number;
+  return count;
 }
 
 /**
@@ -849,7 +852,7 @@ export function createWorker(config: WorkerConfig) {
         await recordError(
           workerPrisma,
           row,
-          new Error("SYSTEM actor with null userId not supported in Phase 1"),
+          new Error("SYSTEM actor with null userId must not enter the outbox — check OUTBOX_BYPASS_AUDIT_ACTIONS"),
         );
         continue;
       }
@@ -861,7 +864,10 @@ export function createWorker(config: WorkerConfig) {
           "worker.delivered",
         );
         void dispatchWebhookForRow(payload, row.tenant_id);
-        // Phase 3: fan out to non-DB delivery targets
+        // Phase 3: fan out to non-DB delivery targets (fire-and-forget).
+        // If the worker crashes here, outbox row is already SENT so fan-out
+        // will not be retried. This is the design trade-off per Plan §3.4:
+        // DB target success is not rolled back by fan-out failure.
         void fanOutDeliveries(workerPrisma, row.id, row.tenant_id, payload);
       } catch (err) {
         log.warn(

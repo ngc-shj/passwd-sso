@@ -87,7 +87,14 @@ export function isPrivateIp(ip: string): boolean {
  * Returns the list of validated public IPs for use in IP pinning.
  */
 export async function resolveAndValidateIps(url: string): Promise<string[]> {
-  const hostname = new URL(url).hostname;
+  const parsed = new URL(url);
+
+  // S-m1 fix: reject non-HTTP schemes explicitly
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    throw new Error(`Unsupported URL scheme: ${parsed.protocol}`);
+  }
+
+  const hostname = parsed.hostname;
 
   // Already an IP literal — check directly
   if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) {
@@ -214,6 +221,7 @@ export function sanitizeForExternalDelivery(value: unknown): unknown {
 const CREDENTIAL_PATTERNS = [
   /[?&](?:token|key|secret|password|api_key|apikey|access_token)=[^&\s]*/gi,
   /Bearer\s+[^\s,]+/gi,
+  /Basic\s+[A-Za-z0-9+/=]+/gi,
   /Splunk\s+[^\s,]+/gi,
   /AWS4-HMAC-SHA256\s+Credential=[^\s,]+/gi,
 ];

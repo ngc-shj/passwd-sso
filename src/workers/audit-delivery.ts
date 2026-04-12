@@ -9,6 +9,7 @@
  */
 
 import { createHmac, createHash } from "node:crypto";
+import { z } from "zod/v4";
 import {
   validateAndFetch,
   sanitizeForExternalDelivery,
@@ -21,6 +22,25 @@ import { getLogger } from "@/lib/logger";
 export interface TargetConfig {
   [key: string]: unknown;
 }
+
+// ─── Config validation schemas (S-M1 fix) ─────────────────────
+
+const webhookConfigSchema = z.object({
+  url: z.url(),
+  secret: z.string().min(1),
+});
+
+const siemHecConfigSchema = z.object({
+  url: z.url(),
+  token: z.string().min(1),
+});
+
+const s3ObjectConfigSchema = z.object({
+  endpoint: z.url(),
+  region: z.string().min(1),
+  accessKeyId: z.string().min(1),
+  secretAccessKey: z.string().min(1),
+});
 
 export interface DeliveryPayload {
   id: string;
@@ -144,17 +164,21 @@ function buildObjectKey(tenantId: string, outboxId: string, createdAt: string): 
 export const webhookDeliverer: AuditDeliverer = {
   async deliver(config, payload) {
     const log = getLogger();
+    const parsed = webhookConfigSchema.safeParse(config);
+    if (!parsed.success) {
+      throw new Error(`Invalid webhook config: ${parsed.error.message}`);
+    }
     const sanitized = sanitizeForExternalDelivery(payload);
     const body = JSON.stringify(sanitized);
 
-    const secret = typeof config.secret === "string" ? config.secret : "";
+    const { url, secret } = parsed.data;
     const signature = createHmac("sha256", secret).update(body).digest("hex");
 
-    log.info({ outboxId: payload.id, url: config.url }, "audit-delivery.webhook.attempt");
+    log.info({ outboxId: payload.id, url }, "audit-delivery.webhook.attempt");
 
     let res: Response;
     try {
-      res = await validateAndFetch(String(config.url), {
+      res = await validateAndFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -185,6 +209,11 @@ export const webhookDeliverer: AuditDeliverer = {
 export const siemHecDeliverer: AuditDeliverer = {
   async deliver(config, payload) {
     const log = getLogger();
+    const parsed = siemHecConfigSchema.safeParse(config);
+    if (!parsed.success) {
+      throw new Error(`Invalid SIEM HEC config: ${parsed.error.message}`);
+    }
+    const { url, token } = parsed.data;
     const sanitized = sanitizeForExternalDelivery(payload);
     const hecEvent = {
       event: sanitized,
@@ -193,12 +222,11 @@ export const siemHecDeliverer: AuditDeliverer = {
     };
     const body = JSON.stringify(hecEvent);
 
-    const token = typeof config.token === "string" ? config.token : "";
-    log.info({ outboxId: payload.id, url: config.url }, "audit-delivery.siem_hec.attempt");
+    log.info({ outboxId: payload.id, url }, "audit-delivery.siem_hec.attempt");
 
     let res: Response;
     try {
-      res = await validateAndFetch(String(config.url), {
+      res = await validateAndFetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -241,14 +269,13 @@ export const siemHecDeliverer: AuditDeliverer = {
 export const s3ObjectDeliverer: AuditDeliverer = {
   async deliver(config, payload) {
     const log = getLogger();
+    const parsed = s3ObjectConfigSchema.safeParse(config);
+    if (!parsed.success) {
+      throw new Error(`Invalid S3 object config: ${parsed.error.message}`);
+    }
+    const { endpoint, region, accessKeyId, secretAccessKey } = parsed.data;
     const sanitized = sanitizeForExternalDelivery(payload);
     const body = JSON.stringify(sanitized);
-
-    const endpoint = typeof config.endpoint === "string" ? config.endpoint : "";
-    const region = typeof config.region === "string" ? config.region : "us-east-1";
-    const accessKeyId = typeof config.accessKeyId === "string" ? config.accessKeyId : "";
-    const secretAccessKey =
-      typeof config.secretAccessKey === "string" ? config.secretAccessKey : "";
 
     const objectKey = buildObjectKey(payload.tenantId, payload.id, payload.createdAt);
     // Normalize: strip trailing slash from endpoint, prepend slash to key
