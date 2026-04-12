@@ -18,5 +18,10 @@ GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
 -- insert delivered rows into audit_logs, read tenant for FK validation.
 -- No sequence grants: UUID PKs do not require sequences.
 GRANT SELECT, UPDATE, DELETE ON TABLE "audit_outbox" TO passwd_outbox_worker;
-GRANT INSERT ON TABLE "audit_logs" TO passwd_outbox_worker;
+-- SELECT needed for ON CONFLICT (outbox_id) DO NOTHING dedup check
+GRANT SELECT, INSERT ON TABLE "audit_logs" TO passwd_outbox_worker;
+-- FK-referenced tables: SELECT needed for referential integrity checks under RLS
 GRANT SELECT ON TABLE "tenants" TO passwd_outbox_worker;
+GRANT SELECT ON TABLE "users" TO passwd_outbox_worker;
+GRANT SELECT ON TABLE "teams" TO passwd_outbox_worker;
+GRANT SELECT ON TABLE "service_accounts" TO passwd_outbox_worker;

@@ -66,5 +66,10 @@ GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
 -- Minimum table privileges: claim + deliver + delete SENT/FAILED rows from outbox,
 -- insert delivered rows into audit_logs, read tenant for FK validation.
 GRANT SELECT, UPDATE, DELETE ON audit_outbox TO passwd_outbox_worker;
-GRANT INSERT ON audit_logs TO passwd_outbox_worker;
+-- SELECT needed for ON CONFLICT (outbox_id) DO NOTHING dedup check
+GRANT SELECT, INSERT ON audit_logs TO passwd_outbox_worker;
+-- FK-referenced tables: SELECT needed for referential integrity checks under RLS
 GRANT SELECT ON tenants TO passwd_outbox_worker;
+GRANT SELECT ON users TO passwd_outbox_worker;
+GRANT SELECT ON teams TO passwd_outbox_worker;
+GRANT SELECT ON service_accounts TO passwd_outbox_worker;
