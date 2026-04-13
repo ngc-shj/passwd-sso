@@ -8,19 +8,21 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
-import { safeRecord } from "@/lib/safe-keys";
 import { getLogger } from "@/lib/logger";
 import {
   getMasterKeyByVersion,
   decryptServerData,
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
-import { resolve4, resolve6 } from "node:dns/promises";
-import { Agent as UndiciAgent } from "undici";
-import { isIpInCidr } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
+import { Agent as UndiciAgent } from "undici";
+import {
+  EXTERNAL_DELIVERY_METADATA_BLOCKLIST,
+  sanitizeForExternalDelivery,
+  resolveAndValidateIps,
+  createPinnedDispatcher,
+} from "@/lib/external-http";
 
 // ─── Types ──────────────────────────────────────────────────────
 
@@ -57,19 +59,10 @@ const RETRY_DELAYS = [1_000, 5_000, 25_000];
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
 /**
- * Business PII keys to strip from webhook payloads.
- * Superset of METADATA_BLOCKLIST (crypto keys) plus business PII.
+ * @deprecated Use EXTERNAL_DELIVERY_METADATA_BLOCKLIST from external-http.ts instead.
+ * Re-exported for backward compatibility.
  */
-export const WEBHOOK_METADATA_BLOCKLIST = new Set([
-  ...METADATA_BLOCKLIST,
-  "email",
-  "targetUserEmail",
-  "reason",
-  "incidentRef",
-  "displayName",
-  "justification",
-  "requestedScope",
-]);
+export const WEBHOOK_METADATA_BLOCKLIST = EXTERNAL_DELIVERY_METADATA_BLOCKLIST;
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -77,110 +70,8 @@ function computeHmac(secret: string, payload: string): string {
   return createHmac("sha256", secret).update(payload, "utf8").digest("hex");
 }
 
-/** Recursively strip keys in WEBHOOK_METADATA_BLOCKLIST. */
-function sanitizeWebhookData(value: unknown): unknown {
-  if (value === null || value === undefined) return value;
-  if (Array.isArray(value)) {
-    return value.map(sanitizeWebhookData).filter((v) => v !== undefined);
-  }
-  if (typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const entries: [string, unknown][] = [];
-    for (const [k, v] of Object.entries(obj)) {
-      if (!WEBHOOK_METADATA_BLOCKLIST.has(k)) {
-        const sanitized = sanitizeWebhookData(v);
-        if (sanitized !== undefined) {
-          entries.push([k, sanitized]);
-        }
-      }
-    }
-    return safeRecord(entries);
-  }
-  return value;
-}
-
-/**
- * CIDR ranges that must never receive webhook deliveries.
- * Covers RFC 1918, loopback, link-local, cloud metadata, CGNAT,
- * benchmarking, IETF reserved, and IPv6 equivalents.
- */
-const BLOCKED_CIDRS = [
-  // IPv4
-  "10.0.0.0/8",         // RFC 1918
-  "172.16.0.0/12",      // RFC 1918
-  "192.168.0.0/16",     // RFC 1918
-  "127.0.0.0/8",        // loopback
-  "0.0.0.0/8",          // "this" network
-  "169.254.0.0/16",     // link-local + cloud metadata (169.254.169.254)
-  "100.64.0.0/10",      // RFC 6598 CGNAT (also Tailscale)
-  "192.0.0.0/24",       // RFC 6890 IETF protocol assignments
-  "192.0.2.0/24",       // RFC 5737 TEST-NET-1
-  "198.18.0.0/15",      // RFC 2544 benchmarking
-  "198.51.100.0/24",    // RFC 5737 TEST-NET-2
-  "203.0.113.0/24",     // RFC 5737 TEST-NET-3
-  "240.0.0.0/4",        // RFC 1112 reserved
-  // IPv6
-  "::1/128",            // loopback
-  "::/128",             // unspecified
-  "fe80::/10",          // link-local
-  "fc00::/7",           // unique local (ULA)
-  "::ffff:0:0/96",      // IPv4-mapped IPv6 (prevents bypass via ::ffff:127.0.0.1)
-];
-
-/**
- * Check if an IP address belongs to a private/reserved range
- * using the existing CIDR matcher from ip-access.ts.
- */
-function isPrivateIp(ip: string): boolean {
-  return BLOCKED_CIDRS.some((cidr) => isIpInCidr(ip, cidr));
-}
-
-/**
- * Resolve hostname and reject private/reserved IPs to prevent SSRF.
- * Returns the list of validated public IPs for use in IP pinning.
- */
-async function resolveAndValidateIps(url: string): Promise<string[]> {
-  const hostname = new URL(url).hostname;
-
-  // Already an IP literal — check directly
-  if (/^[\d.]+$/.test(hostname) || hostname.includes(":")) {
-    if (isPrivateIp(hostname)) throw new Error(`Private IP rejected: ${hostname}`);
-    return [hostname];
-  }
-
-  const ips: string[] = [];
-  try { ips.push(...await resolve4(hostname)); } catch { /* no A records */ }
-  try { ips.push(...await resolve6(hostname)); } catch { /* no AAAA records */ }
-
-  if (ips.length === 0) throw new Error(`DNS resolution failed: ${hostname}`);
-
-  for (const ip of ips) {
-    if (isPrivateIp(ip)) {
-      throw new Error(`Hostname ${hostname} resolves to private IP: ${ip}`);
-    }
-  }
-
-  return ips;
-}
-
-/**
- * Create an undici Agent that pins connections to pre-validated IPs,
- * eliminating the DNS rebinding TOCTOU window between validation and fetch.
- */
-function createPinnedDispatcher(hostname: string, validatedIps: string[]): UndiciAgent {
-  let index = 0;
-  return new UndiciAgent({
-    connect: {
-      // Preserve TLS certificate validation via SNI
-      servername: hostname,
-      lookup: (_origin, _opts, cb) => {
-        const ip = validatedIps[index % validatedIps.length];
-        index++;
-        cb(null, [{ address: ip, family: ip.includes(":") ? 6 : 4 }]);
-      },
-    },
-  });
-}
+/** Recursively strip keys in EXTERNAL_DELIVERY_METADATA_BLOCKLIST. */
+const sanitizeWebhookData = sanitizeForExternalDelivery;
 
 async function deliverWithRetry(
   url: string,

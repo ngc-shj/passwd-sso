@@ -73,3 +73,6 @@ GRANT SELECT ON tenants TO passwd_outbox_worker;
 GRANT SELECT ON users TO passwd_outbox_worker;
 GRANT SELECT ON teams TO passwd_outbox_worker;
 GRANT SELECT ON service_accounts TO passwd_outbox_worker;
+-- Phase 3: delivery targets
+GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;

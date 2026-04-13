@@ -440,6 +440,8 @@ model Tenant {
   shareAccessLogs            ShareAccessLog[]
   auditLogs                  AuditLog[]
   auditOutbox                AuditOutbox[]
+  auditDeliveryTargets       AuditDeliveryTarget[]
+  auditDeliveries            AuditDelivery[]
   attachments                Attachment[]
   emergencyAccessGrants      EmergencyAccessGrant[]
   folders                    Folder[]
@@ -907,6 +909,8 @@ enum AuditAction {
   AUDIT_OUTBOX_RETENTION_PURGED
   AUDIT_OUTBOX_METRICS_VIEW
   AUDIT_OUTBOX_PURGE_EXECUTED
+  AUDIT_DELIVERY_FAILED
+  AUDIT_DELIVERY_DEAD_LETTER
 }
 
 enum AuditScope {
@@ -923,6 +927,20 @@ enum ActorType {
 }
 
 enum AuditOutboxStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+}
+
+enum AuditDeliveryTargetKind {
+  DB
+  WEBHOOK
+  SIEM_HEC
+  S3_OBJECT
+}
+
+enum AuditDeliveryStatus {
   PENDING
   PROCESSING
   SENT
@@ -972,12 +990,57 @@ model AuditOutbox {
   sentAt              DateTime?         @map("sent_at")
   lastError           String?           @map("last_error") @db.VarChar(1024)
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  deliveries AuditDelivery[]
 
   @@index([status, nextRetryAt])
   @@index([tenantId, status, createdAt])
   @@index([status, processingStartedAt])
   @@map("audit_outbox")
+}
+
+model AuditDeliveryTarget {
+  id               String                   @id @default(uuid(4)) @db.Uuid
+  tenantId         String                   @map("tenant_id") @db.Uuid
+  kind             AuditDeliveryTargetKind
+  configEncrypted  String                   @map("config_encrypted")
+  configIv         String                   @map("config_iv")
+  configAuthTag    String                   @map("config_auth_tag")
+  masterKeyVersion Int                      @map("master_key_version")
+  isActive         Boolean                  @default(true) @map("is_active")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  failCount        Int                      @default(0) @map("fail_count")
+  lastError        String?                  @map("last_error") @db.VarChar(1024)
+  lastDeliveredAt  DateTime?                @map("last_delivered_at")
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  deliveries AuditDelivery[]
+
+  @@index([tenantId, isActive])
+  @@map("audit_delivery_targets")
+}
+
+model AuditDelivery {
+  id                  String                @id @default(uuid(4)) @db.Uuid
+  outboxId            String                @map("outbox_id") @db.Uuid
+  targetId            String                @map("target_id") @db.Uuid
+  tenantId            String                @map("tenant_id") @db.Uuid
+  status              AuditDeliveryStatus   @default(PENDING)
+  attemptCount        Int                   @default(0) @map("attempt_count")
+  maxAttempts         Int                   @default(8) @map("max_attempts")
+  nextRetryAt         DateTime              @default(now()) @map("next_retry_at")
+  processingStartedAt DateTime?             @map("processing_started_at")
+  lastError           String?               @map("last_error") @db.VarChar(1024)
+  createdAt           DateTime              @default(now()) @map("created_at")
+
+  outbox AuditOutbox          @relation(fields: [outboxId], references: [id], onDelete: Restrict)
+  target AuditDeliveryTarget  @relation(fields: [targetId], references: [id], onDelete: Restrict)
+  tenant Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([outboxId, targetId])
+  @@index([tenantId, status, nextRetryAt])
+  @@index([status, nextRetryAt])
+  @@map("audit_deliveries")
 }
 
 // ─── Access Request Models (JIT) ────────────────────────────
