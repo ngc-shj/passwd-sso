@@ -36,9 +36,9 @@ model Session {
   sessionToken String   @unique @map("session_token")
   userId       String   @map("user_id") @db.Uuid
   tenantId     String   @map("tenant_id") @db.Uuid
-  expires      DateTime
-  createdAt    DateTime @default(now()) @map("created_at")
-  lastActiveAt DateTime @default(now()) @map("last_active_at")
+  expires      DateTime @db.Timestamptz(3)
+  createdAt    DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  lastActiveAt DateTime @db.Timestamptz(3) @default(now()) @map("last_active_at")
   ipAddress    String?  @map("ip_address") @db.VarChar(45)
   userAgent    String?  @map("user_agent") @db.VarChar(512)
 
@@ -53,7 +53,7 @@ model Session {
 model VerificationToken {
   identifier String
   token      String   @unique
-  expires    DateTime
+  expires    DateTime @db.Timestamptz(3)
 
   @@unique([identifier, token])
   @@map("verification_tokens")
@@ -66,13 +66,13 @@ model User {
   tenantId      String    @map("tenant_id") @db.Uuid
   name          String?
   email         String?   @unique
-  emailVerified DateTime? @map("email_verified")
+  emailVerified DateTime? @db.Timestamptz(3) @map("email_verified")
   image         String?
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  createdAt     DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  updatedAt     DateTime @db.Timestamptz(3)  @updatedAt @map("updated_at")
 
   // Vault (E2E encryption) fields
-  vaultSetupAt             DateTime? @map("vault_setup_at")
+  vaultSetupAt             DateTime? @db.Timestamptz(3) @map("vault_setup_at")
   accountSalt              String?   @map("account_salt") @db.VarChar(64)
   encryptedSecretKey       String?   @map("encrypted_secret_key") @db.Text
   secretKeyIv              String?   @map("secret_key_iv") @db.VarChar(24)
@@ -100,15 +100,15 @@ model User {
   recoverySecretKeyAuthTag   String?   @map("recovery_secret_key_auth_tag") @db.VarChar(32)
   recoveryHkdfSalt           String?   @map("recovery_hkdf_salt") @db.VarChar(64)
   recoveryVerifierHmac       String?   @map("recovery_verifier_hmac") @db.VarChar(64)
-  recoveryKeySetAt           DateTime? @map("recovery_key_set_at")
+  recoveryKeySetAt           DateTime? @db.Timestamptz(3) @map("recovery_key_set_at")
 
   // User preference
   locale String? @db.VarChar(5)
 
   // Account lockout
   failedUnlockAttempts Int       @default(0) @map("failed_unlock_attempts")
-  lastFailedUnlockAt   DateTime? @map("last_failed_unlock_at")
-  accountLockedUntil   DateTime? @map("account_locked_until")
+  lastFailedUnlockAt   DateTime? @db.Timestamptz(3) @map("last_failed_unlock_at")
+  accountLockedUntil   DateTime? @db.Timestamptz(3) @map("account_locked_until")
 
   accounts  Account[]
   sessions  Session[]
@@ -147,7 +147,7 @@ model User {
 
   // Travel Mode
   travelModeActive      Boolean   @default(false) @map("travel_mode_active")
-  travelModeActivatedAt DateTime? @map("travel_mode_activated_at")
+  travelModeActivatedAt DateTime? @db.Timestamptz(3) @map("travel_mode_activated_at")
 
   // SCIM tokens
   createdScimTokens ScimToken[]
@@ -179,10 +179,10 @@ model ExtensionToken {
   tenantId   String    @map("tenant_id") @db.Uuid
   tokenHash  String    @unique @map("token_hash") @db.VarChar(64)
   scope      String    @db.VarChar(255)
-  expiresAt  DateTime  @map("expires_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  revokedAt  DateTime? @map("revoked_at")
-  lastUsedAt DateTime? @map("last_used_at")
+  expiresAt  DateTime @db.Timestamptz(3)  @map("expires_at")
+  createdAt  DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  revokedAt  DateTime? @db.Timestamptz(3) @map("revoked_at")
+  lastUsedAt DateTime? @db.Timestamptz(3) @map("last_used_at")
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -199,9 +199,9 @@ model ExtensionBridgeCode {
   userId    String    @map("user_id") @db.Uuid
   tenantId  String    @map("tenant_id") @db.Uuid
   scope     String    @db.VarChar(255)
-  expiresAt DateTime  @map("expires_at")
-  usedAt    DateTime? @map("used_at")
-  createdAt DateTime  @default(now()) @map("created_at")
+  expiresAt DateTime @db.Timestamptz(3)  @map("expires_at")
+  usedAt    DateTime? @db.Timestamptz(3) @map("used_at")
+  createdAt DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
   ip        String?   @db.VarChar(64)
   userAgent String?   @map("user_agent") @db.VarChar(512)
 
@@ -218,10 +218,10 @@ model ScimToken {
   tenantId    String    @map("tenant_id") @db.Uuid
   tokenHash   String    @unique @map("token_hash") @db.VarChar(64)
   description String?   @db.VarChar(255)
-  expiresAt   DateTime? @map("expires_at")
-  createdAt   DateTime  @default(now()) @map("created_at")
-  revokedAt   DateTime? @map("revoked_at")
-  lastUsedAt  DateTime? @map("last_used_at")
+  expiresAt   DateTime? @db.Timestamptz(3) @map("expires_at")
+  createdAt   DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  revokedAt   DateTime? @db.Timestamptz(3) @map("revoked_at")
+  lastUsedAt  DateTime? @db.Timestamptz(3) @map("last_used_at")
   createdById String?   @map("created_by_id") @db.Uuid
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -237,8 +237,8 @@ model ScimExternalMapping {
   externalId   String   @map("external_id")
   resourceType String   @map("resource_type") @db.VarChar(20)
   internalId   String   @map("internal_id")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt    DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt    DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
@@ -255,8 +255,8 @@ model Tag {
   parentId  String?  @map("parent_id") @db.Uuid
   userId    String   @map("user_id") @db.Uuid
   tenantId  String   @map("tenant_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   parent    Tag?            @relation("TagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children  Tag[]           @relation("TagHierarchy")
@@ -277,7 +277,7 @@ model VaultKey {
   verificationCiphertext String   @map("verification_ciphertext") @db.Text
   verificationIv         String   @map("verification_iv") @db.VarChar(24)
   verificationAuthTag    String   @map("verification_auth_tag") @db.VarChar(32)
-  createdAt              DateTime @default(now()) @map("created_at")
+  createdAt              DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -305,14 +305,14 @@ model PasswordEntry {
   isFavorite      Boolean   @default(false) @map("is_favorite")
   isArchived      Boolean   @default(false) @map("is_archived")
   requireReprompt Boolean   @default(false) @map("require_reprompt")
-  expiresAt       DateTime? @map("expires_at")
-  deletedAt       DateTime? @map("deleted_at")
+  expiresAt       DateTime? @db.Timestamptz(3) @map("expires_at")
+  deletedAt       DateTime? @db.Timestamptz(3) @map("deleted_at")
 
   userId    String   @map("user_id") @db.Uuid
   tenantId  String   @map("tenant_id") @db.Uuid
   folderId  String?  @map("folder_id") @db.Uuid
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   tags        Tag[]
   user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -381,8 +381,8 @@ model Team {
   // E2E encryption (ECDH-P256)
   teamKeyVersion Int @default(1) @map("team_key_version")
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   members              TeamMember[]
   passwords            TeamPasswordEntry[]
@@ -417,8 +417,8 @@ model Tenant {
   tailscaleEnabled          Boolean  @default(false) @map("tailscale_enabled")
   tailscaleTailnet          String?  @map("tailscale_tailnet") @db.VarChar(255)
   requireMinPinLength      Int?     @map("require_min_pin_length")
-  createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt                DateTime @updatedAt @map("updated_at")
+  createdAt                DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt                DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   users                      User[]
   accounts                   Account[]
@@ -482,7 +482,7 @@ model Tenant {
 
   // MFA enforcement
   requirePasskey             Boolean  @default(false) @map("require_passkey")
-  requirePasskeyEnabledAt    DateTime? @map("require_passkey_enabled_at")
+  requirePasskeyEnabledAt    DateTime? @db.Timestamptz(3) @map("require_passkey_enabled_at")
   passkeyGracePeriodDays     Int?     @map("passkey_grace_period_days")
 
   // Configurable vault lockout
@@ -516,12 +516,12 @@ model TenantMember {
   tenantId           String             @map("tenant_id") @db.Uuid
   userId             String             @map("user_id") @db.Uuid
   role               TenantRole         @default(MEMBER)
-  deactivatedAt      DateTime?          @map("deactivated_at")
+  deactivatedAt      DateTime? @db.Timestamptz(3)          @map("deactivated_at")
   scimManaged        Boolean            @default(false) @map("scim_managed")
   provisioningSource ProvisioningSource @default(MANUAL) @map("provisioning_source")
-  lastScimSyncedAt   DateTime?          @map("last_scim_synced_at")
-  createdAt          DateTime           @default(now()) @map("created_at")
-  updatedAt          DateTime           @updatedAt @map("updated_at")
+  lastScimSyncedAt   DateTime? @db.Timestamptz(3)          @map("last_scim_synced_at")
+  createdAt          DateTime @db.Timestamptz(3)           @default(now()) @map("created_at")
+  updatedAt          DateTime @db.Timestamptz(3)           @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -537,8 +537,8 @@ model ScimGroupMapping {
   teamId          String   @map("team_id") @db.Uuid
   externalGroupId String   @map("external_group_id")
   role            TeamRole @default(MEMBER)
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdAt       DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt       DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
@@ -556,11 +556,11 @@ model TeamMember {
   tenantId       String    @map("tenant_id") @db.Uuid
   role           TeamRole  @default(MEMBER)
   keyDistributed Boolean   @default(false) @map("key_distributed")
-  deactivatedAt  DateTime? @map("deactivated_at")
+  deactivatedAt  DateTime? @db.Timestamptz(3) @map("deactivated_at")
   scimManaged    Boolean   @default(false) @map("scim_managed")
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -583,8 +583,8 @@ model TeamMemberKey {
   hkdfSalt           String   @map("hkdf_salt") @db.VarChar(64)
   wrapVersion        Int      @default(1) @map("wrap_version")
   keyVersion         Int      @default(1) @map("key_version")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  createdAt          DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt          DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -618,8 +618,8 @@ model TeamPasswordEntry {
   // Metadata (unencrypted)
   isArchived     Boolean   @default(false) @map("is_archived")
   requireReprompt Boolean  @default(false) @map("require_reprompt")
-  expiresAt      DateTime? @map("expires_at")
-  deletedAt      DateTime? @map("deleted_at")
+  expiresAt      DateTime? @db.Timestamptz(3) @map("expires_at")
+  deletedAt      DateTime? @db.Timestamptz(3) @map("deleted_at")
 
   teamId       String  @map("team_id") @db.Uuid
   tenantId     String  @map("tenant_id") @db.Uuid
@@ -627,8 +627,8 @@ model TeamPasswordEntry {
   updatedById  String  @map("updated_by_id") @db.Uuid
   teamFolderId String? @map("team_folder_id") @db.Uuid
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team        Team                       @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant      Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -655,8 +655,8 @@ model TeamTag {
   teamId   String @map("team_id") @db.Uuid
   tenantId String @map("tenant_id") @db.Uuid
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   parent    TeamTag?            @relation("TeamTagHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
   children  TeamTag[]           @relation("TeamTagHierarchy")
@@ -675,7 +675,7 @@ model TeamPasswordFavorite {
   tenantId            String @map("tenant_id") @db.Uuid
   teamPasswordEntryId String @map("team_password_entry_id") @db.Uuid
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
 
   user              User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant            Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -694,12 +694,12 @@ model TeamInvitation {
   role      TeamRole         @default(MEMBER)
   status    InvitationStatus @default(PENDING)
   token     String           @unique
-  expiresAt DateTime         @map("expires_at")
+  expiresAt DateTime @db.Timestamptz(3)         @map("expires_at")
 
   invitedById String @map("invited_by_id") @db.Uuid
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team      Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -720,12 +720,12 @@ model PasswordShare {
   encryptedData String     @map("encrypted_data") @db.Text
   dataIv        String     @map("data_iv") @db.VarChar(24)
   dataAuthTag   String     @map("data_auth_tag") @db.VarChar(32)
-  expiresAt     DateTime   @map("expires_at")
+  expiresAt     DateTime @db.Timestamptz(3)   @map("expires_at")
   maxViews      Int?       @map("max_views")
   viewCount     Int        @default(0) @map("view_count")
-  revokedAt     DateTime?  @map("revoked_at")
+  revokedAt     DateTime? @db.Timestamptz(3)  @map("revoked_at")
   createdById   String     @map("created_by_id") @db.Uuid
-  createdAt     DateTime   @default(now()) @map("created_at")
+  createdAt     DateTime @db.Timestamptz(3)   @default(now()) @map("created_at")
 
   // Entry share relations
   passwordEntryId     String? @map("password_entry_id") @db.Uuid
@@ -769,7 +769,7 @@ model ShareAccessLog {
   tenantId  String   @map("tenant_id") @db.Uuid
   ip        String?  @db.VarChar(45)
   userAgent String?  @map("user_agent") @db.VarChar(512)
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
 
   share  PasswordShare @relation(fields: [shareId], references: [id], onDelete: Cascade)
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -964,7 +964,7 @@ model AuditLog {
   metadata         Json?
   ip               String?     @db.VarChar(45)
   userAgent        String?     @map("user_agent") @db.VarChar(512)
-  createdAt        DateTime    @default(now()) @map("created_at")
+  createdAt        DateTime @db.Timestamptz(3)    @default(now()) @map("created_at")
   outboxId         String?     @unique @map("outbox_id") @db.Uuid
   chainSeq         BigInt?     @map("chain_seq")
   eventHash        Bytes?      @map("event_hash")
@@ -987,7 +987,7 @@ model AuditChainAnchor {
   tenantId  String   @id @map("tenant_id") @db.Uuid
   chainSeq  BigInt   @default(0) @map("chain_seq")
   prevHash  Bytes    @default(dbgenerated("'\\x00'::bytea")) @map("prev_hash")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   @@map("audit_chain_anchors")
@@ -1000,10 +1000,10 @@ model AuditOutbox {
   status              AuditOutboxStatus @default(PENDING)
   attemptCount        Int               @default(0) @map("attempt_count")
   maxAttempts         Int               @default(8) @map("max_attempts")
-  createdAt           DateTime          @default(now()) @map("created_at")
-  nextRetryAt         DateTime          @default(now()) @map("next_retry_at")
-  processingStartedAt DateTime?         @map("processing_started_at")
-  sentAt              DateTime?         @map("sent_at")
+  createdAt           DateTime @db.Timestamptz(3)          @default(now()) @map("created_at")
+  nextRetryAt         DateTime @db.Timestamptz(3)          @default(now()) @map("next_retry_at")
+  processingStartedAt DateTime? @db.Timestamptz(3)         @map("processing_started_at")
+  sentAt              DateTime? @db.Timestamptz(3)         @map("sent_at")
   lastError           String?           @map("last_error") @db.VarChar(1024)
 
   tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1024,10 +1024,10 @@ model AuditDeliveryTarget {
   configAuthTag    String                   @map("config_auth_tag")
   masterKeyVersion Int                      @map("master_key_version")
   isActive         Boolean                  @default(true) @map("is_active")
-  createdAt        DateTime                 @default(now()) @map("created_at")
+  createdAt        DateTime @db.Timestamptz(3)                 @default(now()) @map("created_at")
   failCount        Int                      @default(0) @map("fail_count")
   lastError        String?                  @map("last_error") @db.VarChar(1024)
-  lastDeliveredAt  DateTime?                @map("last_delivered_at")
+  lastDeliveredAt  DateTime? @db.Timestamptz(3)                @map("last_delivered_at")
 
   tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   deliveries AuditDelivery[]
@@ -1044,10 +1044,10 @@ model AuditDelivery {
   status              AuditDeliveryStatus   @default(PENDING)
   attemptCount        Int                   @default(0) @map("attempt_count")
   maxAttempts         Int                   @default(8) @map("max_attempts")
-  nextRetryAt         DateTime              @default(now()) @map("next_retry_at")
-  processingStartedAt DateTime?             @map("processing_started_at")
+  nextRetryAt         DateTime @db.Timestamptz(3)              @default(now()) @map("next_retry_at")
+  processingStartedAt DateTime? @db.Timestamptz(3)             @map("processing_started_at")
   lastError           String?               @map("last_error") @db.VarChar(1024)
-  createdAt           DateTime              @default(now()) @map("created_at")
+  createdAt           DateTime @db.Timestamptz(3)              @default(now()) @map("created_at")
 
   outbox AuditOutbox          @relation(fields: [outboxId], references: [id], onDelete: Restrict)
   target AuditDeliveryTarget  @relation(fields: [targetId], references: [id], onDelete: Restrict)
@@ -1076,11 +1076,11 @@ model AccessRequest {
   justification      String?             @db.Text
   status             AccessRequestStatus @default(PENDING)
   approvedById       String?             @map("approved_by_id") @db.Uuid
-  approvedAt         DateTime?           @map("approved_at")
+  approvedAt         DateTime? @db.Timestamptz(3)           @map("approved_at")
   grantedTokenId     String?             @map("granted_token_id") @db.Uuid
   grantedTokenTtlSec Int?                @map("granted_token_ttl_sec")
-  expiresAt          DateTime            @map("expires_at")
-  createdAt          DateTime            @default(now()) @map("created_at")
+  expiresAt          DateTime @db.Timestamptz(3)            @map("expires_at")
+  createdAt          DateTime @db.Timestamptz(3)            @default(now()) @map("created_at")
 
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
@@ -1109,7 +1109,7 @@ model Attachment {
   passwordEntryId     String?  @map("password_entry_id") @db.Uuid
   teamPasswordEntryId String?  @map("team_password_entry_id") @db.Uuid
   createdById         String   @map("created_by_id") @db.Uuid
-  createdAt           DateTime @default(now()) @map("created_at")
+  createdAt           DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
 
   passwordEntry     PasswordEntry?     @relation(fields: [passwordEntryId], references: [id], onDelete: Cascade)
   teamPasswordEntry TeamPasswordEntry? @relation(fields: [teamPasswordEntryId], references: [id], onDelete: Cascade)
@@ -1145,7 +1145,7 @@ model EmergencyAccessGrant {
   waitDays     Int                   @map("wait_days")
 
   tokenHash      String   @unique @map("token_hash") @db.VarChar(64)
-  tokenExpiresAt DateTime @map("token_expires_at")
+  tokenExpiresAt DateTime @db.Timestamptz(3) @map("token_expires_at")
 
   // ECDH key exchange fields
   keyAlgorithm            String  @default("ECDH-P256") @map("key_algorithm") @db.VarChar(32)
@@ -1163,13 +1163,13 @@ model EmergencyAccessGrant {
   kemPublicKey  String? @map("kem_public_key") @db.Text
 
   // Timestamps for state machine
-  requestedAt   DateTime? @map("requested_at")
-  activatedAt   DateTime? @map("activated_at")
-  waitExpiresAt DateTime? @map("wait_expires_at")
-  revokedAt     DateTime? @map("revoked_at")
+  requestedAt   DateTime? @db.Timestamptz(3) @map("requested_at")
+  activatedAt   DateTime? @db.Timestamptz(3) @map("activated_at")
+  waitExpiresAt DateTime? @db.Timestamptz(3) @map("wait_expires_at")
+  revokedAt     DateTime? @db.Timestamptz(3) @map("revoked_at")
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   owner          User                    @relation("emergencyGrantsAsOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   grantee        User?                   @relation("emergencyGrantsAsGrantee", fields: [granteeId], references: [id], onDelete: SetNull)
@@ -1191,8 +1191,8 @@ model Folder {
   userId    String   @map("user_id") @db.Uuid
   tenantId  String   @map("tenant_id") @db.Uuid
   sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1213,8 +1213,8 @@ model TeamFolder {
   teamId    String   @map("team_id") @db.Uuid
   tenantId  String   @map("tenant_id") @db.Uuid
   sortOrder Int      @default(0) @map("sort_order")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team     Team                @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1239,7 +1239,7 @@ model PasswordEntryHistory {
   blobAuthTag   String   @map("blob_auth_tag") @db.VarChar(32)
   keyVersion    Int      @map("key_version")
   aadVersion    Int      @default(0) @map("aad_version")
-  changedAt     DateTime @default(now()) @map("changed_at")
+  changedAt     DateTime @db.Timestamptz(3) @default(now()) @map("changed_at")
 
   entry  PasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1263,7 +1263,7 @@ model TeamPasswordEntryHistory {
   itemKeyIv        String?  @map("item_key_iv") @db.VarChar(24)
   itemKeyAuthTag   String?  @map("item_key_auth_tag") @db.VarChar(32)
   changedById      String   @map("changed_by_id") @db.Uuid
-  changedAt        DateTime @default(now()) @map("changed_at")
+  changedAt        DateTime @db.Timestamptz(3) @default(now()) @map("changed_at")
 
   entry     TeamPasswordEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
   changedBy User              @relation(fields: [changedById], references: [id])
@@ -1282,7 +1282,7 @@ model EmergencyAccessKeyPair {
   privateKeyIv        String @map("private_key_iv") @db.VarChar(24)
   privateKeyAuthTag   String @map("private_key_auth_tag") @db.VarChar(32)
 
-  createdAt DateTime @default(now()) @map("created_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
 
   grant  EmergencyAccessGrant @relation(fields: [grantId], references: [id], onDelete: Cascade)
   tenant Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1317,7 +1317,7 @@ model Notification {
   body      String           @db.Text
   metadata  Json?
   isRead    Boolean          @default(false) @map("is_read")
-  createdAt DateTime         @default(now()) @map("created_at")
+  createdAt DateTime @db.Timestamptz(3)         @default(now()) @map("created_at")
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1351,8 +1351,8 @@ model TeamPolicy {
   inheritTenantCidrs        Boolean @default(true) @map("inherit_tenant_cidrs")
   teamAllowedCidrs          String[] @default([])  @map("team_allowed_cidrs")
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1374,10 +1374,10 @@ model TeamWebhook {
   isActive        Boolean  @default(true) @map("is_active")
   lastError       String?  @map("last_error") @db.Text
   failCount       Int      @default(0) @map("fail_count")
-  lastDeliveredAt DateTime? @map("last_delivered_at")
-  lastFailedAt    DateTime? @map("last_failed_at")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  lastDeliveredAt DateTime? @db.Timestamptz(3) @map("last_delivered_at")
+  lastFailedAt    DateTime? @db.Timestamptz(3) @map("last_failed_at")
+  createdAt       DateTime @db.Timestamptz(3) @default(now()) @map("created_at")
+  updatedAt       DateTime @db.Timestamptz(3) @updatedAt @map("updated_at")
 
   team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1399,10 +1399,10 @@ model TenantWebhook {
   isActive         Boolean   @default(true) @map("is_active")
   lastError        String?   @map("last_error") @db.Text
   failCount        Int       @default(0) @map("fail_count")
-  lastDeliveredAt  DateTime? @map("last_delivered_at")
-  lastFailedAt     DateTime? @map("last_failed_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  lastDeliveredAt  DateTime? @db.Timestamptz(3) @map("last_delivered_at")
+  lastFailedAt     DateTime? @db.Timestamptz(3) @map("last_failed_at")
+  createdAt        DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  updatedAt        DateTime @db.Timestamptz(3)  @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -1419,10 +1419,10 @@ model AdminVaultReset {
   targetUserId  String    @map("target_user_id") @db.Uuid
   initiatedById String    @map("initiated_by_id") @db.Uuid
   tokenHash     String    @unique @map("token_hash") @db.VarChar(64)
-  expiresAt     DateTime  @map("expires_at")
-  executedAt    DateTime? @map("executed_at")
-  revokedAt     DateTime? @map("revoked_at")
-  createdAt     DateTime  @default(now()) @map("created_at")
+  expiresAt     DateTime @db.Timestamptz(3)  @map("expires_at")
+  executedAt    DateTime? @db.Timestamptz(3) @map("executed_at")
+  revokedAt     DateTime? @db.Timestamptz(3) @map("revoked_at")
+  createdAt     DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
 
   tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   team        Team?  @relation(fields: [teamId], references: [id], onDelete: SetNull)
@@ -1451,8 +1451,8 @@ model ServiceAccount {
   identityType IdentityType @default(SERVICE_ACCOUNT) @map("identity_type")
   isActive     Boolean      @default(true) @map("is_active")
   createdById  String       @map("created_by_id") @db.Uuid
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
+  createdAt    DateTime @db.Timestamptz(3)     @default(now()) @map("created_at")
+  updatedAt    DateTime @db.Timestamptz(3)     @updatedAt @map("updated_at")
 
   tenant    Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   team      Team?               @relation(fields: [teamId], references: [id], onDelete: SetNull)
@@ -1474,10 +1474,10 @@ model ServiceAccountToken {
   prefix           String    @map("prefix") @db.VarChar(8)
   name             String    @db.VarChar(100)
   scope            String    @db.VarChar(1024)
-  expiresAt        DateTime  @map("expires_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  revokedAt        DateTime? @map("revoked_at")
-  lastUsedAt       DateTime? @map("last_used_at")
+  expiresAt        DateTime @db.Timestamptz(3)  @map("expires_at")
+  createdAt        DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  revokedAt        DateTime? @db.Timestamptz(3) @map("revoked_at")
+  lastUsedAt       DateTime? @db.Timestamptz(3) @map("last_used_at")
 
   serviceAccount ServiceAccount @relation(fields: [serviceAccountId], references: [id], onDelete: Cascade)
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1498,10 +1498,10 @@ model ApiKey {
   prefix     String    @map("prefix") @db.VarChar(8)
   name       String    @db.VarChar(100)
   scope      String    @db.VarChar(512)
-  expiresAt  DateTime  @map("expires_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
-  revokedAt  DateTime? @map("revoked_at")
-  lastUsedAt DateTime? @map("last_used_at")
+  expiresAt  DateTime @db.Timestamptz(3)  @map("expires_at")
+  createdAt  DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  revokedAt  DateTime? @db.Timestamptz(3) @map("revoked_at")
+  lastUsedAt DateTime? @db.Timestamptz(3) @map("last_used_at")
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1533,8 +1533,8 @@ model WebAuthnCredential {
   prfSupported          Boolean   @default(false) @map("prf_supported")
   registeredDevice      String?   @map("registered_device") @db.VarChar(100)
   lastUsedDevice        String?   @map("last_used_device") @db.VarChar(100)
-  createdAt             DateTime  @default(now()) @map("created_at")
-  lastUsedAt            DateTime? @map("last_used_at")
+  createdAt             DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  lastUsedAt            DateTime? @db.Timestamptz(3) @map("last_used_at")
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -1570,12 +1570,12 @@ model DirectorySyncConfig {
   credentialsIv       String                @map("credentials_iv") @db.VarChar(24)
   credentialsAuthTag  String                @map("credentials_auth_tag") @db.VarChar(32)
   status              DirectorySyncStatus   @default(IDLE)
-  lastSyncAt          DateTime?             @map("last_sync_at")
+  lastSyncAt          DateTime? @db.Timestamptz(3)             @map("last_sync_at")
   lastSyncError       String?               @map("last_sync_error") @db.Text
   lastSyncStats       Json?                 @map("last_sync_stats")
-  nextSyncAt          DateTime?             @map("next_sync_at")
-  createdAt           DateTime              @default(now()) @map("created_at")
-  updatedAt           DateTime              @updatedAt @map("updated_at")
+  nextSyncAt          DateTime? @db.Timestamptz(3)             @map("next_sync_at")
+  createdAt           DateTime @db.Timestamptz(3)              @default(now()) @map("created_at")
+  updatedAt           DateTime @db.Timestamptz(3)              @updatedAt @map("updated_at")
 
   tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   syncLogs DirectorySyncLog[]
@@ -1590,8 +1590,8 @@ model DirectorySyncLog {
   configId         String              @map("config_id") @db.Uuid
   tenantId         String              @map("tenant_id") @db.Uuid
   status           DirectorySyncStatus
-  startedAt        DateTime            @map("started_at")
-  completedAt      DateTime?           @map("completed_at")
+  startedAt        DateTime @db.Timestamptz(3)            @map("started_at")
+  completedAt      DateTime? @db.Timestamptz(3)           @map("completed_at")
   dryRun           Boolean             @default(false) @map("dry_run")
   usersCreated     Int                 @default(0) @map("users_created")
   usersUpdated     Int                 @default(0) @map("users_updated")
@@ -1615,9 +1615,9 @@ model PersonalLogAccessGrant {
   targetUserId String    @map("target_user_id") @db.Uuid
   reason       String    @db.Text
   incidentRef  String?   @map("incident_ref") @db.VarChar(500)
-  expiresAt    DateTime  @map("expires_at")
-  revokedAt    DateTime? @map("revoked_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  expiresAt    DateTime @db.Timestamptz(3)  @map("expires_at")
+  revokedAt    DateTime? @db.Timestamptz(3) @map("revoked_at")
+  createdAt    DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
 
   tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   requester  User   @relation("BreakGlassRequester", fields: [requesterId], references: [id], onDelete: Restrict)
@@ -1642,10 +1642,10 @@ model McpClient {
   allowedScopes    String    @map("allowed_scopes") @db.VarChar(1024)
   isActive         Boolean   @default(true) @map("is_active")
   isDcr            Boolean   @default(false) @map("is_dcr")
-  dcrExpiresAt     DateTime? @map("dcr_expires_at")
+  dcrExpiresAt     DateTime? @db.Timestamptz(3) @map("dcr_expires_at")
   createdById      String?   @map("created_by_id") @db.Uuid
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  createdAt        DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
+  updatedAt        DateTime @db.Timestamptz(3)  @updatedAt @map("updated_at")
 
   tenant             Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   createdBy          User?                @relation("mcpClientCreator", fields: [createdById], references: [id], onDelete: Restrict)
@@ -1671,9 +1671,9 @@ model McpAuthorizationCode {
   scope               String    @db.VarChar(1024)
   codeChallenge       String    @map("code_challenge") @db.VarChar(128)
   codeChallengeMethod String    @default("S256") @map("code_challenge_method") @db.VarChar(10)
-  expiresAt           DateTime  @map("expires_at")
-  usedAt              DateTime? @map("used_at")
-  createdAt           DateTime  @default(now()) @map("created_at")
+  expiresAt           DateTime @db.Timestamptz(3)  @map("expires_at")
+  usedAt              DateTime? @db.Timestamptz(3) @map("used_at")
+  createdAt           DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
 
   mcpClient McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
 
@@ -1689,10 +1689,10 @@ model McpAccessToken {
   userId           String?   @map("user_id") @db.Uuid
   serviceAccountId String?   @map("service_account_id") @db.Uuid
   scope            String    @db.VarChar(1024)
-  expiresAt        DateTime  @map("expires_at")
-  revokedAt        DateTime? @map("revoked_at")
-  lastUsedAt       DateTime? @map("last_used_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
+  expiresAt        DateTime @db.Timestamptz(3)  @map("expires_at")
+  revokedAt        DateTime? @db.Timestamptz(3) @map("revoked_at")
+  lastUsedAt       DateTime? @db.Timestamptz(3) @map("last_used_at")
+  createdAt        DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   mcpClient McpClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -1714,11 +1714,11 @@ model McpRefreshToken {
   userId           String?   @map("user_id") @db.Uuid
   serviceAccountId String?   @map("service_account_id") @db.Uuid
   scope            String    @db.VarChar(1024)
-  expiresAt        DateTime  @map("expires_at")
-  revokedAt        DateTime? @map("revoked_at")
-  rotatedAt        DateTime? @map("rotated_at")
+  expiresAt        DateTime @db.Timestamptz(3)  @map("expires_at")
+  revokedAt        DateTime? @db.Timestamptz(3) @map("revoked_at")
+  rotatedAt        DateTime? @db.Timestamptz(3) @map("rotated_at")
   replacedByHash   String?   @map("replaced_by_hash") @db.VarChar(64)
-  createdAt        DateTime  @default(now()) @map("created_at")
+  createdAt        DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
 
   tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   mcpClient   McpClient      @relation(fields: [clientId], references: [id], onDelete: Cascade)
@@ -1737,9 +1737,9 @@ model DelegationSession {
   mcpTokenId String    @map("mcp_token_id") @db.Uuid
   entryIds   String[]  @map("entry_ids")
   note       String?   @db.VarChar(255)
-  expiresAt  DateTime  @map("expires_at")
-  revokedAt  DateTime? @map("revoked_at")
-  createdAt  DateTime  @default(now()) @map("created_at")
+  expiresAt  DateTime @db.Timestamptz(3)  @map("expires_at")
+  revokedAt  DateTime? @db.Timestamptz(3) @map("revoked_at")
+  createdAt  DateTime @db.Timestamptz(3)  @default(now()) @map("created_at")
 
   user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant         Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)

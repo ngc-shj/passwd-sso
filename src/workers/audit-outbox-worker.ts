@@ -240,6 +240,10 @@ export async function deliverRowWithChain(
 
     // Build metadata JSON
     const metadataJson = payload.metadata !== null ? JSON.stringify(payload.metadata) : null;
+    // Use ISO string for created_at to avoid pg driver's local timezone interpretation
+    // of TIMESTAMP WITHOUT TIME ZONE columns. The same ISO string is used for
+    // both hash computation (via buildChainInput) and DB storage, ensuring
+    // the verify endpoint can reproduce the exact same hash.
     const createdAtIso = row.created_at.toISOString();
 
     // P4-F1 fix: INSERT with RETURNING to detect conflict

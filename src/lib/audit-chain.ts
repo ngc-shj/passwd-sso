@@ -1,5 +1,33 @@
 import { createHash } from "node:crypto";
-import canonicalize from "canonicalize";
+
+/**
+ * Minimal JCS (RFC 8785) canonicalization.
+ * Recursively sorts object keys and serializes to JSON.
+ * Handles: objects, arrays, strings, numbers, booleans, null.
+ * Does not handle: BigInt, undefined, symbols, functions (throws).
+ */
+function jcsCanonical(value: unknown): string {
+  if (value === null) return "null";
+  if (typeof value === "boolean") return value ? "true" : "false";
+  if (typeof value === "number") {
+    if (!isFinite(value)) throw new Error("JCS: non-finite number");
+    return JSON.stringify(value);
+  }
+  if (typeof value === "string") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return "[" + value.map((v) => jcsCanonical(v)).join(",") + "]";
+  }
+  if (typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).sort();
+    const entries = keys.map((k) => {
+      const v = (value as Record<string, unknown>)[k];
+      if (v === undefined) return null;
+      return JSON.stringify(k) + ":" + jcsCanonical(v);
+    }).filter((e) => e !== null);
+    return "{" + entries.join(",") + "}";
+  }
+  throw new Error(`JCS: unsupported type ${typeof value}`);
+}
 
 /**
  * Fields included in the canonical representation for hash chain computation.
@@ -42,10 +70,7 @@ export function buildChainInput(fields: {
  * Compute the canonical byte representation of a ChainInput using JCS (RFC 8785).
  */
 export function computeCanonicalBytes(input: ChainInput): Buffer {
-  const canonical = canonicalize(input);
-  if (canonical === undefined) {
-    throw new Error("JCS canonicalization failed: input cannot be serialized");
-  }
+  const canonical = jcsCanonical(input);
   return Buffer.from(canonical, "utf-8");
 }
 

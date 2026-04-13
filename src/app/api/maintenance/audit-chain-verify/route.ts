@@ -48,21 +48,39 @@ function buildQuerySchema() {
     );
 }
 
+// Prisma $queryRawUnsafe returns bigint as string, bytea as Uint8Array
+interface ChainRowRaw {
+  id: string;
+  created_at: Date;
+  chain_seq: string;
+  event_hash: Uint8Array;
+  chain_prev_hash: Uint8Array;
+  metadata: unknown;
+}
+
 interface ChainRow {
   id: string;
   created_at: Date;
-  chain_seq: bigint;
+  chain_seq: string;
   event_hash: Buffer;
   chain_prev_hash: Buffer;
   metadata: unknown;
 }
 
+function toChainRow(raw: ChainRowRaw): ChainRow {
+  return {
+    ...raw,
+    event_hash: Buffer.from(raw.event_hash),
+    chain_prev_hash: Buffer.from(raw.chain_prev_hash),
+  };
+}
+
 interface AnchorRow {
-  chain_seq: bigint;
+  chain_seq: string;
 }
 
 interface SeqBoundRow {
-  chain_seq: bigint | null;
+  chain_seq: string | null;
 }
 
 async function handleGET(req: NextRequest) {
@@ -181,7 +199,7 @@ async function handleGET(req: NextRequest) {
     const seedRows = await withBypassRls(
       prisma,
       async () =>
-        prisma.$queryRawUnsafe<{ event_hash: Buffer }[]>(
+        prisma.$queryRawUnsafe<{ event_hash: Uint8Array }[]>(
           `SELECT event_hash
            FROM audit_logs
            WHERE tenant_id = $1
@@ -197,7 +215,7 @@ async function handleGET(req: NextRequest) {
         { status: 422 },
       );
     }
-    seedPrevHash = seedRows[0].event_hash;
+    seedPrevHash = Buffer.from(seedRows[0].event_hash);
   }
 
   // Walk the chain
@@ -212,8 +230,9 @@ async function handleGET(req: NextRequest) {
   const rows = await withBypassRls(
     prisma,
     async () =>
-      prisma.$queryRawUnsafe<ChainRow[]>(
-        `SELECT id, tenant_id, created_at, chain_seq, event_hash, chain_prev_hash, metadata
+      prisma.$queryRawUnsafe<ChainRowRaw[]>(
+        `SELECT id, tenant_id, created_at,
+                chain_seq, event_hash, chain_prev_hash, metadata
          FROM audit_logs
          WHERE tenant_id = $1
            AND chain_seq IS NOT NULL
@@ -225,7 +244,7 @@ async function handleGET(req: NextRequest) {
         BigInt(fromSeq),
         BigInt(toSeq),
         MAX_ROWS_PER_REQUEST,
-      ),
+      ).then((rawRows) => rawRows.map(toChainRow)),
     BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
   );
 
@@ -253,7 +272,7 @@ async function handleGET(req: NextRequest) {
       const chainInput = buildChainInput({
         id: row.id,
         createdAt: row.created_at,
-        chainSeq: row.chain_seq,
+        chainSeq: BigInt(row.chain_seq),
         prevHash,
         payload,
       });
