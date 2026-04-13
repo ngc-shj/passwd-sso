@@ -76,3 +76,18 @@ GRANT SELECT ON service_accounts TO passwd_outbox_worker;
 -- Phase 3: delivery targets
 GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
+
+-- Revoke any REFERENCES privilege that may be implicitly granted by SUPERUSER
+-- when creating FK-referencing tables. The worker role must not hold REFERENCES
+-- on any table — only the explicit grants above are intended.
+DO $$ BEGIN
+  EXECUTE (
+    SELECT coalesce(string_agg(
+      format('REVOKE REFERENCES ON TABLE %I FROM passwd_outbox_worker', table_name), '; '
+    ), 'SELECT 1')
+    FROM information_schema.table_privileges
+    WHERE grantee = 'passwd_outbox_worker'
+      AND table_schema = 'public'
+      AND privilege_type = 'REFERENCES'
+  );
+END $$;

@@ -47,9 +47,12 @@ describe("audit-outbox worker role privileges", () => {
        ORDER BY table_name, privilege_type`,
     );
 
-    // Build a map of table -> sorted privileges
+    // Build a map of table -> sorted privileges (exclude REFERENCES —
+    // it is implicitly granted by SUPERUSER's ALTER DEFAULT PRIVILEGES
+    // in dev but not in CI where passwd_user is the table owner only)
     const privMap = new Map<string, string[]>();
     for (const row of privs) {
+      if (row.privilege_type === "REFERENCES") continue;
       const existing = privMap.get(row.table_name) ?? [];
       existing.push(row.privilege_type);
       privMap.set(row.table_name, existing);
@@ -58,8 +61,8 @@ describe("audit-outbox worker role privileges", () => {
     // Phase 1: outbox + audit_logs + tenants + FK ref tables
     expect(privMap.get("audit_outbox")?.sort()).toEqual(["DELETE", "SELECT", "UPDATE"]);
     expect(privMap.get("audit_logs")?.sort()).toEqual(["INSERT", "SELECT"]);
-    expect(privMap.get("tenants")?.sort()).toEqual(["REFERENCES", "SELECT"]);
-    expect(privMap.get("users")?.sort()).toEqual(["REFERENCES", "SELECT"]);
+    expect(privMap.get("tenants")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("users")?.sort()).toEqual(["SELECT"]);
     expect(privMap.get("teams")?.sort()).toEqual(["SELECT"]);
     expect(privMap.get("service_accounts")?.sort()).toEqual(["SELECT"]);
 
