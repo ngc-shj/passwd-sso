@@ -230,7 +230,7 @@ const CREDENTIAL_PATTERNS = [
  * Strip credential patterns from error messages before storage
  * in `lastError` columns (P3-S5 fix).
  */
-export function sanitizeErrorForStorage(message: string): string {
+export function sanitizeErrorForStorage(message: string, maxLength = 1024): string {
   let sanitized = message;
 
   // Strip URL query parameters that may contain credentials
@@ -254,5 +254,5 @@ export function sanitizeErrorForStorage(message: string): string {
     sanitized = sanitized.replace(pattern, "[REDACTED]");
   }
 
-  return sanitized;
+  return sanitized.slice(0, maxLength);
 }

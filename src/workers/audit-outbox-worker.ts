@@ -179,41 +179,26 @@ async function fanOutDeliveries(
   prisma: PrismaClient,
   outboxId: string,
   tenantId: string,
-  payload: AuditOutboxPayload,
 ): Promise<void> {
-  // Query active delivery targets for this tenant
-  const targets = await prisma.$transaction(async (tx) => {
+  await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    return tx.auditDeliveryTarget.findMany({
+    const targets = await tx.auditDeliveryTarget.findMany({
       where: { tenantId, isActive: true, kind: { not: "DB" } },
     });
+
+    getLogger().info({ outboxId, tenantId, targetCount: targets.length }, "worker.fanout_targets");
+    if (targets.length === 0) return;
+
+    await tx.auditDelivery.createMany({
+      data: targets.map((t) => ({
+        outboxId,
+        targetId: t.id,
+        tenantId,
+        status: "PENDING" as const,
+      })),
+      skipDuplicates: true,
+    });
   });
-
-  getLogger().info({ outboxId, tenantId, targetCount: targets.length }, "worker.fanout_targets");
-  if (targets.length === 0) return;
-
-  // Create delivery rows (upsert for idempotency)
-  for (const target of targets) {
-    try {
-      await prisma.$transaction(async (tx) => {
-        await setBypassRlsGucs(tx);
-        await tx.auditDelivery.upsert({
-          where: { outboxId_targetId: { outboxId, targetId: target.id } },
-          create: {
-            outboxId,
-            targetId: target.id,
-            tenantId,
-            status: "PENDING",
-          },
-          update: {}, // no-op if already exists
-        });
-      });
-    } catch (err) {
-      getLogger().error({ outboxId, targetId: target.id, err }, "failed to create delivery row");
-    }
-  }
-
-  void payload; // payload reserved for future per-target filtering
 }
 
 /**
@@ -332,10 +317,10 @@ function parsePayloadAction(raw: unknown): string {
  * Uses the same FOR UPDATE SKIP LOCKED pattern as outbox claim.
  */
 async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Promise<number> {
-  // Claim batch of pending deliveries
-  const claimed = await prisma.$transaction(async (tx) => {
+  // Claim + fetch in a single transaction to avoid an extra roundtrip
+  const deliveries = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
-    return tx.$queryRawUnsafe<Array<{ id: string }>>(
+    const claimed = await tx.$queryRawUnsafe<Array<{ id: string }>>(
       `UPDATE "audit_deliveries"
        SET "status" = 'PROCESSING',
            "processing_started_at" = now()
@@ -351,19 +336,10 @@ async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Pr
        RETURNING "id"`,
       batchSize,
     );
-  });
-
-  if (claimed.length === 0) return 0;
-
-  // Fetch full delivery rows with target config
-  const deliveries = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
+    if (claimed.length === 0) return [];
     return tx.auditDelivery.findMany({
       where: { id: { in: claimed.map((r) => r.id) } },
-      include: {
-        target: true,
-        outbox: true,
-      },
+      include: { target: true, outbox: true },
     });
   });
 
@@ -371,7 +347,7 @@ async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Pr
     await processOneDelivery(prisma, delivery);
   }
 
-  return claimed.length;
+  return deliveries.length;
 }
 
 async function processOneDelivery(
@@ -453,8 +429,7 @@ async function processOneDelivery(
         where: { id: delivery.target.id },
         data: {
           lastDeliveredAt: new Date(),
-          failCount: 0,
-          lastError: null,
+          ...(delivery.target.failCount > 0 ? { failCount: 0, lastError: null } : {}),
         },
       });
     });
@@ -490,7 +465,7 @@ async function recordDeliveryError(
         data: {
           status: "FAILED",
           attemptCount: newAttemptCount,
-          lastError: message.slice(0, 1024),
+          lastError: message,
           processingStartedAt: null,
         },
       });
@@ -498,7 +473,7 @@ async function recordDeliveryError(
         where: { id: delivery.target.id },
         data: {
           failCount: delivery.target.failCount + 1,
-          lastError: message.slice(0, 1024),
+          lastError: message,
         },
       });
     });
@@ -523,7 +498,7 @@ async function recordDeliveryError(
           status: "PENDING",
           attemptCount: newAttemptCount,
           nextRetryAt: nextRetry,
-          lastError: message.slice(0, 1024),
+          lastError: message,
           processingStartedAt: null,
         },
       });
@@ -719,29 +694,18 @@ async function purgeRetention(prisma: PrismaClient): Promise<void> {
   }
 
   // Purge terminal delivery rows
-  const deliverySentPurged = await prisma.$transaction(async (tx) => {
+  const deliveryPurged = await prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     return tx.$executeRawUnsafe(
       `DELETE FROM "audit_deliveries"
-       WHERE "status" = 'SENT'
-         AND "created_at" < $1`,
+       WHERE ("status" = 'SENT' AND "created_at" < $1)
+          OR ("status" = 'FAILED' AND "created_at" < $2)`,
       sentCutoff,
-    );
-  });
-  const deliveryFailedPurged = await prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    return tx.$executeRawUnsafe(
-      `DELETE FROM "audit_deliveries"
-       WHERE "status" = 'FAILED'
-         AND "created_at" < $1`,
       failedCutoff,
     );
   });
-  if ((deliverySentPurged as number) > 0 || (deliveryFailedPurged as number) > 0) {
-    getLogger().info(
-      { deliverySent: deliverySentPurged, deliveryFailed: deliveryFailedPurged },
-      "purged delivery retention rows",
-    );
+  if (Number(deliveryPurged) > 0) {
+    getLogger().info({ deliveryPurged }, "purged delivery retention rows");
   }
 }
 
@@ -869,7 +833,7 @@ export function createWorker(config: WorkerConfig) {
         // If the worker crashes here, outbox row is already SENT so fan-out
         // will not be retried. This is the design trade-off per Plan §3.4:
         // DB target success is not rolled back by fan-out failure.
-        fanOutDeliveries(workerPrisma, row.id, row.tenant_id, payload).catch((err) => {
+        fanOutDeliveries(workerPrisma, row.id, row.tenant_id).catch((err) => {
           log.error({ err, outboxId: row.id }, "worker.fanout_failed");
         });
       } catch (err) {

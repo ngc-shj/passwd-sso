@@ -154,98 +154,75 @@ function buildObjectKey(tenantId: string, outboxId: string, createdAt: string): 
   return `audit-logs/${tenantId}/${yyyy}/${mm}/${dd}/${outboxId}.json`;
 }
 
+// ─── Common delivery helper ───────────────────────────────────
+
+async function fetchOrThrow(
+  label: string,
+  url: string,
+  options: RequestInit & { timeout?: number },
+): Promise<Response> {
+  let res: Response;
+  try {
+    res = await validateAndFetch(url, options);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`${label} delivery failed: ${sanitizeErrorForStorage(msg)}`);
+  }
+  if (!res.ok) {
+    throw new Error(`${label} delivery failed with HTTP ${res.status}`);
+  }
+  return res;
+}
+
 // ─── Implementations ──────────────────────────────────────────
 
 /**
  * Webhook deliverer — HMAC-SHA256-signed POST.
- *
  * Config: { url: string, secret: string }
  */
 export const webhookDeliverer: AuditDeliverer = {
   async deliver(config, payload) {
-    const log = getLogger();
     const parsed = webhookConfigSchema.safeParse(config);
-    if (!parsed.success) {
-      throw new Error(`Invalid webhook config: ${parsed.error.message}`);
-    }
-    const sanitized = sanitizeForExternalDelivery(payload);
-    const body = JSON.stringify(sanitized);
-
+    if (!parsed.success) throw new Error(`Invalid webhook config: ${parsed.error.message}`);
     const { url, secret } = parsed.data;
+
+    const body = JSON.stringify(sanitizeForExternalDelivery(payload));
     const signature = createHmac("sha256", secret).update(body).digest("hex");
 
-    log.info({ outboxId: payload.id, url }, "audit-delivery.webhook.attempt");
-
-    let res: Response;
-    try {
-      res = await validateAndFetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Signature": `sha256=${signature}`,
-        },
-        body,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Webhook delivery failed: ${sanitizeErrorForStorage(msg)}`);
-    }
-
-    if (!res.ok) {
-      throw new Error(
-        `Webhook delivery failed with HTTP ${res.status}`,
-      );
-    }
-
-    log.info({ outboxId: payload.id, status: res.status }, "audit-delivery.webhook.ok");
+    getLogger().info({ outboxId: payload.id, url }, "audit-delivery.webhook.attempt");
+    const res = await fetchOrThrow("Webhook", url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Signature": `sha256=${signature}` },
+      body,
+    });
+    getLogger().info({ outboxId: payload.id, status: res.status }, "audit-delivery.webhook.ok");
   },
 };
 
 /**
  * SIEM HEC deliverer — Splunk/Datadog HTTP Event Collector.
- *
  * Config: { url: string, token: string }
  */
 export const siemHecDeliverer: AuditDeliverer = {
   async deliver(config, payload) {
-    const log = getLogger();
     const parsed = siemHecConfigSchema.safeParse(config);
-    if (!parsed.success) {
-      throw new Error(`Invalid SIEM HEC config: ${parsed.error.message}`);
-    }
+    if (!parsed.success) throw new Error(`Invalid SIEM HEC config: ${parsed.error.message}`);
     const { url, token } = parsed.data;
-    const sanitized = sanitizeForExternalDelivery(payload);
+
     const hecEvent = {
-      event: sanitized,
+      event: sanitizeForExternalDelivery(payload),
       time: Math.floor(new Date(payload.createdAt).getTime() / 1000),
       sourcetype: "passwd-sso:audit",
     };
     const body = JSON.stringify(hecEvent);
 
-    log.info({ outboxId: payload.id, url }, "audit-delivery.siem_hec.attempt");
-
-    let res: Response;
-    try {
-      res = await validateAndFetch(url, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Splunk ${token}`,
-        },
-        body,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`SIEM HEC delivery failed: ${sanitizeErrorForStorage(msg)}`);
-    }
-
-    if (!res.ok) {
-      throw new Error(
-        `SIEM HEC delivery failed with HTTP ${res.status}`,
-      );
-    }
-
-    log.info({ outboxId: payload.id, status: res.status }, "audit-delivery.siem_hec.ok");
+    getLogger().info({ outboxId: payload.id, url }, "audit-delivery.siem_hec.attempt");
+    const res = await fetchOrThrow("SIEM HEC", url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Splunk ${token}` },
+      body,
+    });
+    getLogger().info({ outboxId: payload.id, status: res.status }, "audit-delivery.siem_hec.ok");
   },
 };
 
@@ -268,60 +245,32 @@ export const siemHecDeliverer: AuditDeliverer = {
  */
 export const s3ObjectDeliverer: AuditDeliverer = {
   async deliver(config, payload) {
-    const log = getLogger();
     const parsed = s3ObjectConfigSchema.safeParse(config);
-    if (!parsed.success) {
-      throw new Error(`Invalid S3 object config: ${parsed.error.message}`);
-    }
+    if (!parsed.success) throw new Error(`Invalid S3 object config: ${parsed.error.message}`);
     const { endpoint, region, accessKeyId, secretAccessKey } = parsed.data;
-    const sanitized = sanitizeForExternalDelivery(payload);
-    const body = JSON.stringify(sanitized);
 
+    const body = JSON.stringify(sanitizeForExternalDelivery(payload));
     const objectKey = buildObjectKey(payload.tenantId, payload.id, payload.createdAt);
-    // Normalize: strip trailing slash from endpoint, prepend slash to key
-    const normalizedEndpoint = endpoint.replace(/\/+$/, "");
-    const objectUrl = `${normalizedEndpoint}/${objectKey}`;
+    const objectUrl = `${endpoint.replace(/\/+$/, "")}/${objectKey}`;
 
     const bodyHash = sha256Hex(body);
     const { dateTime, date } = utcNow();
-
     const { authorization, amzDate } = buildSigV4AuthorizationHeader({
-      method: "PUT",
-      url: objectUrl,
-      region,
-      accessKeyId,
-      secretAccessKey,
-      bodyHash,
-      dateTime,
-      date,
+      method: "PUT", url: objectUrl, region, accessKeyId, secretAccessKey, bodyHash, dateTime, date,
     });
 
-    log.info({ outboxId: payload.id, objectUrl }, "audit-delivery.s3_object.attempt");
-
-    let res: Response;
-    try {
-      res = await validateAndFetch(objectUrl, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          "x-amz-content-sha256": bodyHash,
-          "x-amz-date": amzDate,
-          Authorization: authorization,
-        },
-        body,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Object storage delivery failed: ${sanitizeErrorForStorage(msg)}`);
-    }
-
-    if (!res.ok) {
-      throw new Error(
-        `Object storage delivery failed with HTTP ${res.status} for key ${objectKey}`,
-      );
-    }
-
-    log.info({ outboxId: payload.id, objectKey, status: res.status }, "audit-delivery.s3_object.ok");
+    getLogger().info({ outboxId: payload.id, objectUrl }, "audit-delivery.s3_object.attempt");
+    const res = await fetchOrThrow("Object storage", objectUrl, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "x-amz-content-sha256": bodyHash,
+        "x-amz-date": amzDate,
+        Authorization: authorization,
+      },
+      body,
+    });
+    getLogger().info({ outboxId: payload.id, objectKey, status: res.status }, "audit-delivery.s3_object.ok");
   },
 };
 
