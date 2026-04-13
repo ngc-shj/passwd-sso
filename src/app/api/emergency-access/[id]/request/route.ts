@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { canTransition } from "@/lib/emergency-access-state";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -61,7 +61,7 @@ async function handlePOST(
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST,
     userId: session.user.id,

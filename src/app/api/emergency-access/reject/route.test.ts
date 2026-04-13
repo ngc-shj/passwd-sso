@@ -21,7 +21,7 @@ vi.mock("@/lib/crypto-server", () => ({
   hashToken: (t: string) => `hashed-${t}`,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,

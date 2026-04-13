@@ -1,14 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockLogAudit, mockLogAuditBatch, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
+const { mockAuth, mockFindMany, mockUpdateMany, mockAuditCreate, mockAuditCreateMany, mockLogAudit, mockPrismaUser, mockWithUserTenantRls, mockWithBypassRls, mockTransaction } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockFindMany: vi.fn(),
   mockUpdateMany: vi.fn(),
   mockAuditCreate: vi.fn(),
   mockAuditCreateMany: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockLogAuditBatch: vi.fn(),
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
@@ -40,8 +39,7 @@ vi.mock("@/lib/audit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit")>();
   return {
     ...actual,
-    logAudit: mockLogAudit,
-    logAuditBatch: mockLogAuditBatch,
+    logAuditAsync: mockLogAudit,
   };
 });
 
@@ -183,8 +181,7 @@ describe("POST /api/passwords/bulk-restore", () => {
 
     await POST(createRequest("POST", URL, { body: { ids: [id1, id2] } }));
 
-    // 1 parent log via logAudit, per-entry logs via logAuditBatch
-    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    // 1 parent log + 2 per-entry logs, all via logAuditAsync
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ENTRY_BULK_RESTORE",
@@ -198,27 +195,26 @@ describe("POST /api/passwords/bulk-restore", () => {
       })
     );
 
-    // Per-entry logs via a single logAuditBatch call
-    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
-    expect(mockLogAuditBatch).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action: "ENTRY_RESTORE",
-          targetId: id1,
-          metadata: expect.objectContaining({
-            source: "bulk-restore",
-            parentAction: "ENTRY_BULK_RESTORE",
-          }),
+    // Per-entry logs via individual logAuditAsync calls
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ENTRY_RESTORE",
+        targetId: id1,
+        metadata: expect.objectContaining({
+          source: "bulk-restore",
+          parentAction: "ENTRY_BULK_RESTORE",
         }),
-        expect.objectContaining({
-          action: "ENTRY_RESTORE",
-          targetId: id2,
-          metadata: expect.objectContaining({
-            source: "bulk-restore",
-            parentAction: "ENTRY_BULK_RESTORE",
-          }),
+      })
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ENTRY_RESTORE",
+        targetId: id2,
+        metadata: expect.objectContaining({
+          source: "bulk-restore",
+          parentAction: "ENTRY_BULK_RESTORE",
         }),
-      ])
+      })
     );
   });
 });

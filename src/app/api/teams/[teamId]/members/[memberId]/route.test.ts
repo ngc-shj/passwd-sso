@@ -59,7 +59,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLogger,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 

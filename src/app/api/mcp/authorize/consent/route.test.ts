@@ -63,7 +63,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
 }));
 

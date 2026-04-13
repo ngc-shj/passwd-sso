@@ -114,7 +114,7 @@ vi.mock("@/lib/auth-adapter", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
 }));
 
 vi.mock("@/lib/session-meta", () => ({

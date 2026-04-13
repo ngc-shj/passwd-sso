@@ -67,7 +67,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));

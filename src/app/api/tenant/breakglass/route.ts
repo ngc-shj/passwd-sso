@@ -8,7 +8,7 @@ import type { GrantStatus } from "@/lib/constants/breakglass";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { createNotification } from "@/lib/notification";
@@ -158,7 +158,7 @@ async function handlePOST(req: NextRequest) {
 
   // Audit log (non-blocking)
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
     userId,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -51,7 +51,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
 
   const requestMeta = extractRequestMeta(req);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_EMPTY_TRASH,
     userId: session.user.id,
@@ -67,7 +67,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   });
 
   for (const entryId of entryIds) {
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
       userId: session.user.id,

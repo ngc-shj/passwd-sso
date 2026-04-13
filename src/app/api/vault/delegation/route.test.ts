@@ -49,7 +49,7 @@ vi.mock("@/lib/csrf", () => ({ assertOrigin: mockAssertOrigin }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/audit", () => ({ logAudit: mockLogAudit }));
+vi.mock("@/lib/audit", () => ({ logAuditAsync: mockLogAudit }));
 vi.mock("@/lib/ip-access", () => ({ extractClientIp: vi.fn(() => "127.0.0.1") }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withBypassRls: mockWithBypassRls }));
 vi.mock("@/lib/prisma", () => ({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta, resolveActorType } from "@/lib/audit";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { authOrToken } from "@/lib/auth-or-token";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -200,7 +200,7 @@ async function handlePOST(req: NextRequest) {
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.ACCESS_REQUEST_CREATE,
     userId,

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   // Handle deny action (before claiming — deny should not bind the client)
   if (action === "deny") {
     const { ip, userAgent } = extractRequestMeta(req);
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.MCP_CONSENT_DENY,
       userId: session.user.id,
@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
     } else {
       // Freshly claimed
       const { ip: claimIp } = extractRequestMeta(req);
-      logAudit({
+      await logAuditAsync({
         scope: AUDIT_SCOPE.TENANT,
         action: AUDIT_ACTION.MCP_CLIENT_DCR_CLAIM,
         userId: session.user.id,
@@ -189,7 +189,7 @@ export async function POST(req: NextRequest) {
 
   // Audit the consent grant
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MCP_CONSENT_GRANT,
     userId: session.user.id,

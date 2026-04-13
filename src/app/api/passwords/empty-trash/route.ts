@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -32,7 +32,7 @@ async function handlePOST(req: NextRequest) {
 
   const requestMeta = extractRequestMeta(req);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_EMPTY_TRASH,
     userId: session.user.id,
@@ -47,7 +47,7 @@ async function handlePOST(req: NextRequest) {
   });
 
   for (const entryId of entryIds) {
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
       userId: session.user.id,

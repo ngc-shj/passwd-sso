@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -69,7 +69,7 @@ async function handleGET(
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EMERGENCY_VAULT_ACCESS,
     userId: session.user.id,

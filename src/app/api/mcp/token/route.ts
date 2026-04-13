@@ -7,7 +7,7 @@ import {
 } from "@/lib/mcp/oauth-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { NIL_UUID } from "@/lib/constants/app";
 
@@ -118,7 +118,7 @@ export async function POST(req: NextRequest) {
 
     if (!result.ok) {
       if (result.reason === "replay" && result.tenantId) {
-        logAudit({
+        await logAuditAsync({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
           userId: NIL_UUID,
@@ -132,7 +132,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
       userId: result.userId ?? "system",

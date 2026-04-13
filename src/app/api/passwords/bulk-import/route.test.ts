@@ -11,7 +11,6 @@ const {
   mockWithUserTenantRls,
   mockRateLimiterCheck,
   mockLogAudit,
-  mockLogAuditBatch,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockPrismaPasswordEntry: {
@@ -24,7 +23,6 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockLogAuditBatch: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -44,8 +42,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
-  logAuditBatch: mockLogAuditBatch,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({}),
 }));
 vi.mock("@/lib/logger", () => {
@@ -181,7 +178,7 @@ describe("POST /api/passwords/bulk-import", () => {
     );
   });
 
-  it("calls logAuditBatch with ENTRY_CREATE for each created entry", async () => {
+  it("calls logAuditAsync with ENTRY_CREATE for each created entry", async () => {
     const entries = [
       makeEntry("550e8400-e29b-41d4-a716-000000000001"),
       makeEntry("550e8400-e29b-41d4-a716-000000000002"),
@@ -190,19 +187,37 @@ describe("POST /api/passwords/bulk-import", () => {
 
     await POST(createRequest("POST", URL, { body: { entries } }));
 
-    expect(mockLogAuditBatch).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action: AUDIT_ACTION.ENTRY_CREATE,
-          metadata: expect.objectContaining({
-            source: "bulk-import",
-            parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
-          }),
+    // logAuditAsync called once per entry with ENTRY_CREATE
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetId: "550e8400-e29b-41d4-a716-000000000001",
+        metadata: expect.objectContaining({
+          source: "bulk-import",
+          parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
         }),
-      ]),
+      }),
     );
-    const batchArg = mockLogAuditBatch.mock.calls[0][0];
-    expect(batchArg).toHaveLength(3);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetId: "550e8400-e29b-41d4-a716-000000000002",
+        metadata: expect.objectContaining({
+          source: "bulk-import",
+          parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
+        }),
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetId: "550e8400-e29b-41d4-a716-000000000003",
+        metadata: expect.objectContaining({
+          source: "bulk-import",
+          parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
+        }),
+      }),
+    );
   });
 
   it("uses rate limiter key scoped to userId", async () => {

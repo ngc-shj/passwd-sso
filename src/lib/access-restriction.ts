@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/ip-access";
 import { verifyTailscalePeer } from "@/lib/tailscale-client";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { NextResponse } from "next/server";
@@ -153,7 +153,7 @@ export async function checkAccessRestrictionWithAudit(
 
   if (!result.allowed) {
     // Fire-and-forget audit log
-    logAudit({
+    await logAuditAsync({
       action: AUDIT_ACTION.ACCESS_DENIED,
       scope: AUDIT_SCOPE.TENANT,
       userId: userId ?? "unknown",
@@ -217,7 +217,7 @@ export async function enforceAccessRestriction(
   const result = await checkAccessRestriction(tenantId, clientIp);
 
   if (!result.allowed) {
-    logAudit({
+    await logAuditAsync({
       action: AUDIT_ACTION.ACCESS_DENIED,
       scope: AUDIT_SCOPE.TENANT,
       userId,
@@ -236,7 +236,7 @@ export async function enforceAccessRestriction(
   if (policy.tailscaleEnabled && policy.tailscaleTailnet && clientIp && isTailscaleIp(clientIp)) {
     const verified = await verifyTailscalePeer(clientIp, policy.tailscaleTailnet);
     if (!verified) {
-      logAudit({
+      await logAuditAsync({
         action: AUDIT_ACTION.ACCESS_DENIED,
         scope: AUDIT_SCOPE.TENANT,
         userId,

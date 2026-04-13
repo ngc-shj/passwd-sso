@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { unauthorized, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -202,7 +202,7 @@ async function handlePOST(req: NextRequest) {
 
   const { entry } = createResult;
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_CREATE,
     userId,

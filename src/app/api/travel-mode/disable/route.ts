@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { verifyPassphraseVerifier } from "@/lib/crypto-server";
 import { checkLockout, recordFailure } from "@/lib/account-lockout";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -83,7 +83,7 @@ async function handlePOST(request: NextRequest) {
   if (!valid) {
     await recordFailure(session.user.id, request);
 
-    logAudit({
+    await logAuditAsync({
       action: AUDIT_ACTION.TRAVEL_MODE_DISABLE_FAILED,
       scope: AUDIT_SCOPE.PERSONAL,
       userId: session.user.id,
@@ -103,7 +103,7 @@ async function handlePOST(request: NextRequest) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     action: AUDIT_ACTION.TRAVEL_MODE_DISABLE,
     scope: AUDIT_SCOPE.PERSONAL,
     userId: session.user.id,

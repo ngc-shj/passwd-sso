@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { notFound, forbidden, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/check-auth";
@@ -191,7 +191,7 @@ async function handlePUT(
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_UPDATE,
     userId,
@@ -260,7 +260,7 @@ async function handleDELETE(
     );
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: permanent
       ? AUDIT_ACTION.ENTRY_PERMANENT_DELETE

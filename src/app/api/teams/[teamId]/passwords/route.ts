@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { checkAuth } from "@/lib/check-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createTeamE2EPasswordSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { parseBody } from "@/lib/parse-body";
@@ -117,7 +117,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_CREATE,
     userId: session.user.id,

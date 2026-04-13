@@ -44,7 +44,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -59,7 +59,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { POST } from "./route";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 
 function createRequest(body: unknown) {
   return new NextRequest("http://localhost/api/teams/team-1/rotate-key", {
@@ -255,7 +255,7 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
     expect(json.success).toBe(true);
     expect(json.teamKeyVersion).toBe(2);
     expect(mockTransaction).toHaveBeenCalled();
-    expect(vi.mocked(logAudit)).toHaveBeenCalledWith(
+    expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "TEAM_KEY_ROTATION",
         teamId: "team-1",

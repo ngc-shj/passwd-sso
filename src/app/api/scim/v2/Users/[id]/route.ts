@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { validateScimToken } from "@/lib/scim-token";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
@@ -120,7 +120,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     }
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId: auditUserId,
@@ -207,7 +207,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     }
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId: auditUserId,
@@ -274,7 +274,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     }
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
     userId: auditUserId,

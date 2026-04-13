@@ -8,7 +8,7 @@ const { mockAuth, mockLogAudit } = vi.hoisted(() => ({
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 

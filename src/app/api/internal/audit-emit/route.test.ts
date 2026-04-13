@@ -19,7 +19,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
 }));
 vi.mock("@/lib/constants", async (importOriginal) => {

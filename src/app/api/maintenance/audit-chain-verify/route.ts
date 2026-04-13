@@ -11,7 +11,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -294,7 +294,7 @@ async function handleGET(req: NextRequest) {
   const ok = firstTamperedSeq === null && firstGapAfterSeq === null && firstTimestampViolationSeq === null;
 
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
     userId: operatorId,

@@ -37,7 +37,7 @@ vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 

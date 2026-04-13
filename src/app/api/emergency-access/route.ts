@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createEmergencyGrantSchema } from "@/lib/validations";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyInviteEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -80,7 +80,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EMERGENCY_GRANT_CREATE,
     userId: session.user.id,

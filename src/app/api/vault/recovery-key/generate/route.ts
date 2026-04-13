@@ -9,7 +9,7 @@ import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, zodValidationError } from "@/lib/api-response";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
@@ -135,7 +135,7 @@ async function handlePOST(request: NextRequest) {
   // Audit log
   const isRegeneration = !!user.recoveryKeySetAt;
   const { ip, userAgent } = extractRequestMeta(request);
-  logAudit({
+  await logAuditAsync({
     scope: "PERSONAL",
     action: isRegeneration ? "RECOVERY_KEY_REGENERATED" : "RECOVERY_KEY_CREATED",
     userId: session.user.id,

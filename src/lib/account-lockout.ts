@@ -12,7 +12,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { logAudit, logAuditInTx, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { notifyAdminsOfLockout } from "@/lib/lockout-admin-notify";
@@ -281,7 +281,7 @@ export async function recordFailure(
           });
         }, BYPASS_PURPOSE.AUDIT_WRITE);
       } else {
-        logAudit({
+        await logAuditAsync({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
           userId,
@@ -314,7 +314,7 @@ export async function recordFailure(
             });
           }, BYPASS_PURPOSE.AUDIT_WRITE);
         } else {
-          logAudit({
+          await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
             action: AUDIT_ACTION.VAULT_LOCKOUT_TRIGGERED,
             userId,
@@ -363,7 +363,7 @@ export async function recordFailure(
       // NOTE: logAudit() swallows internally; catch kept as safety net.
       try {
         const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
-        logAudit({
+        await logAuditAsync({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
           userId,

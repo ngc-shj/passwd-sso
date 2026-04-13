@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
@@ -79,7 +79,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       ]),
     );
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
       userId: session.user.id,
@@ -123,7 +123,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
     userId: session.user.id,
@@ -209,7 +209,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     getLogger().error({ userId: target.userId, error }, "session-invalidation-failed");
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
     userId: session.user.id,

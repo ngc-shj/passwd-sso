@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { rejectEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto-server";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -51,7 +51,7 @@ async function handlePOST(req: NextRequest) {
     }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EMERGENCY_GRANT_REJECT,
     userId: session.user.id,

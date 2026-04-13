@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
@@ -131,7 +131,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.API_KEY_CREATE,
     userId: userId,

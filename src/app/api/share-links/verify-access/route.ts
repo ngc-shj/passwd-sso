@@ -6,7 +6,7 @@ import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
 import { createShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -72,7 +72,7 @@ async function handlePOST(req: NextRequest) {
     // Non-atomic audit: userId="anonymous" is not a valid UUID,
     // so this cannot use logAuditInTx (worker INSERT would fail on ::uuid cast).
     // Falls through the FIFO flusher path where tenantId is already resolved.
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
       userId: "anonymous",
@@ -87,7 +87,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Non-atomic audit: same userId="anonymous" limitation as above.
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
     userId: "anonymous",

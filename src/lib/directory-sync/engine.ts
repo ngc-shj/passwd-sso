@@ -12,7 +12,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { decryptCredentials } from "./credentials";
@@ -199,7 +199,7 @@ export async function runDirectorySync(
 
     // Log stale-reset if we overrode a stale RUNNING lock
     if (acquired && wasStaleRunning) {
-      logAudit({
+      await logAuditAsync({
         scope: AUDIT_SCOPE.TENANT,
         action: AUDIT_ACTION.DIRECTORY_SYNC_STALE_RESET,
         userId: actorUserId ?? "system",

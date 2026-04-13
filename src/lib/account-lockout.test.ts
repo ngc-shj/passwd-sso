@@ -38,7 +38,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
 }));
 vi.mock("@/lib/logger", () => ({

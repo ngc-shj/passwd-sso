@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
@@ -48,7 +48,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     prisma.tenantWebhook.delete({ where: { id: webhookId, tenantId: actor.tenantId } }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.TENANT_WEBHOOK_DELETE,
     userId: session.user.id,

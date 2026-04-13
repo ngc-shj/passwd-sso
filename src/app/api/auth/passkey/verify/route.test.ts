@@ -38,7 +38,7 @@ vi.mock("@/lib/webauthn-authorize", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({
     ip: null,
     userAgent: null,

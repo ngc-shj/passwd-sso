@@ -56,7 +56,7 @@ vi.mock("@/lib/ip-access", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
 }));
 
 vi.mock("@/lib/crypto-server", () => ({

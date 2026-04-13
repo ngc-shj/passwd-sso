@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import { verifyAdminToken } from "@/lib/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -103,7 +103,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.HISTORY_PURGE,
     userId: operatorId,

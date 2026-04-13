@@ -12,7 +12,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authOrToken, hasUserId } from "@/lib/auth-or-token";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -89,7 +89,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Lightweight audit (success only)
-  logAudit({
+  await logAuditAsync({
     action: AUDIT_ACTION.DELEGATION_CHECK,
     scope: AUDIT_SCOPE.PERSONAL,
     userId,

@@ -16,7 +16,7 @@ import {
   getDelegatedEntryIdsForSession,
   type DelegationMetadata,
 } from "@/lib/delegation";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 
@@ -98,7 +98,7 @@ async function getSession(token: McpTokenData) {
   return { session };
 }
 
-function auditDelegationAccess(
+async function auditDelegationAccess(
   token: McpTokenData,
   tool: "list" | "search",
   sessionId: string,
@@ -120,8 +120,8 @@ function auditDelegationAccess(
     },
     ip: ip ?? undefined,
   };
-  logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
 }
 
 // ─── Tool handlers ────────────────────────────────────────────
@@ -157,7 +157,7 @@ export async function toolListCredentials(
   // Apply pagination
   const paginated = entries.slice(offset, offset + limit);
 
-  auditDelegationAccess(token, "list", session.id, ip, { entryCount: paginated.length });
+  await auditDelegationAccess(token, "list", session.id, ip, { entryCount: paginated.length });
 
   return { result: { entries: paginated, total: entries.length } };
 }
@@ -199,7 +199,7 @@ export async function toolSearchCredentials(
 
   const paginated = filtered.slice(offset, offset + limit);
 
-  auditDelegationAccess(token, "search", session.id, ip, { entryCount: paginated.length, query });
+  await auditDelegationAccess(token, "search", session.id, ip, { entryCount: paginated.length, query });
 
   return { result: { entries: paginated, total: filtered.length } };
 }
