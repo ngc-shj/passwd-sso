@@ -6,7 +6,7 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["src/**/*.integration.test.ts"],
-    setupFiles: ["src/__tests__/setup.ts"],
+    setupFiles: ["src/__tests__/db-integration/setup.ts"],
     pool: "forks" as const,
     maxWorkers: 1,
     isolate: true,

@@ -75,12 +75,13 @@ describe("audit-chain RLS enforcement", () => {
     expect(rows[0].tenant_id).toBe(tenantIdA);
   });
 
-  it("passwd_user (table owner) without bypass GUC cannot see cross-tenant anchor (FORCE RLS)", async () => {
-    // passwd_user has FORCE ROW LEVEL SECURITY, so even the table owner
-    // cannot bypass RLS without the app.bypass_rls GUC
+  it("passwd_app (non-superuser) without bypass GUC cannot see cross-tenant anchor (FORCE RLS)", async () => {
+    // passwd_app is NOSUPERUSER + NOBYPASSRLS, so FORCE ROW LEVEL SECURITY
+    // ensures the app role cannot bypass RLS without the app.bypass_rls GUC.
+    // Note: passwd_user is SUPERUSER with BYPASSRLS, so it always bypasses RLS.
     const differentTenantId = "00000000-0000-0000-0000-000000000002";
 
-    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+    const rows = await ctx.app.prisma.$transaction(async (tx) => {
       // Explicitly set tenant_id to a different tenant — do NOT set bypass_rls
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${differentTenantId}, true)`;
       return tx.$queryRawUnsafe<{ tenant_id: string }[]>(

@@ -93,12 +93,25 @@ describe("audit-outbox metrics endpoint (real DB)", () => {
   });
 
   it("records an AUDIT_OUTBOX_METRICS_VIEW audit log via writeDirectAuditLog pattern", async () => {
+    // Create a SENT outbox row so the HUMAN audit_logs row satisfies
+    // CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM')
+    const outboxId = randomUUID();
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+         VALUES ($1::uuid, $2::uuid, '{}', 'SENT', now())`,
+        outboxId,
+        tenantId,
+      );
+    });
+
     // Simulate what the metrics endpoint does: write a direct audit log entry
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_logs (
-          id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
+          id, tenant_id, scope, action, user_id, actor_type, metadata, created_at, outbox_id
         ) VALUES (
           gen_random_uuid(),
           $1::uuid,
@@ -107,7 +120,8 @@ describe("audit-outbox metrics endpoint (real DB)", () => {
           $4::uuid,
           $5::"ActorType",
           $6::jsonb,
-          now()
+          now(),
+          $7::uuid
         )`,
         tenantId,
         AUDIT_SCOPE.TENANT,
@@ -115,6 +129,7 @@ describe("audit-outbox metrics endpoint (real DB)", () => {
         userId,
         ACTOR_TYPE.HUMAN,
         JSON.stringify({ viewedBy: userId }),
+        outboxId,
       );
     });
 

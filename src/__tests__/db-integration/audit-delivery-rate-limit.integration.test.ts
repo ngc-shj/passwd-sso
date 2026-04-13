@@ -86,21 +86,24 @@ describe("audit-delivery rate limit", () => {
       deliveryIds.push(dId);
     }
 
-    // Claim only the first 2 (simulating a small batch)
+    // Claim only the first 2 (simulating a small batch).
+    // Use a CTE to materialize the LIMIT + FOR UPDATE SKIP LOCKED subquery,
+    // preventing the planner from flattening it into the outer UPDATE.
     const claimed = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return tx.$queryRawUnsafe<{ id: string }[]>(
-        `UPDATE "audit_deliveries"
-         SET "status" = 'PROCESSING', "processing_started_at" = now()
-         WHERE "id" IN (
+        `WITH batch AS (
            SELECT "id" FROM "audit_deliveries"
            WHERE "status" = 'PENDING' AND "tenant_id" = $1::uuid
            ORDER BY "created_at" ASC
            LIMIT 2
            FOR UPDATE SKIP LOCKED
          )
-         AND "status" = 'PENDING'
-         RETURNING "id"`,
+         UPDATE "audit_deliveries" d
+         SET "status" = 'PROCESSING', "processing_started_at" = now()
+         FROM batch
+         WHERE d."id" = batch."id"
+         RETURNING d."id"`,
         tenantId,
       );
     });

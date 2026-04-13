@@ -58,8 +58,8 @@ describe("audit-outbox worker role privileges", () => {
     // Phase 1: outbox + audit_logs + tenants + FK ref tables
     expect(privMap.get("audit_outbox")?.sort()).toEqual(["DELETE", "SELECT", "UPDATE"]);
     expect(privMap.get("audit_logs")?.sort()).toEqual(["INSERT", "SELECT"]);
-    expect(privMap.get("tenants")?.sort()).toEqual(["SELECT"]);
-    expect(privMap.get("users")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("tenants")?.sort()).toEqual(["REFERENCES", "SELECT"]);
+    expect(privMap.get("users")?.sort()).toEqual(["REFERENCES", "SELECT"]);
     expect(privMap.get("teams")?.sort()).toEqual(["SELECT"]);
     expect(privMap.get("service_accounts")?.sort()).toEqual(["SELECT"]);
 
@@ -90,8 +90,8 @@ describe("audit-outbox worker role privileges", () => {
         await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
         await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
         await tx.$executeRawUnsafe(
-          `INSERT INTO password_entries (id, tenant_id, user_id, encrypted_blob, encrypted_overview, iv, auth_tag, overview_iv, overview_auth_tag, created_at, updated_at)
-           VALUES (gen_random_uuid(), $1::uuid, gen_random_uuid(), '', '', '', '', '', '', now(), now())`,
+          `INSERT INTO password_entries (id, tenant_id, user_id, encrypted_blob, encrypted_overview, blob_iv, blob_auth_tag, overview_iv, overview_auth_tag, key_version, created_at, updated_at)
+           VALUES (gen_random_uuid(), $1::uuid, gen_random_uuid(), '', '', '', '', '', '', 1, now(), now())`,
           tenantId,
         );
       }),

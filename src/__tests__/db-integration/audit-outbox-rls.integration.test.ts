@@ -87,11 +87,13 @@ describe("audit-outbox RLS enforcement", () => {
     expect(Number(rows[0].cnt)).toBe(1);
   });
 
-  it("passwd_user (superuser) WITHOUT bypass GUC and tenant_id=B cannot see tenant A rows (FORCE RLS)", async () => {
+  it("passwd_app (non-superuser) WITHOUT bypass GUC and tenant_id=B cannot see tenant A rows (FORCE RLS)", async () => {
     await insertOutboxRowForTenantA();
 
-    // Even the table owner is subject to FORCE RLS when bypass_rls is off
-    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+    // passwd_app is NOSUPERUSER + NOBYPASSRLS, so FORCE ROW LEVEL SECURITY
+    // ensures the app role cannot bypass RLS without the app.bypass_rls GUC.
+    // Note: passwd_user is SUPERUSER with BYPASSRLS, so it always bypasses RLS.
+    const rows = await ctx.app.prisma.$transaction(async (tx) => {
       await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'off', true)`;
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantB}, true)`;
       return tx.$queryRawUnsafe<{ cnt: bigint }[]>(

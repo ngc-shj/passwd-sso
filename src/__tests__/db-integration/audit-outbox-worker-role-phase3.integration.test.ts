@@ -50,9 +50,9 @@ describe("audit-outbox worker role (Phase 1+2+3)", () => {
       ["DELETE", "SELECT", "UPDATE"].sort(),
     );
     expect(privMap.get("audit_logs")?.sort()).toEqual(["INSERT", "SELECT"]);
-    expect(privMap.get("tenants")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("tenants")?.sort()).toEqual(["REFERENCES", "SELECT"]);
     // FK ref tables (granted by Phase 1 migration for referential integrity under RLS)
-    expect(privMap.get("users")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("users")?.sort()).toEqual(["REFERENCES", "SELECT"]);
     expect(privMap.get("teams")?.sort()).toEqual(["SELECT"]);
     expect(privMap.get("service_accounts")?.sort()).toEqual(["SELECT"]);
 

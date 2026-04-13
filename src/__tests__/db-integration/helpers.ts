@@ -156,6 +156,13 @@ export async function createTestContext(): Promise<TestContext> {
         `DELETE FROM audit_logs WHERE tenant_id = $1::uuid`,
         tenantId,
       );
+      // The before-delete trigger blocks DELETE of PENDING/PROCESSING rows,
+      // so first move them to FAILED (which the trigger allows).
+      await tx.$executeRawUnsafe(
+        `UPDATE audit_outbox SET status = 'FAILED'::"AuditOutboxStatus"
+         WHERE tenant_id = $1::uuid AND status IN ('PENDING', 'PROCESSING')`,
+        tenantId,
+      );
       await tx.$executeRawUnsafe(
         `DELETE FROM audit_outbox WHERE tenant_id = $1::uuid`,
         tenantId,

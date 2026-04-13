@@ -92,21 +92,35 @@ describe("audit-chain disabled tenant", () => {
   });
 
   it("does not create an anchor row for a disabled tenant", async () => {
+    // Create a SENT outbox row so the HUMAN audit_logs row satisfies
+    // CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM')
+    const outboxId = randomUUID();
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+         VALUES ($1::uuid, $2::uuid, '{}', 'SENT', now())`,
+        outboxId,
+        tenantId,
+      );
+    });
+
     // Insert a plain audit_logs row (no chain)
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_logs (
           id, tenant_id, scope, action, user_id, actor_type,
-          created_at
+          created_at, outbox_id
         ) VALUES (
           $1::uuid, $2::uuid, 'PERSONAL'::"AuditScope", 'ENTRY_CREATE'::"AuditAction",
           $3::uuid, 'HUMAN'::"ActorType",
-          now()
+          now(), $4::uuid
         )`,
         randomUUID(),
         tenantId,
         userId,
+        outboxId,
       );
     });
 

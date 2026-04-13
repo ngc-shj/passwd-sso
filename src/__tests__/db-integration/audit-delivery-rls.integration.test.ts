@@ -138,12 +138,13 @@ describe("audit-delivery RLS", () => {
     expect(Number(rows[0].cnt)).toBe(1);
   });
 
-  it("superuser without bypass RLS cannot read cross-tenant (FORCE RLS)", async () => {
+  it("passwd_app without bypass RLS cannot read cross-tenant (FORCE RLS)", async () => {
     await insertTargetForA("WEBHOOK");
 
-    // Superuser (passwd_user) without bypass GUC — RLS is FORCE-enabled
-    // so even the table owner should see 0 rows without correct tenant_id
-    const rows = await ctx.su.prisma.$transaction(async (tx) => {
+    // passwd_app is NOSUPERUSER + NOBYPASSRLS, so FORCE ROW LEVEL SECURITY
+    // ensures the app role cannot bypass RLS without the app.bypass_rls GUC.
+    // Note: passwd_user is SUPERUSER with BYPASSRLS, so it always bypasses RLS.
+    const rows = await ctx.app.prisma.$transaction(async (tx) => {
       // Set tenant_id to tenant B (not A) without bypass
       await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantB}, true)`;
       return tx.$queryRawUnsafe<{ cnt: bigint }[]>(

@@ -146,6 +146,7 @@ describe("audit-chain verify endpoint logic", () => {
 
       for (let i = 1; i <= count; i++) {
         const id = randomUUID();
+        const outboxId = randomUUID();
         const createdAt = new Date(Date.now() + i * 1000);
         const seq = BigInt(i);
         const metadata = { index: i, verify: true };
@@ -160,22 +161,32 @@ describe("audit-chain verify endpoint logic", () => {
         const canonicalBytes = computeCanonicalBytes(chainInput);
         const eventHash = computeEventHash(prevHash, canonicalBytes);
 
+        // Create a SENT outbox row so the HUMAN audit_logs row satisfies
+        // CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM')
+        await tx.$executeRawUnsafe(
+          `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+           VALUES ($1::uuid, $2::uuid, '{}', 'SENT', now())`,
+          outboxId,
+          tenantId,
+        );
+
         await tx.$executeRawUnsafe(
           `INSERT INTO audit_logs (
             id, tenant_id, scope, action, user_id, actor_type,
-            metadata, created_at,
+            metadata, created_at, outbox_id,
             chain_seq, event_hash, chain_prev_hash
           ) VALUES (
             $1::uuid, $2::uuid, 'PERSONAL'::"AuditScope", 'ENTRY_CREATE'::"AuditAction",
             $3::uuid, 'HUMAN'::"ActorType",
-            $4::jsonb, $5::timestamptz,
-            $6, $7, $8
+            $4::jsonb, $5::timestamptz, $6::uuid,
+            $7, $8, $9
           )`,
           id,
           tenantId,
           userId,
           JSON.stringify(metadata),
           createdAt.toISOString(),
+          outboxId,
           seq,
           eventHash,
           prevHash,
@@ -289,6 +300,7 @@ describe("audit-chain verify endpoint logic", () => {
 
       for (let i = 0; i < 3; i++) {
         const id = randomUUID();
+        const outboxId = randomUUID();
         const seq = BigInt(i + 1);
         const metadata = { index: i + 1 };
 
@@ -302,22 +314,32 @@ describe("audit-chain verify endpoint logic", () => {
         const canonicalBytes = computeCanonicalBytes(chainInput);
         const eventHash = computeEventHash(prevHash, canonicalBytes);
 
+        // Create a SENT outbox row so the HUMAN audit_logs row satisfies
+        // CHECK (outbox_id IS NOT NULL OR actor_type = 'SYSTEM')
+        await tx.$executeRawUnsafe(
+          `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+           VALUES ($1::uuid, $2::uuid, '{}', 'SENT', now())`,
+          outboxId,
+          tenantId,
+        );
+
         await tx.$executeRawUnsafe(
           `INSERT INTO audit_logs (
             id, tenant_id, scope, action, user_id, actor_type,
-            metadata, created_at,
+            metadata, created_at, outbox_id,
             chain_seq, event_hash, chain_prev_hash
           ) VALUES (
             $1::uuid, $2::uuid, 'PERSONAL'::"AuditScope", 'ENTRY_CREATE'::"AuditAction",
             $3::uuid, 'HUMAN'::"ActorType",
-            $4::jsonb, $5::timestamptz,
-            $6, $7, $8
+            $4::jsonb, $5::timestamptz, $6::uuid,
+            $7, $8, $9
           )`,
           id,
           tenantId,
           userId,
           JSON.stringify(metadata),
           timestamps[i].toISOString(),
+          outboxId,
           seq,
           eventHash,
           prevHash,
