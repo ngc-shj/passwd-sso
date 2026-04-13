@@ -469,6 +469,7 @@ model Tenant {
   mcpAccessTokens            McpAccessToken[]
   mcpRefreshTokens           McpRefreshToken[]
   delegationSessions         DelegationSession[]
+  auditChainAnchor           AuditChainAnchor?
 
   // JIT access policy
   jitTokenDefaultTtlSec      Int?     @map("jit_token_default_ttl_sec")
@@ -498,6 +499,7 @@ model Tenant {
 
   // Audit log retention
   auditLogRetentionDays      Int?     @map("audit_log_retention_days")
+  auditChainEnabled          Boolean  @default(false) @map("audit_chain_enabled")
 
   // Tenant-wide password policy
   tenantMinPasswordLength    Int      @default(0)    @map("tenant_min_password_length")
@@ -911,6 +913,7 @@ enum AuditAction {
   AUDIT_OUTBOX_PURGE_EXECUTED
   AUDIT_DELIVERY_FAILED
   AUDIT_DELIVERY_DEAD_LETTER
+  AUDIT_CHAIN_VERIFY
 }
 
 enum AuditScope {
@@ -963,6 +966,9 @@ model AuditLog {
   userAgent        String?     @map("user_agent") @db.VarChar(512)
   createdAt        DateTime    @default(now()) @map("created_at")
   outboxId         String?     @unique @map("outbox_id") @db.Uuid
+  chainSeq         BigInt?     @map("chain_seq")
+  eventHash        Bytes?      @map("event_hash")
+  chainPrevHash    Bytes?      @map("chain_prev_hash")
 
   user           User?           @relation(fields: [userId], references: [id], onDelete: Cascade)
   serviceAccount ServiceAccount? @relation(fields: [serviceAccountId], references: [id], onDelete: SetNull)
@@ -975,6 +981,16 @@ model AuditLog {
   @@index([tenantId, actorType, createdAt(sort: Desc)])
   @@index([action])
   @@map("audit_logs")
+}
+
+model AuditChainAnchor {
+  tenantId  String   @id @map("tenant_id") @db.Uuid
+  chainSeq  BigInt   @default(0) @map("chain_seq")
+  prevHash  Bytes    @default(dbgenerated("'\\x00'::bytea")) @map("prev_hash")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  @@map("audit_chain_anchors")
 }
 
 model AuditOutbox {

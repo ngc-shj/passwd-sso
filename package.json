@@ -50,6 +50,7 @@
     "@swc/helpers": "0.5.18",
     "argon2-browser": "^1.18.0",
     "bowser": "^2.14.1",
+    "canonicalize": "^3.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^17.2.4",
