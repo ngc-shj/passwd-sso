@@ -7,6 +7,7 @@ export const TENANT_PERMISSION = {
   BREAKGLASS_REQUEST: "tenant:breakglass:request",
   WEBHOOK_MANAGE: "tenant:webhook:manage",
   SERVICE_ACCOUNT_MANAGE: "tenant:serviceAccount:manage",
+  AUDIT_DELIVERY_MANAGE: "tenant:auditDelivery:manage",
 } as const;
 
 export type TenantPermissionValue =

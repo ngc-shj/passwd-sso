@@ -38,6 +38,9 @@ export const EPHEMERAL_PUBLIC_KEY_MAX = 500;
 export const MAX_WEBHOOKS = 5;
 export const WEBHOOK_URL_MAX_LENGTH = 2048;
 
+// ─── Audit Delivery ─────────────────────────────────────────
+export const MAX_AUDIT_DELIVERY_TARGETS = 10;
+
 // ─── Directory Sync ──────────────────────────────────────────
 export const SYNC_INTERVAL_MIN = 15;
 export const SYNC_INTERVAL_MAX = 1440;

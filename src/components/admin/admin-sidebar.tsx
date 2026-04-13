@@ -19,6 +19,7 @@ import {
   Link2,
   ListChecks,
   ScrollText,
+  Send,
   Settings2,
   Shield,
   ShieldAlert,
@@ -140,6 +141,7 @@ function useNavItems(
       children: [
         { href: "/admin/tenant/audit-logs/logs", label: t("navAuditLogsLogs"), icon: <ScrollText className="h-3.5 w-3.5 shrink-0" /> },
         { href: "/admin/tenant/audit-logs/breakglass", label: t("navAuditLogsBreakglass"), icon: <ShieldAlert className="h-3.5 w-3.5 shrink-0" /> },
+        { href: "/admin/tenant/audit-logs/delivery", label: t("navAuditDelivery"), icon: <Send className="h-3.5 w-3.5 shrink-0" /> },
       ],
     },
   ];

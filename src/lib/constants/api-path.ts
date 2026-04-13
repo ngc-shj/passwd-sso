@@ -62,6 +62,7 @@ export const API_PATH = {
   TENANT_AUDIT_LOGS: "/api/tenant/audit-logs",
   TENANT_BREAKGLASS: "/api/tenant/breakglass",
   TENANT_WEBHOOKS: "/api/tenant/webhooks",
+  TENANT_AUDIT_DELIVERY_TARGETS: "/api/tenant/audit-delivery-targets",
   TRAVEL_MODE: "/api/travel-mode",
   WEBAUTHN: "/api/webauthn",
   WEBAUTHN_REGISTER_OPTIONS: "/api/webauthn/register/options",
@@ -187,6 +188,9 @@ export const apiPath = {
   tenantWebhooks: () => API_PATH.TENANT_WEBHOOKS,
   tenantWebhookById: (webhookId: string) =>
     `${API_PATH.TENANT_WEBHOOKS}/${webhookId}`,
+  tenantAuditDeliveryTargets: () => API_PATH.TENANT_AUDIT_DELIVERY_TARGETS,
+  tenantAuditDeliveryTargetById: (targetId: string) =>
+    `${API_PATH.TENANT_AUDIT_DELIVERY_TARGETS}/${targetId}`,
   tenantServiceAccounts: () => API_PATH.TENANT_SERVICE_ACCOUNTS,
   tenantServiceAccountById: (saId: string) =>
     `${API_PATH.TENANT_SERVICE_ACCOUNTS}/${saId}`,
