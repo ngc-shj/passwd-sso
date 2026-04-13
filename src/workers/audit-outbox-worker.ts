@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import pg from "pg";
+import { randomUUID } from "node:crypto";
 import { getLogger } from "@/lib/logger";
 import { deadLetterLogger } from "@/lib/audit-logger";
 import { computeBackoffMs, withFullJitter } from "@/lib/backoff";
@@ -17,9 +18,9 @@ import { NIL_UUID } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/external-http";
+import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit-chain";
 
-// Raw shape returned from the claim query
-interface AuditOutboxRow {
+export interface AuditOutboxRow {
   id: string;
   tenant_id: string;
   payload: unknown;
@@ -33,7 +34,7 @@ interface AuditOutboxRow {
   last_error: string | null;
 }
 
-interface AuditOutboxPayload {
+export interface AuditOutboxPayload {
   scope: string;
   action: string;
   userId: string | null;
@@ -160,6 +161,152 @@ async function deliverRow(
       row.id,
     );
 
+    await tx.$executeRawUnsafe(
+      `UPDATE audit_outbox
+       SET status = 'SENT',
+           sent_at = now(),
+           processing_started_at = NULL
+       WHERE id = $1`,
+      row.id,
+    );
+  });
+}
+
+export async function checkChainEnabled(
+  prisma: PrismaClient,
+  tenantId: string,
+): Promise<boolean> {
+  const result = await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+    const rows = await tx.$queryRawUnsafe<{ audit_chain_enabled: boolean }[]>(
+      `SELECT audit_chain_enabled FROM tenants WHERE id = $1::uuid`,
+      tenantId,
+    );
+    return rows[0]?.audit_chain_enabled ?? false;
+  });
+  return result;
+}
+
+export async function deliverRowWithChain(
+  prisma: PrismaClient,
+  row: AuditOutboxRow,
+  payload: AuditOutboxPayload,
+): Promise<void> {
+  await prisma.$transaction(async (tx) => {
+    await setBypassRlsGucs(tx);
+
+    // P4-S2 fix: prevent indefinite lock wait
+    await tx.$executeRaw`SET LOCAL lock_timeout = '5000ms'`;
+
+    // P4-F4 fix: ensure anchor row exists (idempotent upsert)
+    await tx.$executeRawUnsafe(
+      `INSERT INTO audit_chain_anchors (tenant_id, chain_seq, prev_hash, updated_at)
+       VALUES ($1::uuid, 0, '\\x00'::bytea, now())
+       ON CONFLICT (tenant_id) DO NOTHING`,
+      row.tenant_id,
+    );
+
+    // Lock the anchor row for this tenant
+    const anchors = await tx.$queryRawUnsafe<{
+      chain_seq: bigint;
+      prev_hash: Buffer;
+    }[]>(
+      `SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1::uuid FOR UPDATE`,
+      row.tenant_id,
+    );
+
+    const anchor = anchors[0];
+    if (!anchor) {
+      throw new Error(`Anchor row missing after upsert for tenant ${row.tenant_id}`);
+    }
+
+    const newSeq = anchor.chain_seq + BigInt(1);
+    const prevHashBuf = Buffer.isBuffer(anchor.prev_hash)
+      ? anchor.prev_hash
+      : Buffer.from(anchor.prev_hash);
+
+    // Compute event hash
+    // IMPORTANT: metadataObj uses ?? {} fallback for null metadata.
+    // The verify endpoint uses the same fallback (row.metadata ?? {}).
+    // Both paths must use identical fallback for hash consistency.
+    const auditLogId = randomUUID();
+    const metadataObj = (payload.metadata ?? {}) as Record<string, unknown>;
+    const chainInput = buildChainInput({
+      id: auditLogId,
+      createdAt: row.created_at,
+      chainSeq: newSeq,
+      prevHash: prevHashBuf,
+      payload: metadataObj,
+    });
+    const canonicalBytes = computeCanonicalBytes(chainInput);
+    const eventHash = computeEventHash(prevHashBuf, canonicalBytes);
+
+    // Build metadata JSON
+    const metadataJson = payload.metadata !== null ? JSON.stringify(payload.metadata) : null;
+    const createdAtIso = row.created_at.toISOString();
+
+    // P4-F1 fix: INSERT with RETURNING to detect conflict
+    const inserted = await tx.$queryRawUnsafe<{ id: string }[]>(
+      `INSERT INTO audit_logs (
+        id, tenant_id, scope, action, user_id, actor_type,
+        service_account_id, team_id, target_type, target_id,
+        metadata, ip, user_agent, created_at, outbox_id,
+        chain_seq, event_hash, chain_prev_hash
+      ) VALUES (
+        $1::uuid,
+        $2::uuid,
+        $3::"AuditScope",
+        $4::"AuditAction",
+        $5::uuid,
+        $6::"ActorType",
+        $7::uuid,
+        $8::uuid,
+        $9,
+        $10,
+        $11::jsonb,
+        $12,
+        $13,
+        $14::timestamptz,
+        $15::uuid,
+        $16,
+        $17,
+        $18
+      )
+      ON CONFLICT (outbox_id) DO NOTHING
+      RETURNING id`,
+      auditLogId,
+      row.tenant_id,
+      payload.scope,
+      payload.action,
+      payload.userId,
+      payload.actorType,
+      payload.serviceAccountId,
+      payload.teamId,
+      payload.targetType,
+      payload.targetId,
+      metadataJson,
+      payload.ip,
+      payload.userAgent,
+      createdAtIso,
+      row.id,
+      newSeq,
+      eventHash,
+      prevHashBuf,
+    );
+
+    // Only advance anchor if INSERT succeeded (not a conflict/reprocessing)
+    if (inserted.length > 0) {
+      await tx.$executeRawUnsafe(
+        `UPDATE audit_chain_anchors
+         SET chain_seq = $1, prev_hash = $2, updated_at = now()
+         WHERE tenant_id = $3::uuid`,
+        newSeq,
+        eventHash,
+        row.tenant_id,
+      );
+    }
+
+    // Unconditionally mark outbox row as SENT
     await tx.$executeRawUnsafe(
       `UPDATE audit_outbox
        SET status = 'SENT',
@@ -823,7 +970,12 @@ export function createWorker(config: WorkerConfig) {
       }
 
       try {
-        await deliverRow(workerPrisma, row, payload);
+        const chainEnabled = await checkChainEnabled(workerPrisma, row.tenant_id);
+        if (chainEnabled) {
+          await deliverRowWithChain(workerPrisma, row, payload);
+        } else {
+          await deliverRow(workerPrisma, row, payload);
+        }
         log.info(
           { outboxId: row.id, action: payload.action, tenantId: row.tenant_id },
           "worker.delivered",

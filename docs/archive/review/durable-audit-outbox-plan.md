@@ -647,6 +647,26 @@ model AuditChainAnchor {
 }
 ```
 
+**P4-S1 fix (RLS policy — both USING and WITH CHECK)**:
+```sql
+ALTER TABLE "audit_chain_anchors" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "audit_chain_anchors" FORCE ROW LEVEL SECURITY;
+CREATE POLICY audit_chain_anchors_tenant_isolation ON "audit_chain_anchors"
+  USING (
+    COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
+    OR "tenant_id" = current_setting('app.tenant_id', true)::uuid
+  )
+  WITH CHECK (
+    COALESCE(current_setting('app.bypass_rls', true), '') = 'on'
+    OR "tenant_id" = current_setting('app.tenant_id', true)::uuid
+  );
+```
+
+**P4-F3 fix (worker grants)**:
+```sql
+GRANT SELECT, INSERT, UPDATE ON TABLE "audit_chain_anchors" TO passwd_outbox_worker;
+```
+
 `AuditLog` gains optional columns:
 
 ```prisma
@@ -659,29 +679,61 @@ model AuditLog {
 }
 ```
 
-`Tenant` gains `auditChainEnabled Boolean @default(false) @map("audit_chain_enabled")`.
+`Tenant` gains:
+- `auditChainEnabled Boolean @default(false) @map("audit_chain_enabled")`
+- `auditChainAnchor AuditChainAnchor?` (back-relation)
+
+`enum AuditAction` gains: `AUDIT_CHAIN_VERIFY` **(P4-F2 fix — R12 compliance; requires corresponding updates to constants, i18n, and group maps in Step 26)**.
 
 #### 4.2 Single-writer-per-tenant chain computation
 
 When the worker is about to insert an audit row for a tenant that has `auditChainEnabled = true`:
 
+**P4-R2-F3 fix (flag read location)**: Before entering the chain transaction, the worker reads `tenant.auditChainEnabled` via `SELECT audit_chain_enabled FROM tenants WHERE id = $1` (within `setBypassRlsGucs` scope but **outside** the chain transaction to avoid extending lock hold time). If `false`, the worker uses the existing non-chain `deliverRow` path.
+
 ```sql
 BEGIN;
+SET LOCAL lock_timeout = '5000ms';  -- P4-S2 fix: prevent indefinite lock wait
+-- P4-F4 fix: ensure anchor row exists (idempotent upsert)
+INSERT INTO audit_chain_anchors (tenant_id, chain_seq, prev_hash)
+  VALUES ($1, 0, '\x00'::bytea)
+  ON CONFLICT (tenant_id) DO NOTHING;
 SELECT chain_seq, prev_hash FROM audit_chain_anchors WHERE tenant_id = $1 FOR UPDATE;
 -- compute event_hash = SHA256(prev_hash || canonical(payload))
 -- compute new_seq = chain_seq + 1
-INSERT INTO audit_logs (..., chain_seq, prev_hash, event_hash, ...) VALUES (..., new_seq, prev_hash, event_hash, ...);
-UPDATE audit_chain_anchors SET chain_seq = new_seq, prev_hash = event_hash, updated_at = now() WHERE tenant_id = $1;
+-- P4-F1 fix: check INSERT result to prevent chain gap on reprocessing
+INSERT INTO audit_logs (..., chain_seq, prev_hash, event_hash, ...)
+  VALUES (..., new_seq, prev_hash, event_hash, ...)
+  ON CONFLICT (outbox_id) DO NOTHING
+  RETURNING id;
+-- Only advance anchor if INSERT actually inserted a row (P4-R2-F2 fix: also update outbox status)
+IF inserted THEN
+  UPDATE audit_chain_anchors SET chain_seq = new_seq, prev_hash = event_hash, updated_at = now() WHERE tenant_id = $1;
+END IF;
+-- Unconditionally mark outbox row as SENT (regardless of INSERT result)
+UPDATE audit_outbox SET status = 'SENT', sent_at = now(), processing_started_at = NULL WHERE id = $outbox_id;
 COMMIT;
 ```
 
-The `FOR UPDATE` on the anchor row serializes chain insertion **per tenant**. Different tenants' chains insert in parallel. This addresses TM2/TM5/P2-S4.
+The `FOR UPDATE` on the anchor row serializes chain insertion **per tenant**. Different tenants' chains insert in parallel. This addresses TM2/TM5/P2-S4. Lock acquisition failure (timeout after 5s) is treated as a transient error and retried via normal backoff. `lock_timeout` also applies to the anchor upsert INSERT, but contention on INSERT is negligible (<1ms) in practice.
 
-Canonicalization function: stable JCS (RFC 8785) over `payload_json` plus the row's `id`, **`created_at` (from the outbox row — business-event time, not worker time)**, `chain_seq`, and `prev_hash`. New helper [`src/lib/audit-chain.ts`](../../src/lib/audit-chain.ts).
+Canonicalization function: stable JCS (RFC 8785) over `payload_json` plus the row's `id`, **`created_at` (from the outbox row — business-event time, not worker time)**, `chain_seq`, and `prev_hash`. New helper [`src/lib/audit-chain.ts`](../../src/lib/audit-chain.ts). **Exported API**: `computeCanonicalBytes(input)`, `computeEventHash(prevHash, canonicalBytes)`, `buildChainInput(fields)`.
+
+**P4-S5 fix (canonicalization precision)**: `chain_seq` (BigInt) is serialized as a string (`"12345"`) in the canonical input object — avoids IEEE 754 precision loss for values > 2^53. `created_at` is normalized to UTC ISO 8601 with `Z` suffix before inclusion.
+
+**P4-R2-F4/S3 fix (genesis prev_hash)**: The genesis `prev_hash` is `'\x00'::bytea` — a **single zero byte** (not 32-byte zero buffer). This is intentional; normal `prev_hash` values are 32-byte SHA-256 outputs. The unit test must use a 1-byte `Buffer.from([0x00])` for the genesis vector.
 
 **S13/S19 — chain ordering limitation (documented explicitly)**: `chain_seq` represents **ingestion order** (order of worker processing), NOT strict temporal order of the underlying business events. A compromised worker can reorder events within a claim batch and produce a valid, self-consistent chain. The chain only detects **post-insertion tampering** (modifying a row after the hash was computed), NOT pre-insertion reordering by the chain authority (the worker). The verify endpoint additionally checks `created_at` monotonic non-decreasing ordering alongside `chain_seq` — a violation indicates either worker compromise or a bug.
 
-A new admin endpoint `GET /api/maintenance/audit-chain-verify?tenantId=...&from=...&to=...` re-walks the chain to detect tampering. **S32 fix**: follows the standard admin envelope — `verifyAdminToken`, `createRateLimiter(windowMs: 60_000, max: 3)`, operator membership check, Zod validation on query params (`tenantId: z.string().uuid()`, `from/to: z.coerce.date().optional()`), result pagination capped at 10,000 rows per request to prevent DoS.
+**P4-F6 fix (chain-external rows)**: `writeDirectAuditLog` rows (SYSTEM-actor meta-events like `AUDIT_OUTBOX_REAPED`) have `chain_seq = NULL` and are outside the hash chain scope. The verify endpoint filters these with `WHERE chain_seq IS NOT NULL`.
+
+A new admin endpoint `GET /api/maintenance/audit-chain-verify?tenantId=...&from=...&to=...` re-walks the chain to detect tampering. **S32 fix**: follows the standard admin envelope — `verifyAdminToken`, `createRateLimiter(windowMs: 60_000, max: 3)`, operator membership check, Zod validation on query params (`tenantId: z.string().uuid()`, `from: z.coerce.date().min(fiveYearsAgo).optional()`, `to: z.coerce.date().max(now).optional()`, plus `from < to` logic check — P4-S4 fix), result pagination capped at 10,000 rows per request to prevent DoS. **P4-F5 fix**: at request start, capture `anchor.chain_seq` as the upper bound; scan only `chain_seq <= captured_max`. **P4-S3 fix**: response shape `{ ok, firstTamperedSeq?, firstGapAfterSeq?, totalVerified }` — no raw hashes exposed. **P4-T7 fix**: verify also checks `chain_seq` dense monotonic (no gaps).
+
+**P4-R2-F1 fix (from/to semantics)**: `from/to` filter by `created_at` to determine the `chain_seq` range to verify. When `from` is provided, the endpoint finds the lowest `chain_seq` where `created_at >= from` and loads the `event_hash` from `chain_seq - 1` as the genesis hash for the partial walk. When only `from` is provided (no `to`), `to` defaults to the anchor snapshot time. This enables partial-chain verification without scanning from `chain_seq = 1`. When neither `from` nor `to` is provided, the endpoint walks from `chain_seq = 1` to `captured_max`.
+
+**P4-R2-N2 fix (empty chain)**: If the anchor row does not exist (tenant has `auditChainEnabled = true` but no events processed yet), the endpoint returns `{ ok: true, totalVerified: 0 }` — not an error.
+
+**P4-R2-S4 fix (logAudit usage)**: The verify endpoint uses `logAudit()` (fire-and-forget void, NOT `logAuditInTx`) to record the verification event. This ensures the verify event is enqueued after the snapshot is captured, preventing it from appearing in the current scan. **Do not migrate to `logAuditInTx`** — the verify event would then be inside the scan transaction scope and interfere with the snapshot boundary.
 
 #### 4.3 External notarization (out of scope for plan, noted)
 
@@ -735,11 +787,30 @@ Multiple replicas are safe by design (TM7 + `FOR UPDATE SKIP LOCKED`); productio
 24. (Out of scope for the loaded review, but listed for completeness): tenant CRUD endpoints for `audit_delivery_targets`. Note: targets support soft-delete only (`isActive = false`, P3-F5).
 
 ### Phase 4
-25. Add `model AuditChainAnchor`, columns on `AuditLog`, flag on `Tenant`. Migration `<ts>_add_audit_chain`. **S31 fix**: include `ENABLE / FORCE ROW LEVEL SECURITY` + `audit_chain_anchors_tenant_isolation` policy (same USING/WITH CHECK as `audit_outbox_tenant_isolation`).
-26. Implement `src/lib/audit-chain.ts` with JCS canonicalization (vendor RFC 8785 minimal impl or use `canonicalize` package; library choice deferred to implementation).
-27. Worker integration: when `tenant.auditChainEnabled`, the worker uses the chain insertion path (single transaction with `FOR UPDATE` on the anchor row).
-28. Implement `GET /api/maintenance/audit-chain-verify` admin endpoint that walks the chain and reports the first tampered row (or "OK").
-29. Tests: concurrent chain insertion (real DB) preserves ordering; tamper detection finds modified row.
+25. Add `model AuditChainAnchor`, columns on `AuditLog`, flag on `Tenant`, back-relation `auditChainAnchor AuditChainAnchor?` on `Tenant`. Add `AUDIT_CHAIN_VERIFY` to `enum AuditAction` in `prisma/schema.prisma`. Migration `<ts>_add_audit_chain`:
+    - `ENABLE / FORCE ROW LEVEL SECURITY` on `audit_chain_anchors`
+    - **P4-S1 fix**: `audit_chain_anchors_tenant_isolation` policy with **both USING and WITH CHECK** (same pattern as `audit_outbox_tenant_isolation`)
+    - **P4-F3 fix**: `GRANT SELECT, INSERT, UPDATE ON TABLE "audit_chain_anchors" TO passwd_outbox_worker` (INSERT for anchor upsert, SELECT+UPDATE for chain computation)
+    - Install `canonicalize` npm package: `npm install canonicalize` (JCS RFC 8785 implementation)
+26. Update `src/lib/constants/audit.ts`: add `AUDIT_CHAIN_VERIFY` to `AUDIT_ACTION`, `AUDIT_ACTION_VALUES`, `AUDIT_ACTION_GROUPS_TENANT[MAINTENANCE]`, `WEBHOOK_DISPATCH_SUPPRESS`. Update `messages/en/AuditLog.json` and `messages/ja/AuditLog.json` with translation key. **(P4-F2 fix — R12 compliance)**
+27. Implement `src/lib/audit-chain.ts`:
+    - **Exported functions**: `computeCanonicalBytes(input)`, `computeEventHash(prevHash, canonicalBytes)`, `buildChainInput(fields)` — all named exports for testability **(P4-T9 fix)**
+    - JCS canonicalization via `canonicalize` package (RFC 8785)
+    - **P4-S5 fix**: `chain_seq` (BigInt) serialized as string (`"12345"`) in canonical form. `created_at` normalized to UTC ISO 8601 with `Z` suffix before canonicalization
+28. Worker integration: when `tenant.auditChainEnabled`, the worker uses the chain insertion path:
+    - **P4-F4 fix (anchor initialization)**: Before `SELECT FOR UPDATE`, execute `INSERT INTO audit_chain_anchors (tenant_id, chain_seq, prev_hash) VALUES ($1, 0, '\x00') ON CONFLICT (tenant_id) DO NOTHING` to ensure anchor exists
+    - **P4-S2 fix (lock timeout)**: Set `SET LOCAL lock_timeout = '5000ms'` within the chain insertion transaction. Lock acquisition failure is treated as transient error (normal backoff retry)
+    - **P4-F1 fix (reprocessing safety)**: Use `INSERT INTO audit_logs (...) ... ON CONFLICT (outbox_id) DO NOTHING RETURNING id`. If RETURNING is empty (conflict = already delivered), skip anchor UPDATE and commit without chain advancement. This prevents chain_seq gaps on reaper-triggered reprocessing
+    - Single transaction: `BEGIN → UPSERT anchor → SELECT FOR UPDATE anchor → compute hash → INSERT audit_log (RETURNING id) → conditional anchor UPDATE → COMMIT`
+29. Implement `GET /api/maintenance/audit-chain-verify` admin endpoint:
+    - Standard admin envelope: `verifyAdminToken`, `createRateLimiter(windowMs: 60_000, max: 3)`, operator membership check
+    - Zod validation: `tenantId: z.string().uuid()`, `from: z.coerce.date().min(fiveYearsAgo).optional()`, `to: z.coerce.date().max(new Date()).optional()`, plus `from < to` logic validation **(P4-S4 fix)**
+    - **P4-F5 fix (snapshot consistency)**: At request start, capture `anchor.chain_seq` as upper bound. Scan only `WHERE chain_seq IS NOT NULL AND chain_seq <= captured_max ORDER BY chain_seq` **(P4-F6 fix — filters out writeDirectAuditLog rows)**
+    - Pagination capped at 10,000 rows per request
+    - Chain walk: re-compute each hash, verify `chain_seq` monotonic dense (no gaps — **P4-T7 fix**), verify `created_at` non-decreasing
+    - **P4-S3 fix (minimal response)**: Response shape `{ ok: boolean, firstTamperedSeq?: number, firstGapAfterSeq?: number, totalVerified: number }` — no raw hashes exposed
+    - Emit `logAudit(AUDIT_CHAIN_VERIFY)` after verification
+30. Tests (see Phase 4 tests below). **P4-T1 fix (prerequisite)**: Before Phase 4 tests, ensure `vitest.integration.config.ts` has `poolOptions: { forks: { singleFork: true } }` and `audit-outbox-integration` CI job exists in `.github/workflows/ci.yml`.
 
 ## Testing strategy
 
@@ -818,11 +889,21 @@ The most important property — **business write succeeds ⇔ audit row exists i
 
 ### Phase 4 tests
 
+**P4-T1 fix (prerequisite)**: Before adding Phase 4 tests, ensure `vitest.integration.config.ts` has `poolOptions: { forks: { singleFork: true } }` and `audit-outbox-integration` CI job exists in `.github/workflows/ci.yml` (following existing `rls-smoke` job pattern). This is a prerequisite carried over from Phase 1 design.
+
 | Test | DB/Mock | What it verifies |
 |---|---|---|
-| `audit-chain-ordering.integration.test.ts` | Real DB | **(T13 fix — resolved Q7)**: uses same two-Prisma-client + Deferred barrier pattern as `audit-outbox-skip-locked`. `chain_seq` is monotonic and dense; `created_at` is non-decreasing (S13/S19 fix). |
-| `audit-chain-tamper-detection.integration.test.ts` | Real DB | Modifying a row's payload after insertion is detected by the verify endpoint. |
+| `audit-chain.unit.test.ts` | Mocked | **(P4-T3 fix)**: Unit tests for `computeCanonicalBytes`, `computeEventHash`, `buildChainInput` — functions imported as named exports from `@/lib/audit-chain`. Fixed test vectors: known inputs → expected SHA-256 outputs. Covers: initial `prev_hash` (`\x00` — single zero byte, matching schema default; NOT 32-byte zero buffer), normal 32-byte prev_hash, `created_at` timezone normalization (`Z` suffix), `chain_seq` BigInt serialization as string. **(P4-R2-N4 fix — RT3 scope)**: functions are imported from module (not hardcoded strings); test vector expected hashes are legitimately hardcoded fixed values. |
+| `audit-chain-ordering.integration.test.ts` | Real DB | **(T13 fix — resolved Q7, P4-T6 fix, P4-R2-N1 fix — barrier placement specified)**: uses same two-Prisma-client + Deferred barrier pattern as `audit-outbox-skip-locked`. **Concurrency sequence**: Client A and Client B both execute `BEGIN; INSERT ... ON CONFLICT (anchor upsert)`. Deferred barrier is placed **immediately before `SELECT ... FOR UPDATE`**. Both clients release the barrier simultaneously via `Promise.all`. Client A acquires the lock first and commits. Client B then acquires the lock and commits. Assert `chain_seq` values are `(1, 2)` with no gaps or duplicates. `created_at` is non-decreasing (S13/S19 fix). |
+| `audit-chain-tamper-detection.integration.test.ts` | Real DB | Modifying a row's payload after insertion is detected by the verify endpoint. **(P4-T7 fix, P4-R2-N3 fix — test setup specified)**: gap detection test uses `passwd_user` (SUPERUSER) connection with `setBypassRlsGucs` to directly INSERT `audit_logs` rows with `chain_seq` gap (e.g., seq 1, 2, 4). Verify endpoint reports the gap via `firstGapAfterSeq`. |
 | `audit-chain-cross-tenant.integration.test.ts` | Real DB | Two tenants' chains are independent; stuck chain on tenant A does not block tenant B. |
+| `audit-chain-disabled.integration.test.ts` | Real DB | **(P4-T4 fix, P4-R2-N5 fix)**: Process outbox row for `auditChainEnabled = false` tenant. Assert resulting `audit_logs` row has `chain_seq IS NULL`, `event_hash IS NULL`, `prev_hash IS NULL`. Also assert `audit_chain_anchors` has **no row** for this tenant (anchor should not be created for disabled tenants). |
+| `audit-chain-rls.integration.test.ts` | Real DB | **(P4-T5 fix)**: (a) `passwd_app` without bypass GUC cannot SELECT/UPDATE cross-tenant anchor row. (b) `passwd_user` (table owner) without bypass GUC also cannot (FORCE RLS check). |
+| `audit-chain-verify-endpoint.test.ts` | Mocked | **(P4-T2 fix)**: Verify endpoint requires `verifyAdminToken`, operator membership. Zod rejects invalid `tenantId` / `from > to`. Rate limiter `max: 3`. Assert `logAudit` (not `logAuditInTx`) called with `AUDIT_CHAIN_VERIFY` (imported from `@/lib/constants/audit`, RT3). |
+| `audit-chain-verify-endpoint.integration.test.ts` | Real DB | **(P4-T2 fix, P4-R2-N2 fix)**: Real DB: valid chain → `{ ok: true, totalVerified: N }`. Tampered chain → `{ ok: false, firstTamperedSeq: N }`. **Empty chain (anchor not yet created)** → `{ ok: true, totalVerified: 0 }`. |
+| Update `audit-outbox-worker-role.integration.test.ts` | Real DB | **(P4-T9 merged into F3)**: Add `SELECT, INSERT, UPDATE on audit_chain_anchors` to expected grant set. |
+
+**P4-T10 fix**: Existing `audit-i18n-coverage.test.ts` and `audit-bypass-coverage.test.ts` will automatically fail if `AUDIT_CHAIN_VERIFY` is missing from i18n or bypass sets — no additional test changes needed, but this dependency is documented here for implementer awareness.
 
 ### Prior review findings resolution (T16 fix)
 

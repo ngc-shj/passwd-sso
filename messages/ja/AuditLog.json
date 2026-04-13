@@ -218,6 +218,7 @@
   "AUDIT_OUTBOX_PURGE_EXECUTED": "送信キュー失敗行をパージ",
   "AUDIT_DELIVERY_FAILED": "監査配信失敗",
   "AUDIT_DELIVERY_DEAD_LETTER": "監査配信デッドレター化",
+  "AUDIT_CHAIN_VERIFY": "監査チェーン検証を実行",
   "groupDelegation": "委任",
   "groupMaintenance": "メンテナンス",
   "delegationListMeta": "委任済み {entryCount} 件を一覧表示",
