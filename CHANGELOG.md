@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.40](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.39...passwd-sso-v0.4.40) (2026-04-13)
+
+
+### Features
+
+* durable audit outbox — Phase 2 ([#367](https://github.com/ngc-shj/passwd-sso/issues/367)) ([1ab59c4](https://github.com/ngc-shj/passwd-sso/commit/1ab59c4bbb3770902f6fa63fec45d403e37581da))
+* durable audit outbox — Phase 3 ([#369](https://github.com/ngc-shj/passwd-sso/issues/369)) ([db08c7a](https://github.com/ngc-shj/passwd-sso/commit/db08c7ae82682d9fdc7a7028251407402568e7b3))
+* durable audit outbox — Phase 4 + TIMESTAMPTZ migration ([#370](https://github.com/ngc-shj/passwd-sso/issues/370)) ([46e775a](https://github.com/ngc-shj/passwd-sso/commit/46e775a99d2f060f3c742633c61fc02f57a8f208))
+
 ## [0.4.39](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.38...passwd-sso-v0.4.39) (2026-04-12)
 
 
