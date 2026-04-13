@@ -99,13 +99,15 @@ export async function createTestContext(): Promise<TestContext> {
 
   async function createTenant(): Promise<string> {
     const id = randomUUID();
+    const slug = `test-${id.replace(/-/g, "").slice(0, 16)}`;
     await su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
-        `INSERT INTO tenants (id, name, created_at, updated_at)
-         VALUES ($1::uuid, $2, now(), now())`,
+        `INSERT INTO tenants (id, name, slug, created_at, updated_at)
+         VALUES ($1::uuid, $2, $3, now(), now())`,
         id,
         `test-tenant-${id.slice(0, 8)}`,
+        slug,
       );
     });
     return id;
