@@ -57,6 +57,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenantMember", "tenant", "auditLog"]],
   ["src/app/api/maintenance/audit-outbox-metrics/route.ts", ["tenantMember"]],
   ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", ["tenantMember"]],
+  ["src/app/api/maintenance/audit-chain-verify/route.ts", ["tenantMember"]],
   ["src/app/api/user/passkey-status/route.ts", ["webAuthnCredential", "user"]],
   ["src/app/api/share-links/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_CREATE
   ["src/app/api/share-links/[id]/route.ts", ["auditOutbox"]], // logAuditInTx for SHARE_REVOKE
