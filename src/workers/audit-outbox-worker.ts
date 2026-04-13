@@ -189,6 +189,7 @@ async function fanOutDeliveries(
     });
   });
 
+  getLogger().info({ outboxId, tenantId, targetCount: targets.length }, "worker.fanout_targets");
   if (targets.length === 0) return;
 
   // Create delivery rows (upsert for idempotency)
@@ -868,7 +869,9 @@ export function createWorker(config: WorkerConfig) {
         // If the worker crashes here, outbox row is already SENT so fan-out
         // will not be retried. This is the design trade-off per Plan §3.4:
         // DB target success is not rolled back by fan-out failure.
-        void fanOutDeliveries(workerPrisma, row.id, row.tenant_id, payload);
+        fanOutDeliveries(workerPrisma, row.id, row.tenant_id, payload).catch((err) => {
+          log.error({ err, outboxId: row.id }, "worker.fanout_failed");
+        });
       } catch (err) {
         log.warn(
           { err, outboxId: row.id, action: payload.action },

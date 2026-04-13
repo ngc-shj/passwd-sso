@@ -91,8 +91,8 @@ CREATE POLICY audit_deliveries_tenant_isolation ON "audit_deliveries"
   );
 
 -- Worker grants (use current_database() to avoid hardcoding DB name)
--- Phase 3: delivery targets — worker needs to read target config and track delivery state
-GRANT SELECT ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
+-- Phase 3: delivery targets — worker needs to read target config and update delivery stats (failCount, lastError, lastDeliveredAt)
+GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
 
 -- AlterEnum: add Phase 3 audit actions
