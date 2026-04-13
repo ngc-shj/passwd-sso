@@ -185,7 +185,7 @@ describe("logAuditAsync", () => {
       logAuditAsync({
         scope: AUDIT_SCOPE.PERSONAL,
         action: AUDIT_ACTION.AUTH_LOGIN,
-        userId: "user-1",
+        userId: "00000000-0000-4000-8000-000000000001",
         tenantId: "tenant-1",
       })
     ).resolves.toBeUndefined();

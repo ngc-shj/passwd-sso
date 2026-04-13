@@ -410,7 +410,7 @@ describe("recordFailure", () => {
     expect(result!.lockedUntil).toEqual(activeLock);
   });
 
-  it("swallows logAudit error in VAULT_UNLOCK_FAILED block", async () => {
+  it("swallows logAuditAsync error in VAULT_UNLOCK_FAILED block", async () => {
     setupTransaction({
       failed_unlock_attempts: 0,
       last_failed_unlock_at: null,
@@ -429,7 +429,7 @@ describe("recordFailure", () => {
     );
   });
 
-  it("swallows logAudit error in VAULT_LOCKOUT_TRIGGERED block", async () => {
+  it("swallows logAuditAsync error in VAULT_LOCKOUT_TRIGGERED block", async () => {
     setupTransaction({
       failed_unlock_attempts: 4,
       last_failed_unlock_at: new Date(),
@@ -450,20 +450,19 @@ describe("recordFailure", () => {
     );
   });
 
-  it("swallows logAudit error in lock_timeout catch block", async () => {
+  it("calls logAuditAsync in lock_timeout path (never throws)", async () => {
     const lockTimeoutError = Object.assign(new Error("lock timeout"), {
       code: "55P03",
     });
     mockPrismaTransaction.mockRejectedValue(lockTimeoutError);
-    mockLogAudit.mockImplementationOnce(() => {
-      throw new Error("audit write failed on lock_timeout");
-    });
 
     const result = await recordFailure("user-1");
     expect(result).toBeNull();
-    expect(mockLoggerInstance.error).toHaveBeenCalledWith(
-      expect.objectContaining({ userId: "user-1" }),
-      "audit.vaultUnlockFailed.lockTimeout.error",
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "VAULT_UNLOCK_FAILED",
+        metadata: { reason: "lock_timeout" },
+      }),
     );
   });
 });

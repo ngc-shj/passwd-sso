@@ -359,21 +359,17 @@ export async function recordFailure(
     if (isLockTimeoutError(err)) {
       getLogger().warn({ userId }, "vault.unlock.lockTimeout");
 
-      // Record audit even on lock_timeout (async nonblocking, outside transaction)
-      // NOTE: logAudit() swallows internally; catch kept as safety net.
-      try {
-        const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
-        await logAuditAsync({
-          scope: AUDIT_SCOPE.PERSONAL,
-          action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
-          userId,
-          metadata: { reason: "lock_timeout" },
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-        });
-      } catch (auditErr) {
-        getLogger().error({ err: auditErr, userId }, "audit.vaultUnlockFailed.lockTimeout.error");
-      }
+      // Record audit even on lock_timeout (outside transaction).
+      // logAuditAsync never throws — errors go to deadLetterLogger internally.
+      const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
+      await logAuditAsync({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
+        userId,
+        metadata: { reason: "lock_timeout" },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
 
       return null;
     }
