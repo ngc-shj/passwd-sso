@@ -37,6 +37,7 @@
   "navTransferOwnership": "Transfer",
   "navAuditLogsLogs": "Logs",
   "navAuditLogsBreakglass": "Break Glass",
+  "navAuditDelivery": "Delivery",
   "sectionMembers": "Members",
   "sectionMembersDesc": "Manage members and roles.",
   "sectionTeams": "Teams",

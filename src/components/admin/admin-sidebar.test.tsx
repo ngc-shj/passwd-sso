@@ -73,9 +73,9 @@ describe("AdminSidebar — tenant scope", () => {
     );
 
     const links = screen.getAllByRole("link");
-    // Leaf items (members, teams, security) + children under groups (provisioning×2, service-accounts×2, mcp×1, audit-logs×2)
-    // = 3 leaf + 7 children = 10 per sidebar × 2 sidebars = 20
-    expect(links.length).toBe(20);
+    // Leaf items (members, teams, security) + children under groups (provisioning×2, service-accounts×2, mcp×1, audit-logs×3)
+    // = 3 leaf + 8 children = 11 per sidebar × 2 sidebars = 22
+    expect(links.length).toBe(22);
   });
 
   it("renders correct tenant nav hrefs including children", () => {
@@ -100,6 +100,7 @@ describe("AdminSidebar — tenant scope", () => {
       "/admin/tenant/mcp/clients",
       "/admin/tenant/audit-logs/logs",
       "/admin/tenant/audit-logs/breakglass",
+      "/admin/tenant/audit-logs/delivery",
     ];
 
     expectedHrefs.forEach((href) => {
