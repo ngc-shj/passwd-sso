@@ -11,6 +11,15 @@
 -- interprets TIMESTAMP WITHOUT TZ values as the client's local timezone
 -- when constructing JavaScript Date objects.
 
+-- Guard: abort if DB timezone is not UTC — existing TIMESTAMP values were
+-- stored as UTC and the USING clause assumes this.
+DO $$
+BEGIN
+  IF current_setting('TimeZone') <> 'UTC' THEN
+    RAISE EXCEPTION 'Migration requires database timezone=UTC, got: %. Set timezone=UTC before running.', current_setting('TimeZone');
+  END IF;
+END$$;
+
 ALTER TABLE "access_requests" ALTER COLUMN "approved_at" SET DATA TYPE TIMESTAMPTZ(3) USING "approved_at" AT TIME ZONE 'UTC';
 ALTER TABLE "access_requests" ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMPTZ(3) USING "created_at" AT TIME ZONE 'UTC';
 ALTER TABLE "access_requests" ALTER COLUMN "expires_at" SET DATA TYPE TIMESTAMPTZ(3) USING "expires_at" AT TIME ZONE 'UTC';

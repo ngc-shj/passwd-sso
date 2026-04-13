@@ -59,7 +59,7 @@ export function buildChainInput(fields: {
 }): ChainInput {
   return {
     id: fields.id,
-    createdAt: fields.createdAt.toISOString().replace(/\+00:00$/, "Z"),
+    createdAt: fields.createdAt.toISOString(),
     chainSeq: fields.chainSeq.toString(),
     prevHash: fields.prevHash.toString("hex"),
     payload: fields.payload,

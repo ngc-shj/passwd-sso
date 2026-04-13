@@ -35,9 +35,9 @@ function buildQuerySchema() {
       operatorId: z.string().uuid(),
       from: z.coerce
         .date()
-        .min(new Date(now.getTime() - FIVE_YEARS_MS))
+        .min(new Date(now.getTime() - FIVE_YEARS_MS), { message: "from is too far in the past" })
         .optional(),
-      to: z.coerce.date().max(now).optional(),
+      to: z.coerce.date().max(now, { message: "to must not be in the future" }).optional(),
     })
     .refine(
       (data) => {
@@ -88,7 +88,8 @@ async function handleGET(req: NextRequest) {
     return unauthorized();
   }
 
-  const rl = await rateLimiter.check("rl:admin:chain-verify");
+  const tenantIdParam = req.nextUrl.searchParams.get("tenantId") ?? "global";
+  const rl = await rateLimiter.check(`rl:admin:chain-verify:${tenantIdParam}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

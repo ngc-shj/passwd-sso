@@ -21,6 +21,20 @@ describe("audit-chain", () => {
       expect(result.createdAt).toMatch(/Z$/);
     });
 
+    it("normalizes non-UTC offset Date to UTC Z suffix (JST +09:00)", () => {
+      // Same instant as 2026-01-15T10:30:00.000Z, expressed as JST
+      const jstDate = new Date("2026-01-15T19:30:00+09:00");
+      const result = buildChainInput({
+        id: "test-id",
+        createdAt: jstDate,
+        chainSeq: 1n,
+        prevHash: Buffer.from([0x00]),
+        payload: {},
+      });
+
+      expect(result.createdAt).toBe("2026-01-15T10:30:00.000Z");
+    });
+
     it("serializes chainSeq as string to avoid IEEE 754 precision loss", () => {
       const result = buildChainInput({
         id: "550e8400-e29b-41d4-a716-446655440000",
@@ -154,6 +168,37 @@ describe("audit-chain", () => {
       expect(eventHash.toString("hex")).toBe(
         "4050642603fe1d4a79d3937446f7927c98cb1793f6099cd06f2ae3175f765a0d",
       );
+    });
+
+    // Golden vector via buildChainInput with JST-offset Date — same hash as vector 1
+    it("matches golden vector 1 from JST-offset Date via buildChainInput", () => {
+      const jstDate = new Date("2026-01-15T19:30:00+09:00"); // same instant as 10:30Z
+      const genesis = Buffer.from([0x00]);
+      const input = buildChainInput({
+        id: "550e8400-e29b-41d4-a716-446655440000",
+        createdAt: jstDate,
+        chainSeq: 1n,
+        prevHash: genesis,
+        payload: { action: "ENTRY_CREATE", title: "test" },
+      });
+      const canonical = computeCanonicalBytes(input);
+      const eventHash = computeEventHash(genesis, canonical);
+
+      expect(eventHash.toString("hex")).toBe(
+        "ae91cbf650e0bd0638be63b8d75b3e739efde36df9edfcde1cf153f499bf681d",
+      );
+    });
+
+    it("produces identical hash from Uint8Array-derived Buffer (simulating Prisma bytea)", () => {
+      const uint8 = new Uint8Array([0x00]);
+      const prevHashFromUint8 = Buffer.from(uint8);
+      const prevHashDirect = Buffer.from([0x00]);
+      const canonical = Buffer.from("test-data", "utf-8");
+
+      const hash1 = computeEventHash(prevHashFromUint8, canonical);
+      const hash2 = computeEventHash(prevHashDirect, canonical);
+
+      expect(hash1.equals(hash2)).toBe(true);
     });
 
     it("produces different hashes for different prevHash values", () => {
