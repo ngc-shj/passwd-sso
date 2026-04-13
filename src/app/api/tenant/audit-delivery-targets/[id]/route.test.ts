@@ -166,6 +166,24 @@ describe("PATCH /api/tenant/audit-delivery-targets/[id]", () => {
     );
   });
 
+  it("returns success without update when isActive is already the requested value", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockAuditDeliveryTargetFindFirst.mockResolvedValue(makeTarget({ isActive: true }));
+
+    const req = createRequest("PATCH", `http://localhost/api/tenant/audit-delivery-targets/${TARGET_ID}`, {
+      body: { isActive: true },
+      headers: { origin: "http://localhost" },
+    });
+    const res = await PATCH(req, createParams({ id: TARGET_ID }));
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(200);
+    expect(json.success).toBe(true);
+    expect(mockAuditDeliveryTargetUpdate).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
   it("reactivates target and logs AUDIT_DELIVERY_TARGET_REACTIVATE", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

@@ -52,27 +52,21 @@ interface ConfigState {
   secret: string;
   // SIEM_HEC
   hecToken: string;
-  index: string;
-  sourcetype: string;
   // S3_OBJECT
-  bucket: string;
+  endpoint: string;
   region: string;
   accessKeyId: string;
   secretAccessKey: string;
-  prefix: string;
 }
 
 const defaultConfig: ConfigState = {
   url: "",
   secret: "",
   hecToken: "",
-  index: "",
-  sourcetype: "",
-  bucket: "",
+  endpoint: "",
   region: "",
   accessKeyId: "",
   secretAccessKey: "",
-  prefix: "",
 };
 
 export function AuditDeliveryTargetCard() {
@@ -120,41 +114,30 @@ export function AuditDeliveryTargetCard() {
 
   const buildPayload = (): Record<string, string> => {
     if (kind === "WEBHOOK") {
-      const p: Record<string, string> = { kind, url: config.url.trim() };
-      if (config.secret.trim()) p.secret = config.secret.trim();
-      return p;
+      return { kind, url: config.url.trim(), secret: config.secret.trim() };
     }
     if (kind === "SIEM_HEC") {
-      const p: Record<string, string> = {
-        kind,
-        url: config.url.trim(),
-        token: config.hecToken.trim(),
-      };
-      if (config.index.trim()) p.index = config.index.trim();
-      if (config.sourcetype.trim()) p.sourcetype = config.sourcetype.trim();
-      return p;
+      return { kind, url: config.url.trim(), token: config.hecToken.trim() };
     }
     if (kind === "S3_OBJECT") {
-      const p: Record<string, string> = {
+      return {
         kind,
-        bucket: config.bucket.trim(),
+        endpoint: config.endpoint.trim(),
         region: config.region.trim(),
         accessKeyId: config.accessKeyId.trim(),
         secretAccessKey: config.secretAccessKey.trim(),
       };
-      if (config.prefix.trim()) p.prefix = config.prefix.trim();
-      return p;
     }
     return {};
   };
 
   const isCreateDisabled = (): boolean => {
     if (!kind || creating) return true;
-    if (kind === "WEBHOOK") return !config.url.trim();
+    if (kind === "WEBHOOK") return !config.url.trim() || !config.secret.trim();
     if (kind === "SIEM_HEC") return !config.url.trim() || !config.hecToken.trim();
     if (kind === "S3_OBJECT") {
       return (
-        !config.bucket.trim() ||
+        !config.endpoint.trim() ||
         !config.region.trim() ||
         !config.accessKeyId.trim() ||
         !config.secretAccessKey.trim()
@@ -166,8 +149,9 @@ export function AuditDeliveryTargetCard() {
   const handleCreate = async () => {
     if (!kind) return;
 
-    if (kind === "WEBHOOK" || kind === "SIEM_HEC") {
-      const urlValidationError = validateUrl(config.url);
+    const urlValue = kind === "S3_OBJECT" ? config.endpoint : config.url;
+    if (kind === "WEBHOOK" || kind === "SIEM_HEC" || kind === "S3_OBJECT") {
+      const urlValidationError = validateUrl(urlValue);
       if (urlValidationError) {
         setUrlError(urlValidationError);
         return;
@@ -397,37 +381,23 @@ export function AuditDeliveryTargetCard() {
                       placeholder={t("hecTokenPlaceholder")}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hec-index">{t("index")}</Label>
-                    <Input
-                      id="hec-index"
-                      value={config.index}
-                      onChange={(e) => setConfigField("index", e.target.value)}
-                      placeholder={t("indexPlaceholder")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hec-sourcetype">{t("sourcetype")}</Label>
-                    <Input
-                      id="hec-sourcetype"
-                      value={config.sourcetype}
-                      onChange={(e) => setConfigField("sourcetype", e.target.value)}
-                      placeholder={t("sourcetypePlaceholder")}
-                    />
-                  </div>
                 </>
               )}
 
               {kind === "S3_OBJECT" && (
                 <>
                   <div className="space-y-2">
-                    <Label htmlFor="s3-bucket">{t("bucket")}</Label>
+                    <Label htmlFor="s3-endpoint">{t("endpoint")}</Label>
                     <Input
-                      id="s3-bucket"
-                      value={config.bucket}
-                      onChange={(e) => setConfigField("bucket", e.target.value)}
-                      placeholder={t("bucketPlaceholder")}
+                      id="s3-endpoint"
+                      type="url"
+                      value={config.endpoint}
+                      onChange={(e) => setConfigField("endpoint", e.target.value)}
+                      placeholder={t("endpointPlaceholder")}
                     />
+                    {urlError && (
+                      <p className="text-sm text-destructive">{urlError}</p>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="s3-region">{t("region")}</Label>
@@ -455,15 +425,6 @@ export function AuditDeliveryTargetCard() {
                       value={config.secretAccessKey}
                       onChange={(e) => setConfigField("secretAccessKey", e.target.value)}
                       placeholder={t("secretAccessKeyPlaceholder")}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="s3-prefix">{t("prefix")}</Label>
-                    <Input
-                      id="s3-prefix"
-                      value={config.prefix}
-                      onChange={(e) => setConfigField("prefix", e.target.value)}
-                      placeholder={t("prefixPlaceholder")}
                     />
                   </div>
                 </>

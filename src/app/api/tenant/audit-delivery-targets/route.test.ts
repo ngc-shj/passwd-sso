@@ -157,7 +157,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     mockAuth.mockResolvedValue(null);
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     const res = await POST(req);
@@ -171,7 +171,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     mockRequireTenantPermission.mockRejectedValue(new TenantAuthError("FORBIDDEN", 403));
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     const res = await POST(req);
@@ -186,7 +186,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     );
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
     });
     const res = await POST(req);
     const { status } = await parseResponse(res);
@@ -242,7 +242,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://localhost/hook" },
+      body: { kind: "WEBHOOK", url: "https://localhost/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     const res = await POST(req);
@@ -256,7 +256,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "http://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "http://example.com/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     const res = await POST(req);
@@ -271,7 +271,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     mockAuditDeliveryTargetCount.mockResolvedValue(10);
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     const res = await POST(req);
@@ -302,7 +302,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     mockAuditDeliveryTargetCreate.mockResolvedValue(created);
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     const res = await POST(req);
@@ -339,7 +339,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     });
 
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
-      body: { kind: "WEBHOOK", url: "https://example.com/hook" },
+      body: { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" },
       headers: { origin: "http://localhost" },
     });
     await POST(req);
@@ -372,16 +372,22 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
       lastDeliveredAt: null,
     });
 
-    const payload = { kind: "WEBHOOK", url: "https://example.com/hook" };
+    const payload = { kind: "WEBHOOK", url: "https://example.com/hook", secret: "s3cr3t" };
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
       body: payload,
       headers: { origin: "http://localhost" },
     });
     await POST(req);
 
+    // Config blob should NOT include kind (stripped before encryption)
+    const callArg = mockEncryptServerData.mock.calls[0]?.[0] as string;
+    const parsed = JSON.parse(callArg);
+    expect(parsed).toEqual({ url: "https://example.com/hook", secret: "s3cr3t" });
+    // AAD buffer is the 3rd argument
     expect(mockEncryptServerData).toHaveBeenCalledWith(
-      JSON.stringify(payload),
+      expect.any(String),
       expect.anything(),
+      expect.any(Buffer),
     );
   });
 
@@ -407,7 +413,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     const req = createRequest("POST", "http://localhost/api/tenant/audit-delivery-targets", {
       body: {
         kind: "S3_OBJECT",
-        bucket: "my-audit-bucket",
+        endpoint: "https://s3.us-east-1.amazonaws.com/my-audit-bucket",
         region: "us-east-1",
         accessKeyId: "AKIAIOSFODNN7EXAMPLE",
         secretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",

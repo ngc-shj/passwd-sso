@@ -58,6 +58,11 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     return notFound();
   }
 
+  // No-op guard: skip update + audit log if isActive is already the requested value
+  if (target.isActive === data.isActive) {
+    return NextResponse.json({ success: true, target: { id, kind: target.kind, isActive: target.isActive } });
+  }
+
   const updated = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.auditDeliveryTarget.update({
       where: { id, tenantId: actor.tenantId },

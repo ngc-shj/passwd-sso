@@ -17,6 +17,7 @@ import {
   encryptServerData,
 } from "@/lib/crypto-server";
 import { AuditDeliveryTargetKind } from "@prisma/client";
+import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/api-response";
@@ -46,22 +47,19 @@ const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.WEBHOOK),
     url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(ssrfSafeUrl, { message: ssrfMessage }),
-    secret: z.string().optional(),
+    secret: z.string().min(1),
   }),
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.SIEM_HEC),
     url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(ssrfSafeUrl, { message: ssrfMessage }),
     token: z.string().min(1),
-    index: z.string().optional(),
-    sourcetype: z.string().optional(),
   }),
   z.object({
     kind: z.literal(AuditDeliveryTargetKind.S3_OBJECT),
-    bucket: z.string().min(1),
+    endpoint: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(ssrfSafeUrl, { message: ssrfMessage }),
     region: z.string().min(1),
     accessKeyId: z.string().min(1),
     secretAccessKey: z.string().min(1),
-    prefix: z.string().optional(),
   }),
 ]);
 
@@ -139,15 +137,26 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Encrypt the config blob
-  const configJson = JSON.stringify(data);
+  // Pre-generate UUID so we can build AAD before DB insert
+  const targetId = randomUUID();
+
+  // Strip kind from config — worker reads kind from DB column, not blob
+  const { kind: _kind, ...configFields } = data;
+  const configJson = JSON.stringify(configFields);
+
+  // Encrypt with AAD = targetId + tenantId (must match worker decryption)
   const version = getCurrentMasterKeyVersion();
   const masterKey = getMasterKeyByVersion(version);
-  const encrypted = encryptServerData(configJson, masterKey);
+  const aad = Buffer.concat([
+    Buffer.from(targetId.replace(/-/g, ""), "hex"),
+    Buffer.from(actor.tenantId.replace(/-/g, ""), "hex"),
+  ]);
+  const encrypted = encryptServerData(configJson, masterKey, aad);
 
   const target = await withTenantRls(prisma, actor.tenantId, async () =>
     prisma.auditDeliveryTarget.create({
       data: {
+        id: targetId,
         tenantId: actor.tenantId,
         kind: data.kind,
         configEncrypted: encrypted.ciphertext,
