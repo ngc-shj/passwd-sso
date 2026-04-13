@@ -8,6 +8,9 @@ export default defineConfig({
     include: ["src/**/*.integration.test.ts"],
     setupFiles: ["src/__tests__/setup.ts"],
     pool: "forks" as const,
+    poolOptions: {
+      forks: { singleFork: true },
+    },
     isolate: true,
     testTimeout: 30000,
   },
