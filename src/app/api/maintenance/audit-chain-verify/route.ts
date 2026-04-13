@@ -27,23 +27,26 @@ const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });
 const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000;
 const MAX_ROWS_PER_REQUEST = 10_000;
 
-const querySchema = z
-  .object({
-    tenantId: z.string().uuid(),
-    operatorId: z.string().uuid(),
-    from: z.coerce
-      .date()
-      .min(new Date(Date.now() - FIVE_YEARS_MS))
-      .optional(),
-    to: z.coerce.date().max(new Date()).optional(),
-  })
-  .refine(
-    (data) => {
-      if (data.from && data.to) return data.from < data.to;
-      return true;
-    },
-    { message: "from must be before to" },
-  );
+function buildQuerySchema() {
+  const now = new Date();
+  return z
+    .object({
+      tenantId: z.string().uuid(),
+      operatorId: z.string().uuid(),
+      from: z.coerce
+        .date()
+        .min(new Date(now.getTime() - FIVE_YEARS_MS))
+        .optional(),
+      to: z.coerce.date().max(now).optional(),
+    })
+    .refine(
+      (data) => {
+        if (data.from && data.to) return data.from < data.to;
+        return true;
+      },
+      { message: "from must be before to" },
+    );
+}
 
 interface ChainRow {
   id: string;
@@ -72,6 +75,7 @@ async function handleGET(req: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
+  const querySchema = buildQuerySchema();
   const params = querySchema.safeParse({
     tenantId: req.nextUrl.searchParams.get("tenantId"),
     operatorId: req.nextUrl.searchParams.get("operatorId"),
@@ -93,6 +97,7 @@ async function handleGET(req: NextRequest) {
       prisma.tenantMember.findFirst({
         where: {
           userId: operatorId,
+          tenantId,
           role: { in: ["OWNER", "ADMIN"] },
           deactivatedAt: null,
         },
@@ -186,15 +191,20 @@ async function handleGET(req: NextRequest) {
         ),
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE,
     );
-    if (seedRows[0]?.event_hash) {
-      seedPrevHash = seedRows[0].event_hash;
+    if (!seedRows[0]?.event_hash) {
+      return NextResponse.json(
+        { error: `Seed row for chain_seq ${fromSeq - 1} not found — partial verification requires the preceding row` },
+        { status: 422 },
+      );
     }
+    seedPrevHash = seedRows[0].event_hash;
   }
 
   // Walk the chain
   let totalVerified = 0;
   let firstTamperedSeq: number | null = null;
   let firstGapAfterSeq: number | null = null;
+  let firstTimestampViolationSeq: number | null = null;
   let prevHash = seedPrevHash;
   let prevSeq: number | null = null;
   let prevCreatedAt: Date | null = null;
@@ -229,9 +239,8 @@ async function handleGET(req: NextRequest) {
       }
     }
 
-    // Check created_at is non-decreasing (best-effort; don't abort verification)
-    if (prevCreatedAt !== null && row.created_at < prevCreatedAt) {
-      // Non-decreasing violation — noted implicitly via tamper detection
+    if (prevCreatedAt !== null && row.created_at < prevCreatedAt && firstTimestampViolationSeq === null) {
+      firstTimestampViolationSeq = seq;
     }
 
     // Re-compute the event hash and compare with stored event_hash
@@ -262,7 +271,7 @@ async function handleGET(req: NextRequest) {
     totalVerified++;
   }
 
-  const ok = firstTamperedSeq === null && firstGapAfterSeq === null;
+  const ok = firstTamperedSeq === null && firstGapAfterSeq === null && firstTimestampViolationSeq === null;
 
   const { ip, userAgent } = extractRequestMeta(req);
   logAudit({
@@ -276,6 +285,7 @@ async function handleGET(req: NextRequest) {
       totalVerified,
       firstTamperedSeq,
       firstGapAfterSeq,
+      firstTimestampViolationSeq,
     },
     ip,
     userAgent,
@@ -285,6 +295,7 @@ async function handleGET(req: NextRequest) {
     ok,
     firstTamperedSeq,
     firstGapAfterSeq,
+    firstTimestampViolationSeq,
     totalVerified,
   });
 }

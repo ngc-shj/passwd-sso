@@ -20,8 +20,7 @@ import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit-chain";
 
-// Raw shape returned from the claim query
-interface AuditOutboxRow {
+export interface AuditOutboxRow {
   id: string;
   tenant_id: string;
   payload: unknown;
@@ -35,7 +34,7 @@ interface AuditOutboxRow {
   last_error: string | null;
 }
 
-interface AuditOutboxPayload {
+export interface AuditOutboxPayload {
   scope: string;
   action: string;
   userId: string | null;
@@ -173,7 +172,7 @@ async function deliverRow(
   });
 }
 
-async function checkChainEnabled(
+export async function checkChainEnabled(
   prisma: PrismaClient,
   tenantId: string,
 ): Promise<boolean> {
@@ -188,7 +187,7 @@ async function checkChainEnabled(
   return result;
 }
 
-async function deliverRowWithChain(
+export async function deliverRowWithChain(
   prisma: PrismaClient,
   row: AuditOutboxRow,
   payload: AuditOutboxPayload,
@@ -287,7 +286,7 @@ async function deliverRowWithChain(
       payload.userAgent,
       createdAtIso,
       row.id,
-      Number(newSeq),
+      newSeq,
       eventHash,
       prevHashBuf,
     );
@@ -298,7 +297,7 @@ async function deliverRowWithChain(
         `UPDATE audit_chain_anchors
          SET chain_seq = $1, prev_hash = $2, updated_at = now()
          WHERE tenant_id = $3::uuid`,
-        Number(newSeq),
+        newSeq,
         eventHash,
         row.tenant_id,
       );
