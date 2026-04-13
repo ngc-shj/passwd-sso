@@ -346,6 +346,109 @@ jobs:
           psql -v ON_ERROR_STOP=1 postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_sso -f scripts/rls-smoke-verify.sql
           echo "✓ RLS enforcement verified: passwd_app cannot see seeded rows"
 
+  # ─── Integration: Audit Outbox ──────────────────────────────
+  audit-outbox-integration:
+    name: "Integration: Audit outbox"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: changes
+    if: needs.changes.outputs.app == 'true' || needs.changes.outputs.ci == 'true'
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: passwd_user
+          POSTGRES_PASSWORD: passwd_pass
+          POSTGRES_DB: passwd_sso
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U passwd_user -d passwd_sso"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    env:
+      DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+      MIGRATION_DATABASE_URL: "postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso"
+      SHARE_MASTER_KEY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      AUTH_SECRET: "ci-secret-value-that-is-at-least-32-chars"
+      AUTH_URL: "http://localhost:3000"
+      VERIFIER_PEPPER_KEY: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      REDIS_URL: "redis://localhost:6379"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Create app and outbox worker roles
+        run: |
+          psql postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            -- App role (same as rls-smoke)
+            CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS
+              NOCREATEDB NOCREATEROLE PASSWORD 'passwd_app_pass';
+            REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+            GRANT CONNECT ON DATABASE passwd_sso TO passwd_app;
+            GRANT USAGE ON SCHEMA public TO passwd_app;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+              GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+            ALTER DEFAULT PRIVILEGES IN SCHEMA public
+              GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
+
+            -- Outbox worker role (least privilege)
+            CREATE ROLE passwd_outbox_worker WITH LOGIN NOSUPERUSER NOBYPASSRLS
+              NOCREATEDB NOCREATEROLE PASSWORD 'passwd_outbox_pass';
+            GRANT CONNECT ON DATABASE passwd_sso TO passwd_outbox_worker;
+            REVOKE ALL ON SCHEMA public FROM passwd_outbox_worker;
+            GRANT USAGE ON SCHEMA public TO passwd_outbox_worker;
+          SQL
+
+      - name: Run migrations as SUPERUSER
+        run: npx prisma migrate deploy
+
+      - name: Grant worker privileges post-migration
+        run: |
+          psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            -- Phase 1: outbox core + FK ref tables
+            GRANT SELECT, UPDATE, DELETE ON TABLE "audit_outbox" TO passwd_outbox_worker;
+            GRANT SELECT, INSERT ON TABLE "audit_logs" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "tenants" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "users" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "teams" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "service_accounts" TO passwd_outbox_worker;
+            -- Phase 3: delivery targets
+            GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
+            GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
+            -- Phase 4: chain anchors
+            GRANT SELECT, INSERT, UPDATE ON TABLE "audit_chain_anchors" TO passwd_outbox_worker;
+          SQL
+
+      - name: Re-grant app role on new tables
+        run: |
+          psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
+            GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
+          SQL
+
+      - name: Run integration tests
+        run: npx vitest run --config vitest.integration.config.ts
+
   # ─── Container Scan (Trivy) ─────────────────────────────────
   container-scan:
     name: "Trivy: Container image scan"

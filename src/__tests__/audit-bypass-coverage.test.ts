@@ -29,16 +29,21 @@ describe("audit bypass coverage", () => {
     expect(missing).toEqual([]);
   });
 
-  it("worker-emitted AUDIT_OUTBOX_* actions are in OUTBOX_BYPASS_AUDIT_ACTIONS", () => {
-    const workerEmitted = [
+  it("OUTBOX_BYPASS_AUDIT_ACTIONS contains exactly the expected 7 actions", () => {
+    const expected = new Set([
+      // Phase 1: webhook delivery failures
+      AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
+      AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
+      // Phase 2: outbox worker operational events
       AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
       AUDIT_ACTION.AUDIT_OUTBOX_DEAD_LETTER,
       AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED,
-    ];
-    const missing = workerEmitted.filter(
-      (a) => !OUTBOX_BYPASS_AUDIT_ACTIONS.has(a),
-    );
-    expect(missing).toEqual([]);
+      // Phase 3: audit delivery failures
+      AUDIT_ACTION.AUDIT_DELIVERY_FAILED,
+      AUDIT_ACTION.AUDIT_DELIVERY_DEAD_LETTER,
+    ]);
+    expect(OUTBOX_BYPASS_AUDIT_ACTIONS).toEqual(expected);
+    expect(OUTBOX_BYPASS_AUDIT_ACTIONS.size).toBe(7);
   });
 
   it("admin-endpoint AUDIT_OUTBOX_* actions are NOT in OUTBOX_BYPASS_AUDIT_ACTIONS", () => {

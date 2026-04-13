@@ -76,3 +76,8 @@ GRANT SELECT ON service_accounts TO passwd_outbox_worker;
 -- Phase 3: delivery targets
 GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
+
+-- Prevent SUPERUSER's ALTER DEFAULT PRIVILEGES from implicitly granting
+-- REFERENCES on future tables to the worker role.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+  REVOKE REFERENCES ON TABLES FROM passwd_outbox_worker;
