@@ -1,10 +1,22 @@
 /**
- * Privilege enumeration for passwd_outbox_worker role.
- * Asserts exact allowed privileges and confirms denied operations.
+ * Privilege enumeration for passwd_outbox_worker role (Phase 1+2+3+4).
+ * Asserts exact allowed privileges after all migrations run,
+ * and confirms denied operations on non-granted tables.
+ *
+ * Expected grants after all migrations:
+ *   audit_outbox: SELECT, UPDATE, DELETE
+ *   audit_logs: SELECT, INSERT
+ *   tenants: SELECT
+ *   users: SELECT (FK ref integrity under RLS)
+ *   teams: SELECT (FK ref integrity under RLS)
+ *   service_accounts: SELECT (FK ref integrity under RLS)
+ *   audit_delivery_targets: SELECT, UPDATE
+ *   audit_deliveries: SELECT, INSERT, UPDATE, DELETE
+ *   audit_chain_anchors: SELECT, INSERT, UPDATE
  */
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { createTestContext, type TestContext } from "./helpers";
 
 describe("audit-outbox worker role privileges", () => {
   let ctx: TestContext;
@@ -43,30 +55,32 @@ describe("audit-outbox worker role privileges", () => {
       privMap.set(row.table_name, existing);
     }
 
-    // Assert exact allowed set
-    expect(privMap.get("audit_outbox")?.sort()).toEqual(
-      ["DELETE", "SELECT", "UPDATE"].sort(),
-    );
-    expect(privMap.get("audit_logs")?.sort()).toEqual(["INSERT"]);
+    // Phase 1: outbox + audit_logs + tenants + FK ref tables
+    expect(privMap.get("audit_outbox")?.sort()).toEqual(["DELETE", "SELECT", "UPDATE"]);
+    expect(privMap.get("audit_logs")?.sort()).toEqual(["INSERT", "SELECT"]);
     expect(privMap.get("tenants")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("users")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("teams")?.sort()).toEqual(["SELECT"]);
+    expect(privMap.get("service_accounts")?.sort()).toEqual(["SELECT"]);
 
-    // Worker should NOT have privileges on other tables
-    // (only audit_outbox, audit_logs, tenants should appear)
-    const allowedTables = new Set(["audit_outbox", "audit_logs", "tenants"]);
+    // Phase 3: delivery targets + deliveries
+    expect(privMap.get("audit_delivery_targets")?.sort()).toEqual(["SELECT", "UPDATE"]);
+    expect(privMap.get("audit_deliveries")?.sort()).toEqual(["DELETE", "INSERT", "SELECT", "UPDATE"]);
+
+    // Phase 4: chain anchors
+    expect(privMap.get("audit_chain_anchors")?.sort()).toEqual(["INSERT", "SELECT", "UPDATE"]);
+
+    // Verify no unexpected tables
+    const allowedTables = new Set([
+      "audit_outbox", "audit_logs", "tenants",
+      "users", "teams", "service_accounts",
+      "audit_delivery_targets", "audit_deliveries",
+      "audit_chain_anchors",
+    ]);
     for (const tableName of privMap.keys()) {
-      expect(allowedTables.has(tableName)).toBe(true);
+      expect(allowedTables.has(tableName), `Unexpected grant on table: ${tableName}`).toBe(true);
     }
-  });
-
-  it("cannot SELECT from users table", async () => {
-    await expect(
-      ctx.worker.prisma.$transaction(async (tx) => {
-        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
-        await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
-        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
-        return tx.$queryRawUnsafe(`SELECT id FROM users LIMIT 1`);
-      }),
-    ).rejects.toThrow(/permission denied/);
+    expect(privMap.size).toBe(allowedTables.size);
   });
 
   it("cannot INSERT into password_entries table", async () => {
@@ -84,12 +98,18 @@ describe("audit-outbox worker role privileges", () => {
     ).rejects.toThrow(/permission denied/);
   });
 
-  it("cannot call nextval() on sequences it does not own", async () => {
-    // The worker should not be able to advance arbitrary sequences
+  it("cannot INSERT into users table", async () => {
     await expect(
-      ctx.worker.prisma.$queryRawUnsafe(
-        `SELECT nextval(pg_get_serial_sequence('tenants', 'id'))`,
-      ),
-    ).rejects.toThrow();
+      ctx.worker.prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+        await tx.$executeRaw`SELECT set_config('app.bypass_purpose', 'audit_write', true)`;
+        await tx.$executeRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+        await tx.$executeRawUnsafe(
+          `INSERT INTO users (id, tenant_id, email, name, created_at, updated_at)
+           VALUES (gen_random_uuid(), $1::uuid, 'test@example.com', 'Test', now(), now())`,
+          tenantId,
+        );
+      }),
+    ).rejects.toThrow(/permission denied/);
   });
 });

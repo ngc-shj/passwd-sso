@@ -95,7 +95,7 @@ export async function createTestContext(): Promise<TestContext> {
   const worker = createPrismaForRole("worker");
 
   // Verify connectivity
-  await su.prisma.$executeRawUnsafe("SELECT 1");
+  await su.prisma.$executeRaw`SELECT 1`;
 
   async function createTenant(): Promise<string> {
     const id = randomUUID();

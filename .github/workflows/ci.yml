@@ -425,11 +425,17 @@ jobs:
       - name: Grant worker privileges post-migration
         run: |
           psql -v ON_ERROR_STOP=1 postgresql://passwd_user:passwd_pass@localhost:5432/passwd_sso <<'SQL'
+            -- Phase 1: outbox core + FK ref tables
             GRANT SELECT, UPDATE, DELETE ON TABLE "audit_outbox" TO passwd_outbox_worker;
-            GRANT INSERT ON TABLE "audit_logs" TO passwd_outbox_worker;
+            GRANT SELECT, INSERT ON TABLE "audit_logs" TO passwd_outbox_worker;
             GRANT SELECT ON TABLE "tenants" TO passwd_outbox_worker;
-            GRANT SELECT ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "users" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "teams" TO passwd_outbox_worker;
+            GRANT SELECT ON TABLE "service_accounts" TO passwd_outbox_worker;
+            -- Phase 3: delivery targets
+            GRANT SELECT, UPDATE ON TABLE "audit_delivery_targets" TO passwd_outbox_worker;
             GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE "audit_deliveries" TO passwd_outbox_worker;
+            -- Phase 4: chain anchors
             GRANT SELECT, INSERT, UPDATE ON TABLE "audit_chain_anchors" TO passwd_outbox_worker;
           SQL
 

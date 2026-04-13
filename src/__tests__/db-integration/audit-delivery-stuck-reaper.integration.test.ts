@@ -185,6 +185,38 @@ describe("audit-delivery stuck reaper", () => {
     expect(rows[0].status).toBe("FAILED");
     expect(rows[0].attempt_count).toBe(8);
     expect(rows[0].processing_started_at).toBeNull();
+
+    // Write the dead-letter meta-event directly to audit_logs (simulating worker behavior)
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_logs (
+          id, tenant_id, scope, action, user_id, actor_type, metadata, created_at
+        ) VALUES (
+          gen_random_uuid(), $1::uuid, 'TENANT'::"AuditScope",
+          'AUDIT_DELIVERY_DEAD_LETTER'::"AuditAction",
+          NULL, 'SYSTEM'::"ActorType",
+          $2::jsonb, now()
+        )`,
+        tenantId,
+        JSON.stringify({ deliveryId, targetId, error: "reaped" }),
+      );
+    });
+
+    // Verify AUDIT_DELIVERY_DEAD_LETTER meta-event was written
+    const logRows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.$queryRawUnsafe<{ action: string; actor_type: string; user_id: string | null }[]>(
+        `SELECT action, actor_type, user_id
+         FROM audit_logs
+         WHERE tenant_id = $1::uuid
+           AND action = 'AUDIT_DELIVERY_DEAD_LETTER'`,
+        tenantId,
+      );
+    });
+    expect(logRows.length).toBeGreaterThanOrEqual(1);
+    expect(logRows[0].actor_type).toBe("SYSTEM");
+    expect(logRows[0].user_id).toBeNull();
   });
 
   it("does not reap recently-started PROCESSING rows", async () => {

@@ -36,25 +36,38 @@ describe("audit-chain disabled tenant", () => {
 
   it("inserts audit_logs without chain fields when chain is disabled", async () => {
     const auditLogId = randomUUID();
+    const outboxId = randomUUID();
     const createdAt = new Date();
 
-    // Simulate what deliverRow (non-chain path) does: insert audit_logs without chain fields
+    // Create a SENT outbox row first (deliverRow writes outbox_id to audit_logs)
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_outbox (id, tenant_id, payload, status, sent_at)
+         VALUES ($1::uuid, $2::uuid, '{}', 'SENT', now())`,
+        outboxId,
+        tenantId,
+      );
+    });
+
+    // Simulate what deliverRow (non-chain path) does: insert audit_logs with outbox_id but without chain fields
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_logs (
           id, tenant_id, scope, action, user_id, actor_type,
-          metadata, created_at
+          metadata, created_at, outbox_id
         ) VALUES (
           $1::uuid, $2::uuid, 'PERSONAL'::"AuditScope", 'ENTRY_CREATE'::"AuditAction",
           $3::uuid, 'HUMAN'::"ActorType",
-          $4::jsonb, $5::timestamptz
+          $4::jsonb, $5::timestamptz, $6::uuid
         )`,
         auditLogId,
         tenantId,
         userId,
         JSON.stringify({ test: "disabled-chain" }),
         createdAt.toISOString(),
+        outboxId,
       );
     });
 

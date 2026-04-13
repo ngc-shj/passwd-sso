@@ -22,7 +22,7 @@ describe("audit-outbox SKIP LOCKED concurrency", () => {
 
   beforeAll(async () => {
     ctx = await createTestContext();
-    worker2 = createPrismaForRole("superuser");
+    worker2 = createPrismaForRole("worker");
   });
   afterAll(async () => {
     await worker2.prisma.$disconnect().then(() => worker2.pool.end());
@@ -83,7 +83,7 @@ describe("audit-outbox SKIP LOCKED concurrency", () => {
     `;
 
     // Worker 1 claims first
-    const w1Promise = ctx.su.prisma.$transaction(async (tx) => {
+    const w1Promise = ctx.worker.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       const claimed = await tx.$queryRawUnsafe<{ id: string }[]>(claimQuery, tenantId);
       // Signal that worker1 holds locks
