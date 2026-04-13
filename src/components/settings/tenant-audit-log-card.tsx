@@ -91,6 +91,7 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.DELEGATION]: "groupDelegation",
   [AUDIT_ACTION_GROUP.TENANT_WEBHOOK]: "groupTenantWebhook",
   [AUDIT_ACTION_GROUP.MAINTENANCE]: "groupMaintenance",
+  [AUDIT_ACTION_GROUP.AUDIT_DELIVERY_TARGET]: "groupAuditDeliveryTarget",
 };
 
 interface TenantAuditLogCardProps {
