@@ -229,7 +229,10 @@ describe("POST /api/share-links/verify-access", () => {
         tenantId: "tenant-1",
         userId: null,
         actorType: "SYSTEM",
-        metadata: expect.objectContaining({ anonymousAccess: true }),
+        metadata: expect.objectContaining({
+          anonymousAccess: true,
+          ip: expect.any(String),
+        }),
       }),
     );
   });
@@ -250,7 +253,10 @@ describe("POST /api/share-links/verify-access", () => {
         tenantId: "tenant-1",
         userId: null,
         actorType: "SYSTEM",
-        metadata: expect.objectContaining({ anonymousAccess: true }),
+        metadata: expect.objectContaining({
+          anonymousAccess: true,
+          ip: expect.any(String),
+        }),
       }),
     );
   });

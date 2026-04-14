@@ -1,8 +1,13 @@
 /**
  * Server-side audit logging helpers.
  *
- * logAuditAsync() writes audit events to the outbox. Awaitable, never throws.
- * Dual-write: PostgreSQL AuditLog table (via outbox) + structured JSON to stdout (via pino).
+ * logAuditAsync() writes audit events. Awaitable, never throws.
+ * Routing:
+ *   - userId = UUID → outbox (enqueueAudit) → worker → audit_logs (participates in chain, SIEM fan-out)
+ *   - userId = null → direct write to audit_logs with actorType=SYSTEM (bypasses outbox).
+ *     This path is for events without a user context (e.g. anonymous share-access).
+ *     By design: no chain entry, no SIEM/webhook fan-out (matches worker-emitted meta-events).
+ * Dual-write: PostgreSQL audit_logs + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
  */
 
@@ -93,11 +98,17 @@ export function sanitizeMetadata(value: unknown): unknown {
 export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
   const safeMetadata = truncateMetadata(params.metadata);
   const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
+  // Enforce CHECK constraint invariant: userId IS NULL requires actorType = SYSTEM.
+  // This keeps the structured JSON emit and the DB write consistent regardless of
+  // what the caller passed for actorType.
+  const actorType = params.userId === null
+    ? ACTOR_TYPE.SYSTEM
+    : (params.actorType ?? ACTOR_TYPE.HUMAN);
   return {
     scope: params.scope,
     action: params.action,
     userId: params.userId,
-    actorType: params.actorType ?? ACTOR_TYPE.HUMAN,
+    actorType,
     serviceAccountId: params.serviceAccountId ?? null,
     teamId: params.teamId ?? null,
     targetType: params.targetType ?? null,
@@ -223,7 +234,7 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
             scope: payload.scope,
             action: payload.action,
             userId: null,
-            actorType: ACTOR_TYPE.SYSTEM,
+            actorType: payload.actorType, // SYSTEM (forced by buildOutboxPayload when userId is null)
             serviceAccountId: payload.serviceAccountId,
             tenantId,
             teamId: payload.teamId,

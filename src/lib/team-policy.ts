@@ -201,7 +201,7 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
   await logAuditAsync({
     action: AUDIT_ACTION.ACCESS_DENIED,
     scope: AUDIT_SCOPE.TEAM,
-    userId: userId ?? "unknown",
+    userId: userId ?? null,
     teamId,
     ip: clientIp,
     metadata: { clientIp, reason: "IP not in team allowed CIDRs" },

@@ -6,11 +6,13 @@ const {
   mockDeadLetterWarn,
   mockUserFindUnique,
   mockTeamFindUnique,
+  mockAuditLogCreate,
 } = vi.hoisted(() => ({
   mockEnqueueAudit: vi.fn().mockResolvedValue(undefined),
   mockDeadLetterWarn: vi.fn(),
   mockUserFindUnique: vi.fn(),
   mockTeamFindUnique: vi.fn(),
+  mockAuditLogCreate: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/audit-outbox", () => ({
@@ -22,7 +24,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     team: { findUnique: mockTeamFindUnique },
     user: { findUnique: mockUserFindUnique },
-    auditLog: { create: vi.fn().mockResolvedValue(undefined) },
+    auditLog: { create: mockAuditLogCreate },
   },
 }));
 
@@ -91,6 +93,78 @@ describe("logAuditAsync", () => {
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
     // null userId must NOT trigger user lookup
     expect(mockUserFindUnique).not.toHaveBeenCalled();
+    // Direct write MUST happen with SYSTEM actor + null userId
+    expect(mockAuditLogCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          userId: null,
+          actorType: "SYSTEM",
+          tenantId: "tenant-1",
+          action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
+        }),
+      }),
+    );
+  });
+
+  it("forces actorType to SYSTEM when userId is null (even if caller omits it)", async () => {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
+      userId: null,
+      // actorType intentionally omitted — buildOutboxPayload must force SYSTEM
+      tenantId: "tenant-1",
+    });
+
+    // Structured emit must also use SYSTEM (not HUMAN default)
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({ userId: null, actorType: "SYSTEM" }),
+      }),
+      expect.any(String),
+    );
+    // DB write must also use SYSTEM
+    expect(mockAuditLogCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ userId: null, actorType: "SYSTEM" }),
+      }),
+    );
+  });
+
+  it("dead-letters null userId when tenantId is absent", async () => {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
+      userId: null,
+      // tenantId omitted
+    });
+
+    expect(mockAuditLogCreate).not.toHaveBeenCalled();
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: "tenant_not_found" }),
+      "audit.dead_letter",
+    );
+  });
+
+  it("catches direct write failure and logs to dead letter (null userId path)", async () => {
+    mockAuditLogCreate.mockRejectedValueOnce(new Error("db down"));
+
+    await expect(
+      logAuditAsync({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
+        userId: null,
+        tenantId: "tenant-1",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "logAuditAsync_failed",
+        error: expect.stringContaining("db down"),
+      }),
+      "audit.dead_letter",
+    );
   });
 
   it("resolves tenantId from userId when not provided", async () => {
@@ -154,11 +228,14 @@ describe("logAuditAsync", () => {
     );
   });
 
-  it("dead-letters non-UUID userId without tenantId (tenant_not_found)", async () => {
+  it("dead-letters UUID userId when user lookup returns null (tenant_not_found)", async () => {
+    // UUID userId that doesn't exist in DB — resolveTenantId returns null
+    mockUserFindUnique.mockResolvedValue(null);
+
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
-      userId: "anonymous",
+      userId: "00000000-0000-4000-8000-00000000ffff",
     });
 
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
