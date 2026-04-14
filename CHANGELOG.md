@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.41](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.40...passwd-sso-v0.4.41) (2026-04-14)
+
+
+### Features
+
+* add audit delivery target CRUD API + admin UI ([#372](https://github.com/ngc-shj/passwd-sso/issues/372)) ([c794e1e](https://github.com/ngc-shj/passwd-sso/commit/c794e1e7438cfd2a2fb86fd3b994d5097fa10fff))
+
+
+### Code Refactoring
+
+* migrate all logAudit/logAuditBatch to logAuditAsync ([#374](https://github.com/ngc-shj/passwd-sso/issues/374)) ([af91f48](https://github.com/ngc-shj/passwd-sso/commit/af91f48b9d86bd00dcf26e3a4c489cc637fad384))
+
 ## [0.4.40](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.39...passwd-sso-v0.4.40) (2026-04-13)
 
 
