@@ -77,6 +77,22 @@ describe("logAuditAsync", () => {
     );
   });
 
+  it("bypasses outbox and writes directly for null userId (SYSTEM actor)", async () => {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
+      userId: null,
+      actorType: "SYSTEM",
+      tenantId: "tenant-1",
+      metadata: { anonymousAccess: true },
+    });
+
+    // null userId must NOT enter the outbox — worker rejects it
+    expect(mockEnqueueAudit).not.toHaveBeenCalled();
+    // null userId must NOT trigger user lookup
+    expect(mockUserFindUnique).not.toHaveBeenCalled();
+  });
+
   it("resolves tenantId from userId when not provided", async () => {
     mockUserFindUnique.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000042",
@@ -138,7 +154,7 @@ describe("logAuditAsync", () => {
     );
   });
 
-  it("dead-letters non-UUID userId without tenantId", async () => {
+  it("dead-letters non-UUID userId without tenantId (tenant_not_found)", async () => {
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
@@ -147,7 +163,7 @@ describe("logAuditAsync", () => {
 
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
     expect(mockDeadLetterWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ reason: "non_uuid_userId_no_tenantId" }),
+      expect.objectContaining({ reason: "tenant_not_found" }),
       "audit.dead_letter",
     );
   });

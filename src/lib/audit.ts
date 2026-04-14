@@ -35,7 +35,7 @@ import { UUID_RE } from "@/lib/constants/app";
 export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
-  userId: string;
+  userId: string | null;
   actorType?: ActorType;
   serviceAccountId?: string | null;
   tenantId?: string;
@@ -126,7 +126,7 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
       return team?.tenantId ?? null;
     }
 
-    if (UUID_RE.test(params.userId)) {
+    if (params.userId && UUID_RE.test(params.userId)) {
       const user = await prisma.user.findUnique({
         where: { id: params.userId },
         select: { tenantId: true },
@@ -201,40 +201,44 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
     // Never let forwarding break the app
   }
 
-  // Outbox enqueue — all errors caught (MF2: never throws)
+  // All errors caught (MF2: never throws)
   try {
-    // Non-UUID userId (e.g., "anonymous") bypasses the outbox
-    if (!UUID_RE.test(params.userId)) {
+    // SYSTEM-actor / null userId events bypass the outbox and write directly.
+    // Rationale: the outbox worker rejects null userId payloads (that path is
+    // reserved for worker-emitted meta-events via writeDirectAuditLog). Events
+    // without a user context (anonymous access, etc.) must write directly
+    // with user_id=NULL + actor_type=SYSTEM (allowed by audit_logs CHECK).
+    if (params.userId === null) {
       const tenantId = params.tenantId ?? null;
       if (!tenantId) {
         deadLetterLogger.warn(
-          deadLetterEntry(params, "non_uuid_userId_no_tenantId"),
+          deadLetterEntry(params, "tenant_not_found"),
           "audit.dead_letter",
         );
         return;
       }
-      try {
-        await withBypassRls(prisma, async () => {
-          await prisma.auditLog.create({
-            data: {
-              scope: payload.scope, action: payload.action, userId: payload.userId!,
-              actorType: payload.actorType, serviceAccountId: payload.serviceAccountId,
-              tenantId, teamId: payload.teamId, targetType: payload.targetType,
-              targetId: payload.targetId,
-              metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
-              ip: payload.ip, userAgent: payload.userAgent,
-            },
-          });
-        }, BYPASS_PURPOSE.AUDIT_WRITE);
-      } catch (err) {
-        deadLetterLogger.warn(
-          deadLetterEntry(params, "non_uuid_direct_write_failed", String(err)),
-          "audit.dead_letter",
-        );
-      }
+      await withBypassRls(prisma, async () => {
+        await prisma.auditLog.create({
+          data: {
+            scope: payload.scope,
+            action: payload.action,
+            userId: null,
+            actorType: ACTOR_TYPE.SYSTEM,
+            serviceAccountId: payload.serviceAccountId,
+            tenantId,
+            teamId: payload.teamId,
+            targetType: payload.targetType,
+            targetId: payload.targetId,
+            metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
+            ip: payload.ip,
+            userAgent: payload.userAgent,
+          },
+        });
+      }, BYPASS_PURPOSE.AUDIT_WRITE);
       return;
     }
 
+    // Normal path: UUID userId → outbox
     const tenantId = await resolveTenantId(params);
     if (!tenantId) {
       deadLetterLogger.warn(
