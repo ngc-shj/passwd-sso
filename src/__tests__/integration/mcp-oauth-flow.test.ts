@@ -120,7 +120,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
 

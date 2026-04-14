@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -218,7 +218,7 @@ async function handlePOST(
     throw error;
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
     userId: session.user.id,

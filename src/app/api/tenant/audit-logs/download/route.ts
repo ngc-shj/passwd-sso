@@ -5,7 +5,7 @@ import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -96,7 +96,7 @@ async function handleGET(req: NextRequest) {
   };
 
   // Record the download itself
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
     userId: session.user.id,

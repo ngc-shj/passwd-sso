@@ -29,7 +29,7 @@ vi.mock("@/lib/logger", () => ({
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 vi.mock("@/lib/tenant-context", () => ({

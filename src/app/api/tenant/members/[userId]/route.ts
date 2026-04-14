@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { updateTenantMemberRoleSchema } from "@/lib/validations";
 import {
   requireTenantPermission,
@@ -118,7 +118,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       );
     }
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.TENANT_ROLE_UPDATE,
       userId: session.user.id,
@@ -158,7 +158,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.TENANT_ROLE_UPDATE,
     userId: session.user.id,

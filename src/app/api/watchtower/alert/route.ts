@@ -6,7 +6,7 @@ import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { watchtowerAlertEmail } from "@/lib/email/templates/watchtower-alert";
@@ -88,7 +88,7 @@ async function handlePOST(req: NextRequest) {
   });
 
   // Audit log
-  logAudit({
+  await logAuditAsync({
     scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.WATCHTOWER_ALERT_SENT,
     userId: session.user.id,

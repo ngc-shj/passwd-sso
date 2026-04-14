@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { inviteSchema } from "@/lib/validations";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -139,7 +139,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.TEAM_MEMBER_INVITE,
     userId: session.user.id,

@@ -48,7 +48,7 @@ vi.mock("@/lib/ip-access", () => ({
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
 }));
 vi.mock("@/lib/logger", () => {

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { assertPolicyAllowsExport } from "@/lib/team-policy";
 import { PolicyViolationError } from "@/lib/team-policy";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -124,7 +124,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   // Record the download itself
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
     userId: session.user.id,

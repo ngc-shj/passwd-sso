@@ -6,7 +6,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import {
@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Audit log — system-level, no tenant or user context
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MCP_CLIENT_DCR_REGISTER,
     userId: NIL_UUID,

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -47,7 +47,7 @@ async function handleDELETE(
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.API_KEY_REVOKE,
     userId,

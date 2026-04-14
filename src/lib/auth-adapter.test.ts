@@ -72,7 +72,7 @@ vi.mock("@auth/prisma-adapter", () => ({
   }),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,

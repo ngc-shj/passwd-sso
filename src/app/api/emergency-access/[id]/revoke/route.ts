@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { revokeEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRevokedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -64,7 +64,7 @@ async function handlePOST(
       }),
     );
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE,
       userId: session.user.id,
@@ -108,7 +108,7 @@ async function handlePOST(
       }),
     );
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.EMERGENCY_ACCESS_REVOKE,
       userId: session.user.id,

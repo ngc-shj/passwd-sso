@@ -39,7 +39,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn().mockReturnValue({}),
 }));
 vi.mock("@/lib/tenant-context", () => ({

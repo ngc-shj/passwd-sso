@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, zodValidationError } from "@/lib/api-response";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
@@ -208,7 +208,7 @@ async function handleReset(body: unknown, userId: string, request: NextRequest) 
   );
 
   const { ip, userAgent } = extractRequestMeta(request);
-  logAudit({
+  await logAuditAsync({
     scope: "PERSONAL",
     action: "RECOVERY_PASSPHRASE_RESET",
     userId,

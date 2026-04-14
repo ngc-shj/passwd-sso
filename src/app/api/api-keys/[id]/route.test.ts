@@ -35,7 +35,7 @@ vi.mock("@/lib/logger", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({}),
 }));
 

@@ -50,7 +50,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/crypto-server", () => ({

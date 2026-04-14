@@ -62,7 +62,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   withBypassRls: mockWithBypassRls,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
 }));
 vi.mock("@/lib/ip-access", () => ({

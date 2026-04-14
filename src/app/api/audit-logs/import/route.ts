@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod/v4";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -43,7 +43,7 @@ async function handlePOST(req: NextRequest) {
     }
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_IMPORT,
     userId: session.user.id,

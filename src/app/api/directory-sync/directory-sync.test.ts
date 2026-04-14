@@ -42,7 +42,7 @@ vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 vi.mock("@/lib/directory-sync/credentials", () => ({
@@ -272,7 +272,7 @@ describe("POST /api/directory-sync", () => {
     );
   });
 
-  it("calls logAudit after successful creation", async () => {
+  it("calls logAuditAsync after successful creation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(null);

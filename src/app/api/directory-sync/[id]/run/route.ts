@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/rate-limit";
@@ -98,7 +98,7 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     force,
   });
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.DIRECTORY_SYNC_RUN,
     userId: session.user.id,

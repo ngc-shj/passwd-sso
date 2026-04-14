@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { checkAuth } from "@/lib/check-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
@@ -144,7 +144,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_UPDATE,
     userId: session.user.id,
@@ -195,7 +195,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     teamPasswordService.deleteTeamPassword(teamId, id, permanent),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_DELETE,
     userId: session.user.id,

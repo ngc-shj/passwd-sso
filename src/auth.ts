@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import type { Account } from "next-auth";
 import { createCustomAdapter } from "@/lib/auth-adapter";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant-claim";
@@ -335,7 +335,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signIn({ user }) {
       if (user.id) {
         const meta = sessionMetaStorage.getStore();
-        logAudit({
+        await logAuditAsync({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.AUTH_LOGIN,
           userId: user.id,
@@ -347,7 +347,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async signOut(message) {
       if ("session" in message && message.session?.userId) {
         const meta = sessionMetaStorage.getStore();
-        logAudit({
+        await logAuditAsync({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.AUTH_LOGOUT,
           userId: message.session.userId,

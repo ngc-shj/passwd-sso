@@ -47,7 +47,7 @@ vi.mock("@/lib/logger", () => {
   };
 });
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({}),
 }));
 vi.mock("@/lib/constants/api-key", async (importOriginal) => {

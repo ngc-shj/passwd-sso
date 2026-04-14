@@ -17,7 +17,7 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto-server";
 import type { ServerEncryptedData } from "@/lib/crypto-server";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 
 // ─── Constants ─────────────────────────────────────────────────
@@ -250,8 +250,8 @@ export async function revokeAllDelegationSessions(
       tenantId,
       metadata: { revokedCount: result.count, reason: reason ?? "manual" },
     };
-    logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-    logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
   }
 
   return result.count;
@@ -285,8 +285,8 @@ export async function revokeDelegationSession(
       targetId: sessionId,
       metadata: { reason: "manual" },
     };
-    logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-    logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
   }
 
   return result.count > 0;

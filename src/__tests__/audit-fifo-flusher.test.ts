@@ -26,11 +26,13 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
+const mockAuditInfo = vi.hoisted(() => vi.fn());
+
 vi.mock("@/lib/audit-logger", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
   return {
     ...actual,
-    auditLogger: { info: vi.fn(), enabled: false },
+    auditLogger: { info: mockAuditInfo, enabled: true },
     deadLetterLogger: { warn: mockDeadLetterWarn },
   };
 });
@@ -150,20 +152,64 @@ describe("logAuditAsync", () => {
     );
   });
 
-  it("propagates enqueueAudit rejection without throwing", async () => {
+  it("catches enqueueAudit rejection and logs to dead letter (never throws)", async () => {
     mockUserFindUnique.mockResolvedValue({
       id: "00000000-0000-4000-8000-000000000001",
       tenantId: "tenant-1",
     });
     mockEnqueueAudit.mockRejectedValueOnce(new Error("outbox write failed"));
 
-    // logAuditAsync should propagate the rejection (caller decides how to handle)
+    // logAuditAsync must never throw — errors go to deadLetterLogger
     await expect(
       logAuditAsync({
         scope: AUDIT_SCOPE.PERSONAL,
         action: AUDIT_ACTION.AUTH_LOGIN,
         userId: "00000000-0000-4000-8000-000000000001",
       }),
-    ).rejects.toThrow("outbox write failed");
+    ).resolves.toBeUndefined();
+
+    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "logAuditAsync_failed",
+        error: expect.stringContaining("outbox write failed"),
+      }),
+      "audit.dead_letter",
+    );
+  });
+
+  it("emits structured JSON to auditLogger before outbox write", async () => {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: "00000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-1",
+    });
+
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          scope: AUDIT_SCOPE.PERSONAL,
+          action: AUDIT_ACTION.AUTH_LOGIN,
+          tenantId: "tenant-1",
+        }),
+      }),
+      "audit.AUTH_LOGIN",
+    );
+  });
+
+  it("dead letter output does not contain raw metadata", async () => {
+    mockUserFindUnique.mockResolvedValue(null);
+
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: "00000000-0000-4000-8000-0000000000ff",
+      metadata: { password: "secret", token: "bearer-xyz" },
+    });
+
+    const deadLetterCall = mockDeadLetterWarn.mock.calls[0][0];
+    expect(deadLetterCall).not.toHaveProperty("auditEntry");
+    expect(deadLetterCall).not.toHaveProperty("metadata");
+    expect(deadLetterCall).toHaveProperty("reason", "tenant_not_found");
   });
 });

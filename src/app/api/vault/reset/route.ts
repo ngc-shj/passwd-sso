@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { z } from "zod/v4";
 
@@ -76,7 +76,7 @@ async function handlePOST(request: NextRequest) {
     await executeVaultReset(userId);
 
   const { ip, userAgent } = extractRequestMeta(request);
-  logAudit({
+  await logAuditAsync({
     scope: "PERSONAL",
     action: "VAULT_RESET_EXECUTED",
     userId,

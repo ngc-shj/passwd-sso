@@ -61,7 +61,7 @@ vi.mock("@/lib/delegation", () => ({
   revokeAllDelegationSessions: vi.fn(async () => 0),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: vi.fn(),
+  logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn(() => ({})),
 }));
 

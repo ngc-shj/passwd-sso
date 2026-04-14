@@ -28,7 +28,7 @@ vi.mock("@/lib/audit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit")>();
   return {
     ...actual,
-    logAudit: mockLogAudit,
+    logAuditAsync: mockLogAudit,
   };
 });
 vi.mock("@/lib/prisma", () => ({
@@ -62,7 +62,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 // ─── Imports after mocks ───────────────────────────────────────────────────────
 
-import { logAudit, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, resolveActorType } from "@/lib/audit";
 import type { AuthResult } from "@/lib/auth-or-token";
 
 // ─── Scenario 5: SA action audit logging ──────────────────────────────────────
@@ -97,8 +97,8 @@ describe("Scenario 5: SA action audit logging", () => {
     expect(resolveActorType(auth)).toBe("HUMAN");
   });
 
-  it("logAudit writes actorType SERVICE_ACCOUNT and serviceAccountId when SA acts", () => {
-    logAudit({
+  it("logAuditAsync writes actorType SERVICE_ACCOUNT and serviceAccountId when SA acts", async () => {
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_CREATE,
       userId: "sa-proxy-user-id",
@@ -118,10 +118,10 @@ describe("Scenario 5: SA action audit logging", () => {
     );
   });
 
-  it("logAudit emits actorType SERVICE_ACCOUNT to pino logger when SA acts", () => {
+  it("logAuditAsync emits actorType SERVICE_ACCOUNT to pino logger when SA acts", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.ENTRY_UPDATE,
       userId: "sa-proxy-user-id",
@@ -156,9 +156,9 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
     expect(resolveActorType(auth)).toBe("HUMAN");
   });
 
-  it("logAudit defaults actorType to HUMAN when not provided", () => {
+  it("logAuditAsync defaults actorType to HUMAN when not provided", async () => {
     // No actorType passed — should default to HUMAN in DB write
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "b0000000-0000-4000-8000-000000000001",
@@ -178,10 +178,10 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
     expect(call.actorType).toBeUndefined();
   });
 
-  it("logAudit defaults actorType to HUMAN in pino emit when not provided", () => {
+  it("logAuditAsync defaults actorType to HUMAN in pino emit when not provided", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGOUT,
       userId: "b0000000-0000-4000-8000-000000000001",
@@ -196,8 +196,8 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
     );
   });
 
-  it("session-based audit has no serviceAccountId in DB write", () => {
-    logAudit({
+  it("session-based audit has no serviceAccountId in DB write", async () => {
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_VIEW,
       userId: "user-human",

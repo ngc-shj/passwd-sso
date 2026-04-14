@@ -63,7 +63,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 }));
 
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
 }));
 
@@ -331,7 +331,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     );
   });
 
-  it("calls logAudit after successful consent", async () => {
+  it("calls logAuditAsync after successful consent", async () => {
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
       VALID_FORM_FIELDS,
@@ -367,7 +367,7 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(location).toContain("code=");
   });
 
-  it("redirects with error=access_denied and calls logAudit on deny action", async () => {
+  it("redirects with error=access_denied and calls logAuditAsync on deny action", async () => {
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
       {

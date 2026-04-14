@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -47,7 +47,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     prisma.teamWebhook.delete({ where: { id: webhookId, teamId } }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.WEBHOOK_DELETE,
     userId: session.user.id,

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockLogAuditBatch } = vi.hoisted(() => {
+const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -21,7 +21,6 @@ const { mockAuth, mockPrismaTeamPasswordEntry, mockPrismaTransaction, mockRequir
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     mockLogAudit: vi.fn(),
-    mockLogAuditBatch: vi.fn(),
   };
 });
 
@@ -41,8 +40,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
-  logAuditBatch: mockLogAuditBatch,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 
@@ -164,6 +162,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-archive", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
+    // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     // Parent log via logAudit
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -182,31 +182,30 @@ describe("POST /api/teams/[teamId]/passwords/bulk-archive", () => {
       }),
     );
 
-    // Per-entry logs batched via logAuditBatch
-    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
-    expect(mockLogAuditBatch).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          scope: AUDIT_SCOPE.TEAM,
-          action: "ENTRY_UPDATE",
-          teamId: TEAM_ID,
-          targetId: id1,
-          metadata: expect.objectContaining({
-            source: "bulk-archive",
-            parentAction: "ENTRY_BULK_ARCHIVE",
-          }),
+    // Per-entry logs via individual logAuditAsync calls
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.TEAM,
+        action: "ENTRY_UPDATE",
+        teamId: TEAM_ID,
+        targetId: id1,
+        metadata: expect.objectContaining({
+          source: "bulk-archive",
+          parentAction: "ENTRY_BULK_ARCHIVE",
         }),
-        expect.objectContaining({
-          scope: AUDIT_SCOPE.TEAM,
-          action: "ENTRY_UPDATE",
-          teamId: TEAM_ID,
-          targetId: id2,
-          metadata: expect.objectContaining({
-            source: "bulk-archive",
-            parentAction: "ENTRY_BULK_ARCHIVE",
-          }),
+      }),
+    );
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.TEAM,
+        action: "ENTRY_UPDATE",
+        teamId: TEAM_ID,
+        targetId: id2,
+        metadata: expect.objectContaining({
+          source: "bulk-archive",
+          parentAction: "ENTRY_BULK_ARCHIVE",
         }),
-      ]),
+      }),
     );
   });
 
@@ -234,6 +233,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-archive", () => {
       }),
     );
 
+    // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: AUDIT_SCOPE.TEAM,
@@ -247,19 +248,16 @@ describe("POST /api/teams/[teamId]/passwords/bulk-archive", () => {
       }),
     );
 
-    expect(mockLogAuditBatch).toHaveBeenCalledTimes(1);
-    expect(mockLogAuditBatch).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          scope: AUDIT_SCOPE.TEAM,
-          action: "ENTRY_UPDATE",
-          teamId: TEAM_ID,
-          metadata: expect.objectContaining({
-            source: "bulk-archive",
-            parentAction: "ENTRY_BULK_UNARCHIVE",
-          }),
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.TEAM,
+        action: "ENTRY_UPDATE",
+        teamId: TEAM_ID,
+        metadata: expect.objectContaining({
+          source: "bulk-archive",
+          parentAction: "ENTRY_BULK_UNARCHIVE",
         }),
-      ]),
+      }),
     );
   });
 });

@@ -5,7 +5,7 @@ import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
@@ -94,7 +94,7 @@ async function handleDELETE(
 
   // Audit log (non-blocking)
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
     userId,

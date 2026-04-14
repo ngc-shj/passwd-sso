@@ -9,7 +9,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import {
   PIN_LENGTH_MIN,
@@ -210,7 +210,7 @@ async function handlePOST(req: NextRequest) {
     });
   });
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.WEBAUTHN_CREDENTIAL_REGISTER,
     userId,

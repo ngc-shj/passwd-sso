@@ -589,7 +589,7 @@ export const AUDIT_ACTION_GROUPS_TENANT: Record<string, AuditAction[]> = {
 /**
  * Event groups subscribable via tenant webhooks.
  * Derived from AUDIT_ACTION_GROUPS_TENANT minus self-referential and
- * privacy-sensitive groups. logAudit() dispatches webhooks automatically
+ * privacy-sensitive groups. logAuditAsync() dispatches webhooks automatically
  * for all audit actions, so every action here is guaranteed to fire.
  *
  * Intentionally excluded:

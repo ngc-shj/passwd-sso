@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
@@ -140,7 +140,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     throw err;
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SERVICE_ACCOUNT_UPDATE,
     userId: session.user.id,
@@ -194,7 +194,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SERVICE_ACCOUNT_DELETE,
     userId: session.user.id,

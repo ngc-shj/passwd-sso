@@ -38,7 +38,7 @@ vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
@@ -213,7 +213,7 @@ describe("POST /api/directory-sync/[id]/run", () => {
     expect(json.usersDeactivated).toBe(0);
   });
 
-  it("calls logAudit with correct metadata on success", async () => {
+  it("calls logAuditAsync with correct metadata on success", async () => {
     const req = createRequest("POST", ROUTE_URL, { body: { dryRun: true } });
     await POST(req, CTX);
 

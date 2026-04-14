@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
@@ -103,7 +103,7 @@ async function handlePOST(
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
     userId: session.user.id,

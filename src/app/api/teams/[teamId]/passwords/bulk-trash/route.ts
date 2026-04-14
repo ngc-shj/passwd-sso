@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAudit, logAuditBatch, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -61,7 +61,7 @@ async function handlePOST(
   );
   const requestMeta = extractRequestMeta(req);
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TEAM,
     action: AUDIT_ACTION.ENTRY_BULK_TRASH,
     userId: session.user.id,
@@ -77,21 +77,22 @@ async function handlePOST(
     ...requestMeta,
   });
 
-  logAuditBatch(
-    entryIds.map((entryId) => ({
-      scope: AUDIT_SCOPE.TEAM,
-      action: AUDIT_ACTION.ENTRY_TRASH,
-      userId: session.user.id,
-      teamId,
-      targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-      targetId: entryId,
-      metadata: {
-        source: "bulk-trash",
-        parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
-      },
-      ...requestMeta,
-    })),
-  );
+  const auditEntries = entryIds.map((entryId) => ({
+    scope: AUDIT_SCOPE.TEAM,
+    action: AUDIT_ACTION.ENTRY_TRASH,
+    userId: session.user.id,
+    teamId,
+    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+    targetId: entryId,
+    metadata: {
+      source: "bulk-trash",
+      parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
+    },
+    ...requestMeta,
+  }));
+  for (const entry of auditEntries) {
+    await logAuditAsync(entry);
+  }
 
   return NextResponse.json({ success: true, movedCount: updateResult.count });
 }

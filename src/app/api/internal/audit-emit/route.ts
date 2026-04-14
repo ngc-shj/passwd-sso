@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { checkAuth } from "@/lib/check-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { createRateLimiter } from "@/lib/rate-limit";
 
@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
   const auditAction = AUDIT_ACTION[action as keyof typeof AUDIT_ACTION];
 
   const meta = extractRequestMeta(request);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId,

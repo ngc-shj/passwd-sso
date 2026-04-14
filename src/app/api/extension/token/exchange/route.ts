@@ -35,7 +35,7 @@ import {
 import { issueExtensionToken } from "@/lib/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -150,7 +150,7 @@ async function handlePOST(req: NextRequest) {
       scope: consumed.scope,
     });
   } catch (err) {
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_FAILURE,
       userId: consumed.userId,
@@ -172,7 +172,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Audit success: userId and tenantId both come from the consumed code record
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_SUCCESS,
     userId: consumed.userId,

@@ -22,7 +22,7 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -109,7 +109,7 @@ async function handlePOST(req: NextRequest) {
 
   // Audit log (async nonblocking; logAudit handles errors internally)
   const { ip } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     userId: operatorId,

@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import {
   scimResponse,
   scimError,
@@ -237,7 +237,7 @@ async function handlePOST(req: NextRequest) {
       }),
     );
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,

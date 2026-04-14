@@ -9,7 +9,6 @@ const {
   mockWithTeamTenantRls,
   mockRateLimiterCheck,
   mockLogAudit,
-  mockLogAuditBatch,
   mockCreateTeamPassword,
   TeamPasswordServiceError,
 } = vi.hoisted(() => {
@@ -41,7 +40,6 @@ const {
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
     mockRateLimiterCheck: vi.fn(),
     mockLogAudit: vi.fn(),
-    mockLogAuditBatch: vi.fn(),
     mockCreateTeamPassword: vi.fn(),
     TeamPasswordServiceError: _TeamPasswordServiceError,
   };
@@ -64,8 +62,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
-  logAuditBatch: mockLogAuditBatch,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({}),
 }));
 vi.mock("@/lib/services/team-password-service", () => ({
@@ -227,7 +224,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     expect(json.failed).toBe(1);
   });
 
-  it("calls logAudit with ENTRY_BULK_IMPORT and TEAM scope", async () => {
+  it("calls logAuditAsync with ENTRY_BULK_IMPORT and TEAM scope", async () => {
     const entries = [
       makeEntry("660e8400-e29b-41d4-a716-000000000001"),
       makeEntry("660e8400-e29b-41d4-a716-000000000002"),
@@ -238,6 +235,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
+    expect(mockLogAudit).toHaveBeenCalledTimes(3); // 1 parent + 2 per-entry
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
@@ -252,7 +250,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     );
   });
 
-  it("calls logAuditBatch with ENTRY_CREATE for each created team entry", async () => {
+  it("calls logAuditAsync with ENTRY_CREATE for each created team entry", async () => {
     const entries = [
       makeEntry("660e8400-e29b-41d4-a716-000000000001"),
       makeEntry("660e8400-e29b-41d4-a716-000000000002"),
@@ -263,19 +261,29 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
-    expect(mockLogAuditBatch).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action: AUDIT_ACTION.ENTRY_CREATE,
-          teamId: TEAM_ID,
-          metadata: expect.objectContaining({
-            source: "bulk-import",
-            parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
-          }),
+    // logAuditAsync called once per entry with ENTRY_CREATE
+    expect(mockLogAudit).toHaveBeenCalledTimes(3); // 1 parent + 2 per-entry
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetId: "660e8400-e29b-41d4-a716-000000000001",
+        teamId: TEAM_ID,
+        metadata: expect.objectContaining({
+          source: "bulk-import",
+          parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
         }),
-      ]),
+      }),
     );
-    const batchArg = mockLogAuditBatch.mock.calls[0][0];
-    expect(batchArg).toHaveLength(2);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTION.ENTRY_CREATE,
+        targetId: "660e8400-e29b-41d4-a716-000000000002",
+        teamId: TEAM_ID,
+        metadata: expect.objectContaining({
+          source: "bulk-import",
+          parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
+        }),
+      }),
+    );
   });
 });

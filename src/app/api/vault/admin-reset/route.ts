@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
@@ -137,7 +137,7 @@ async function handlePOST(req: NextRequest) {
 
   // Audit log — use TENANT scope for tenant-level resets (teamId is null)
   const auditScope = resetRecord.teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.TENANT;
-  logAudit({
+  await logAuditAsync({
     scope: auditScope,
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
     userId: session.user.id,

@@ -31,7 +31,7 @@ vi.mock("@/lib/team-auth", () => ({
   TeamAuthError,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
 }));
 vi.mock("@/lib/tenant-context", () => ({

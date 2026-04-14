@@ -5,7 +5,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
@@ -121,7 +121,7 @@ async function handlePOST(req: NextRequest) {
 
   // Audit log
   if (evictedCount > 0) {
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.SESSION_REVOKE_ALL,
       userId: user.id,
@@ -129,7 +129,7 @@ async function handlePOST(req: NextRequest) {
       ...meta,
     });
   }
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.AUTH_LOGIN,
     userId: user.id,

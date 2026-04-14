@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -216,8 +216,8 @@ async function handlePOST(request: NextRequest) {
     ip: extractClientIp(request),
     userAgent: request.headers.get("user-agent"),
   };
-  logAudit({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  logAudit({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
+  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
 
   return NextResponse.json({
     delegationSessionId: delegationSession.id,

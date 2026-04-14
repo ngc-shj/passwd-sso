@@ -17,7 +17,7 @@ const DEFAULT_APP_NAME = process.env.AUDIT_LOG_APP_NAME ?? "passwd-sso";
  * Defense-in-depth: even if a caller accidentally passes sensitive data,
  * sanitizeMetadata() in audit.ts will remove these keys before pino sees them.
  *
- * Also used to generate pino redact paths for both auditLogger and deadLetterLogger.
+ * Also used to generate pino redact paths for auditLogger.
  */
 export const METADATA_BLOCKLIST = new Set([
   "password",
@@ -101,10 +101,8 @@ export const deadLetterLogger = pino({
     _logType: "audit-dead-letter",
     _app: DEFAULT_APP_NAME,
   },
-  redact: {
-    paths: [...METADATA_BLOCKLIST].map((k) => `auditEntry.metadata.${k}`),
-    censor: "[REDACTED]",
-  },
+  // No redact paths needed — deadLetterEntry() in audit.ts emits only
+  // { scope, action, userId, tenantId, reason, error }, never raw metadata.
   formatters: {
     level(label: string) {
       return { level: label };

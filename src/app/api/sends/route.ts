@@ -9,7 +9,7 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto-server";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -91,7 +91,7 @@ async function handlePOST(req: NextRequest) {
 
   // Audit log
   const { ip, userAgent } = extractRequestMeta(req);
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SEND_CREATE,
     userId: session.user.id,

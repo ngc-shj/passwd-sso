@@ -1,7 +1,7 @@
 /**
  * Server-side audit logging helpers.
  *
- * logAudit() is async nonblocking — it never throws and never blocks the response.
+ * logAuditAsync() writes audit events to the outbox. Awaitable, never throws.
  * Dual-write: PostgreSQL AuditLog table (via outbox) + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
  */
@@ -154,131 +154,106 @@ export async function logAuditInTx(
 
 // ─── logAuditAsync ──────────────────────────────────────────────
 
+/** Minimal dead-letter payload — never includes raw metadata. */
+function deadLetterEntry(params: AuditLogParams, reason: string, error?: string) {
+  return {
+    scope: params.scope,
+    action: params.action,
+    userId: params.userId,
+    tenantId: params.tenantId ?? null,
+    reason,
+    ...(error != null && { error }),
+  };
+}
+
 /**
- * Write an audit log entry via the outbox. Awaitable version.
- * Resolves tenantId if not provided, then enqueues to the outbox.
+ * Write an audit log entry via the outbox. Awaitable, never throws.
+ *
+ * 1. Emits structured JSON to auditLogger (synchronous, before outbox write).
+ * 2. Enqueues the entry to the outbox (awaited).
+ * 3. On any error, logs to deadLetterLogger — caller never needs try/catch.
  */
 export async function logAuditAsync(params: AuditLogParams): Promise<void> {
   const payload = buildOutboxPayload(params);
 
-  // Non-UUID userId (e.g., "anonymous") bypasses the outbox
-  if (!UUID_RE.test(params.userId)) {
-    const tenantId = params.tenantId ?? null;
-    if (!tenantId) {
-      deadLetterLogger.warn(
-        { auditEntry: params, reason: "non_uuid_userId_no_tenantId" },
-        "audit.dead_letter",
-      );
-      return;
-    }
-    try {
-      await withBypassRls(prisma, async () => {
-        await prisma.auditLog.create({
-          data: {
-            scope: payload.scope, action: payload.action, userId: payload.userId!,
-            actorType: payload.actorType, serviceAccountId: payload.serviceAccountId,
-            tenantId, teamId: payload.teamId, targetType: payload.targetType,
-            targetId: payload.targetId,
-            metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
-            ip: payload.ip, userAgent: payload.userAgent,
-          },
-        });
-      }, BYPASS_PURPOSE.AUDIT_WRITE);
-    } catch (err) {
-      getLogger().warn({ err }, "logAuditAsync: non-UUID direct write failed");
-    }
-    return;
-  }
-
-  const tenantId = await resolveTenantId(params);
-  if (!tenantId) {
-    deadLetterLogger.warn(
-      { auditEntry: params, reason: "tenant_not_found" },
-      "audit.dead_letter",
-    );
-    return;
-  }
-
-  await enqueueAudit(tenantId, payload);
-}
-
-// ─── logAudit ───────────���────────────────────────────────────────
-
-/**
- * Write an audit log entry. Async nonblocking: errors are silently caught.
- *
- * @deprecated Use logAuditInTx(tx, tenantId, params) for atomicity guarantees,
- * or logAuditAsync(params) when atomicity is not required but you need to await.
- */
-export function logAudit(params: AuditLogParams): void {
-  const { scope, action, userId, actorType, serviceAccountId, tenantId, teamId, targetType, targetId, metadata, ip, userAgent } = params;
-
-  const safeMetadata = truncateMetadata(metadata);
-  const safeUserAgent = userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null;
-
-  // Fire-and-forget outbox enqueue
-  void logAuditAsync({
-    scope,
-    action,
-    userId,
-    actorType,
-    serviceAccountId,
-    tenantId,
-    teamId,
-    targetType,
-    targetId,
-    metadata: safeMetadata,
-    ip,
-    userAgent: safeUserAgent,
-  }).catch((err) => {
-    deadLetterLogger.warn(
-      { auditEntry: params, reason: "logAuditAsync_failed", error: String(err) },
-      "audit.dead_letter",
-    );
-  });
-
-  // --- Structured JSON emit for external forwarding ---
+  // Structured JSON emit FIRST (synchronous, never fails the caller)
   try {
     auditLogger.info(
       {
         audit: {
-          scope,
-          action,
-          userId,
-          actorType: actorType ?? ACTOR_TYPE.HUMAN,
-          serviceAccountId: serviceAccountId ?? null,
-          teamId: teamId ?? null,
-          targetType: targetType ?? null,
-          targetId: targetId ?? null,
-          metadata: sanitizeMetadata(safeMetadata),
-          ip: ip ?? null,
-          userAgent: safeUserAgent,
+          scope: payload.scope,
+          action: payload.action,
+          userId: payload.userId,
+          actorType: payload.actorType,
+          serviceAccountId: payload.serviceAccountId,
+          tenantId: params.tenantId ?? null,
+          teamId: payload.teamId,
+          targetType: payload.targetType,
+          targetId: payload.targetId,
+          metadata: sanitizeMetadata(payload.metadata),
+          ip: payload.ip,
+          userAgent: payload.userAgent,
         },
       },
-      `audit.${action}`,
+      `audit.${payload.action}`,
     );
   } catch {
     // Never let forwarding break the app
   }
-}
 
-// ─── logAuditBatch ───────────────────────────────────────────────
+  // Outbox enqueue — all errors caught (MF2: never throws)
+  try {
+    // Non-UUID userId (e.g., "anonymous") bypasses the outbox
+    if (!UUID_RE.test(params.userId)) {
+      const tenantId = params.tenantId ?? null;
+      if (!tenantId) {
+        deadLetterLogger.warn(
+          deadLetterEntry(params, "non_uuid_userId_no_tenantId"),
+          "audit.dead_letter",
+        );
+        return;
+      }
+      try {
+        await withBypassRls(prisma, async () => {
+          await prisma.auditLog.create({
+            data: {
+              scope: payload.scope, action: payload.action, userId: payload.userId!,
+              actorType: payload.actorType, serviceAccountId: payload.serviceAccountId,
+              tenantId, teamId: payload.teamId, targetType: payload.targetType,
+              targetId: payload.targetId,
+              metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
+              ip: payload.ip, userAgent: payload.userAgent,
+            },
+          });
+        }, BYPASS_PURPOSE.AUDIT_WRITE);
+      } catch (err) {
+        deadLetterLogger.warn(
+          deadLetterEntry(params, "non_uuid_direct_write_failed", String(err)),
+          "audit.dead_letter",
+        );
+      }
+      return;
+    }
 
-/**
- * Write multiple audit log entries.
- * Async nonblocking: errors are silently caught.
- *
- * @deprecated Use logAuditInTx(tx, tenantId, params) per entry for atomicity guarantees.
- */
-export function logAuditBatch(paramsList: AuditLogParams[]): void {
-  if (paramsList.length === 0) return;
+    const tenantId = await resolveTenantId(params);
+    if (!tenantId) {
+      deadLetterLogger.warn(
+        deadLetterEntry(params, "tenant_not_found"),
+        "audit.dead_letter",
+      );
+      return;
+    }
 
-  for (const params of paramsList) {
-    logAudit(params);
+    await enqueueAudit(tenantId, payload);
+  } catch (err) {
+    deadLetterLogger.warn(
+      deadLetterEntry(params, "logAuditAsync_failed", String(err)),
+      "audit.dead_letter",
+    );
   }
 }
 
-// ─── extractRequestMeta ───────��──────────────────────────────────
+// ─── extractRequestMeta ──────────────────────────────────────────
 
 /**
  * Extract IP address, User-Agent, and Accept-Language from a NextRequest.

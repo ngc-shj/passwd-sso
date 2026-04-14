@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto-emergency";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -79,7 +79,7 @@ async function handlePOST(
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EMERGENCY_GRANT_CONFIRM,
     userId: session.user.id,

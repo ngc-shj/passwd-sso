@@ -12,7 +12,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { logAudit, logAuditInTx, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { notifyAdminsOfLockout } from "@/lib/lockout-admin-notify";
@@ -281,7 +281,7 @@ export async function recordFailure(
           });
         }, BYPASS_PURPOSE.AUDIT_WRITE);
       } else {
-        logAudit({
+        await logAuditAsync({
           scope: AUDIT_SCOPE.PERSONAL,
           action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
           userId,
@@ -314,7 +314,7 @@ export async function recordFailure(
             });
           }, BYPASS_PURPOSE.AUDIT_WRITE);
         } else {
-          logAudit({
+          await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
             action: AUDIT_ACTION.VAULT_LOCKOUT_TRIGGERED,
             userId,
@@ -359,21 +359,17 @@ export async function recordFailure(
     if (isLockTimeoutError(err)) {
       getLogger().warn({ userId }, "vault.unlock.lockTimeout");
 
-      // Record audit even on lock_timeout (async nonblocking, outside transaction)
-      // NOTE: logAudit() swallows internally; catch kept as safety net.
-      try {
-        const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
-        logAudit({
-          scope: AUDIT_SCOPE.PERSONAL,
-          action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
-          userId,
-          metadata: { reason: "lock_timeout" },
-          ip: meta.ip,
-          userAgent: meta.userAgent,
-        });
-      } catch (auditErr) {
-        getLogger().error({ err: auditErr, userId }, "audit.vaultUnlockFailed.lockTimeout.error");
-      }
+      // Record audit even on lock_timeout (outside transaction).
+      // logAuditAsync never throws — errors go to deadLetterLogger internally.
+      const meta = request ? extractRequestMeta(request) : { ip: null, userAgent: null };
+      await logAuditAsync({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.VAULT_UNLOCK_FAILED,
+        userId,
+        metadata: { reason: "lock_timeout" },
+        ip: meta.ip,
+        userAgent: meta.userAgent,
+      });
 
       return null;
     }

@@ -28,7 +28,7 @@ vi.mock("@/lib/account-lockout", () => ({
   recordFailure: mockRecordFailure,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
 }));
 vi.mock("@/lib/crypto-server", () => ({
@@ -151,7 +151,7 @@ describe("POST /api/travel-mode/enable", () => {
     );
   });
 
-  it("calls logAudit after enabling travel mode", async () => {
+  it("calls logAuditAsync after enabling travel mode", async () => {
     await EnablePOST(
       createRequest("POST", "http://localhost:3000/api/travel-mode/enable"),
     );

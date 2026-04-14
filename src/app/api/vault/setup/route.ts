@@ -7,7 +7,7 @@ import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -164,7 +164,7 @@ async function handlePOST(request: NextRequest) {
   );
 
   const { ip, userAgent } = extractRequestMeta(request);
-  logAudit({
+  await logAuditAsync({
     scope: "PERSONAL",
     action: "VAULT_SETUP",
     userId: session.user.id,

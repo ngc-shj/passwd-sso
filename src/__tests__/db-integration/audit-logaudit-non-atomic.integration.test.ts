@@ -9,7 +9,7 @@ import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { enqueueAudit, type AuditOutboxPayload } from "@/lib/audit-outbox";
 
-describe("audit logAudit non-atomic (negative test)", () => {
+describe("audit logAuditAsync non-atomic (negative test)", () => {
   let ctx: TestContext;
   let tenantId: string;
   let userId: string;

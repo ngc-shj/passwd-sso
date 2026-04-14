@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { unauthorized } from "@/lib/api-response";
@@ -29,7 +29,7 @@ async function handlePOST(request: NextRequest) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     action: AUDIT_ACTION.TRAVEL_MODE_ENABLE,
     scope: AUDIT_SCOPE.PERSONAL,
     userId: session.user.id,

@@ -12,7 +12,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 import {
@@ -189,7 +189,7 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_UPDATE,
     userId: session.user.id,
@@ -248,7 +248,7 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_DELETE,
     userId: session.user.id,

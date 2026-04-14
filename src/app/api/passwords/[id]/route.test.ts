@@ -49,7 +49,7 @@ vi.mock("@/lib/audit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/audit")>();
   return {
     ...actual,
-    logAudit: mockLogAudit,
+    logAuditAsync: mockLogAudit,
   };
 });
 import { NextResponse } from "next/server";

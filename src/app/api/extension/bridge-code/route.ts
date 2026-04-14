@@ -17,7 +17,7 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import {
   AUDIT_ACTION,
@@ -102,7 +102,7 @@ async function handlePOST(req: NextRequest) {
   }, BYPASS_PURPOSE.TOKEN_LIFECYCLE);
 
   // Audit (success path uses logAudit; userId/tenantId both resolved)
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.EXTENSION_BRIDGE_CODE_ISSUE,
     userId,

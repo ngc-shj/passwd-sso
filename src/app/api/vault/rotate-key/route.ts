@@ -11,7 +11,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
@@ -304,7 +304,7 @@ async function handlePOST(request: NextRequest) {
   // Revoke all delegation sessions (key rotation invalidates delegated plaintext)
   await revokeAllDelegationSessions(userId, user.tenantId, "KEY_ROTATION").catch(() => {});
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.VAULT_KEY_ROTATION,
     userId,

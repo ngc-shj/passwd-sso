@@ -15,6 +15,7 @@ import {
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { NIL_UUID } from "@/lib/constants/app";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
 import {
@@ -227,11 +228,11 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
         }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
         // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
-        const { logAudit } = await import("@/lib/audit");
-        logAudit({
+        const { logAuditAsync } = await import("@/lib/audit");
+        await logAuditAsync({
           scope: AUDIT_SCOPE.TEAM,
           action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
-          userId: "system",
+          userId: NIL_UUID,
           teamId: event.teamId,
           metadata: {
             webhookId: id,
@@ -298,11 +299,11 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
           });
         }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
-        const { logAudit } = await import("@/lib/audit");
-        logAudit({
+        const { logAuditAsync } = await import("@/lib/audit");
+        await logAuditAsync({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
-          userId: "system",
+          userId: NIL_UUID,
           tenantId: event.tenantId,
           metadata: {
             webhookId: id,

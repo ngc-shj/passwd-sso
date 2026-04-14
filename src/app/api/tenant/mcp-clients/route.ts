@@ -5,7 +5,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { randomBytes } from "node:crypto";
 import { hashToken } from "@/lib/crypto-server";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MCP_CLIENT_CREATE,
     userId: session.user.id,

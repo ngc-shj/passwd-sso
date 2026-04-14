@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { validateScimToken } from "@/lib/scim-token";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimPatchOpSchema, scimGroupSchema } from "@/lib/scim/validations";
 import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
@@ -102,7 +102,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     throw e;
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,
@@ -178,7 +178,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     throw e;
   }
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     userId: auditUserId,

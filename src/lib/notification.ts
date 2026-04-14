@@ -2,7 +2,7 @@
  * Server-side notification helpers.
  *
  * createNotification() is async nonblocking — it never throws and never blocks
- * the response. Follows the same fire-and-forget pattern as logAudit().
+ * the response. Follows the same fire-and-forget pattern as logAuditAsync().
  *
  * Design rule: `body` and `metadata` must NEVER contain E2E-encrypted entry
  * content (titles, passwords, etc.). Only non-sensitive information is allowed:

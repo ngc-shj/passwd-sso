@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
-import { logAudit, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { parseBody } from "@/lib/parse-body";
 import {
@@ -139,7 +139,7 @@ async function handlePOST(req: NextRequest) {
     }),
   );
 
-  logAudit({
+  await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.TENANT_WEBHOOK_CREATE,
     userId: session.user.id,

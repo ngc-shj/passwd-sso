@@ -31,19 +31,18 @@ vi.mock("@/lib/audit-logger", async (importOriginal) => {
   };
 });
 
-import { logAudit, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit";
 
-describe("logAudit", () => {
-  it("pushes entry to FIFO and emits pino log synchronously", () => {
+describe("logAuditAsync", () => {
+  it("emits structured JSON to auditLogger", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "user-1",
     });
 
-    // pino emit happens synchronously in logAudit
     expect(mockAuditInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         audit: expect.objectContaining({
@@ -52,6 +51,7 @@ describe("logAudit", () => {
           userId: "user-1",
           actorType: "HUMAN",
           serviceAccountId: null,
+          tenantId: null,
           teamId: null,
           targetType: null,
           targetId: null,
@@ -63,10 +63,30 @@ describe("logAudit", () => {
     );
   });
 
-  it("passes optional fields to the pino logger", () => {
+  it("includes tenantId in structured emit when provided", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
-    logAudit({
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: "user-1",
+      tenantId: "tenant-1",
+    });
+
+    expect(mockAuditInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        audit: expect.objectContaining({
+          tenantId: "tenant-1",
+        }),
+      }),
+      "audit.AUTH_LOGIN",
+    );
+  });
+
+  it("passes optional fields to the auditLogger", async () => {
+    mockAuditInfo.mockReturnValue(undefined);
+
+    await logAuditAsync({
       scope: AUDIT_SCOPE.TEAM,
       action: AUDIT_ACTION.ENTRY_CREATE,
       userId: "user-1",
@@ -96,21 +116,20 @@ describe("logAudit", () => {
     );
   });
 
-  it("truncates metadata larger than 10KB before emitting pino log", () => {
+  it("truncates metadata larger than 10KB before emitting", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
     const largeMetadata: Record<string, unknown> = {
       data: "x".repeat(15_000),
     };
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_UPDATE,
       userId: "user-1",
       metadata: largeMetadata,
     });
 
-    // pino receives sanitized (truncated) metadata
     expect(mockAuditInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         audit: expect.objectContaining({
@@ -124,11 +143,11 @@ describe("logAudit", () => {
     );
   });
 
-  it("truncates user-agent to 512 chars", () => {
+  it("truncates user-agent to 512 chars", async () => {
     mockAuditInfo.mockReturnValue(undefined);
     const longUA = "A".repeat(1000);
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.AUTH_LOGIN,
       userId: "user-1",
@@ -145,24 +164,54 @@ describe("logAudit", () => {
     );
   });
 
-  it("does not throw when auditLogger.info throws", () => {
+  it("does not throw when auditLogger.info throws", async () => {
     mockAuditInfo.mockImplementation(() => {
       throw new Error("pino error");
     });
 
-    expect(() =>
-      logAudit({
+    await expect(
+      logAuditAsync({
         scope: AUDIT_SCOPE.PERSONAL,
         action: AUDIT_ACTION.AUTH_LOGIN,
         userId: "user-1",
       })
-    ).not.toThrow();
+    ).resolves.toBeUndefined();
   });
 
-  it("passes actorType SERVICE_ACCOUNT and serviceAccountId to pino logger", () => {
+  it("does not throw when enqueueAudit rejects", async () => {
+    mockEnqueueAudit.mockRejectedValueOnce(new Error("outbox write failed"));
+
+    await expect(
+      logAuditAsync({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
+        userId: "00000000-0000-4000-8000-000000000001",
+        tenantId: "tenant-1",
+      })
+    ).resolves.toBeUndefined();
+  });
+
+  it("calls enqueueAudit for normal UUID userId flow", async () => {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.AUTH_LOGIN,
+      userId: "00000000-0000-4000-8000-000000000001",
+      tenantId: "tenant-1",
+    });
+
+    expect(mockEnqueueAudit).toHaveBeenCalledWith(
+      "tenant-1",
+      expect.objectContaining({
+        scope: AUDIT_SCOPE.PERSONAL,
+        action: AUDIT_ACTION.AUTH_LOGIN,
+      }),
+    );
+  });
+
+  it("passes actorType SERVICE_ACCOUNT and serviceAccountId", async () => {
     mockAuditInfo.mockReturnValue(undefined);
 
-    logAudit({
+    await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.ENTRY_CREATE,
       userId: "user-1",

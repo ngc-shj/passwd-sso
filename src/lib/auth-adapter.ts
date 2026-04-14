@@ -9,7 +9,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
-import { logAudit } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { createNotification } from "@/lib/notification";
 import { getStrictestSessionDuration } from "@/lib/team-policy";
@@ -315,7 +315,7 @@ export function createCustomAdapter(): Adapter {
           evicted: { id: string; ipAddress: string | null; userAgent: string | null }[];
         };
         for (const ev of evicted) {
-          logAudit({
+          await logAuditAsync({
             scope: AUDIT_SCOPE.PERSONAL,
             action: AUDIT_ACTION.SESSION_EVICTED,
             userId: session.userId,
@@ -471,7 +471,7 @@ export function createCustomAdapter(): Adapter {
                 () => prisma.session.delete({ where: { sessionToken: session.sessionToken } }),
                 BYPASS_PURPOSE.AUTH_FLOW,
               );
-              logAudit({
+              await logAuditAsync({
                 scope: AUDIT_SCOPE.PERSONAL,
                 action: AUDIT_ACTION.SESSION_REVOKE,
                 userId: current.userId,

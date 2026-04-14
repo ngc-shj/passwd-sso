@@ -59,7 +59,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/audit", () => ({
-  logAudit: mockLogAudit,
+  logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/csrf", () => ({
@@ -319,7 +319,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     expect(json).not.toHaveProperty("secret");
   });
 
-  it("calls logAudit with AUDIT_DELIVERY_TARGET_CREATE", async () => {
+  it("calls logAuditAsync with AUDIT_DELIVERY_TARGET_CREATE", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAuditDeliveryTargetCount.mockResolvedValue(0);
