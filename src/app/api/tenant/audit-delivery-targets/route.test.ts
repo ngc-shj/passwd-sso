@@ -319,7 +319,7 @@ describe("POST /api/tenant/audit-delivery-targets", () => {
     expect(json).not.toHaveProperty("secret");
   });
 
-  it("calls logAudit with AUDIT_DELIVERY_TARGET_CREATE", async () => {
+  it("calls logAuditAsync with AUDIT_DELIVERY_TARGET_CREATE", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     mockAuditDeliveryTargetCount.mockResolvedValue(0);

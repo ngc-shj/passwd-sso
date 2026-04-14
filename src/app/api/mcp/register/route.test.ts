@@ -300,7 +300,7 @@ describe("POST /api/mcp/register", () => {
     expect(json.token_endpoint_auth_method).toBe("none");
   });
 
-  it("calls logAudit after successful registration", async () => {
+  it("calls logAuditAsync after successful registration", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: VALID_BODY,
     });

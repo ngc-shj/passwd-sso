@@ -159,6 +159,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-trash", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
+    // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     // Parent log via logAudit
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -85,7 +85,7 @@ describe("POST /api/internal/audit-emit", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 200 and calls logAudit with correct params for PASSKEY_ENFORCEMENT_BLOCKED", async () => {
+  it("returns 200 and calls logAuditAsync with correct params for PASSKEY_ENFORCEMENT_BLOCKED", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {
         body: { action: "PASSKEY_ENFORCEMENT_BLOCKED" },
@@ -113,7 +113,7 @@ describe("POST /api/internal/audit-emit", () => {
     expect(res.status).toBe(429);
   });
 
-  it("includes metadata in logAudit call", async () => {
+  it("includes metadata in logAuditAsync call", async () => {
     const meta = { redirectedPath: "/dashboard", reason: "no_passkey" };
     const res = await POST(
       createRequest("POST", "http://localhost/api/internal/audit-emit", {

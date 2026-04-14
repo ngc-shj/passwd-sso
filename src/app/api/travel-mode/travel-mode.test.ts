@@ -151,7 +151,7 @@ describe("POST /api/travel-mode/enable", () => {
     );
   });
 
-  it("calls logAudit after enabling travel mode", async () => {
+  it("calls logAuditAsync after enabling travel mode", async () => {
     await EnablePOST(
       createRequest("POST", "http://localhost:3000/api/travel-mode/enable"),
     );

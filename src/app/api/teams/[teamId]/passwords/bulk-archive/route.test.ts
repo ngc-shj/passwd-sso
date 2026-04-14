@@ -162,6 +162,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-archive", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
+    // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     // Parent log via logAudit
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -231,6 +233,8 @@ describe("POST /api/teams/[teamId]/passwords/bulk-archive", () => {
       }),
     );
 
+    // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: AUDIT_SCOPE.TEAM,

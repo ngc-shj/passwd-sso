@@ -229,6 +229,7 @@ describe("POST /api/passwords/bulk-archive", () => {
     await POST(createRequest("POST", URL, { body: { ids: [id1, id2] } }));
 
     // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ENTRY_BULK_ARCHIVE",
@@ -277,6 +278,7 @@ describe("POST /api/passwords/bulk-archive", () => {
     }));
 
     // 1 parent log + 1 per-entry log, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(2);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ENTRY_BULK_UNARCHIVE",
@@ -314,6 +316,7 @@ describe("POST /api/passwords/bulk-archive", () => {
     }));
 
     // 1 parent + 3 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(4);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ENTRY_BULK_ARCHIVE",
@@ -350,6 +353,7 @@ describe("POST /api/passwords/bulk-archive", () => {
     );
 
     // Each per-entry call carries the same fields that individual logAudit calls produce
+    expect(mockLogAudit).toHaveBeenCalledTimes(4); // 1 parent + 3 per-entry
     for (const targetId of [id1, id2, id3]) {
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({

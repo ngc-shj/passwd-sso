@@ -248,7 +248,7 @@ describe("PUT /api/directory-sync/[id]", () => {
     );
   });
 
-  it("calls logAudit after successful update", async () => {
+  it("calls logAuditAsync after successful update", async () => {
     const req = createRequest("PUT", ROUTE_URL, { body: { enabled: false } });
     await PUT(req, CTX);
 
@@ -317,7 +317,7 @@ describe("DELETE /api/directory-sync/[id]", () => {
     );
   });
 
-  it("calls logAudit after successful delete", async () => {
+  it("calls logAuditAsync after successful delete", async () => {
     const req = createRequest("DELETE", ROUTE_URL);
     await DELETE(req, CTX);
 

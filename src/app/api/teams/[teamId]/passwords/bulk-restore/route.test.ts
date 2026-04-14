@@ -160,6 +160,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-restore", () => {
     );
 
     // Parent log via logAudit
+    expect(mockLogAudit).toHaveBeenCalledTimes(3); // 1 parent + 2 per-entry
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         scope: AUDIT_SCOPE.TEAM,

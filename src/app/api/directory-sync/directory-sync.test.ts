@@ -272,7 +272,7 @@ describe("POST /api/directory-sync", () => {
     );
   });
 
-  it("calls logAudit after successful creation", async () => {
+  it("calls logAuditAsync after successful creation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(null);

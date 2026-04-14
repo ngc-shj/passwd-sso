@@ -127,7 +127,7 @@ describe("DELETE /api/webauthn/credentials/[id]", () => {
     );
   });
 
-  it("calls logAudit with credential metadata", async () => {
+  it("calls logAuditAsync with credential metadata", async () => {
     const req = createRequest("DELETE", ROUTE_URL);
     await DELETE(req, CTX);
 

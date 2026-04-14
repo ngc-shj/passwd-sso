@@ -224,7 +224,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     expect(json.failed).toBe(1);
   });
 
-  it("calls logAudit with ENTRY_BULK_IMPORT and TEAM scope", async () => {
+  it("calls logAuditAsync with ENTRY_BULK_IMPORT and TEAM scope", async () => {
     const entries = [
       makeEntry("660e8400-e29b-41d4-a716-000000000001"),
       makeEntry("660e8400-e29b-41d4-a716-000000000002"),
@@ -235,6 +235,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
       createParams({ teamId: TEAM_ID }),
     );
 
+    expect(mockLogAudit).toHaveBeenCalledTimes(3); // 1 parent + 2 per-entry
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
@@ -261,6 +262,7 @@ describe("POST /api/teams/[teamId]/passwords/bulk-import", () => {
     );
 
     // logAuditAsync called once per entry with ENTRY_CREATE
+    expect(mockLogAudit).toHaveBeenCalledTimes(3); // 1 parent + 2 per-entry
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_CREATE,

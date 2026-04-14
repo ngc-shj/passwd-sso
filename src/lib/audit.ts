@@ -213,18 +213,25 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
         );
         return;
       }
-      await withBypassRls(prisma, async () => {
-        await prisma.auditLog.create({
-          data: {
-            scope: payload.scope, action: payload.action, userId: payload.userId!,
-            actorType: payload.actorType, serviceAccountId: payload.serviceAccountId,
-            tenantId, teamId: payload.teamId, targetType: payload.targetType,
-            targetId: payload.targetId,
-            metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
-            ip: payload.ip, userAgent: payload.userAgent,
-          },
-        });
-      }, BYPASS_PURPOSE.AUDIT_WRITE);
+      try {
+        await withBypassRls(prisma, async () => {
+          await prisma.auditLog.create({
+            data: {
+              scope: payload.scope, action: payload.action, userId: payload.userId!,
+              actorType: payload.actorType, serviceAccountId: payload.serviceAccountId,
+              tenantId, teamId: payload.teamId, targetType: payload.targetType,
+              targetId: payload.targetId,
+              metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
+              ip: payload.ip, userAgent: payload.userAgent,
+            },
+          });
+        }, BYPASS_PURPOSE.AUDIT_WRITE);
+      } catch (err) {
+        deadLetterLogger.warn(
+          deadLetterEntry(params, "non_uuid_direct_write_failed", String(err)),
+          "audit.dead_letter",
+        );
+      }
       return;
     }
 

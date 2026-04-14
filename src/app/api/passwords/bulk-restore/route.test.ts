@@ -182,6 +182,7 @@ describe("POST /api/passwords/bulk-restore", () => {
     await POST(createRequest("POST", URL, { body: { ids: [id1, id2] } }));
 
     // 1 parent log + 2 per-entry logs, all via logAuditAsync
+    expect(mockLogAudit).toHaveBeenCalledTimes(3);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "ENTRY_BULK_RESTORE",

@@ -39,6 +39,8 @@ export default defineConfig({
         "src/lib/access-restriction.ts",
         "src/lib/account-lockout.ts",
         "src/lib/webhook-dispatcher.ts",
+        "src/lib/audit.ts",
+        "src/lib/audit-outbox.ts",
         "src/lib/audit-query.ts",
         "src/proxy.ts",
         "src/components/**/*.{ts,tsx}",

@@ -157,7 +157,7 @@ describe("POST /api/passwords/bulk-import", () => {
     expect(json.failed).toBe(1);
   });
 
-  it("calls logAudit with ENTRY_BULK_IMPORT action", async () => {
+  it("calls logAuditAsync with ENTRY_BULK_IMPORT action", async () => {
     const entries = [
       makeEntry("550e8400-e29b-41d4-a716-000000000001"),
       makeEntry("550e8400-e29b-41d4-a716-000000000002"),
@@ -165,6 +165,7 @@ describe("POST /api/passwords/bulk-import", () => {
 
     await POST(createRequest("POST", URL, { body: { entries } }));
 
+    expect(mockLogAudit).toHaveBeenCalledTimes(3); // 1 parent + 2 per-entry
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
@@ -188,6 +189,7 @@ describe("POST /api/passwords/bulk-import", () => {
     await POST(createRequest("POST", URL, { body: { entries } }));
 
     // logAuditAsync called once per entry with ENTRY_CREATE
+    expect(mockLogAudit).toHaveBeenCalledTimes(4); // 1 parent + 3 per-entry
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTION.ENTRY_CREATE,
