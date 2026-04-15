@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Manual test script for audit delivery target CRUD
-# Usage: bash scripts/test-delivery-targets.sh
+# Usage: bash scripts/manual-tests/test-delivery-targets.sh
 set -euo pipefail
 
 BASE="https://localhost:3001/passwd-sso"
