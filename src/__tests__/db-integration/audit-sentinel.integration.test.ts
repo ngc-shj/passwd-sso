@@ -314,6 +314,19 @@ describe("audit-sentinel: post-migration invariants", () => {
     // (outbox_id IS NULL) must have been written with SYSTEM_ACTOR_ID. This covers:
     //   (a) pre-migration rows backfilled by the migration, and
     //   (b) new rows written by writeDirectAuditLog which always uses SYSTEM_ACTOR_ID.
+    //
+    // To avoid a vacuous pass on clean CI databases, seed one SYSTEM row first.
+    await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO audit_logs (id, tenant_id, scope, action, user_id, actor_type, created_at)
+         VALUES ($1::uuid, $2::uuid, 'TENANT', 'AUDIT_OUTBOX_REAPED', $3::uuid, 'SYSTEM', now())`,
+        randomUUID(),
+        tenantIdA,
+        SYSTEM_ACTOR_ID,
+      );
+    });
+
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return tx.$queryRawUnsafe<Array<{ user_id: string }>>(
@@ -322,6 +335,8 @@ describe("audit-sentinel: post-migration invariants", () => {
          LIMIT 100`,
       );
     });
+    // Ensure the seeded row (and any historical rows) were actually queried
+    expect(rows.length).toBeGreaterThanOrEqual(1);
     for (const row of rows) {
       expect(row.user_id).toBe(SYSTEM_ACTOR_ID);
     }

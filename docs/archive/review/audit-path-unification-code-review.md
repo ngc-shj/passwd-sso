@@ -222,3 +222,31 @@ None.
 - Vitest: 7161 tests passed (565 files). Up from 7151 before Round 1 (added 10 new tests).
 - next build: succeeds.
 
+---
+
+## Round 2 Findings
+
+Round 2 (re-review of Round 1 fixes) — see `/tmp/review-3-r2/` for raw outputs.
+
+- Functionality expert: No findings. All Round 1 fixes verified correct.
+- Security expert: No actionable findings (S6/S7 rated Info — no action needed).
+- Testing expert: 2 actionable findings (T1-R2 Major, T3.4-R2 Minor) + 1 note (T3.6 Minor, already consistent with project pattern).
+
+### [T1-R2] Major — Scenario 7 backfill test could pass vacuously on clean CI DB — Resolved
+- Action: Added seed INSERT of a SYSTEM+outbox_id-NULL row before the query, plus `expect(rows.length).toBeGreaterThanOrEqual(1)` assertion. File: `src/__tests__/db-integration/audit-sentinel.integration.test.ts`.
+
+### [T3.4-R2] Minor — `policyCache` pollution between tests in access-restriction.test.ts — Resolved
+- Action: Added `beforeEach(() => { _clearPolicyCache(); mockLogAudit.mockReset(); })` so each test starts with a fresh cache. File: `src/lib/access-restriction.test.ts`.
+
+### [T3.6-R2] Minor — TENANT webhook test lacks `vi.waitFor` — Accepted (consistent with project pattern)
+- Anti-Deferral check: acceptable risk
+  - Worst case: flaky test on fast CI due to microtask ordering
+  - Likelihood: low — the same pattern is used throughout the file including a pre-existing passing TENANT webhook test at L586
+  - Cost to fix: 5 LOC; preferred to apply project-wide in a follow-up pass rather than localize
+
+## Verification (Round 2 fixes)
+- Lint: 0 errors, 1 pre-existing warning.
+- Vitest: 7161 tests pass. Targeted files: `access-restriction.test.ts` 2/2 pass.
+- tsc: unchanged (136 pre-existing errors in unmodified files).
+- Build: skipped (test-only changes per project convention).
+

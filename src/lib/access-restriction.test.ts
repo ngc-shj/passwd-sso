@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 
 // T3.4: checkAccessRestrictionWithAudit uses ANONYMOUS_ACTOR_ID when userId is null
@@ -40,10 +40,15 @@ vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: vi.fn(),
 }));
 
-import { checkAccessRestrictionWithAudit } from "@/lib/access-restriction";
+import { checkAccessRestrictionWithAudit, _clearPolicyCache } from "@/lib/access-restriction";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestrictionWithAudit — sentinel fallback", () => {
+  beforeEach(() => {
+    _clearPolicyCache();
+    mockLogAudit.mockReset();
+  });
+
   it("uses ANONYMOUS_ACTOR_ID with ANONYMOUS actorType when userId is null and access is denied", async () => {
     const req = new NextRequest("http://localhost/api/test");
     const result = await checkAccessRestrictionWithAudit("tenant-1", "1.2.3.4", null, req);
