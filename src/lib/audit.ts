@@ -16,7 +16,6 @@ import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit-l
 import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
-import { getLogger } from "@/lib/logger";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
