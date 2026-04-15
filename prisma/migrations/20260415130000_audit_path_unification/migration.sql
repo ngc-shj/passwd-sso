@@ -22,15 +22,10 @@ BEGIN
   END IF;
 END $$;
 
--- 3. Backfill all NULL userId rows with SYSTEM_ACTOR_ID sentinel.
-UPDATE audit_logs
-SET user_id = '00000000-0000-4000-8000-000000000001'::uuid
-WHERE user_id IS NULL;
-
--- 4. Drop CHECK that allowed NULL userId for SYSTEM.
-ALTER TABLE audit_logs DROP CONSTRAINT audit_logs_system_actor_user_id_check;
-
--- 5. Drop FK to users. Decouples audit trail from user lifecycle.
+-- 3. Drop FK to users FIRST. The backfill in step 5 writes SYSTEM_ACTOR_ID
+--    which is a sentinel UUID not present in the users table — so the FK
+--    must be dropped before the UPDATE, or the UPDATE would fail with
+--    foreign_key_violation (SQLSTATE 23503).
 --    Note: audit_logs_outbox_id_actor_type_check is KEPT — it still
 --    limits direct writes (outbox_id IS NULL) to SYSTEM actor only.
 -- NOTE: dropping this FK decouples audit_logs from users.id, strengthening
@@ -39,6 +34,17 @@ ALTER TABLE audit_logs DROP CONSTRAINT audit_logs_system_actor_user_id_check;
 -- separate PII redaction job; see docs/archive/review/audit-path-unification-plan.md
 -- §Considerations ▸ GDPR for the follow-up commitment.
 ALTER TABLE audit_logs DROP CONSTRAINT audit_logs_user_id_fkey;
+
+-- 4. Drop CHECK that allowed NULL userId for SYSTEM. Must happen before the
+--    NOT NULL set (step 6), and is independent of the backfill.
+ALTER TABLE audit_logs DROP CONSTRAINT audit_logs_system_actor_user_id_check;
+
+-- 5. Backfill all NULL userId rows with SYSTEM_ACTOR_ID sentinel.
+--    FK already dropped (step 3), so the sentinel UUID is accepted despite
+--    not existing in the users table.
+UPDATE audit_logs
+SET user_id = '00000000-0000-4000-8000-000000000001'::uuid
+WHERE user_id IS NULL;
 
 -- 6. Restore NOT NULL (sentinels fill the previously-NULL slot).
 ALTER TABLE audit_logs ALTER COLUMN user_id SET NOT NULL;
