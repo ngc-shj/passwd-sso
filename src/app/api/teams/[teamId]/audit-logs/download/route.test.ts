@@ -34,7 +34,13 @@ const { mockAuth, mockPrismaAuditLog, mockPrismaUser, mockRequireTeamPermission,
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 vi.mock("@/lib/prisma", () => ({
-  prisma: { auditLog: mockPrismaAuditLog, user: mockPrismaUser },
+  prisma: {
+    auditLog: mockPrismaAuditLog,
+    user: mockPrismaUser,
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    })),
+  },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,

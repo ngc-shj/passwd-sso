@@ -22,7 +22,7 @@ import {
   paginateResult,
   isValidCursorId,
 } from "@/lib/audit-query";
-import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)
 async function handleGET(req: NextRequest) {
@@ -87,25 +87,7 @@ async function handleGET(req: NextRequest) {
   const { items, nextCursor } = paginateResult(logs, limit);
 
   // Batch-lookup user display info (userId is now always a UUID string)
-  const logUserIds = [
-    ...new Set(
-      items
-        .map((l) => l.userId)
-        .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
-    ),
-  ];
-  const logUserMap: Record<string, { id: string; name: string | null; email: string | null; image: string | null }> = {};
-  if (logUserIds.length > 0) {
-    const logUsers = await withUserTenantRls(session.user.id, async () =>
-      prisma.user.findMany({
-        where: { id: { in: logUserIds } },
-        select: { id: true, name: true, email: true, image: true },
-      }),
-    );
-    for (const u of logUsers) {
-      logUserMap[u.id] = u;
-    }
-  }
+  const logUserMap = await fetchAuditUserMap(items.map((l) => l.userId));
 
   // Resolve encrypted overviews for PasswordEntry targets
   const entryIds = [
@@ -181,14 +163,7 @@ async function handleGET(req: NextRequest) {
       ip: log.ip,
       userAgent: log.userAgent,
       createdAt: log.createdAt,
-      user: log.userId && logUserMap[log.userId]
-        ? {
-            id: logUserMap[log.userId].id,
-            name: logUserMap[log.userId].name,
-            email: logUserMap[log.userId].email,
-            image: logUserMap[log.userId].image,
-          }
-        : null,
+      user: log.userId ? (logUserMap.get(log.userId) ?? null) : null,
     })),
     nextCursor,
     entryOverviews,

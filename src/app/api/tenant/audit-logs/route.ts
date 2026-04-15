@@ -17,7 +17,7 @@ import {
   paginateResult,
   isValidCursorId,
 } from "@/lib/audit-query";
-import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 // GET /api/tenant/audit-logs — Tenant-scoped audit logs (TENANT + TEAM scope, ADMIN/OWNER only)
 async function handleGET(req: NextRequest) {
@@ -130,29 +130,11 @@ async function handleGET(req: NextRequest) {
   const { items, nextCursor } = paginateResult(logs, limit);
 
   // Batch-lookup user display info
-  const tenantUserIds = [
-    ...new Set(
-      items
-        .map((l) => l.userId)
-        .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
-    ),
-  ];
-  const tenantUserMap: Record<string, { id: string; name: string | null; email: string | null; image: string | null }> = {};
-  if (tenantUserIds.length > 0) {
-    const tenantUsers = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.user.findMany({
-        where: { id: { in: tenantUserIds } },
-        select: { id: true, name: true, email: true, image: true },
-      }),
-    );
-    for (const u of tenantUsers) {
-      tenantUserMap[u.id] = u;
-    }
-  }
+  const tenantUserMap = await fetchAuditUserMap(items.map((l) => l.userId));
 
   return NextResponse.json({
     items: items.map((log) => {
-      const userInfo = log.userId ? tenantUserMap[log.userId] : undefined;
+      const userInfo = log.userId ? (tenantUserMap.get(log.userId) ?? undefined) : undefined;
       return {
         id: log.id,
         scope: log.scope,

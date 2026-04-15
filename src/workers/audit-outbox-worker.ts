@@ -495,7 +495,10 @@ async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Pr
 
   if (deliveries.length === 0) return 0;
 
-  const outboxIds = [...new Set(deliveries.map((d) => d.outboxId))];
+  const outboxIds = [
+    ...new Set(deliveries.map((d) => d.outboxId).filter((id) => UUID_RE.test(id))),
+  ];
+  if (outboxIds.length === 0) return deliveries.length;
   const outboxRows = await prisma.auditOutbox.findMany({
     where: { id: { in: outboxIds } },
     select: { id: true, createdAt: true, payload: true, tenantId: true },
@@ -957,9 +960,10 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
-      // Catches malformed outbox payloads: payload.userId must be a valid UUID (real user or sentinel).
-      // `parsePayload` may coerce non-string JSON values to empty string; this guard ensures the row
-      // is skipped and logged before reaching the SQL UUID cast.
+      // Defense-in-depth: reject payloads whose userId is not a valid UUID (e.g. "" from
+      // parsePayload's fallback on malformed JSON, or legacy null rows from before the type
+      // tightened). logAuditAsync cannot produce these, but external inserts or legacy
+      // outbox rows could. Skip the row rather than letting the UUID cast fail.
       if (!UUID_RE.test(payload.userId) && payload.actorType !== ACTOR_TYPE.SYSTEM) {
         log.warn(
           { outboxId: row.id, action: payload.action, actorType: payload.actorType },
@@ -977,9 +981,7 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
-      // Catches malformed outbox payloads: payload.userId must be a valid UUID (real user or sentinel).
-      // `parsePayload` may coerce non-string JSON values to empty string; this guard ensures the row
-      // is skipped and logged before reaching the SQL UUID cast.
+      // Same guard for SYSTEM actor.
       if (!UUID_RE.test(payload.userId)) {
         log.warn(
           { outboxId: row.id, action: payload.action },

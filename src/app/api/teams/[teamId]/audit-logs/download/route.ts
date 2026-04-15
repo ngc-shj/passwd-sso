@@ -19,7 +19,7 @@ import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
-import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -156,28 +156,10 @@ async function handleGET(req: NextRequest, { params }: Params) {
           );
 
           // Batch-lookup user display info for this page
-          const teamDlUserIds = [
-            ...new Set(
-              batch
-                .map((l) => l.userId)
-                .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
-            ),
-          ];
-          const teamDlUserMap: Record<string, { id: string; name: string | null; email: string | null }> = {};
-          if (teamDlUserIds.length > 0) {
-            const teamDlUsers = await withTeamTenantRls(teamId, async () =>
-              prisma.user.findMany({
-                where: { id: { in: teamDlUserIds } },
-                select: { id: true, name: true, email: true },
-              }),
-            );
-            for (const u of teamDlUsers) {
-              teamDlUserMap[u.id] = u;
-            }
-          }
+          const teamDlUserMap = await fetchAuditUserMap(batch.map((l) => l.userId));
 
           for (const log of batch) {
-            const userInfo = log.userId ? teamDlUserMap[log.userId] : undefined;
+            const userInfo = log.userId ? (teamDlUserMap.get(log.userId) ?? undefined) : undefined;
             if (format === "csv") {
               controller.enqueue(
                 encoder.encode(

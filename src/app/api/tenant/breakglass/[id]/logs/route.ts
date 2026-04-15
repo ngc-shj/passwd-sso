@@ -19,7 +19,7 @@ import {
   isValidCursorId,
 } from "@/lib/audit-query";
 import type { Prisma } from "@prisma/client";
-import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 export const runtime = "nodejs";
 
@@ -223,29 +223,11 @@ async function handleGET(
   const { items, nextCursor } = paginateResult(logs, limit);
 
   // Batch-lookup user display info
-  const bgUserIds = [
-    ...new Set(
-      items
-        .map((l) => l.userId)
-        .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
-    ),
-  ];
-  const bgUserMap: Record<string, { id: string; name: string | null; email: string | null; image: string | null }> = {};
-  if (bgUserIds.length > 0) {
-    const bgUsers = await withTenantRls(prisma, actor.tenantId, async () =>
-      prisma.user.findMany({
-        where: { id: { in: bgUserIds } },
-        select: { id: true, name: true, email: true, image: true },
-      }),
-    );
-    for (const u of bgUsers) {
-      bgUserMap[u.id] = u;
-    }
-  }
+  const bgUserMap = await fetchAuditUserMap(items.map((l) => l.userId));
 
   return NextResponse.json({
     items: items.map((log) => {
-      const userInfo = log.userId ? bgUserMap[log.userId] : undefined;
+      const userInfo = log.userId ? (bgUserMap.get(log.userId) ?? null) : null;
       return {
         id: log.id,
         action: log.action,
@@ -255,9 +237,7 @@ async function handleGET(
         ip: log.ip,
         userAgent: log.userAgent,
         createdAt: log.createdAt,
-        user: userInfo
-          ? { id: userInfo.id, name: userInfo.name, email: userInfo.email, image: userInfo.image }
-          : null,
+        user: userInfo,
       };
     }),
     nextCursor,

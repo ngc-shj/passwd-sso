@@ -54,6 +54,9 @@ vi.mock("@/lib/prisma", () => ({
     user: {
       findMany: mockUserFindMany,
     },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    })),
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,

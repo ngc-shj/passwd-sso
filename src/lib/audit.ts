@@ -194,7 +194,7 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
           teamId: payload.teamId,
           targetType: payload.targetType,
           targetId: payload.targetId,
-          metadata: sanitizeMetadata(payload.metadata),
+          metadata: payload.metadata,
           ip: payload.ip,
           userAgent: payload.userAgent,
         },

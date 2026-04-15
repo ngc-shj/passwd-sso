@@ -17,7 +17,7 @@ import {
   AUDIT_LOG_BATCH_SIZE,
   AUDIT_LOG_MAX_ROWS,
 } from "@/lib/validations/common.server";
-import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -134,28 +134,10 @@ async function handleGET(req: NextRequest) {
           );
 
           // Batch-lookup user display info for this page
-          const tenantBatchUserIds = [
-            ...new Set(
-              batch
-                .map((l) => l.userId)
-                .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
-            ),
-          ];
-          const tenantBatchUserMap: Record<string, { id: string; name: string | null; email: string | null }> = {};
-          if (tenantBatchUserIds.length > 0) {
-            const tenantBatchUsers = await withTenantRls(prisma, tenantId, async () =>
-              prisma.user.findMany({
-                where: { id: { in: tenantBatchUserIds } },
-                select: { id: true, name: true, email: true },
-              }),
-            );
-            for (const u of tenantBatchUsers) {
-              tenantBatchUserMap[u.id] = u;
-            }
-          }
+          const tenantBatchUserMap = await fetchAuditUserMap(batch.map((l) => l.userId));
 
           for (const log of batch) {
-            const userInfo = log.userId ? tenantBatchUserMap[log.userId] : undefined;
+            const userInfo = log.userId ? (tenantBatchUserMap.get(log.userId) ?? undefined) : undefined;
             if (format === "csv") {
               controller.enqueue(
                 encoder.encode(

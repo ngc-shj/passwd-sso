@@ -23,6 +23,9 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { findMany: mockAuditLogFindMany },
     passwordEntry: { findMany: mockPasswordEntryFindMany },
     user: { findMany: mockUserFindMany },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    })),
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({

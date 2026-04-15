@@ -13,7 +13,7 @@ import { verifyTailscalePeer } from "@/lib/tailscale-client";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
-import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
+import { resolveAuditUserId } from "@/lib/constants/app";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -158,7 +158,7 @@ export async function checkAccessRestrictionWithAudit(
     await logAuditAsync({
       action: AUDIT_ACTION.ACCESS_DENIED,
       scope: AUDIT_SCOPE.TENANT,
-      userId: userId ?? ANONYMOUS_ACTOR_ID,
+      userId: resolveAuditUserId(userId, "anonymous"),
       actorType: userId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.ANONYMOUS,
       tenantId,
       ip: clientIp,

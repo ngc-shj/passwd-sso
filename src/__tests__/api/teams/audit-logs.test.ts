@@ -35,6 +35,9 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { findMany: mockFindMany },
     teamPasswordEntry: { findMany: mockTeamEntryFindMany },
     user: { findMany: mockUserFindMany },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    })),
   },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));

@@ -38,3 +38,16 @@ export const SENTINEL_ACTOR_IDS: ReadonlySet<string> = new Set([
   ANONYMOUS_ACTOR_ID,
   SYSTEM_ACTOR_ID,
 ]);
+
+/**
+ * Resolve an optional userId to a concrete string for audit logging.
+ * - Pass `"anonymous"` for unauthenticated-actor events (share access, etc.)
+ * - Pass `"system"` for worker/service-initiated events
+ */
+export function resolveAuditUserId(
+  userId: string | null | undefined,
+  fallback: "anonymous" | "system",
+): string {
+  if (userId) return userId;
+  return fallback === "anonymous" ? ANONYMOUS_ACTOR_ID : SYSTEM_ACTOR_ID;
+}
