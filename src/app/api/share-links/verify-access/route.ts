@@ -11,6 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const ipLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
@@ -69,32 +70,30 @@ async function handlePOST(req: NextRequest) {
   }
 
   if (!verifyAccessPassword(password, share.accessPasswordHash)) {
-    // Non-atomic audit: userId="anonymous" is not a valid UUID,
-    // so this cannot use logAuditInTx (worker INSERT would fail on ::uuid cast).
-    // Falls through the FIFO flusher path where tenantId is already resolved.
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
       action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-      userId: "anonymous",
+      userId: null,
+      actorType: ACTOR_TYPE.SYSTEM,
       tenantId: share.tenantId,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
-      metadata: { ip },
+      metadata: { ip, anonymousAccess: true },
       ...reqMeta,
     });
 
     return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
   }
 
-  // Non-atomic audit: same userId="anonymous" limitation as above.
   await logAuditAsync({
     scope: AUDIT_SCOPE.PERSONAL,
     action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
-    userId: "anonymous",
+    userId: null,
+    actorType: ACTOR_TYPE.SYSTEM,
     tenantId: share.tenantId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
-    metadata: { ip },
+    metadata: { ip, anonymousAccess: true },
     ...reqMeta,
   });
 

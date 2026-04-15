@@ -156,7 +156,7 @@ export async function checkAccessRestrictionWithAudit(
     await logAuditAsync({
       action: AUDIT_ACTION.ACCESS_DENIED,
       scope: AUDIT_SCOPE.TENANT,
-      userId: userId ?? "unknown",
+      userId: userId ?? null,
       tenantId,
       ip: clientIp,
       userAgent: req.headers.get("user-agent"),

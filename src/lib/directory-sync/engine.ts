@@ -202,7 +202,7 @@ export async function runDirectorySync(
       await logAuditAsync({
         scope: AUDIT_SCOPE.TENANT,
         action: AUDIT_ACTION.DIRECTORY_SYNC_STALE_RESET,
-        userId: actorUserId ?? "system",
+        userId: actorUserId ?? null,
         tenantId,
         targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
         targetId: configId,

@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
     await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
-      userId: result.userId ?? "system",
+      userId: result.userId ?? null,
       tenantId: result.tenantId,
       metadata: { clientId: clientIdValue },
     });

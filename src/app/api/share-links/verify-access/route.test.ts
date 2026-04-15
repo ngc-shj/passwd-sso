@@ -224,7 +224,16 @@ describe("POST /api/share-links/verify-access", () => {
     const { status } = await parseResponse(res);
     expect(status).toBe(403);
     expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_FAILED", tenantId: "tenant-1" }),
+      expect.objectContaining({
+        action: "SHARE_ACCESS_VERIFY_FAILED",
+        tenantId: "tenant-1",
+        userId: null,
+        actorType: "SYSTEM",
+        metadata: expect.objectContaining({
+          anonymousAccess: true,
+          ip: expect.any(String),
+        }),
+      }),
     );
   });
 
@@ -239,7 +248,16 @@ describe("POST /api/share-links/verify-access", () => {
     expect(json.accessToken).toBe("access-token-xyz");
     expect(mockCreateShareAccessToken).toHaveBeenCalledWith("share-1");
     expect(mockLogAudit).toHaveBeenCalledWith(
-      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_SUCCESS", tenantId: "tenant-1" }),
+      expect.objectContaining({
+        action: "SHARE_ACCESS_VERIFY_SUCCESS",
+        tenantId: "tenant-1",
+        userId: null,
+        actorType: "SYSTEM",
+        metadata: expect.objectContaining({
+          anonymousAccess: true,
+          ip: expect.any(String),
+        }),
+      }),
     );
   });
 
