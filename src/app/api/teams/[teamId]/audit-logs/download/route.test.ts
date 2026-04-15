@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
 
-const { mockAuth, mockPrismaAuditLog, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockExtractRequestMeta, mockAssertPolicyAllowsExport, PolicyViolationError, mockCheckRateLimit } = vi.hoisted(() => {
+const { mockAuth, mockPrismaAuditLog, mockPrismaUser, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockExtractRequestMeta, mockAssertPolicyAllowsExport, PolicyViolationError, mockCheckRateLimit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -19,6 +19,7 @@ const { mockAuth, mockPrismaAuditLog, mockRequireTeamPermission, TeamAuthError, 
   return {
     mockAuth: vi.fn(),
     mockPrismaAuditLog: { findMany: vi.fn() },
+    mockPrismaUser: { findMany: vi.fn().mockResolvedValue([]) },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
     mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
@@ -31,8 +32,9 @@ const { mockAuth, mockPrismaAuditLog, mockRequireTeamPermission, TeamAuthError, 
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
+
 vi.mock("@/lib/prisma", () => ({
-  prisma: { auditLog: mockPrismaAuditLog },
+  prisma: { auditLog: mockPrismaAuditLog, user: mockPrismaUser },
 }));
 vi.mock("@/lib/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
@@ -178,6 +180,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
   it("streams JSONL format by default", async () => {
     const logEntry = {
       id: "log-1",
+      userId: "u1",
       action: "ENTRY_CREATE",
       targetType: "password",
       targetId: "pw-1",
@@ -185,9 +188,11 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
       ip: "127.0.0.1",
       userAgent: "TestAgent",
       createdAt: new Date("2025-06-01T00:00:00Z"),
-      user: { id: "u1", name: "Test User", email: "test@example.com" },
     };
     mockPrismaAuditLog.findMany.mockResolvedValue([logEntry]);
+    mockPrismaUser.findMany.mockResolvedValue([
+      { id: "u1", name: "Test User", email: "test@example.com" },
+    ]);
 
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),

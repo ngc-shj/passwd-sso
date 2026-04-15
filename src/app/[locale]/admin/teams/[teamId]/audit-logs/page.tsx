@@ -175,7 +175,7 @@ export default function TeamAdminAuditLogsPage({
           id={log.id}
           icon={ACTION_ICONS[log.action as AuditActionValue] ?? DEFAULT_AUDIT_ICON}
           actionLabel={getActionLabel(t as Parameters<typeof getActionLabel>[0], log.action, audit.actionLabel)}
-          badges={<AuditActorTypeBadge actorType={log.actorType} />}
+          badges={<AuditActorTypeBadge actorType={log.actorType} userId={log.user?.id} />}
           detail={
             <>
               {user && (

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 
 const {
   mockEnqueueAudit,
@@ -79,90 +80,63 @@ describe("logAuditAsync", () => {
     );
   });
 
-  it("bypasses outbox and writes directly for null userId (SYSTEM actor)", async () => {
+  it("enqueues ANONYMOUS actor via outbox when userId is ANONYMOUS_ACTOR_ID", async () => {
     await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
+      scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
-      userId: null,
-      actorType: "SYSTEM",
+      userId: ANONYMOUS_ACTOR_ID,
+      actorType: "ANONYMOUS",
       tenantId: "tenant-1",
-      metadata: { anonymousAccess: true },
     });
 
-    // null userId must NOT enter the outbox — worker rejects it
-    expect(mockEnqueueAudit).not.toHaveBeenCalled();
-    // null userId must NOT trigger user lookup
-    expect(mockUserFindUnique).not.toHaveBeenCalled();
-    // Direct write MUST happen with SYSTEM actor + null userId
-    expect(mockAuditLogCreate).toHaveBeenCalledWith(
+    // ANONYMOUS actor MUST flow through outbox, not direct write
+    expect(mockEnqueueAudit).toHaveBeenCalledWith(
+      "tenant-1",
       expect.objectContaining({
-        data: expect.objectContaining({
-          userId: null,
-          actorType: "SYSTEM",
-          tenantId: "tenant-1",
-          action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
-        }),
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
+        action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
+      }),
+    );
+    // Direct write must NOT be called
+    expect(mockAuditLogCreate).not.toHaveBeenCalled();
+  });
+
+  it("accepts explicit actorType for sentinel userId (no coercion)", async () => {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.TENANT,
+      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
+      userId: ANONYMOUS_ACTOR_ID,
+      actorType: "ANONYMOUS",
+      tenantId: "tenant-1",
+    });
+
+    // actorType must remain ANONYMOUS — no coercion to another type
+    expect(mockEnqueueAudit).toHaveBeenCalledWith(
+      "tenant-1",
+      expect.objectContaining({
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
       }),
     );
   });
 
-  it("forces actorType to SYSTEM when userId is null (even if caller omits it)", async () => {
-    await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-      userId: null,
-      // actorType intentionally omitted — buildOutboxPayload must force SYSTEM
-      tenantId: "tenant-1",
-    });
+  it("dead-letters sentinel userId when tenantId is absent AND user lookup fails", async () => {
+    // Sentinel IDs are not in the users table, so resolveTenantId returns null
+    mockUserFindUnique.mockResolvedValue(null);
 
-    // Structured emit must also use SYSTEM (not HUMAN default)
-    expect(mockAuditInfo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        audit: expect.objectContaining({ userId: null, actorType: "SYSTEM" }),
-      }),
-      expect.any(String),
-    );
-    // DB write must also use SYSTEM
-    expect(mockAuditLogCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ userId: null, actorType: "SYSTEM" }),
-      }),
-    );
-  });
-
-  it("dead-letters null userId when tenantId is absent", async () => {
     await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
+      scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-      userId: null,
-      // tenantId omitted
+      userId: ANONYMOUS_ACTOR_ID,
+      actorType: "ANONYMOUS",
+      // tenantId intentionally omitted
     });
 
     expect(mockAuditLogCreate).not.toHaveBeenCalled();
     expect(mockEnqueueAudit).not.toHaveBeenCalled();
     expect(mockDeadLetterWarn).toHaveBeenCalledWith(
       expect.objectContaining({ reason: "tenant_not_found" }),
-      "audit.dead_letter",
-    );
-  });
-
-  it("catches direct write failure and logs to dead letter (null userId path)", async () => {
-    mockAuditLogCreate.mockRejectedValueOnce(new Error("db down"));
-
-    await expect(
-      logAuditAsync({
-        scope: AUDIT_SCOPE.PERSONAL,
-        action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-        userId: null,
-        tenantId: "tenant-1",
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        reason: "logAuditAsync_failed",
-        error: expect.stringContaining("db down"),
-      }),
       "audit.dead_letter",
     );
   });

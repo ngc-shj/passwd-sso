@@ -14,7 +14,7 @@ import {
   WEBHOOK_DISPATCH_SUPPRESS,
 } from "@/lib/constants/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { NIL_UUID } from "@/lib/constants/app";
+import { NIL_UUID, SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/external-http";
@@ -37,7 +37,7 @@ export interface AuditOutboxRow {
 export interface AuditOutboxPayload {
   scope: string;
   action: string;
-  userId: string | null;
+  userId: string;
   actorType: string;
   serviceAccountId: string | null;
   teamId: string | null;
@@ -69,7 +69,9 @@ function parsePayload(raw: unknown): AuditOutboxPayload {
   return {
     scope: typeof p.scope === "string" ? p.scope : AUDIT_SCOPE.PERSONAL,
     action: typeof p.action === "string" ? p.action : "",
-    userId: typeof p.userId === "string" ? p.userId : null,
+    // Runtime check kept as defense-in-depth (handles malformed rows from older outbox entries).
+    // Falls back to empty string so the null-userId guards below can reject the row.
+    userId: typeof p.userId === "string" ? p.userId : "",
     actorType: typeof p.actorType === "string" ? p.actorType : ACTOR_TYPE.HUMAN,
     serviceAccountId:
       typeof p.serviceAccountId === "string" ? p.serviceAccountId : null,
@@ -369,14 +371,15 @@ async function writeDirectAuditLog(
           $1::uuid,
           $2::"AuditScope",
           $3::"AuditAction",
-          NULL,
-          $4::"ActorType",
-          $5::jsonb,
+          $4::uuid,
+          $5::"ActorType",
+          $6::jsonb,
           now()
         )`,
         tenantId,
         AUDIT_SCOPE.TENANT,
         action,
+        SYSTEM_ACTOR_ID,
         ACTOR_TYPE.SYSTEM,
         JSON.stringify(metadata),
       );
@@ -557,7 +560,7 @@ async function processOneDelivery(
       tenantId: delivery.tenantId,
       action: (outboxPayload.action as string) ?? "",
       scope: (outboxPayload.scope as string) ?? "",
-      userId: (outboxPayload.userId as string | null) ?? null,
+      userId: (outboxPayload.userId as string) ?? "",
       actorType: (outboxPayload.actorType as string) ?? "",
       metadata: (outboxPayload.metadata as Record<string, unknown>) ?? {},
       createdAt: delivery.outbox.createdAt.toISOString(),
@@ -939,6 +942,8 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
+      // Defense-in-depth: logAuditAsync type signature now disallows null, but this guard
+      // remains to catch malformed outbox payloads (e.g., from older rows or external inserts).
       if (payload.userId === null && payload.actorType !== ACTOR_TYPE.SYSTEM) {
         log.warn(
           { outboxId: row.id, action: payload.action, actorType: payload.actorType },
@@ -956,6 +961,8 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
+      // Defense-in-depth: logAuditAsync type signature now disallows null, but this guard
+      // remains to catch malformed outbox payloads (e.g., from older rows or external inserts).
       if (payload.userId === null) {
         log.warn(
           { outboxId: row.id, action: payload.action },

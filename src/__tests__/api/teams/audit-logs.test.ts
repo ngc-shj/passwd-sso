@@ -5,6 +5,7 @@ import { createRequest, createParams, parseResponse } from "../../helpers/reques
 const {
   mockAuth,
   mockFindMany,
+  mockUserFindMany,
   mockRequireTeamPermission,
   mockTeamEntryFindMany,
   TeamAuthError,
@@ -21,6 +22,7 @@ const {
     return {
       mockAuth: vi.fn(),
       mockFindMany: vi.fn(),
+      mockUserFindMany: vi.fn().mockResolvedValue([]),
       mockRequireTeamPermission: vi.fn(),
       mockTeamEntryFindMany: vi.fn(),
       TeamAuthError,
@@ -32,6 +34,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     auditLog: { findMany: mockFindMany },
     teamPasswordEntry: { findMany: mockTeamEntryFindMany },
+    user: { findMany: mockUserFindMany },
   },
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -90,6 +93,7 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
     const logs = [
       {
         id: "log-1",
+        userId: "user-1",
         action: AUDIT_ACTION.ENTRY_CREATE,
         targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
         targetId: "00000000-0000-4000-a000-000000000e01",
@@ -97,12 +101,14 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         ip: "10.0.0.1",
         userAgent: "Test",
         createdAt: now,
-        user: { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
       },
     ];
 
     mockFindMany.mockResolvedValue(logs);
     mockTeamEntryFindMany.mockResolvedValue([]);
+    mockUserFindMany.mockResolvedValue([
+      { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
+    ]);
 
     const req = createRequest(
       "GET",
@@ -127,9 +133,6 @@ describe("GET /api/teams/[teamId]/audit-logs", () => {
         where: {
           teamId: TEAM_ID,
           scope: AUDIT_SCOPE.TEAM,
-        },
-        include: {
-          user: { select: { id: true, name: true, email: true, image: true } },
         },
         orderBy: { createdAt: "desc" },
       })

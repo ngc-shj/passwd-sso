@@ -115,6 +115,7 @@ describe("audit constants", () => {
       AUDIT_ACTION_GROUP.SERVICE_ACCOUNT,
       AUDIT_ACTION_GROUP.MCP_CLIENT,
       AUDIT_ACTION_GROUP.DELEGATION,
+      AUDIT_ACTION_GROUP.SHARE,
     ]);
   });
 

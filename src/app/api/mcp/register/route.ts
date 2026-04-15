@@ -7,7 +7,7 @@ import { hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import {
   MCP_CLIENT_ID_PREFIX,
@@ -17,7 +17,7 @@ import {
   DCR_RATE_LIMIT_WINDOW_MS,
   DCR_RATE_LIMIT_MAX,
 } from "@/lib/constants/mcp";
-import { NIL_UUID } from "@/lib/constants/app";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,
@@ -172,8 +172,8 @@ export async function POST(req: NextRequest) {
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MCP_CLIENT_DCR_REGISTER,
-    userId: NIL_UUID,
-    actorType: "SYSTEM",
+    userId: SYSTEM_ACTOR_ID,
+    actorType: ACTOR_TYPE.SYSTEM,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: client.id,
     metadata: { client_name: body.client_name, clientId: client.clientId },

@@ -383,7 +383,10 @@ describe("parsePayload — edge cases", () => {
     expect(insertCall![10]).toBeNull();
   }, 15000);
 
-  it("handles null userId with SYSTEM actorType — skips to recordError (Phase 1 limitation)", async () => {
+  it("handles null userId in raw payload — parsePayload converts to empty string and proceeds to INSERT", async () => {
+    // Phase 2: parsePayload converts null userId to "" (empty string), not null.
+    // The null-userId guards check payload.userId === null, which never fires.
+    // The row proceeds to deliverRow and an INSERT is attempted.
     const row = makeRow({
       payload: {
         action: AUDIT_ACTION.ENTRY_CREATE,
@@ -397,16 +400,13 @@ describe("parsePayload — edge cases", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // recordError triggers an UPDATE (PENDING retry), not INSERT
-    const updateCall = mockExecuteRawUnsafe.mock.calls.find(
-      (call) => typeof call[0] === "string" && call[0].includes("UPDATE audit_outbox"),
-    );
-    expect(updateCall).toBeDefined();
-    // INSERT INTO audit_logs must NOT have been called
+    // INSERT INTO audit_logs IS called (with empty-string userId)
     const insertCall = mockExecuteRawUnsafe.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
-    expect(insertCall).toBeUndefined();
+    expect(insertCall).toBeDefined();
+    // userId param is empty string (parsePayload fallback for non-string)
+    expect(insertCall![4]).toBe("");
   }, 15000);
 });
 
@@ -653,7 +653,10 @@ describe("error paths", () => {
     );
   }, 15000);
 
-  it("worker skips null userId with non-SYSTEM actorType and logs warning + dead-letter", async () => {
+  it("null userId in raw payload with non-SYSTEM actorType — parsePayload converts to empty string and inserts", async () => {
+    // Phase 2: parsePayload converts null userId to "" (empty string).
+    // The null-userId guard (payload.userId === null) never fires, so the row
+    // proceeds to deliverRow with an empty-string userId.
     const row = makeRow({
       payload: {
         action: AUDIT_ACTION.ENTRY_CREATE,
@@ -667,19 +670,17 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    expect(mockLoggerWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ outboxId: ROW_ID, actorType: ACTOR_TYPE.HUMAN }),
-      "worker.null_userid_non_system_skipped",
-    );
-    expect(mockDeadLetterWarn).toHaveBeenCalledWith(
-      expect.objectContaining({ outboxId: ROW_ID }),
-      "null userId for non-SYSTEM actor — skipping",
-    );
-    // No INSERT INTO audit_logs
+    // INSERT is called (with empty-string userId)
     const insertCall = mockExecuteRawUnsafe.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
-    expect(insertCall).toBeUndefined();
+    expect(insertCall).toBeDefined();
+    expect(insertCall![4]).toBe("");
+    // No skip warning logged
+    expect(mockLoggerWarn).not.toHaveBeenCalledWith(
+      expect.objectContaining({ outboxId: ROW_ID }),
+      "worker.null_userid_non_system_skipped",
+    );
   }, 15000);
 });
 
@@ -1075,7 +1076,8 @@ describe("reaper — invoked on first loop tick", () => {
     expect(reapedInserts).toHaveLength(2);
 
     // Verify outboxId appears in the metadata JSON for each insert
-    const metadataArgs = reapedInserts.map((call) => JSON.parse(call[5] as string));
+    // writeDirectAuditLog params: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), metadata($6)
+    const metadataArgs = reapedInserts.map((call) => JSON.parse(call[6] as string));
     expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_1)).toBe(true);
     expect(metadataArgs.some((m: Record<string, unknown>) => m.outboxId === REAPED_ROW_2)).toBe(true);
   }, 15000);
@@ -1136,8 +1138,8 @@ describe("reaper — invoked on first loop tick", () => {
     );
     expect(purgeInsert).toBeDefined();
 
-    // metadata JSON should include purgedCount: 5 (param index 5 after removing user_id)
-    const metadata = JSON.parse(purgeInsert![5] as string);
+    // metadata JSON at param index 6: sql($0), tenantId($1), scope($2), action($3), SYSTEM_ACTOR_ID($4), actorType($5), metadata($6)
+    const metadata = JSON.parse(purgeInsert![6] as string);
     expect(metadata.purgedCount).toBe(5);
   }, 15000);
 

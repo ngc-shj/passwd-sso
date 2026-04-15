@@ -173,7 +173,7 @@ export function TenantAuditLogCard({ variant }: TenantAuditLogCardProps) {
           >
             {log.scope === "TEAM" ? t("scopeTeam") : t("scopeTenant")}
           </Badge>
-          <AuditActorTypeBadge actorType={log.actorType} />
+          <AuditActorTypeBadge actorType={log.actorType} userId={log.user?.id} />
         </>
       }
       detail={

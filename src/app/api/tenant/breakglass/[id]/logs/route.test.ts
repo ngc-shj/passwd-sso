@@ -10,6 +10,7 @@ const {
   mockTenantMemberFindFirst,
   mockAuditLogCreate,
   mockAuditLogFindMany,
+  mockUserFindMany,
   TenantAuthError,
 } = vi.hoisted(() => {
   class _TenantAuthError extends Error {
@@ -28,6 +29,7 @@ const {
     mockTenantMemberFindFirst: vi.fn(),
     mockAuditLogCreate: vi.fn(),
     mockAuditLogFindMany: vi.fn(),
+    mockUserFindMany: vi.fn().mockResolvedValue([]),
     TenantAuthError: _TenantAuthError,
   };
 });
@@ -48,6 +50,9 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: {
       create: mockAuditLogCreate,
       findMany: mockAuditLogFindMany,
+    },
+    user: {
+      findMany: mockUserFindMany,
     },
   },
 }));
@@ -106,6 +111,7 @@ const makeGrant = (id: string, overrides: Record<string, unknown> = {}) => ({
 
 const makeLog = (overrides: Record<string, unknown> = {}) => ({
   id: "log-1",
+  userId: TARGET_USER_ID,
   action: "ENTRY_CREATE",
   targetType: "PasswordEntry",
   targetId: "entry-1",
@@ -113,12 +119,6 @@ const makeLog = (overrides: Record<string, unknown> = {}) => ({
   ip: "10.0.0.1",
   userAgent: "Mozilla/5.0",
   createdAt: NOW,
-  user: {
-    id: TARGET_USER_ID,
-    name: "Target User",
-    email: "target@example.com",
-    image: null,
-  },
   ...overrides,
 });
 
@@ -138,6 +138,9 @@ describe("GET /api/tenant/breakglass/[id]/logs", () => {
     mockTenantMemberFindFirst.mockResolvedValue({ id: "member-target" });
     mockAuditLogCreate.mockResolvedValue({ id: "audit-view-1" });
     mockAuditLogFindMany.mockResolvedValue([makeLog()]);
+    mockUserFindMany.mockResolvedValue([
+      { id: TARGET_USER_ID, name: "Target User", email: "target@example.com", image: null },
+    ]);
   });
 
   // Tests that fail before reaching the VIEW audit path use a fixed grantId

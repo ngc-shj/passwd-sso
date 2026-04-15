@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX, AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
   let ctx: TestContext;
@@ -95,10 +96,11 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
     expect(rows[0].processing_started_at).toBeNull();
   });
 
-  it("writes an AUDIT_OUTBOX_REAPED audit_logs entry with SYSTEM actor and NULL userId", async () => {
+  it("writes an AUDIT_OUTBOX_REAPED audit_logs entry with SYSTEM actor and SYSTEM_ACTOR_ID userId", async () => {
     const outboxId = randomUUID();
 
     // Write a direct SYSTEM audit log (same pattern as writeDirectAuditLog)
+    // user_id must be SYSTEM_ACTOR_ID sentinel (NOT NULL constraint post-migration)
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
@@ -109,7 +111,7 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
           $1::uuid,
           $2::"AuditScope",
           $3::"AuditAction",
-          NULL,
+          $6::uuid,
           $4::"ActorType",
           $5::jsonb,
           now()
@@ -119,6 +121,7 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
         AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
         ACTOR_TYPE.SYSTEM,
         JSON.stringify({ outboxId, attemptCount: 3 }),
+        SYSTEM_ACTOR_ID,
       );
     });
 

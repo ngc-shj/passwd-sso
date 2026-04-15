@@ -15,6 +15,8 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { logAuditAsync } from "@/lib/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { decryptCredentials } from "./credentials";
 import { sanitizeSyncError } from "./sanitize";
 
@@ -202,7 +204,8 @@ export async function runDirectorySync(
       await logAuditAsync({
         scope: AUDIT_SCOPE.TENANT,
         action: AUDIT_ACTION.DIRECTORY_SYNC_STALE_RESET,
-        userId: actorUserId ?? null,
+        userId: actorUserId ?? SYSTEM_ACTOR_ID,
+        actorType: actorUserId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.SYSTEM,
         tenantId,
         targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
         targetId: configId,

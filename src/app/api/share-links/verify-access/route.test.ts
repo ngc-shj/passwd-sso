@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, parseResponse } from "@/__tests__/helpers/request-builder";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 
 const {
   mockPasswordShareFindUnique,
@@ -227,10 +228,10 @@ describe("POST /api/share-links/verify-access", () => {
       expect.objectContaining({
         action: "SHARE_ACCESS_VERIFY_FAILED",
         tenantId: "tenant-1",
-        userId: null,
-        actorType: "SYSTEM",
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
+        scope: "TENANT",
         metadata: expect.objectContaining({
-          anonymousAccess: true,
           ip: expect.any(String),
         }),
       }),
@@ -251,10 +252,10 @@ describe("POST /api/share-links/verify-access", () => {
       expect.objectContaining({
         action: "SHARE_ACCESS_VERIFY_SUCCESS",
         tenantId: "tenant-1",
-        userId: null,
-        actorType: "SYSTEM",
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
+        scope: "TENANT",
         metadata: expect.objectContaining({
-          anonymousAccess: true,
           ip: expect.any(String),
         }),
       }),

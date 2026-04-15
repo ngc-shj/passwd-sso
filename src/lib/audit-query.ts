@@ -8,7 +8,7 @@ import type { AuditAction } from "@prisma/client";
 export const VALID_ACTIONS: Set<string> = new Set(AUDIT_ACTION_VALUES);
 
 /** Valid actor type values for audit log filtering. */
-export const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM"] as const;
+export const VALID_ACTOR_TYPES = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM", "ANONYMOUS"] as const;
 
 /** Parses actorType from search params. Returns the value if valid, undefined otherwise. */
 export function parseActorType(searchParams: URLSearchParams): (typeof VALID_ACTOR_TYPES)[number] | undefined {

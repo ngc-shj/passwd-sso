@@ -68,7 +68,6 @@ describe("GET /api/audit-logs", () => {
           scope: AUDIT_SCOPE.PERSONAL,
           OR: expect.any(Array),
         }),
-        include: { user: { select: { id: true, name: true, email: true, image: true } } },
         orderBy: { createdAt: "desc" },
         take: 51, // default 50 + 1
       })

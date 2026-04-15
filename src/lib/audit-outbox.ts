@@ -6,7 +6,7 @@ import { NIL_UUID } from "@/lib/constants/app";
 export interface AuditOutboxPayload {
   scope: AuditScope;
   action: AuditAction;
-  userId: string | null;
+  userId: string;
   actorType: ActorType;
   serviceAccountId: string | null;
   teamId: string | null;

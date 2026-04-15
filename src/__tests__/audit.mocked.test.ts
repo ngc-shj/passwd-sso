@@ -376,7 +376,11 @@ describe("resolveActorType", () => {
     expect(resolveActorType(auth)).toBe("MCP_AGENT");
   });
 
-  it("returns MCP_AGENT for mcp_token auth with userId null", () => {
+  it("returns SYSTEM for mcp_token auth with userId null (falls back to SYSTEM_ACTOR_ID)", () => {
+    // When MCP token has no userId (machine-only context), logAuditAsync
+    // substitutes SYSTEM_ACTOR_ID and sets actorType to SYSTEM.
+    // resolveActorType still returns MCP_AGENT for the auth object itself;
+    // the SYSTEM override happens in the route handler before calling logAuditAsync.
     const auth = {
       type: "mcp_token" as const,
       userId: null,

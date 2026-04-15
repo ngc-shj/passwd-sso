@@ -2,8 +2,9 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
-describe("audit-outbox S9 fix: SYSTEM actor with NULL userId", () => {
+describe("audit-outbox: SYSTEM actor with sentinel userId (post audit-path-unification)", () => {
   let ctx: TestContext;
   let tenantId: string;
   let userId: string;
@@ -25,9 +26,9 @@ describe("audit-outbox S9 fix: SYSTEM actor with NULL userId", () => {
     await ctx.deleteTestData(tenantId);
   });
 
-  it("allows SYSTEM actor with user_id = NULL", async () => {
-    // This should succeed: SYSTEM actor rows may have NULL userId
-    // CHECK constraint: (user_id IS NOT NULL OR actor_type = 'SYSTEM')
+  it("allows SYSTEM actor with user_id = SYSTEM_ACTOR_ID", async () => {
+    // Post-migration: SYSTEM actor rows use SYSTEM_ACTOR_ID sentinel, not NULL
+    // userId is now NOT NULL — sentinels fill the previously-null slot
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
@@ -38,7 +39,7 @@ describe("audit-outbox S9 fix: SYSTEM actor with NULL userId", () => {
           $1::uuid,
           $2::"AuditScope",
           $3::"AuditAction",
-          NULL,
+          $6::uuid,
           $4::"ActorType",
           $5::jsonb,
           now()
@@ -48,14 +49,15 @@ describe("audit-outbox S9 fix: SYSTEM actor with NULL userId", () => {
         AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
         ACTOR_TYPE.SYSTEM,
         JSON.stringify({ test: true }),
+        SYSTEM_ACTOR_ID,
       );
     });
 
-    // Verify the row was inserted
+    // Verify the row was inserted with the sentinel UUID
     const rows = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ user_id: string | null; actor_type: string }[]>(
-        `SELECT user_id, actor_type::text FROM audit_logs
+      return tx.$queryRawUnsafe<{ user_id: string; actor_type: string }[]>(
+        `SELECT user_id::text, actor_type::text FROM audit_logs
          WHERE tenant_id = $1::uuid AND action = $2::"AuditAction" AND actor_type = 'SYSTEM'`,
         tenantId,
         AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
@@ -63,13 +65,12 @@ describe("audit-outbox S9 fix: SYSTEM actor with NULL userId", () => {
     });
 
     expect(rows).toHaveLength(1);
-    expect(rows[0].user_id).toBeNull();
+    expect(rows[0].user_id).toBe(SYSTEM_ACTOR_ID);
     expect(rows[0].actor_type).toBe("SYSTEM");
   });
 
-  it("rejects HUMAN actor with user_id = NULL (CHECK constraint violation)", async () => {
-    // This should fail: non-SYSTEM actors must have a user_id
-    // CHECK constraint: (user_id IS NOT NULL OR actor_type = 'SYSTEM')
+  it("rejects any actor with user_id = NULL (NOT NULL constraint)", async () => {
+    // Post-migration: userId is NOT NULL — any NULL insert fails regardless of actor_type
     await expect(
       ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
@@ -93,7 +94,7 @@ describe("audit-outbox S9 fix: SYSTEM actor with NULL userId", () => {
           JSON.stringify({ test: true }),
         );
       }),
-    ).rejects.toThrow(/audit_logs_system_actor_user_id_check|audit_logs_outbox_id_actor_type_check/);
+    ).rejects.toThrow(/null value in column|not-null constraint|audit_logs_outbox_id_actor_type_check/);
   });
 
   it("allows HUMAN actor with valid user_id", async () => {

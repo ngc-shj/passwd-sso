@@ -21,6 +21,7 @@ import {
   paginateResult,
   isValidCursorId,
 } from "@/lib/audit-query";
+import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -77,9 +78,6 @@ async function handleGET(req: NextRequest, { params }: Params) {
     logs = await withTeamTenantRls(teamId, async () =>
       prisma.auditLog.findMany({
         where,
-        include: {
-          user: { select: { id: true, name: true, email: true, image: true } },
-        },
         orderBy: { createdAt: "desc" },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -90,6 +88,27 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
 
   const { items, nextCursor } = paginateResult(logs, limit);
+
+  // Batch-lookup user display info
+  const teamUserIds = [
+    ...new Set(
+      items
+        .map((l) => l.userId)
+        .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
+    ),
+  ];
+  const teamUserMap: Record<string, { id: string; name: string | null; email: string | null; image: string | null }> = {};
+  if (teamUserIds.length > 0) {
+    const teamUsers = await withTeamTenantRls(teamId, async () =>
+      prisma.user.findMany({
+        where: { id: { in: teamUserIds } },
+        select: { id: true, name: true, email: true, image: true },
+      }),
+    );
+    for (const u of teamUsers) {
+      teamUserMap[u.id] = u;
+    }
+  }
 
   // Collect encrypted overviews for entry targets (client decrypts to get titles)
   const entryIds = [
@@ -159,7 +178,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       ip: log.ip,
       userAgent: log.userAgent,
       createdAt: log.createdAt,
-      user: log.user,
+      user: log.userId ? (teamUserMap[log.userId] ?? null) : null,
     })),
     nextCursor,
     entryOverviews,

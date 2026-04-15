@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM actor", () => {
   let ctx: TestContext;
@@ -27,6 +28,7 @@ describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM 
   it("allows outbox_id = NULL for SYSTEM actor bypass actions (AUDIT_OUTBOX_REAPED)", async () => {
     // SYSTEM actor with NULL outbox_id should succeed
     // CHECK constraint: (outbox_id IS NOT NULL OR actor_type = 'SYSTEM')
+    // user_id must be SYSTEM_ACTOR_ID sentinel (NOT NULL constraint)
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
@@ -37,7 +39,7 @@ describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM 
           $1::uuid,
           $2::"AuditScope",
           $3::"AuditAction",
-          NULL,
+          $6::uuid,
           $4::"ActorType",
           $5::jsonb,
           now(),
@@ -48,6 +50,7 @@ describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM 
         AUDIT_ACTION.AUDIT_OUTBOX_REAPED,
         ACTOR_TYPE.SYSTEM,
         JSON.stringify({ test: true }),
+        SYSTEM_ACTOR_ID,
       );
     });
 
@@ -100,6 +103,7 @@ describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM 
 
   it("allows outbox_id = NULL for SYSTEM actor with AUDIT_OUTBOX_RETENTION_PURGED", async () => {
     // Another bypass action should also work
+    // user_id must be SYSTEM_ACTOR_ID sentinel (NOT NULL constraint)
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
@@ -110,7 +114,7 @@ describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM 
           $1::uuid,
           $2::"AuditScope",
           $3::"AuditAction",
-          NULL,
+          $6::uuid,
           $4::"ActorType",
           $5::jsonb,
           now(),
@@ -121,6 +125,7 @@ describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM 
         AUDIT_ACTION.AUDIT_OUTBOX_RETENTION_PURGED,
         ACTOR_TYPE.SYSTEM,
         JSON.stringify({ purgedCount: 5 }),
+        SYSTEM_ACTOR_ID,
       );
     });
 

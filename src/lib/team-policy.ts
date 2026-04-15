@@ -4,6 +4,8 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isIpAllowed, extractClientIp } from "@/lib/ip-access";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import type { NextRequest } from "next/server";
 
 export interface TeamPolicyData {
@@ -201,7 +203,8 @@ export async function checkTeamAccessRestriction(teamId: string, clientIp: strin
   await logAuditAsync({
     action: AUDIT_ACTION.ACCESS_DENIED,
     scope: AUDIT_SCOPE.TEAM,
-    userId: userId ?? null,
+    userId: userId ?? ANONYMOUS_ACTOR_ID,
+    actorType: userId ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.ANONYMOUS,
     teamId,
     ip: clientIp,
     metadata: { clientIp, reason: "IP not in team allowed CIDRs" },

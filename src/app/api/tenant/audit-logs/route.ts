@@ -17,6 +17,7 @@ import {
   paginateResult,
   isValidCursorId,
 } from "@/lib/audit-query";
+import { SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
 
 // GET /api/tenant/audit-logs — Tenant-scoped audit logs (TENANT + TEAM scope, ADMIN/OWNER only)
 async function handleGET(req: NextRequest) {
@@ -106,6 +107,7 @@ async function handleGET(req: NextRequest) {
           scope: true,
           action: true,
           actorType: true,
+          userId: true,
           serviceAccountId: true,
           targetType: true,
           targetId: true,
@@ -113,7 +115,6 @@ async function handleGET(req: NextRequest) {
           ip: true,
           userAgent: true,
           createdAt: true,
-          user: { select: { id: true, name: true, email: true, image: true } },
           team: { select: { id: true, name: true } },
           serviceAccount: { select: { id: true, name: true } },
         },
@@ -128,34 +129,55 @@ async function handleGET(req: NextRequest) {
 
   const { items, nextCursor } = paginateResult(logs, limit);
 
+  // Batch-lookup user display info
+  const tenantUserIds = [
+    ...new Set(
+      items
+        .map((l) => l.userId)
+        .filter((id): id is string => !!id && !SENTINEL_ACTOR_IDS.has(id))
+    ),
+  ];
+  const tenantUserMap: Record<string, { id: string; name: string | null; email: string | null; image: string | null }> = {};
+  if (tenantUserIds.length > 0) {
+    const tenantUsers = await withTenantRls(prisma, actor.tenantId, async () =>
+      prisma.user.findMany({
+        where: { id: { in: tenantUserIds } },
+        select: { id: true, name: true, email: true, image: true },
+      }),
+    );
+    for (const u of tenantUsers) {
+      tenantUserMap[u.id] = u;
+    }
+  }
+
   return NextResponse.json({
-    items: items.map((log) => ({
-      id: log.id,
-      scope: log.scope,
-      action: log.action,
-      actorType: log.actorType,
-      serviceAccountId: log.serviceAccountId,
-      targetType: log.targetType,
-      targetId: log.targetId,
-      metadata: log.metadata,
-      ip: log.ip,
-      userAgent: log.userAgent,
-      createdAt: log.createdAt,
-      user: log.user ? {
-        id: log.user.id,
-        name: log.user.name,
-        email: log.user.email,
-        image: log.user.image,
-      } : null,
-      team: log.team ? {
-        id: log.team.id,
-        name: log.team.name,
-      } : null,
-      serviceAccount: log.serviceAccount ? {
-        id: log.serviceAccount.id,
-        name: log.serviceAccount.name,
-      } : null,
-    })),
+    items: items.map((log) => {
+      const userInfo = log.userId ? tenantUserMap[log.userId] : undefined;
+      return {
+        id: log.id,
+        scope: log.scope,
+        action: log.action,
+        actorType: log.actorType,
+        serviceAccountId: log.serviceAccountId,
+        targetType: log.targetType,
+        targetId: log.targetId,
+        metadata: log.metadata,
+        ip: log.ip,
+        userAgent: log.userAgent,
+        createdAt: log.createdAt,
+        user: userInfo
+          ? { id: userInfo.id, name: userInfo.name, email: userInfo.email, image: userInfo.image }
+          : null,
+        team: log.team ? {
+          id: log.team.id,
+          name: log.team.name,
+        } : null,
+        serviceAccount: log.serviceAccount ? {
+          id: log.serviceAccount.id,
+          name: log.serviceAccount.name,
+        } : null,
+      };
+    }),
     nextCursor,
   });
 }

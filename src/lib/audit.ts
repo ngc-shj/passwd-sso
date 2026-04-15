@@ -2,11 +2,8 @@
  * Server-side audit logging helpers.
  *
  * logAuditAsync() writes audit events. Awaitable, never throws.
- * Routing:
- *   - userId = UUID → outbox (enqueueAudit) → worker → audit_logs (participates in chain, SIEM fan-out)
- *   - userId = null → direct write to audit_logs with actorType=SYSTEM (bypasses outbox).
- *     This path is for events without a user context (e.g. anonymous share-access).
- *     By design: no chain entry, no SIEM/webhook fan-out (matches worker-emitted meta-events).
+ * userId must be a UUID (real user or ANONYMOUS_ACTOR_ID / SYSTEM_ACTOR_ID sentinel);
+ * the direct-write-to-audit_logs path is removed — all application-emitted events flow through the outbox.
  * Dual-write: PostgreSQL audit_logs + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
  */
@@ -39,7 +36,7 @@ import { UUID_RE } from "@/lib/constants/app";
 export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
-  userId: string | null;
+  userId: string;
   actorType?: ActorType;
   serviceAccountId?: string | null;
   tenantId?: string;
@@ -97,12 +94,7 @@ export function sanitizeMetadata(value: unknown): unknown {
 export function buildOutboxPayload(params: AuditLogParams): AuditOutboxPayload {
   const safeMetadata = truncateMetadata(params.metadata);
   const sanitized = sanitizeMetadata(safeMetadata) as Record<string, unknown> | null | undefined;
-  // Enforce CHECK constraint invariant: userId IS NULL requires actorType = SYSTEM.
-  // This keeps the structured JSON emit and the DB write consistent regardless of
-  // what the caller passed for actorType.
-  const actorType = params.userId === null
-    ? ACTOR_TYPE.SYSTEM
-    : (params.actorType ?? ACTOR_TYPE.HUMAN);
+  const actorType = params.actorType ?? ACTOR_TYPE.HUMAN;
   return {
     scope: params.scope,
     action: params.action,
@@ -136,7 +128,9 @@ async function resolveTenantId(params: AuditLogParams): Promise<string | null> {
       return team?.tenantId ?? null;
     }
 
-    if (params.userId && UUID_RE.test(params.userId)) {
+    // Defense-in-depth: userId is typed as string, but sentinel UUIDs and
+    // real user UUIDs must pass UUID_RE before hitting the DB lookup.
+    if (UUID_RE.test(params.userId)) {
       const user = await prisma.user.findUnique({
         where: { id: params.userId },
         select: { tenantId: true },
@@ -213,42 +207,6 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
 
   // All errors caught (MF2: never throws)
   try {
-    // SYSTEM-actor / null userId events bypass the outbox and write directly.
-    // Rationale: the outbox worker rejects null userId payloads (that path is
-    // reserved for worker-emitted meta-events via writeDirectAuditLog). Events
-    // without a user context (anonymous access, etc.) must write directly
-    // with user_id=NULL + actor_type=SYSTEM (allowed by audit_logs CHECK).
-    if (params.userId === null) {
-      const tenantId = params.tenantId ?? null;
-      if (!tenantId) {
-        deadLetterLogger.warn(
-          deadLetterEntry(params, "tenant_not_found"),
-          "audit.dead_letter",
-        );
-        return;
-      }
-      await withBypassRls(prisma, async () => {
-        await prisma.auditLog.create({
-          data: {
-            scope: payload.scope,
-            action: payload.action,
-            userId: null,
-            actorType: payload.actorType, // SYSTEM (forced by buildOutboxPayload when userId is null)
-            serviceAccountId: payload.serviceAccountId,
-            tenantId,
-            teamId: payload.teamId,
-            targetType: payload.targetType,
-            targetId: payload.targetId,
-            metadata: (payload.metadata as Prisma.InputJsonValue) ?? undefined,
-            ip: payload.ip,
-            userAgent: payload.userAgent,
-          },
-        });
-      }, BYPASS_PURPOSE.AUDIT_WRITE);
-      return;
-    }
-
-    // Normal path: UUID userId → outbox
     const tenantId = await resolveTenantId(params);
     if (!tenantId) {
       deadLetterLogger.warn(

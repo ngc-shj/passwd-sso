@@ -452,4 +452,67 @@ The sentinel UUIDs are deterministic deliberately. If a real user's ID somehow m
 3. Now: FK dropped, `audit_logs` rows remain (audit trail preserved)
 4. Separate PII redaction job (out of scope here) runs periodically to redact PII from `metadata` column while preserving audit structure
 
+## Implementation Checklist
+
+### Files to modify
+
+**Schema / Migration:**
+- `prisma/schema.prisma` — enum `ActorType` (+ANONYMOUS), `model AuditLog.userId` (String → non-null, remove FK relation), remove `@@index` rebuild if needed
+- `prisma/migrations/<ts>_audit_path_unification/migration.sql` — new migration per §2
+
+**Constants / Core lib:**
+- `src/lib/constants/app.ts` — add `ANONYMOUS_ACTOR_ID`, `SYSTEM_ACTOR_ID`, `SENTINEL_ACTOR_IDS`
+- `src/lib/constants/audit.ts` — add `ACTOR_TYPE.ANONYMOUS`; add `TENANT_WEBHOOK_EVENT_GROUPS[SHARE]`
+- `src/lib/audit-query.ts:11` — add `"ANONYMOUS"` to `VALID_ACTOR_TYPES`
+- `src/lib/audit.ts` — `AuditLogParams.userId: string` (non-null); `buildOutboxPayload` remove null-coercion; `resolveTenantId` remove null-guard (keep UUID_RE); `logAuditAsync` delete null direct-write branch; update JSDoc header comment at L5-9
+- `src/lib/audit-outbox.ts:9` — `AuditOutboxPayload.userId: string`
+- `src/lib/audit-display.ts` (NEW) — `resolveActorDisplay(userId, actorType)`
+- `src/workers/audit-outbox-worker.ts` — L40 `userId: string`; L72 coercion; L355 `writeDirectAuditLog` uses `SYSTEM_ACTOR_ID` instead of NULL; L560 remove null fallback; L942, L959 keep null guard as defense-in-depth
+
+**Callers (7 sites):**
+- `src/app/api/share-links/verify-access/route.ts:73, 88` — `ANONYMOUS_ACTOR_ID + ANONYMOUS + scope:TENANT`, remove `anonymousAccess` flag
+- `src/app/api/mcp/token/route.ts:124, 138` — `result.userId ?? SYSTEM_ACTOR_ID + SYSTEM`
+- `src/app/api/mcp/register/route.ts:175` — `SYSTEM_ACTOR_ID + SYSTEM + explicit tenantId`
+- `src/lib/directory-sync/engine.ts:205` — `actorUserId ?? SYSTEM_ACTOR_ID + SYSTEM`
+- `src/lib/access-restriction.ts:159` — `userId ?? ANONYMOUS_ACTOR_ID + ANONYMOUS`
+- `src/lib/team-policy.ts:204` — same pattern
+- `src/lib/webhook-dispatcher.ts:235, 306` — `SYSTEM_ACTOR_ID + SYSTEM + explicit tenantId`
+
+**UI / i18n:**
+- `src/components/audit/audit-actor-type-badge.tsx` — add ANONYMOUS case + fix SYSTEM fallthrough (use `resolveActorDisplay`)
+- `messages/en/AuditLog.json`, `messages/ja/AuditLog.json` — add `actorTypeSystem`, `actorTypeAnonymous`
+
+**Tests:**
+- `src/__tests__/audit-fifo-flusher.test.ts` — 1:1 replace 4 null-userId tests per Step 12
+- `src/__tests__/audit-bypass-coverage.test.ts` — add ActorType exhaustiveness assertions
+- `src/__tests__/sentinel-collision.test.ts` (NEW) — invariant tests for SENTINEL_ACTOR_IDS
+- `src/__tests__/db-integration/audit-outbox-userId-system.integration.test.ts` — rewrite per Step 12
+- `src/__tests__/db-integration/audit-sentinel.integration.test.ts` (NEW) — 6 scenarios per Step 12
+- `src/app/api/share-links/verify-access/route.test.ts` — update assertions L230, L254
+- `src/__tests__/audit.mocked.test.ts` L379 — update mcp_token assertions
+- `scripts/manual-tests/share-access-audit.ts` — reverse assertions per Step 13
+
+### Shared utility inventory
+
+Reused (DO NOT reimplement):
+- `NIL_UUID, UUID_RE` ([src/lib/constants/app.ts:17-19]) — base UUID constants
+- `ACTOR_TYPE` object ([src/lib/constants/audit.ts:3]) — add ANONYMOUS alongside
+- `AUDIT_ACTION_GROUP, AUDIT_ACTION_GROUPS_TENANT` ([src/lib/constants/audit.ts]) — existing groups for webhook fan-out
+- `withBypassRls, BYPASS_PURPOSE` ([src/lib/tenant-rls.ts]) — existing RLS bypass wrapper
+- `auditLogger, deadLetterLogger` ([src/lib/audit-logger.ts]) — structured JSON emitters
+- `enqueueAudit, enqueueAuditInTx` ([src/lib/audit-outbox.ts]) — outbox entry points
+- `extractRequestMeta, sanitizeMetadata, truncateMetadata` ([src/lib/audit.ts]) — existing helpers
+- `resolveActorType` ([src/lib/audit.ts:55]) — AuthResult → ActorType (unchanged)
+
+New (create once, reuse):
+- `ANONYMOUS_ACTOR_ID, SYSTEM_ACTOR_ID, SENTINEL_ACTOR_IDS` in `src/lib/constants/app.ts`
+- `resolveActorDisplay(userId, actorType)` in `src/lib/audit-display.ts` (single central helper, used by UI/export/SIEM)
+
+### Cross-cutting patterns to follow
+
+- i18n keys: bilingual update (en + ja) mandatory for every new label
+- Outbox payload enqueue: `enqueueAudit(tenantId, payload)` is the sole path; no direct `prisma.auditLog.create` in application code
+- Sentinel UUIDs: used ONLY with matching `actorType` (`ANONYMOUS_ACTOR_ID` ↔ `ANONYMOUS`, `SYSTEM_ACTOR_ID` ↔ `SYSTEM`). Mismatch is a caller bug
+- Explicit `tenantId` MUST be passed when userId is a sentinel (sentinels don't exist in `users`, so `resolveTenantId` lookup returns null → dead-letter)
+
 **Implication**: A separate follow-up may be needed to run a PII-redaction job. Track as TODO.

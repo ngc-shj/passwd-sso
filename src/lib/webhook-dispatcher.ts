@@ -15,7 +15,8 @@ import {
 } from "@/lib/crypto-server";
 import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { NIL_UUID } from "@/lib/constants/app";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
 import {
@@ -232,7 +233,8 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
         await logAuditAsync({
           scope: AUDIT_SCOPE.TEAM,
           action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
-          userId: NIL_UUID,
+          userId: SYSTEM_ACTOR_ID,
+          actorType: ACTOR_TYPE.SYSTEM,
           teamId: event.teamId,
           metadata: {
             webhookId: id,
@@ -303,7 +305,8 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
         await logAuditAsync({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,
-          userId: NIL_UUID,
+          userId: SYSTEM_ACTOR_ID,
+          actorType: ACTOR_TYPE.SYSTEM,
           tenantId: event.tenantId,
           metadata: {
             webhookId: id,
