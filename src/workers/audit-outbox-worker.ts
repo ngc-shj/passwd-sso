@@ -489,12 +489,27 @@ async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Pr
     if (claimed.length === 0) return [];
     return tx.auditDelivery.findMany({
       where: { id: { in: claimed.map((r) => r.id) } },
-      include: { target: true, outbox: true },
+      include: { target: true },
     });
   });
 
+  if (deliveries.length === 0) return 0;
+
+  const outboxIds = [...new Set(deliveries.map((d) => d.outboxId))];
+  const outboxRows = await prisma.auditOutbox.findMany({
+    where: { id: { in: outboxIds } },
+    select: { id: true, createdAt: true, payload: true, tenantId: true },
+  });
+  const outboxById = new Map(outboxRows.map((o) => [o.id, o]));
+
   for (const delivery of deliveries) {
-    await processOneDelivery(prisma, delivery);
+    const outbox = outboxById.get(delivery.outboxId);
+    if (!outbox) {
+      // Outbox row was purged before delivery completed — log and skip
+      getLogger().warn({ deliveryId: delivery.id, outboxId: delivery.outboxId }, "delivery.outbox_purged");
+      continue;
+    }
+    await processOneDelivery(prisma, { ...delivery, outbox });
   }
 
   return deliveries.length;
@@ -524,7 +539,7 @@ async function processOneDelivery(
     };
   },
 ): Promise<void> {
-  if (!delivery.target || !delivery.outbox) return;
+  if (!delivery.target) return;
 
   const kind = delivery.target.kind;
   const deliverFn = DELIVERERS[kind];

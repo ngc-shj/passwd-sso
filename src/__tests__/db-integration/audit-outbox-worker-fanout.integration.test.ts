@@ -117,25 +117,37 @@ describe("audit-outbox worker fan-out (DB join)", () => {
     expect(claimedIds).toContain(whDeliveryId);
     expect(claimedIds).toContain(s3DeliveryId);
 
-    // Fetch with Prisma include to verify the join works
+    // Fetch deliveries with target; outbox is fetched separately (FK removed)
     const deliveries = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       return tx.auditDelivery.findMany({
         where: { id: { in: [...claimedIds] } },
-        include: { target: true, outbox: true },
+        include: { target: true },
       });
     });
 
     expect(deliveries).toHaveLength(2);
 
+    const outboxIds = [...new Set(deliveries.map((d) => d.outboxId))];
+    const outboxRows = await ctx.su.prisma.$transaction(async (tx) => {
+      await setBypassRlsGucs(tx);
+      return tx.auditOutbox.findMany({
+        where: { id: { in: outboxIds } },
+        select: { id: true, payload: true },
+      });
+    });
+    const outboxById = new Map(outboxRows.map((o) => [o.id, o]));
+
     const whDelivery = deliveries.find((d) => d.id === whDeliveryId)!;
     expect(whDelivery.target.kind).toBe("WEBHOOK");
-    expect(whDelivery.outbox.id).toBe(outboxId);
-    expect((whDelivery.outbox.payload as Record<string, unknown>).action).toBe("ENTRY_CREATE");
+    expect(whDelivery.outboxId).toBe(outboxId);
+    const whOutbox = outboxById.get(whDelivery.outboxId)!;
+    expect(whOutbox.id).toBe(outboxId);
+    expect((whOutbox.payload as Record<string, unknown>).action).toBe("ENTRY_CREATE");
 
     const s3Delivery = deliveries.find((d) => d.id === s3DeliveryId)!;
     expect(s3Delivery.target.kind).toBe("S3_OBJECT");
-    expect(s3Delivery.outbox.id).toBe(outboxId);
+    expect(s3Delivery.outboxId).toBe(outboxId);
   });
 
   it("claimed rows are in PROCESSING status and not re-claimable", async () => {

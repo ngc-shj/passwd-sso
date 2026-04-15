@@ -1009,8 +1009,7 @@ model AuditOutbox {
   sentAt              DateTime?         @map("sent_at") @db.Timestamptz(3)
   lastError           String?           @map("last_error") @db.VarChar(1024)
 
-  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  deliveries AuditDelivery[]
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([status, nextRetryAt])
   @@index([tenantId, status, createdAt])
@@ -1052,7 +1051,6 @@ model AuditDelivery {
   lastError           String?             @map("last_error") @db.VarChar(1024)
   createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  outbox AuditOutbox         @relation(fields: [outboxId], references: [id], onDelete: Restrict)
   target AuditDeliveryTarget @relation(fields: [targetId], references: [id], onDelete: Restrict)
   tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
