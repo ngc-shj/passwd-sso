@@ -236,9 +236,10 @@ describe("audit-sentinel: post-migration invariants", () => {
     });
 
     // Query as tenant B using RLS — should see 0 rows from tenant A
+    // Note: SET LOCAL does not support parameterized values; use set_config() instead.
     const rows = await ctx.app.prisma.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
-        `SET LOCAL app.current_tenant_id = $1`,
+        `SELECT set_config('app.current_tenant_id', $1, true)`,
         tenantIdB,
       );
       return tx.$queryRawUnsafe<{ cnt: bigint }[]>(

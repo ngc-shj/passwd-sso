@@ -141,7 +141,7 @@ describe("audit-outbox reaper resets stuck PROCESSING rows", () => {
     });
 
     expect(logs).toHaveLength(1);
-    expect(logs[0].user_id).toBeNull();
+    expect(logs[0].user_id).toBe(SYSTEM_ACTOR_ID);
     expect(logs[0].actor_type).toBe("SYSTEM");
   });
 
