@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 // ─── Hoisted mocks ───────────────────────────────────────────
 
@@ -671,6 +672,58 @@ describe("runDirectorySync", () => {
 
       expect(result.success).toBe(false);
       expect(result.errorMessage).toContain("DB connection lost");
+    });
+  });
+
+  // T3.3: actorUserId ?? SYSTEM_ACTOR_ID fallback in logAuditAsync calls
+  describe("sentinel fallback: actorUserId ?? SYSTEM_ACTOR_ID", () => {
+    it("uses SYSTEM_ACTOR_ID with SYSTEM actorType when userId is omitted from options", async () => {
+      const staleDate = new Date(Date.now() - 60 * 60 * 1000);
+      mockDirSyncConfig.findFirst.mockResolvedValue({
+        status: "RUNNING",
+        lastSyncAt: staleDate,
+      });
+      mockExecuteRaw.mockResolvedValue(1);
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+
+      // Run without userId to trigger SYSTEM_ACTOR_ID fallback
+      await runDirectorySync({ configId: CONFIG_ID, tenantId: TENANT_ID });
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "DIRECTORY_SYNC_STALE_RESET",
+          userId: SYSTEM_ACTOR_ID,
+          actorType: "SYSTEM",
+        }),
+      );
+    });
+
+    it("uses provided userId with HUMAN actorType when userId is present", async () => {
+      const staleDate = new Date(Date.now() - 60 * 60 * 1000);
+      mockDirSyncConfig.findFirst.mockResolvedValue({
+        status: "RUNNING",
+        lastSyncAt: staleDate,
+      });
+      mockExecuteRaw.mockResolvedValue(1);
+      setupTransaction();
+      mockDirSyncConfig.findUnique.mockResolvedValue(OKTA_CONFIG);
+      mockFetchOktaUsers.mockResolvedValue([]);
+      mockScimMapping.findMany.mockResolvedValue([]);
+      mockTenantMember.findMany.mockResolvedValue([]);
+
+      await runDirectorySync(BASE_OPTIONS);
+
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "DIRECTORY_SYNC_STALE_RESET",
+          userId: USER_ID,
+          actorType: "HUMAN",
+        }),
+      );
     });
   });
 });

@@ -189,6 +189,9 @@ export const EXTERNAL_DELIVERY_METADATA_BLOCKLIST = new Set([
   "displayName",
   "justification",
   "requestedScope",
+  // Network identifiers stay in top-level columns; strip if accidentally written into metadata
+  "ip",
+  "userAgent",
 ]);
 
 /**

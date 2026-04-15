@@ -14,7 +14,7 @@ import {
   WEBHOOK_DISPATCH_SUPPRESS,
 } from "@/lib/constants/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { NIL_UUID, SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/external-http";
@@ -70,7 +70,7 @@ function parsePayload(raw: unknown): AuditOutboxPayload {
     scope: typeof p.scope === "string" ? p.scope : AUDIT_SCOPE.PERSONAL,
     action: typeof p.action === "string" ? p.action : "",
     // Runtime check kept as defense-in-depth (handles malformed rows from older outbox entries).
-    // Falls back to empty string so the null-userId guards below can reject the row.
+    // Falls back to empty string so the UUID_RE guard below can reject the row.
     userId: typeof p.userId === "string" ? p.userId : "",
     actorType: typeof p.actorType === "string" ? p.actorType : ACTOR_TYPE.HUMAN,
     serviceAccountId:
@@ -942,36 +942,38 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
-      // Defense-in-depth: logAuditAsync type signature now disallows null, but this guard
-      // remains to catch malformed outbox payloads (e.g., from older rows or external inserts).
-      if (payload.userId === null && payload.actorType !== ACTOR_TYPE.SYSTEM) {
+      // Catches malformed outbox payloads: payload.userId must be a valid UUID (real user or sentinel).
+      // `parsePayload` may coerce non-string JSON values to empty string; this guard ensures the row
+      // is skipped and logged before reaching the SQL UUID cast.
+      if (!UUID_RE.test(payload.userId) && payload.actorType !== ACTOR_TYPE.SYSTEM) {
         log.warn(
           { outboxId: row.id, action: payload.action, actorType: payload.actorType },
-          "worker.null_userid_non_system_skipped",
+          "worker.invalid_userid_skipped",
         );
         deadLetterLogger.warn(
           { outboxId: row.id, tenantId: row.tenant_id, action: payload.action },
-          "null userId for non-SYSTEM actor — skipping",
+          "invalid userId for non-SYSTEM actor — skipping",
         );
         await recordError(
           workerPrisma,
           row,
-          new Error("null userId for non-SYSTEM actor type"),
+          new Error("invalid userId for non-SYSTEM actor type"),
         );
         continue;
       }
 
-      // Defense-in-depth: logAuditAsync type signature now disallows null, but this guard
-      // remains to catch malformed outbox payloads (e.g., from older rows or external inserts).
-      if (payload.userId === null) {
+      // Catches malformed outbox payloads: payload.userId must be a valid UUID (real user or sentinel).
+      // `parsePayload` may coerce non-string JSON values to empty string; this guard ensures the row
+      // is skipped and logged before reaching the SQL UUID cast.
+      if (!UUID_RE.test(payload.userId)) {
         log.warn(
           { outboxId: row.id, action: payload.action },
-          "worker.system_actor_null_userid_skipped",
+          "worker.invalid_userid_skipped",
         );
         await recordError(
           workerPrisma,
           row,
-          new Error("SYSTEM actor with null userId must not enter the outbox — check OUTBOX_BYPASS_AUDIT_ACTIONS"),
+          new Error("SYSTEM actor with invalid userId must not enter the outbox — check OUTBOX_BYPASS_AUDIT_ACTIONS"),
         );
         continue;
       }

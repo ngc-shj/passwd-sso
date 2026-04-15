@@ -33,6 +33,11 @@ ALTER TABLE audit_logs DROP CONSTRAINT audit_logs_system_actor_user_id_check;
 -- 5. Drop FK to users. Decouples audit trail from user lifecycle.
 --    Note: audit_logs_outbox_id_actor_type_check is KEPT — it still
 --    limits direct writes (outbox_id IS NULL) to SYSTEM actor only.
+-- NOTE: dropping this FK decouples audit_logs from users.id, strengthening
+-- audit trail preservation (SOC 2 / ISO 27001) but removing automatic
+-- cleanup on user deletion. GDPR Art.17 right-to-be-forgotten requires a
+-- separate PII redaction job; see docs/archive/review/audit-path-unification-plan.md
+-- §Considerations ▸ GDPR for the follow-up commitment.
 ALTER TABLE audit_logs DROP CONSTRAINT audit_logs_user_id_fkey;
 
 -- 6. Restore NOT NULL (sentinels fill the previously-NULL slot).

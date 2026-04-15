@@ -64,6 +64,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { POST } from "@/app/api/mcp/register/route";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const VALID_BODY = {
   client_name: "Test MCP Client",
@@ -312,6 +313,21 @@ describe("POST /api/mcp/register", () => {
         actorType: "SYSTEM",
         targetId: MOCK_CREATED_CLIENT.id,
         metadata: expect.objectContaining({ client_name: "Test MCP Client" }),
+      }),
+    );
+  });
+
+  // T3.2: DCR registration always uses SYSTEM_ACTOR_ID (no user context at registration time)
+  it("logAuditAsync is called with userId=SYSTEM_ACTOR_ID for anonymous DCR registration", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: VALID_BODY,
+    });
+    await POST(req);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
       }),
     );
   });

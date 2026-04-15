@@ -9,19 +9,34 @@ vi.mock("@/lib/prisma", () => ({
     teamMember: {
       findMany: vi.fn(),
     },
+    tenant: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
   },
 }));
 
 // withTeamTenantRls just invokes the callback
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: vi.fn((_teamId: string, fn: () => unknown) => fn()),
-  resolveTeamTenantId: vi.fn(),
+  resolveTeamTenantId: vi.fn().mockResolvedValue(null),
 }));
 
 // withBypassRls just invokes the callback
 vi.mock("@/lib/tenant-rls", () => ({
   withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   BYPASS_PURPOSE: { AUTH_FLOW: "auth_flow", CROSS_TENANT_LOOKUP: "cross_tenant_lookup" },
+}));
+
+// T3.5: mocks for checkTeamAccessRestriction sentinel fallback tests
+const { mockLogAudit } = vi.hoisted(() => ({ mockLogAudit: vi.fn() }));
+
+vi.mock("@/lib/audit", () => ({
+  logAuditAsync: mockLogAudit,
+}));
+
+vi.mock("@/lib/ip-access", () => ({
+  isIpAllowed: vi.fn().mockReturnValue(false),
+  extractClientIp: vi.fn().mockReturnValue("5.6.7.8"),
 }));
 
 import { prisma } from "@/lib/prisma";
@@ -31,9 +46,11 @@ import {
   assertPolicyAllowsSharing,
   assertPolicySharePassword,
   getStrictestSessionDuration,
+  checkTeamAccessRestriction,
   PolicyViolationError,
   type TeamPolicyData,
 } from "./team-policy";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 
 const mockFindUnique = prisma.teamPolicy.findUnique as ReturnType<typeof vi.fn>;
 
@@ -206,5 +223,56 @@ describe("PolicyViolationError", () => {
   it("carries the provided message", () => {
     const err = new PolicyViolationError("Export is disabled by team policy");
     expect(err.message).toBe("Export is disabled by team policy");
+  });
+});
+
+// T3.5: checkTeamAccessRestriction — sentinel fallback for logAuditAsync
+describe("checkTeamAccessRestriction — sentinel fallback", () => {
+  const restrictivePolicy: TeamPolicyData = {
+    minPasswordLength: 0,
+    requireUppercase: false,
+    requireLowercase: false,
+    requireNumbers: false,
+    requireSymbols: false,
+    maxSessionDurationMinutes: null,
+    requireRepromptForAll: false,
+    allowExport: true,
+    allowSharing: true,
+    requireSharePassword: false,
+    passwordHistoryCount: 0,
+    inheritTenantCidrs: false,
+    teamAllowedCidrs: ["192.168.0.0/24"], // non-empty: restriction active
+  };
+
+  beforeEach(() => {
+    mockLogAudit.mockReset();
+  });
+
+  it("uses ANONYMOUS_ACTOR_ID with ANONYMOUS actorType when userId is undefined and IP is blocked", async () => {
+    await expect(
+      checkTeamAccessRestriction("team-1", "5.6.7.8", undefined, restrictivePolicy),
+    ).rejects.toThrow(/Access denied/);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: ANONYMOUS_ACTOR_ID,
+        actorType: "ANONYMOUS",
+        teamId: "team-1",
+      }),
+    );
+  });
+
+  it("uses provided userId with HUMAN actorType when userId is set and IP is blocked", async () => {
+    await expect(
+      checkTeamAccessRestriction("team-1", "5.6.7.8", "user-xyz", restrictivePolicy),
+    ).rejects.toThrow(/Access denied/);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        userId: "user-xyz",
+        actorType: "HUMAN",
+        teamId: "team-1",
+      }),
+    );
   });
 });

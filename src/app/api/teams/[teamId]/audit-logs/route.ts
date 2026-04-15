@@ -171,10 +171,11 @@ async function handleGET(req: NextRequest, { params }: Params) {
     items: items.map((log) => ({
       id: log.id,
       action: log.action,
+      actorType: log.actorType,
+      userId: log.userId,
       targetType: log.targetType,
       targetId: log.targetId,
       metadata: log.metadata,
-      actorType: log.actorType,
       ip: log.ip,
       userAgent: log.userAgent,
       createdAt: log.createdAt,

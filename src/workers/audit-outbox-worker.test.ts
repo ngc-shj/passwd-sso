@@ -383,10 +383,10 @@ describe("parsePayload — edge cases", () => {
     expect(insertCall![10]).toBeNull();
   }, 15000);
 
-  it("handles null userId in raw payload — parsePayload converts to empty string and proceeds to INSERT", async () => {
-    // Phase 2: parsePayload converts null userId to "" (empty string), not null.
-    // The null-userId guards check payload.userId === null, which never fires.
-    // The row proceeds to deliverRow and an INSERT is attempted.
+  it("rejects malformed userId (null with SYSTEM actorType) via UUID_RE guard — no INSERT, warn log emitted", async () => {
+    // Phase 3: UUID_RE guard at L968 fires for SYSTEM actor with non-UUID userId.
+    // parsePayload coerces null → ""; UUID_RE.test("") === false triggers the guard.
+    // The row is dead-lettered via recordError and no INSERT is attempted.
     const row = makeRow({
       payload: {
         action: AUDIT_ACTION.ENTRY_CREATE,
@@ -400,13 +400,16 @@ describe("parsePayload — edge cases", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // INSERT INTO audit_logs IS called (with empty-string userId)
+    // INSERT INTO audit_logs must NOT be called
     const insertCall = mockExecuteRawUnsafe.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
-    expect(insertCall).toBeDefined();
-    // userId param is empty string (parsePayload fallback for non-string)
-    expect(insertCall![4]).toBe("");
+    expect(insertCall).toBeUndefined();
+    // UUID_RE guard emits the skip warning
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.objectContaining({ outboxId: ROW_ID }),
+      "worker.invalid_userid_skipped",
+    );
   }, 15000);
 });
 
@@ -653,10 +656,10 @@ describe("error paths", () => {
     );
   }, 15000);
 
-  it("null userId in raw payload with non-SYSTEM actorType — parsePayload converts to empty string and inserts", async () => {
-    // Phase 2: parsePayload converts null userId to "" (empty string).
-    // The null-userId guard (payload.userId === null) never fires, so the row
-    // proceeds to deliverRow with an empty-string userId.
+  it("rejects malformed userId (null with non-SYSTEM actorType) via UUID_RE guard — no INSERT, warn log emitted", async () => {
+    // Phase 3: UUID_RE guard at L948 fires for non-SYSTEM actor with non-UUID userId.
+    // parsePayload coerces null → ""; UUID_RE.test("") === false, actorType !== SYSTEM.
+    // The row is dead-lettered via recordError and no INSERT is attempted.
     const row = makeRow({
       payload: {
         action: AUDIT_ACTION.ENTRY_CREATE,
@@ -670,16 +673,15 @@ describe("error paths", () => {
     const worker = createWorker({ databaseUrl: TEST_DB_URL, pollIntervalMs: 50 });
     await runWorkerOnce(worker);
 
-    // INSERT is called (with empty-string userId)
+    // INSERT INTO audit_logs must NOT be called
     const insertCall = mockExecuteRawUnsafe.mock.calls.find(
       (call) => typeof call[0] === "string" && call[0].includes("INSERT INTO audit_logs"),
     );
-    expect(insertCall).toBeDefined();
-    expect(insertCall![4]).toBe("");
-    // No skip warning logged
-    expect(mockLoggerWarn).not.toHaveBeenCalledWith(
+    expect(insertCall).toBeUndefined();
+    // UUID_RE guard emits the skip warning
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
       expect.objectContaining({ outboxId: ROW_ID }),
-      "worker.null_userid_non_system_skipped",
+      "worker.invalid_userid_skipped",
     );
   }, 15000);
 });

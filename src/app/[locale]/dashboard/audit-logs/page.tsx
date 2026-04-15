@@ -213,7 +213,7 @@ export default function AuditLogsPage() {
         id={log.id}
         icon={ACTION_ICONS[log.action as AuditActionValue] ?? DEFAULT_AUDIT_ICON}
         actionLabel={getActionLabel(t as never, log.action, actionLabel)}
-        badges={<AuditActorTypeBadge actorType={log.actorType} userId={log.user?.id} />}
+        badges={<AuditActorTypeBadge actorType={log.actorType} userId={log.userId ?? undefined} />}
         detail={
           <>
             {targetLabel && (

@@ -3,7 +3,6 @@
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { resolveActorDisplay } from "@/lib/audit-display";
-import type { ActorType } from "@prisma/client";
 
 interface AuditActorTypeBadgeProps {
   actorType?: string;
@@ -15,7 +14,7 @@ export function AuditActorTypeBadge({ actorType, userId }: AuditActorTypeBadgePr
 
   // Sentinel UUIDs override actorType-based rendering
   if (userId) {
-    const { i18nKey, isSentinel } = resolveActorDisplay(userId, (actorType ?? "HUMAN") as ActorType);
+    const { i18nKey, isSentinel } = resolveActorDisplay(userId);
     if (isSentinel && i18nKey) {
       return (
         <Badge variant="destructive" className="text-[10px] px-1.5 py-0 h-4 shrink-0">

@@ -74,6 +74,7 @@ vi.stubGlobal("fetch", mockFetch);
 
 import { dispatchWebhook, dispatchTenantWebhook } from "./webhook-dispatcher";
 import { createHmac } from "node:crypto";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const WEBHOOK = {
   id: "wh-1",
@@ -707,5 +708,57 @@ describe("dispatchTenantWebhook", () => {
     expect(sentPayload.data).not.toHaveProperty("token");
     // non-PII key must be present
     expect(sentPayload.data).toHaveProperty("webhookId", "twh-1");
+  });
+});
+
+// T3.6: delivery-failed audit logs use SYSTEM_ACTOR_ID + SYSTEM actorType
+describe("webhook delivery-failed audit sentinel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("WEBHOOK_DELIVERY_FAILED audit log uses SYSTEM_ACTOR_ID and SYSTEM actorType", async () => {
+    mockPrismaTeamWebhook.findMany.mockResolvedValue([WEBHOOK]);
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+
+    dispatchWebhook(EVENT);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.advanceTimersByTimeAsync(25_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    await vi.waitFor(() => {
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "WEBHOOK_DELIVERY_FAILED",
+          userId: SYSTEM_ACTOR_ID,
+          actorType: "SYSTEM",
+          // TEAM scope: teamId is present, tenantId is not part of this call
+          teamId: "team-1",
+        }),
+      );
+    });
+  });
+
+  it("TENANT_WEBHOOK_DELIVERY_FAILED audit log uses SYSTEM_ACTOR_ID and SYSTEM actorType", async () => {
+    mockPrismaTenantWebhook.findMany.mockResolvedValue([TENANT_WEBHOOK]);
+    mockFetch.mockResolvedValue({ ok: false, status: 500 });
+
+    dispatchTenantWebhook(TENANT_EVENT);
+    await vi.advanceTimersByTimeAsync(32_000);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "TENANT_WEBHOOK_DELIVERY_FAILED",
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
+        tenantId: "tenant-1",
+      }),
+    );
   });
 });

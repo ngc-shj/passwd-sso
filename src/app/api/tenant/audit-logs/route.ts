@@ -158,6 +158,7 @@ async function handleGET(req: NextRequest) {
         scope: log.scope,
         action: log.action,
         actorType: log.actorType,
+        userId: log.userId,
         serviceAccountId: log.serviceAccountId,
         targetType: log.targetType,
         targetId: log.targetId,

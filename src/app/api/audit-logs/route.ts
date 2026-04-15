@@ -38,6 +38,9 @@ async function handleGET(req: NextRequest) {
   }
   const validActorType = parseActorType(searchParams);
 
+  // Sentinel exclusion invariant: session.user.id is always a real user UUID from the users
+  // table, which can never equal ANONYMOUS_ACTOR_ID or SYSTEM_ACTOR_ID. The OR branches below
+  // therefore implicitly exclude sentinel rows without a notIn clause.
   const where: Prisma.AuditLogWhereInput = {
     scope: AUDIT_SCOPE.PERSONAL,
     ...(validActorType ? { actorType: validActorType } : {}),
@@ -171,6 +174,7 @@ async function handleGET(req: NextRequest) {
       id: log.id,
       action: log.action,
       actorType: log.actorType,
+      userId: log.userId,
       targetType: log.targetType,
       targetId: log.targetId,
       metadata: log.metadata,
