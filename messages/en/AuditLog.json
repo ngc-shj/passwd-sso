@@ -200,6 +200,8 @@
   "actorTypeHuman": "Human",
   "actorTypeSa": "Service Account",
   "actorTypeMcp": "MCP Agent",
+  "actorTypeSystem": "System",
+  "actorTypeAnonymous": "Anonymous",
   "DELEGATION_CREATE": "Delegation session created",
   "DELEGATION_REVOKE": "Delegation session revoked",
   "DELEGATION_EXPIRE": "Delegation session expired",

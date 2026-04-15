@@ -8,8 +8,8 @@ import {
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
-import { NIL_UUID } from "@/lib/constants/app";
+import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
+import { NIL_UUID, resolveAuditUserId } from "@/lib/constants/app";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
@@ -135,7 +135,8 @@ export async function POST(req: NextRequest) {
     await logAuditAsync({
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
-      userId: result.userId ?? null,
+      userId: resolveAuditUserId(result.userId, "system"),
+      actorType: result.userId ? ACTOR_TYPE.MCP_AGENT : ACTOR_TYPE.SYSTEM,
       tenantId: result.tenantId,
       metadata: { clientId: clientIdValue },
     });

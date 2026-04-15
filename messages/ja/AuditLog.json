@@ -200,6 +200,8 @@
   "actorTypeHuman": "ユーザー",
   "actorTypeSa": "サービスアカウント",
   "actorTypeMcp": "MCPエージェント",
+  "actorTypeSystem": "システム",
+  "actorTypeAnonymous": "匿名",
   "DELEGATION_CREATE": "委任セッションを作成",
   "DELEGATION_REVOKE": "委任セッションを取り消し",
   "DELEGATION_EXPIRE": "委任セッションが期限切れ",

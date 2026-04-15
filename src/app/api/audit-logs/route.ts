@@ -22,6 +22,7 @@ import {
   paginateResult,
   isValidCursorId,
 } from "@/lib/audit-query";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)
 async function handleGET(req: NextRequest) {
@@ -37,6 +38,9 @@ async function handleGET(req: NextRequest) {
   }
   const validActorType = parseActorType(searchParams);
 
+  // Sentinel exclusion invariant: session.user.id is always a real user UUID from the users
+  // table, which can never equal ANONYMOUS_ACTOR_ID or SYSTEM_ACTOR_ID. The OR branches below
+  // therefore implicitly exclude sentinel rows without a notIn clause.
   const where: Prisma.AuditLogWhereInput = {
     scope: AUDIT_SCOPE.PERSONAL,
     ...(validActorType ? { actorType: validActorType } : {}),
@@ -71,9 +75,6 @@ async function handleGET(req: NextRequest) {
     logs = await withUserTenantRls(session.user.id, async () =>
       prisma.auditLog.findMany({
         where,
-        include: {
-          user: { select: { id: true, name: true, email: true, image: true } },
-        },
         orderBy: { createdAt: "desc" },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -84,6 +85,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const { items, nextCursor } = paginateResult(logs, limit);
+
+  // Batch-lookup user display info (userId is now always a UUID string)
+  const logUserMap = await fetchAuditUserMap(items.map((l) => l.userId));
 
   // Resolve encrypted overviews for PasswordEntry targets
   const entryIds = [
@@ -152,18 +156,14 @@ async function handleGET(req: NextRequest) {
       id: log.id,
       action: log.action,
       actorType: log.actorType,
+      userId: log.userId,
       targetType: log.targetType,
       targetId: log.targetId,
       metadata: log.metadata,
       ip: log.ip,
       userAgent: log.userAgent,
       createdAt: log.createdAt,
-      user: log.user ? {
-        id: log.user.id,
-        name: log.user.name,
-        email: log.user.email,
-        image: log.user.image,
-      } : null,
+      user: log.userId ? (logUserMap.get(log.userId) ?? null) : null,
     })),
     nextCursor,
     entryOverviews,

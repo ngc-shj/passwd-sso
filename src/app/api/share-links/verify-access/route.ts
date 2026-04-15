@@ -12,6 +12,7 @@ import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const ipLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
@@ -71,14 +72,14 @@ async function handlePOST(req: NextRequest) {
 
   if (!verifyAccessPassword(password, share.accessPasswordHash)) {
     await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
+      scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-      userId: null,
-      actorType: ACTOR_TYPE.SYSTEM,
+      userId: ANONYMOUS_ACTOR_ID,
+      actorType: ACTOR_TYPE.ANONYMOUS,
       tenantId: share.tenantId,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
-      metadata: { ip, anonymousAccess: true },
+      metadata: { ip },
       ...reqMeta,
     });
 
@@ -86,14 +87,14 @@ async function handlePOST(req: NextRequest) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
-    userId: null,
-    actorType: ACTOR_TYPE.SYSTEM,
+    userId: ANONYMOUS_ACTOR_ID,
+    actorType: ACTOR_TYPE.ANONYMOUS,
     tenantId: share.tenantId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
-    metadata: { ip, anonymousAccess: true },
+    metadata: { ip },
     ...reqMeta,
   });
 

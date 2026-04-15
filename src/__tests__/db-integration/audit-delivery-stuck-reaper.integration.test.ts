@@ -8,6 +8,7 @@ import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX } from "@/lib/constants/audit";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 describe("audit-delivery stuck reaper", () => {
   let ctx: TestContext;
@@ -195,10 +196,11 @@ describe("audit-delivery stuck reaper", () => {
         ) VALUES (
           gen_random_uuid(), $1::uuid, 'TENANT'::"AuditScope",
           'AUDIT_DELIVERY_DEAD_LETTER'::"AuditAction",
-          NULL, 'SYSTEM'::"ActorType",
-          $2::jsonb, now()
+          $2::uuid, 'SYSTEM'::"ActorType",
+          $3::jsonb, now()
         )`,
         tenantId,
+        SYSTEM_ACTOR_ID,
         JSON.stringify({ deliveryId, targetId, error: "reaped" }),
       );
     });
@@ -216,7 +218,7 @@ describe("audit-delivery stuck reaper", () => {
     });
     expect(logRows.length).toBeGreaterThanOrEqual(1);
     expect(logRows[0].actor_type).toBe("SYSTEM");
-    expect(logRows[0].user_id).toBeNull();
+    expect(logRows[0].user_id).toBe(SYSTEM_ACTOR_ID);
   });
 
   it("does not reap recently-started PROCESSING rows", async () => {

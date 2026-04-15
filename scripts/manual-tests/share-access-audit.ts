@@ -3,8 +3,22 @@
  * Manual test: share-links/verify-access audit logging for anonymous access.
  *
  * Verifies that SHARE_ACCESS_VERIFY_FAILED / SHARE_ACCESS_VERIFY_SUCCESS
- * events write directly to audit_logs (user_id=NULL, actor_type=SYSTEM)
- * and do NOT enter the audit_outbox queue.
+ * events for anonymous callers are written via the audit_outbox → worker →
+ * audit_logs path (user_id=ANONYMOUS_ACTOR_ID, actor_type=ANONYMOUS).
+ *
+ * New flow (post audit-path-unification):
+ *   1. API handler calls logAuditAsync with ANONYMOUS_ACTOR_ID + actorType ANONYMOUS
+ *   2. enqueueAudit writes a row to audit_outbox (status=PENDING) within the same tx
+ *   3. The outbox worker drains it to audit_logs and marks the outbox row SENT
+ *   4. For tenants with a configured audit_delivery_target, an audit_deliveries row
+ *      is also created for SIEM fan-out (brute-force detection via SHARE_ACCESS_VERIFY_FAILED)
+ *
+ * Expected invariants:
+ *   - audit_logs.user_id = ANONYMOUS_ACTOR_ID (not NULL)
+ *   - audit_logs.actor_type = 'ANONYMOUS' (not 'SYSTEM')
+ *   - audit_logs.outbox_id IS NOT NULL (routed through outbox)
+ *   - audit_outbox.status = 'SENT' (worker processed the row)
+ *   - metadata.anonymousAccess key does NOT exist (removed per MF15)
  *
  * See scripts/manual-tests/README.md for usage.
  */
@@ -12,6 +26,7 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken, hashAccessPassword, encryptShareData } from "@/lib/crypto-server";
+import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { randomBytes } from "node:crypto";
 
 async function main() {
@@ -77,16 +92,16 @@ async function main() {
     prisma.$queryRaw<
       Array<{
         action: string;
-        user_id: string | null;
+        user_id: string;
         actor_type: string;
-        anon: string | null;
+        anon_key_exists: boolean;
         ip: string | null;
         outbox_id: string | null;
         created_at: Date;
       }>
     >`
       SELECT action, user_id, actor_type,
-             metadata->>'anonymousAccess' AS anon,
+             (metadata ? 'anonymousAccess') AS anon_key_exists,
              metadata->>'ip' AS ip,
              outbox_id,
              created_at
@@ -103,9 +118,9 @@ async function main() {
 
   const outbox = await withBypassRls(prisma, () =>
     prisma.$queryRaw<
-      Array<{ status: string; action: string; user_id: string | null; actor_type: string; created_at: Date }>
+      Array<{ id: string; status: string; action: string; user_id: string; actor_type: string; created_at: Date }>
     >`
-      SELECT status, payload->>'action' AS action,
+      SELECT id, status, payload->>'action' AS action,
              payload->>'userId' AS user_id,
              payload->>'actorType' AS actor_type,
              created_at
@@ -117,7 +132,7 @@ async function main() {
       LIMIT 5
     `,
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
-  console.log(`\n[OUTBOX (should be EMPTY — null userId bypasses outbox)]`);
+  console.log(`\n[OUTBOX (should have SENT rows — routed through outbox)]`);
   console.table(outbox);
 
   await withBypassRls(prisma, () =>
@@ -127,6 +142,8 @@ async function main() {
 
   const failedRow = logs.find((r) => r.action === "SHARE_ACCESS_VERIFY_FAILED");
   const successRow = logs.find((r) => r.action === "SHARE_ACCESS_VERIFY_SUCCESS");
+  const failedOutbox = outbox.find((r) => r.action === "SHARE_ACCESS_VERIFY_FAILED");
+  const successOutbox = outbox.find((r) => r.action === "SHARE_ACCESS_VERIFY_SUCCESS");
   let ok = true;
   const check = (cond: boolean, msg: string) => {
     console.log(`  ${cond ? "✓" : "✗"} ${msg}`);
@@ -135,21 +152,31 @@ async function main() {
   console.log(`\n[VERIFICATION]`);
   check(r1.status === 403, "wrong password returns 403");
   check(r2.status === 200, "correct password returns 200");
-  check(failedRow != null, "SHARE_ACCESS_VERIFY_FAILED row exists");
-  check(successRow != null, "SHARE_ACCESS_VERIFY_SUCCESS row exists");
+  check(failedRow != null, "SHARE_ACCESS_VERIFY_FAILED row exists in audit_logs");
+  check(successRow != null, "SHARE_ACCESS_VERIFY_SUCCESS row exists in audit_logs");
   if (failedRow) {
-    check(failedRow.user_id === null, "FAILED row: user_id IS NULL");
-    check(failedRow.actor_type === "SYSTEM", "FAILED row: actor_type = SYSTEM");
-    check(failedRow.anon === "true", "FAILED row: metadata.anonymousAccess = true");
-    check(failedRow.outbox_id === null, "FAILED row: outbox_id IS NULL (direct write)");
+    check(failedRow.user_id === ANONYMOUS_ACTOR_ID, "FAILED row: user_id = ANONYMOUS_ACTOR_ID");
+    check(failedRow.actor_type === "ANONYMOUS", "FAILED row: actor_type = ANONYMOUS");
+    check(failedRow.anon_key_exists === false, "FAILED row: metadata.anonymousAccess key absent (removed per MF15)");
+    check(failedRow.outbox_id !== null, "FAILED row: outbox_id IS NOT NULL (routed through outbox)");
   }
   if (successRow) {
-    check(successRow.user_id === null, "SUCCESS row: user_id IS NULL");
-    check(successRow.actor_type === "SYSTEM", "SUCCESS row: actor_type = SYSTEM");
-    check(successRow.anon === "true", "SUCCESS row: metadata.anonymousAccess = true");
-    check(successRow.outbox_id === null, "SUCCESS row: outbox_id IS NULL (direct write)");
+    check(successRow.user_id === ANONYMOUS_ACTOR_ID, "SUCCESS row: user_id = ANONYMOUS_ACTOR_ID");
+    check(successRow.actor_type === "ANONYMOUS", "SUCCESS row: actor_type = ANONYMOUS");
+    check(successRow.anon_key_exists === false, "SUCCESS row: metadata.anonymousAccess key absent (removed per MF15)");
+    check(successRow.outbox_id !== null, "SUCCESS row: outbox_id IS NOT NULL (routed through outbox)");
   }
-  check(outbox.length === 0, "No rows in audit_outbox for these actions");
+  check(outbox.length >= 2, "audit_outbox has rows for these actions (enqueued)");
+  if (failedOutbox) {
+    check(failedOutbox.status === "SENT", "FAILED outbox row: status = SENT (worker processed)");
+    check(failedOutbox.user_id === ANONYMOUS_ACTOR_ID, "FAILED outbox row: userId = ANONYMOUS_ACTOR_ID");
+    check(failedOutbox.actor_type === "ANONYMOUS", "FAILED outbox row: actorType = ANONYMOUS");
+  }
+  if (successOutbox) {
+    check(successOutbox.status === "SENT", "SUCCESS outbox row: status = SENT (worker processed)");
+    check(successOutbox.user_id === ANONYMOUS_ACTOR_ID, "SUCCESS outbox row: userId = ANONYMOUS_ACTOR_ID");
+    check(successOutbox.actor_type === "ANONYMOUS", "SUCCESS outbox row: actorType = ANONYMOUS");
+  }
 
   console.log(`\n${ok ? "✓ All checks passed" : "✗ Some checks FAILED"}`);
   process.exit(ok ? 0 : 1);

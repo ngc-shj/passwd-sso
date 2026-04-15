@@ -19,6 +19,7 @@ import {
   isValidCursorId,
 } from "@/lib/audit-query";
 import type { Prisma } from "@prisma/client";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 export const runtime = "nodejs";
 
@@ -210,9 +211,6 @@ async function handleGET(
     logs = await withTenantRls(prisma, actor.tenantId, async () =>
       prisma.auditLog.findMany({
         where,
-        include: {
-          user: { select: { id: true, name: true, email: true, image: true } },
-        },
         orderBy: { createdAt: "desc" },
         take: limit + 1,
         ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
@@ -224,25 +222,24 @@ async function handleGET(
 
   const { items, nextCursor } = paginateResult(logs, limit);
 
+  // Batch-lookup user display info
+  const bgUserMap = await fetchAuditUserMap(items.map((l) => l.userId));
+
   return NextResponse.json({
-    items: items.map((log) => ({
-      id: log.id,
-      action: log.action,
-      targetType: log.targetType,
-      targetId: log.targetId,
-      metadata: log.metadata,
-      ip: log.ip,
-      userAgent: log.userAgent,
-      createdAt: log.createdAt,
-      user: log.user
-        ? {
-            id: log.user.id,
-            name: log.user.name,
-            email: log.user.email,
-            image: log.user.image,
-          }
-        : null,
-    })),
+    items: items.map((log) => {
+      const userInfo = log.userId ? (bgUserMap.get(log.userId) ?? null) : null;
+      return {
+        id: log.id,
+        action: log.action,
+        targetType: log.targetType,
+        targetId: log.targetId,
+        metadata: log.metadata,
+        ip: log.ip,
+        userAgent: log.userAgent,
+        createdAt: log.createdAt,
+        user: userInfo,
+      };
+    }),
     nextCursor,
     // No entryOverviews — admin cannot decrypt the target user's vault
     grant: {

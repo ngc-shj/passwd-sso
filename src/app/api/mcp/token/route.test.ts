@@ -34,6 +34,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 
 import { POST } from "@/app/api/mcp/token/route";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const VALID_BODY = {
   grant_type: "authorization_code",
@@ -305,5 +306,32 @@ describe("POST /api/mcp/token", () => {
     expect(status).toBe(200);
     expect(json.access_token).toBeDefined();
     expect(json.refresh_token).toBeDefined();
+  });
+
+  // T3.1: null userId path uses SYSTEM_ACTOR_ID + SYSTEM actorType in logAuditAsync
+  it("refresh_token: logs MCP_REFRESH_TOKEN_ROTATE with SYSTEM_ACTOR_ID and SYSTEM actorType when userId is null", async () => {
+    mockExchangeRefreshToken.mockResolvedValue({
+      ok: true,
+      accessToken: "mcp_machine_token",
+      refreshToken: "mcpr_machine",
+      expiresIn: 3600,
+      scope: "credentials:list",
+      tenantId: "tenant-machine",
+      userId: null, // machine-only token (no user context)
+    });
+
+    const req = createRequest("POST", "http://localhost/api/mcp/token", {
+      body: VALID_REFRESH_BODY,
+    });
+    await POST(req);
+
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "MCP_REFRESH_TOKEN_ROTATE",
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
+        tenantId: "tenant-machine",
+      }),
+    );
   });
 });

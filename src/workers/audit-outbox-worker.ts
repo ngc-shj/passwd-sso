@@ -14,7 +14,7 @@ import {
   WEBHOOK_DISPATCH_SUPPRESS,
 } from "@/lib/constants/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { NIL_UUID } from "@/lib/constants/app";
+import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/external-http";
@@ -37,7 +37,7 @@ export interface AuditOutboxRow {
 export interface AuditOutboxPayload {
   scope: string;
   action: string;
-  userId: string | null;
+  userId: string;
   actorType: string;
   serviceAccountId: string | null;
   teamId: string | null;
@@ -69,7 +69,9 @@ function parsePayload(raw: unknown): AuditOutboxPayload {
   return {
     scope: typeof p.scope === "string" ? p.scope : AUDIT_SCOPE.PERSONAL,
     action: typeof p.action === "string" ? p.action : "",
-    userId: typeof p.userId === "string" ? p.userId : null,
+    // Runtime check kept as defense-in-depth (handles malformed rows from older outbox entries).
+    // Falls back to empty string so the UUID_RE guard below can reject the row.
+    userId: typeof p.userId === "string" ? p.userId : "",
     actorType: typeof p.actorType === "string" ? p.actorType : ACTOR_TYPE.HUMAN,
     serviceAccountId:
       typeof p.serviceAccountId === "string" ? p.serviceAccountId : null,
@@ -369,14 +371,15 @@ async function writeDirectAuditLog(
           $1::uuid,
           $2::"AuditScope",
           $3::"AuditAction",
-          NULL,
-          $4::"ActorType",
-          $5::jsonb,
+          $4::uuid,
+          $5::"ActorType",
+          $6::jsonb,
           now()
         )`,
         tenantId,
         AUDIT_SCOPE.TENANT,
         action,
+        SYSTEM_ACTOR_ID,
         ACTOR_TYPE.SYSTEM,
         JSON.stringify(metadata),
       );
@@ -486,12 +489,30 @@ async function processDeliveryBatch(prisma: PrismaClient, batchSize: number): Pr
     if (claimed.length === 0) return [];
     return tx.auditDelivery.findMany({
       where: { id: { in: claimed.map((r) => r.id) } },
-      include: { target: true, outbox: true },
+      include: { target: true },
     });
   });
 
+  if (deliveries.length === 0) return 0;
+
+  const outboxIds = [
+    ...new Set(deliveries.map((d) => d.outboxId).filter((id) => UUID_RE.test(id))),
+  ];
+  if (outboxIds.length === 0) return deliveries.length;
+  const outboxRows = await prisma.auditOutbox.findMany({
+    where: { id: { in: outboxIds } },
+    select: { id: true, createdAt: true, payload: true, tenantId: true },
+  });
+  const outboxById = new Map(outboxRows.map((o) => [o.id, o]));
+
   for (const delivery of deliveries) {
-    await processOneDelivery(prisma, delivery);
+    const outbox = outboxById.get(delivery.outboxId);
+    if (!outbox) {
+      // Outbox row was purged before delivery completed — log and skip
+      getLogger().warn({ deliveryId: delivery.id, outboxId: delivery.outboxId }, "delivery.outbox_purged");
+      continue;
+    }
+    await processOneDelivery(prisma, { ...delivery, outbox });
   }
 
   return deliveries.length;
@@ -521,7 +542,7 @@ async function processOneDelivery(
     };
   },
 ): Promise<void> {
-  if (!delivery.target || !delivery.outbox) return;
+  if (!delivery.target) return;
 
   const kind = delivery.target.kind;
   const deliverFn = DELIVERERS[kind];
@@ -557,7 +578,7 @@ async function processOneDelivery(
       tenantId: delivery.tenantId,
       action: (outboxPayload.action as string) ?? "",
       scope: (outboxPayload.scope as string) ?? "",
-      userId: (outboxPayload.userId as string | null) ?? null,
+      userId: (outboxPayload.userId as string) ?? "",
       actorType: (outboxPayload.actorType as string) ?? "",
       metadata: (outboxPayload.metadata as Record<string, unknown>) ?? {},
       createdAt: delivery.outbox.createdAt.toISOString(),
@@ -939,32 +960,37 @@ export function createWorker(config: WorkerConfig) {
         continue;
       }
 
-      if (payload.userId === null && payload.actorType !== ACTOR_TYPE.SYSTEM) {
+      // Defense-in-depth: reject payloads whose userId is not a valid UUID (e.g. "" from
+      // parsePayload's fallback on malformed JSON, or legacy null rows from before the type
+      // tightened). logAuditAsync cannot produce these, but external inserts or legacy
+      // outbox rows could. Skip the row rather than letting the UUID cast fail.
+      if (!UUID_RE.test(payload.userId) && payload.actorType !== ACTOR_TYPE.SYSTEM) {
         log.warn(
           { outboxId: row.id, action: payload.action, actorType: payload.actorType },
-          "worker.null_userid_non_system_skipped",
+          "worker.invalid_userid_skipped",
         );
         deadLetterLogger.warn(
           { outboxId: row.id, tenantId: row.tenant_id, action: payload.action },
-          "null userId for non-SYSTEM actor — skipping",
+          "invalid userId for non-SYSTEM actor — skipping",
         );
         await recordError(
           workerPrisma,
           row,
-          new Error("null userId for non-SYSTEM actor type"),
+          new Error("invalid userId for non-SYSTEM actor type"),
         );
         continue;
       }
 
-      if (payload.userId === null) {
+      // Same guard for SYSTEM actor.
+      if (!UUID_RE.test(payload.userId)) {
         log.warn(
           { outboxId: row.id, action: payload.action },
-          "worker.system_actor_null_userid_skipped",
+          "worker.invalid_userid_skipped",
         );
         await recordError(
           workerPrisma,
           row,
-          new Error("SYSTEM actor with null userId must not enter the outbox — check OUTBOX_BYPASS_AUDIT_ACTIONS"),
+          new Error("SYSTEM actor with invalid userId must not enter the outbox — check OUTBOX_BYPASS_AUDIT_ACTIONS"),
         );
         continue;
       }

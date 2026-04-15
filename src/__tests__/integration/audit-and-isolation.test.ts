@@ -199,7 +199,7 @@ describe("Scenario 6: Existing audit unchanged — session produces HUMAN", () =
   it("session-based audit has no serviceAccountId in DB write", async () => {
     await logAuditAsync({
       scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.ENTRY_VIEW,
+      action: AUDIT_ACTION.ENTRY_EXPORT,
       userId: "user-human",
       tenantId: "a0000000-0000-4000-8000-000000000001",
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
@@ -244,8 +244,8 @@ describe("Scenario 7: Tenant isolation — SA token from tenant-A rejected for t
 
   it("tenant mismatch is detected: SA tenantId !== route context tenantId", async () => {
     // Simulate SA token from tenant-A, route expects tenant-B
-    const saTokenTenantId = "tenant-A";
-    const routeContextTenantId = "tenant-B";
+    const saTokenTenantId: string = "tenant-A";
+    const routeContextTenantId: string = "tenant-B";
 
     // The check a route handler would perform:
     const isCrossTenant = saTokenTenantId !== routeContextTenantId;

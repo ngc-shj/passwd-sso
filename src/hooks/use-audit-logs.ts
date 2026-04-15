@@ -15,6 +15,7 @@ export interface AuditLogItem {
   id: string;
   action: string;
   actorType?: string;
+  userId?: string | null;
   scope?: string;
   serviceAccountId?: string | null;
   serviceAccount?: { id: string; name: string } | null;

@@ -11,7 +11,17 @@ import {
   TEAM_WEBHOOK_EVENT_GROUPS,
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
+  ACTOR_TYPE,
 } from "@/lib/constants/audit";
+import { VALID_ACTOR_TYPES } from "@/lib/audit-query";
+import {
+  ANONYMOUS_ACTOR_ID,
+  SYSTEM_ACTOR_ID,
+  SENTINEL_ACTOR_IDS,
+  NIL_UUID,
+} from "@/lib/constants/app";
+import enAuditLog from "../../messages/en/AuditLog.json";
+import jaAuditLog from "../../messages/ja/AuditLog.json";
 
 const OUTBOX_ACTIONS = AUDIT_ACTION_VALUES.filter((a) =>
   a.startsWith("AUDIT_OUTBOX_"),
@@ -81,5 +91,69 @@ describe("audit bypass coverage", () => {
       expect(tenantSubscribable.has(a)).toBe(false);
       expect(teamSubscribable.has(a)).toBe(false);
     }
+  });
+});
+
+const ACTOR_TYPE_I18N_KEYS: Record<string, string> = {
+  HUMAN: "actorTypeHuman",
+  SERVICE_ACCOUNT: "actorTypeSa",
+  MCP_AGENT: "actorTypeMcp",
+  SYSTEM: "actorTypeSystem",
+  ANONYMOUS: "actorTypeAnonymous",
+};
+
+describe("ActorType exhaustiveness coverage (T4, T10)", () => {
+  const allActorTypes = ["HUMAN", "SERVICE_ACCOUNT", "MCP_AGENT", "SYSTEM", "ANONYMOUS"] as const;
+
+  for (const actorType of allActorTypes) {
+    it(`VALID_ACTOR_TYPES includes ${actorType}`, () => {
+      expect(VALID_ACTOR_TYPES as readonly string[]).toContain(actorType);
+    });
+
+    it(`ACTOR_TYPE const includes ${actorType}`, () => {
+      expect(Object.values(ACTOR_TYPE)).toContain(actorType);
+    });
+
+    it(`en/AuditLog.json has i18n key for ${actorType}`, () => {
+      const key = ACTOR_TYPE_I18N_KEYS[actorType];
+      expect(enAuditLog).toHaveProperty(key);
+    });
+
+    it(`ja/AuditLog.json has i18n key for ${actorType}`, () => {
+      const key = ACTOR_TYPE_I18N_KEYS[actorType];
+      expect(jaAuditLog).toHaveProperty(key);
+    });
+  }
+});
+
+describe("TENANT_WEBHOOK_EVENT_GROUPS.SHARE coverage (T11/S1)", () => {
+  it("contains SHARE_ACCESS_VERIFY_FAILED", () => {
+    expect(TENANT_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.SHARE]).toContain(
+      AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
+    );
+  });
+
+  it("contains SHARE_ACCESS_VERIFY_SUCCESS", () => {
+    expect(TENANT_WEBHOOK_EVENT_GROUPS[AUDIT_ACTION_GROUP.SHARE]).toContain(
+      AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
+    );
+  });
+});
+
+describe("SENTINEL_ACTOR_IDS invariants", () => {
+  it("contains ANONYMOUS_ACTOR_ID", () => {
+    expect(SENTINEL_ACTOR_IDS.has(ANONYMOUS_ACTOR_ID)).toBe(true);
+  });
+
+  it("contains SYSTEM_ACTOR_ID", () => {
+    expect(SENTINEL_ACTOR_IDS.has(SYSTEM_ACTOR_ID)).toBe(true);
+  });
+
+  it("does not contain NIL_UUID", () => {
+    expect(SENTINEL_ACTOR_IDS.has(NIL_UUID)).toBe(false);
+  });
+
+  it("has exactly 2 entries", () => {
+    expect(SENTINEL_ACTOR_IDS.size).toBe(2);
   });
 });

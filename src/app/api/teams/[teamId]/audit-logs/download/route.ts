@@ -19,6 +19,7 @@ import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
+import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -148,16 +149,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
           const batch = await withTeamTenantRls(teamId, async () =>
             prisma.auditLog.findMany({
               where,
-              include: {
-                user: { select: { id: true, name: true, email: true } },
-              },
               orderBy: { createdAt: "asc" },
               take: AUDIT_LOG_BATCH_SIZE,
               ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
             }),
           );
 
+          // Batch-lookup user display info for this page
+          const teamDlUserMap = await fetchAuditUserMap(batch.map((l) => l.userId));
+
           for (const log of batch) {
+            const userInfo = log.userId ? (teamDlUserMap.get(log.userId) ?? undefined) : undefined;
             if (format === "csv") {
               controller.enqueue(
                 encoder.encode(
@@ -169,9 +171,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
                     log.ip ?? "",
                     log.userAgent ?? "",
                     log.createdAt.toISOString(),
-                    log.user?.id ?? "",
-                    log.user?.name ?? "",
-                    log.user?.email ?? "",
+                    userInfo?.id ?? "",
+                    userInfo?.name ?? "",
+                    userInfo?.email ?? "",
                     JSON.stringify(log.metadata ?? {}),
                   ]) + "\n",
                 ),
@@ -188,8 +190,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
                     ip: log.ip,
                     userAgent: log.userAgent,
                     createdAt: log.createdAt,
-                    user: log.user
-                      ? { id: log.user.id, name: log.user.name, email: log.user.email }
+                    user: userInfo
+                      ? { id: userInfo.id, name: userInfo.name, email: userInfo.email }
                       : null,
                   }) + "\n",
                 ),

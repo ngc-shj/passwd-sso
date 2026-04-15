@@ -23,6 +23,9 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { findMany: mockAuditLogFindMany },
     passwordEntry: { findMany: mockPasswordEntryFindMany },
     user: { findMany: mockUserFindMany },
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({
+      $executeRaw: vi.fn().mockResolvedValue(undefined),
+    })),
   },
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -84,6 +87,10 @@ describe("GET /api/audit-logs", () => {
   it("returns paginated logs with correct response shape", async () => {
     const log = makeLog();
     mockAuditLogFindMany.mockResolvedValue([log]);
+    // Route does a separate user.findMany batch lookup (no longer uses include relation)
+    mockUserFindMany.mockResolvedValue([
+      { id: "user-1", name: "Alice", email: "alice@example.com", image: null },
+    ]);
 
     const res = await GET(createRequest("GET", BASE_URL));
     expect(res.status).toBe(200);
@@ -350,11 +357,15 @@ describe("GET /api/audit-logs", () => {
     expect(json.relatedUsers["grantee-1"]).toMatchObject({ id: "grantee-1", name: "Grantee" });
   });
 
-  it("does not query users when no emergency access logs exist", async () => {
+  it("queries users for all logs with non-sentinel userIds (not just emergency access)", async () => {
+    // Route always batch-lookups user display info for any log with a non-sentinel userId
     mockAuditLogFindMany.mockResolvedValue([makeLog({ action: AUDIT_ACTION.ENTRY_CREATE })]);
 
     await GET(createRequest("GET", BASE_URL));
 
-    expect(mockUserFindMany).not.toHaveBeenCalled();
+    // user.findMany IS called for the log's userId
+    expect(mockUserFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: { in: ["user-1"] } } }),
+    );
   });
 });

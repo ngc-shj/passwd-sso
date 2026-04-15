@@ -376,7 +376,10 @@ describe("resolveActorType", () => {
     expect(resolveActorType(auth)).toBe("MCP_AGENT");
   });
 
-  it("returns MCP_AGENT for mcp_token auth with userId null", () => {
+  it("resolveActorType(mcp_token auth) returns MCP_AGENT — the SYSTEM_ACTOR_ID/SYSTEM override for null userId is performed by the route handler, not this helper", () => {
+    // resolveActorType always returns MCP_AGENT for mcp_token, regardless of userId.
+    // The route handler substitutes SYSTEM_ACTOR_ID and actorType=SYSTEM when userId is null,
+    // before calling logAuditAsync. This helper has no knowledge of that override.
     const auth = {
       type: "mcp_token" as const,
       userId: null,
