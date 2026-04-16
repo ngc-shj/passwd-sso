@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
-import { AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM, AUDIT_SCOPE, mergeActionGroups } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -79,7 +79,7 @@ async function handleGET(req: NextRequest) {
       ? AUDIT_ACTION_GROUPS_TEAM
       : scopeParam === AUDIT_SCOPE.TENANT
         ? AUDIT_ACTION_GROUPS_TENANT
-        : { ...AUDIT_ACTION_GROUPS_TENANT, ...AUDIT_ACTION_GROUPS_TEAM };
+        : mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
 
   try {
     const actionFilter = buildAuditLogActionFilter(

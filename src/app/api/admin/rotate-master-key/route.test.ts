@@ -65,6 +65,7 @@ function restoreEnv() {
 }
 
 import { POST } from "./route";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 function createRequest(
   body: unknown,
@@ -175,8 +176,10 @@ describe("POST /api/admin/rotate-master-key", () => {
         scope: "TENANT",
         tenantId: "tenant-1",
         action: "MASTER_KEY_ROTATION",
-        userId: "660e8400-e29b-41d4-a716-446655440001",
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
         metadata: expect.objectContaining({
+          operatorId: "660e8400-e29b-41d4-a716-446655440001",
           targetVersion: 2,
           revokedShares: 0,
         }),

@@ -18,7 +18,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
 import { formatCsvRow } from "@/lib/audit-csv";
-import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
+import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -28,7 +28,7 @@ const downloadLimiter = createRateLimiter({
   max: 2,
 });
 
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail", "metadata"];
+const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
 
 // GET /api/teams/[teamId]/audit-logs/download — Download team audit logs (ADMIN/OWNER)
 async function handleGET(req: NextRequest, { params }: Params) {
@@ -70,6 +70,14 @@ async function handleGET(req: NextRequest, { params }: Params) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const validActorType = parseActorType(searchParams);
+
+  // Require at least one date boundary
+  if (!from && !to) {
+    return NextResponse.json(
+      { error: API_ERROR.VALIDATION_ERROR, details: { date: "At least 'from' or 'to' is required for download" } },
+      { status: 400 },
+    );
+  }
 
   // Validate date range
   if (from || to) {
@@ -144,13 +152,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
         let cursor: string | undefined;
         let hasMore = true;
+        let totalRows = 0;
 
         while (hasMore) {
+          const remaining = AUDIT_LOG_MAX_ROWS - totalRows;
+          const batchSize = Math.min(AUDIT_LOG_BATCH_SIZE, remaining);
+
           const batch = await withTeamTenantRls(teamId, async () =>
             prisma.auditLog.findMany({
               where,
               orderBy: { createdAt: "asc" },
-              take: AUDIT_LOG_BATCH_SIZE,
+              take: batchSize,
               ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
             }),
           );
@@ -171,7 +183,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
                     log.ip ?? "",
                     log.userAgent ?? "",
                     log.createdAt.toISOString(),
-                    userInfo?.id ?? "",
+                    log.userId ?? "",
+                    log.actorType ?? "",
                     userInfo?.name ?? "",
                     userInfo?.email ?? "",
                     JSON.stringify(log.metadata ?? {}),
@@ -190,6 +203,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
                     ip: log.ip,
                     userAgent: log.userAgent,
                     createdAt: log.createdAt,
+                    userId: log.userId,
+                    actorType: log.actorType,
                     user: userInfo
                       ? { id: userInfo.id, name: userInfo.name, email: userInfo.email }
                       : null,
@@ -199,7 +214,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
             }
           }
 
-          if (batch.length < AUDIT_LOG_BATCH_SIZE) {
+          totalRows += batch.length;
+
+          if (batch.length < batchSize || totalRows >= AUDIT_LOG_MAX_ROWS) {
             hasMore = false;
           } else {
             cursor = batch[batch.length - 1].id;

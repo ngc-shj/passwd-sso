@@ -10,11 +10,12 @@ import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
 import { NIL_UUID, resolveAuditUserId } from "@/lib/constants/app";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   let body: Record<string, string>;
   const contentType = req.headers.get("content-type") ?? "";
 
@@ -152,3 +153,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "unsupported_grant_type" }, { status: 400 });
   }
 }
+
+export const POST = withRequestLog(handlePOST);

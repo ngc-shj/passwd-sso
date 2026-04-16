@@ -3,8 +3,9 @@ import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { handleMcpRequest } from "@/lib/mcp/server";
 import { extractClientIp } from "@/lib/ip-access";
 import { BASE_PATH } from "@/lib/url-helpers";
+import { withRequestLog } from "@/lib/with-request-log";
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   // Validate MCP access token
   const authHeader = req.headers.get("authorization");
   const bearer = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
 }
 
 // SSE endpoint for server-initiated messages (basic support)
-export async function GET(req: NextRequest) {
+async function handleGET(req: NextRequest) {
   const authHeader = req.headers.get("authorization");
   const bearer = authHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
   if (!bearer) {
@@ -68,3 +69,6 @@ export async function GET(req: NextRequest) {
     },
   });
 }
+
+export const POST = withRequestLog(handlePOST);
+export const GET = withRequestLog(handleGET);

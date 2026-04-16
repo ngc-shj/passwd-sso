@@ -13,6 +13,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
@@ -101,9 +102,10 @@ async function handleGET(req: NextRequest) {
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW,
-    userId: operatorId,
+    userId: SYSTEM_ACTOR_ID,
+    actorType: "SYSTEM",
     tenantId: membership.tenantId,
-    metadata: { pending: metrics.pending, failed: metrics.failed },
+    metadata: { operatorId, pending: metrics.pending, failed: metrics.failed },
     ip,
     userAgent,
   });

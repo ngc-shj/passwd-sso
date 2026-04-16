@@ -25,6 +25,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
@@ -112,9 +113,11 @@ async function handlePOST(req: NextRequest) {
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.MASTER_KEY_ROTATION,
-    userId: operatorId,
+    userId: SYSTEM_ACTOR_ID,
+    actorType: "SYSTEM",
     tenantId: operator.tenantId,
     metadata: {
+      operatorId,
       targetVersion,
       revokedShares,
     },

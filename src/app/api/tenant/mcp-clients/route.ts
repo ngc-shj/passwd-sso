@@ -13,6 +13,7 @@ import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, zodValidationError } from "@/lib/api-response";
 import { z } from "zod";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -30,7 +31,7 @@ const createSchema = z.object({
   allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1),
 });
 
-export async function GET(_req: NextRequest) {
+async function handleGET(_req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return unauthorized();
 
@@ -99,7 +100,7 @@ export async function GET(_req: NextRequest) {
   });
 }
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   const session = await auth();
   if (!session?.user?.id) return unauthorized();
 
@@ -185,3 +186,6 @@ export async function POST(req: NextRequest) {
   // Return clientSecret only on creation — never again
   return NextResponse.json({ client: { ...client, clientSecret } }, { status: 201 });
 }
+
+export const GET = withRequestLog(handleGET);
+export const POST = withRequestLog(handlePOST);

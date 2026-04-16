@@ -24,7 +24,7 @@ const downloadLimiter = createRateLimiter({
   max: 3,
 });
 
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "userName", "userEmail", "metadata"];
+const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
 
 // GET /api/tenant/audit-logs/download — Download tenant audit logs (JSONL or CSV, ADMIN/OWNER only)
 async function handleGET(req: NextRequest) {
@@ -149,7 +149,8 @@ async function handleGET(req: NextRequest) {
                     log.ip ?? "",
                     log.userAgent ?? "",
                     log.createdAt.toISOString(),
-                    userInfo?.id ?? "",
+                    log.userId ?? "",
+                    log.actorType ?? "",
                     userInfo?.name ?? "",
                     userInfo?.email ?? "",
                     JSON.stringify(log.metadata ?? {}),
@@ -168,6 +169,8 @@ async function handleGET(req: NextRequest) {
                     ip: log.ip,
                     userAgent: log.userAgent,
                     createdAt: log.createdAt,
+                    userId: log.userId,
+                    actorType: log.actorType,
                     user: userInfo
                       ? { id: userInfo.id, name: userInfo.name, email: userInfo.email }
                       : null,

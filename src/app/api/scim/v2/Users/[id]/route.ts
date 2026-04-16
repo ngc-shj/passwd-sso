@@ -10,6 +10,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { prisma } from "@/lib/prisma";
@@ -35,7 +36,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   }
   const { tenantId } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -64,9 +65,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId, actorType: putActorType } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -124,6 +125,7 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId: auditUserId,
+    actorType: putActorType,
     tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
@@ -146,9 +148,9 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId, actorType: patchActorType } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -211,6 +213,7 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
     scope: AUDIT_SCOPE.TENANT,
     action: auditAction,
     userId: auditUserId,
+    actorType: patchActorType,
     tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
@@ -232,9 +235,9 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId, actorType: deleteActorType } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -278,6 +281,7 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.SCIM_USER_DELETE,
     userId: auditUserId,
+    actorType: deleteActorType,
     tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,

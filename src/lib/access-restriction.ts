@@ -13,7 +13,8 @@ import { verifyTailscalePeer } from "@/lib/tailscale-client";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
-import { resolveAuditUserId } from "@/lib/constants/app";
+import type { ActorType } from "@prisma/client";
+import { resolveAuditUserId, SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
@@ -204,15 +205,26 @@ export function wouldIpBeAllowed(
  * Resolves tenant from userId, checks the client IP against the tenant's
  * access policy. Returns a 403 NextResponse if denied, or null if allowed.
  *
+ * When userId is a sentinel (SYSTEM_ACTOR_ID / ANONYMOUS_ACTOR_ID), a
+ * tenantIdOverride MUST be supplied — without it the function cannot resolve
+ * a tenant and returns 403 fail-closed rather than silently skipping.
+ *
  * Usage in route handler:
- *   const denied = await enforceAccessRestriction(req, userId);
+ *   const denied = await enforceAccessRestriction(req, userId, tenantId, actorType);
  *   if (denied) return denied;
  */
 export async function enforceAccessRestriction(
   req: NextRequest,
   userId: string,
   tenantIdOverride?: string,
+  actorType?: ActorType,
 ): Promise<NextResponse | null> {
+  // Fail-closed: sentinel actor IDs are never in the users table, so
+  // resolveUserTenantId would return null and silently skip all checks.
+  if (SENTINEL_ACTOR_IDS.has(userId) && !tenantIdOverride) {
+    return NextResponse.json({ error: "ACCESS_DENIED" }, { status: 403 });
+  }
+
   const tenantId = tenantIdOverride ?? (await resolveUserTenantId(userId));
   if (!tenantId) return null;
 
@@ -224,6 +236,7 @@ export async function enforceAccessRestriction(
       action: AUDIT_ACTION.ACCESS_DENIED,
       scope: AUDIT_SCOPE.TENANT,
       userId,
+      ...(actorType ? { actorType } : {}),
       tenantId,
       ip: clientIp,
       userAgent: req.headers.get("user-agent"),
@@ -243,6 +256,7 @@ export async function enforceAccessRestriction(
         action: AUDIT_ACTION.ACCESS_DENIED,
         scope: AUDIT_SCOPE.TENANT,
         userId,
+        ...(actorType ? { actorType } : {}),
         tenantId,
         ip: clientIp,
         userAgent: req.headers.get("user-agent"),

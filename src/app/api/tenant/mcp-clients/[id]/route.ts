@@ -12,6 +12,7 @@ import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound, zodValidationError } from "@/lib/api-response";
 import { z } from "zod";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const updateSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -30,7 +31,7 @@ const updateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-export async function GET(
+async function handleGET(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -69,7 +70,7 @@ export async function GET(
   return NextResponse.json({ client });
 }
 
-export async function PUT(
+async function handlePUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -141,7 +142,7 @@ export async function PUT(
   return NextResponse.json({ client: updated });
 }
 
-export async function DELETE(
+async function handleDELETE(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
@@ -180,3 +181,7 @@ export async function DELETE(
 
   return NextResponse.json({ ok: true });
 }
+
+export const GET = withRequestLog(handleGET);
+export const PUT = withRequestLog(handlePUT);
+export const DELETE = withRequestLog(handleDELETE);

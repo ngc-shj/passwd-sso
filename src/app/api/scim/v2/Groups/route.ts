@@ -16,6 +16,7 @@ import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [
   TEAM_ROLE.ADMIN,
@@ -79,7 +80,7 @@ async function handleGET(req: NextRequest) {
   }
   const { tenantId } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -139,7 +140,7 @@ async function handlePOST(req: NextRequest) {
   }
   const { tenantId } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {

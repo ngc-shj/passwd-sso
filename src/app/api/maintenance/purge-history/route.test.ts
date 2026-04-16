@@ -62,6 +62,7 @@ function restoreEnv() {
 }
 
 import { POST } from "./route";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 function createRequest(
   body: unknown,
@@ -277,9 +278,11 @@ describe("POST /api/maintenance/purge-history", () => {
       expect.objectContaining({
         scope: "TENANT",
         action: "HISTORY_PURGE",
-        userId: "660e8400-e29b-41d4-a716-446655440010",
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
         tenantId: "tenant-1",
         metadata: expect.objectContaining({
+          operatorId: "660e8400-e29b-41d4-a716-446655440010",
           purgedCount: 5,
           retentionDays: 90,
           systemWide: true,

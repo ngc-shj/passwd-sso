@@ -692,6 +692,22 @@ export const OUTBOX_BYPASS_AUDIT_ACTIONS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Merge multiple action-group maps by key, producing a Set-based union for
+ * duplicate keys so that no actions from either side are silently dropped.
+ */
+export function mergeActionGroups(
+  ...groups: Record<string, AuditAction[]>[]
+): Record<string, AuditAction[]> {
+  const merged: Record<string, AuditAction[]> = {};
+  for (const group of groups) {
+    for (const [key, actions] of Object.entries(group)) {
+      merged[key] = [...new Set([...(merged[key] ?? []), ...actions])];
+    }
+  }
+  return merged;
+}
+
+/**
  * Actions that suppress webhook dispatch entirely.
  * All AUDIT_OUTBOX_* actions are internal operational events
  * that should never trigger external webhook delivery.

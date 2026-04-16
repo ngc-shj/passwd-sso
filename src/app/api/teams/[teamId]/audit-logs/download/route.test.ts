@@ -201,7 +201,9 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     ]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "2025-06-01", to: "2025-06-30" },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
 
@@ -232,7 +234,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
 
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
-        searchParams: { format: "csv" },
+        searchParams: { format: "csv", from: "2025-06-01", to: "2025-06-30" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -263,7 +265,9 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
       .mockResolvedValueOnce([]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "2025-06-01", to: "2025-06-30" },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
 
@@ -282,7 +286,9 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     mockPrismaAuditLog.findMany.mockResolvedValue([]);
 
     const res = await GET(
-      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "2025-06-01", to: "2025-06-30" },
+      }),
       createParams({ teamId: TEAM_ID }),
     );
 

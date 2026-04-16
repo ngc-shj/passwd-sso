@@ -14,6 +14,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import {
@@ -291,18 +292,42 @@ async function handleGET(req: NextRequest) {
     totalVerified++;
   }
 
-  const ok = firstTamperedSeq === null && firstGapAfterSeq === null && firstTimestampViolationSeq === null;
+  // Detect truncation: query hit MAX_ROWS_PER_REQUEST before covering full range
+  const truncated = rows.length >= MAX_ROWS_PER_REQUEST && (prevSeq === null || prevSeq < toSeq);
+  const verifiedUpToSeq = prevSeq !== null ? prevSeq : undefined;
+
+  const integrityOk = firstTamperedSeq === null && firstGapAfterSeq === null && firstTimestampViolationSeq === null;
+  // Fail-closed: truncated verification is never reported as ok
+  const ok = integrityOk && !truncated;
+
+  // Machine-readable failure reason
+  const reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined =
+    !ok
+      ? truncated && integrityOk
+        ? "TRUNCATED"
+        : firstTamperedSeq !== null
+          ? "TAMPER_DETECTED"
+          : firstGapAfterSeq !== null
+            ? "GAP_DETECTED"
+            : firstTimestampViolationSeq !== null
+              ? "TIMESTAMP_VIOLATION"
+              : undefined
+      : undefined;
 
   const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
-    userId: operatorId,
+    userId: SYSTEM_ACTOR_ID,
+    actorType: "SYSTEM",
     tenantId: membership.tenantId,
     metadata: {
+      operatorId,
       targetTenantId: tenantId,
       ok,
       totalVerified,
+      truncated,
+      verifiedUpToSeq,
       firstTamperedSeq,
       firstGapAfterSeq,
       firstTimestampViolationSeq,
@@ -313,6 +338,8 @@ async function handleGET(req: NextRequest) {
 
   return NextResponse.json({
     ok,
+    ...(reason ? { reason } : {}),
+    ...(truncated ? { truncated, verifiedUpToSeq } : {}),
     firstTamperedSeq,
     firstGapAfterSeq,
     firstTimestampViolationSeq,

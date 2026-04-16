@@ -172,6 +172,55 @@ Wrap with `withRequestLog`:
 - **Finding 8 (MCP rate limiter, S3)**: While adding `withRequestLog`, verify that `/api/mcp/register` (unauthenticated DCR endpoint) has an existing rate limiter. Add IP-based rate limiting if missing.
 - **Finding 6 (breaking change, S7)**: Adding `ok: false` for truncation is a breaking change for existing chain-verify clients (SIEM, scripts). Clients must update to check `reason` field to distinguish `TRUNCATED` from `TAMPER_DETECTED`. Document this in the API response and consider a deprecation period or opt-in via query parameter if clients cannot be updated immediately.
 
+## Implementation Checklist
+
+### Shared utilities to reuse (NOT reimplement)
+- `resolveAuditUserId(userId, fallback)` — `src/lib/constants/app.ts:47`
+- `SYSTEM_ACTOR_ID`, `ANONYMOUS_ACTOR_ID` — `src/lib/constants/app.ts:33-34`
+- `SENTINEL_ACTOR_IDS` — `src/lib/constants/app.ts:37-40`
+- `AUDIT_LOG_MAX_ROWS`, `AUDIT_LOG_BATCH_SIZE` — `src/lib/validations/common.server.ts:22,21`
+- `logAuditAsync` — `src/lib/audit.ts`
+- `withRequestLog` — `src/lib/with-request-log.ts`
+- `AUDIT_ACTION_GROUPS_TENANT`, `AUDIT_ACTION_GROUPS_TEAM` — `src/lib/constants/audit.ts`
+
+### Files to modify
+
+| Finding | File | Change |
+|---------|------|--------|
+| 1 | `src/app/api/teams/[teamId]/audit-logs/download/route.ts` | Import MAX_ROWS, add remaining calc, date boundary |
+| 2 | `src/auth.ts` | Add assertBootstrapSingleMember inside tx |
+| 3 | `src/lib/constants/audit.ts` | Add mergeActionGroups() helper |
+| 3 | `src/app/api/tenant/audit-logs/route.ts` | Replace spread merge with mergeActionGroups() |
+| 4 | `src/app/api/audit-logs/download/route.ts` | Add actorType column, use raw userId |
+| 4 | `src/app/api/tenant/audit-logs/download/route.ts` | Add actorType column, use raw userId |
+| 4 | `src/app/api/teams/[teamId]/audit-logs/download/route.ts` | Add actorType column, use raw userId |
+| 5 | `src/lib/scim-token.ts` | Replace SCIM_SYSTEM_USER_ID with resolveAuditUserId |
+| 5 | `src/lib/scim-token.test.ts` | Update imports/assertions |
+| 5 | `src/app/api/scim/v2/Users/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/app/api/scim/v2/Users/[id]/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/app/api/scim/v2/Groups/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/app/api/scim/v2/Groups/[id]/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/app/api/scim/v2/ResourceTypes/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/app/api/scim/v2/Schemas/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/app/api/scim/v2/ServiceProviderConfig/route.ts` | Pass SYSTEM_ACTOR_ID + tenantIdOverride |
+| 5 | `src/lib/access-restriction.ts` | Add optional actorType param + sentinel guard |
+| 6 | `src/app/api/maintenance/audit-chain-verify/route.ts` | Add truncated/reason/verifiedUpToSeq |
+| 7 | `src/app/api/admin/rotate-master-key/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 7 | `src/app/api/maintenance/purge-history/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 7 | `src/app/api/maintenance/purge-audit-logs/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 7 | `src/app/api/maintenance/audit-outbox-purge-failed/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 7 | `src/app/api/maintenance/audit-outbox-metrics/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 7 | `src/app/api/maintenance/audit-chain-verify/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 7 | `src/app/api/maintenance/dcr-cleanup/route.ts` | Use SYSTEM_ACTOR_ID, operatorId to metadata |
+| 8 | `src/app/api/mcp/register/route.ts` | Wrap with withRequestLog |
+| 8 | `src/app/api/mcp/token/route.ts` | Wrap with withRequestLog |
+| 8 | `src/app/api/mcp/route.ts` | Wrap with withRequestLog |
+| 8 | `src/app/api/tenant/mcp-clients/route.ts` | Wrap with withRequestLog |
+| 8 | `src/app/api/tenant/mcp-clients/[id]/route.ts` | Wrap with withRequestLog |
+
+### New test files
+- `src/lib/constants/audit.test.ts` (Finding 3: mergeActionGroups tests)
+
 ## User Operation Scenarios
 
 1. **Tenant admin downloads team audit logs** (Finding 1): Request without date params returns 400. Request with dates + large dataset stops streaming at 100k rows.
