@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.42](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.41...passwd-sso-v0.4.42) (2026-04-16)
+
+
+### Bug Fixes
+
+* address 8 findings from full codebase review ([#379](https://github.com/ngc-shj/passwd-sso/issues/379)) ([eff787e](https://github.com/ngc-shj/passwd-sso/commit/eff787ef36a3194375c0912348293f937fd6f78f))
+* **docker:** upgrade musl to close CVE-2026-40200 ([#377](https://github.com/ngc-shj/passwd-sso/issues/377)) ([8249c2a](https://github.com/ngc-shj/passwd-sso/commit/8249c2a45e1652b6ef0db47c5b273231137c3752))
+
+
+### Code Refactoring
+
+* unify audit paths via sentinel UUIDs + ANONYMOUS ActorType ([#378](https://github.com/ngc-shj/passwd-sso/issues/378)) ([a75f37c](https://github.com/ngc-shj/passwd-sso/commit/a75f37c2ea6f3a6b2b496135cfe1368facd54b9c))
+* unify audit paths with type-safe null userId for anonymous/SYSTEM events ([#375](https://github.com/ngc-shj/passwd-sso/issues/375)) ([e167f9c](https://github.com/ngc-shj/passwd-sso/commit/e167f9c0e7758eb6d3508c2a4813be2d2071d149))
+
 ## [0.4.41](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.40...passwd-sso-v0.4.41) (2026-04-14)
 
 
