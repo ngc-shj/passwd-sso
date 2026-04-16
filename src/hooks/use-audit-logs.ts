@@ -185,7 +185,24 @@ export function useAuditLogs(config: UseAuditLogsConfig): UseAuditLogsReturn {
       params.set("format", format);
       const res = await fetchApi(`${downloadEndpoint}?${params.toString()}`);
       if (!res.ok) {
-        toast.error(res.status === 429 ? td("rateLimited") : td("downloadError"));
+        if (res.status === 429) {
+          toast.error(td("rateLimited"));
+        } else if (res.status === 400) {
+          try {
+            const body = await res.json();
+            const details = body?.details ?? {};
+            // Map known validation keys to i18n messages
+            const msg =
+              details.date ? td("dateRequired")
+              : details.range ? td("maxRange")
+              : td("downloadError");
+            toast.error(msg);
+          } catch {
+            toast.error(td("downloadError"));
+          }
+        } else {
+          toast.error(td("downloadError"));
+        }
         return;
       }
       const ext = format === "csv" ? "csv" : "jsonl";
