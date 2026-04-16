@@ -142,11 +142,27 @@ vi.mock("./auth.config", () => ({
   default: { callbacks: {} },
 }));
 
-import { ensureTenantMembershipForSignIn } from "./auth";
+import { ensureTenantMembershipForSignIn, assertBootstrapSingleMember } from "./auth";
 
 // Capture the NextAuth call args at import time, before beforeEach clears mocks
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const nextAuthInitArgs = (mockNextAuth.mock.calls as any[])[0];
+
+describe("assertBootstrapSingleMember", () => {
+  it("does not throw when tenant has exactly one active member", async () => {
+    const countFn = vi.fn().mockResolvedValue(1);
+    const tx = { tenantMember: { count: countFn } } as unknown as Parameters<typeof assertBootstrapSingleMember>[0];
+    await expect(assertBootstrapSingleMember(tx, "tenant-1")).resolves.toBeUndefined();
+    expect(countFn).toHaveBeenCalledWith({
+      where: { tenantId: "tenant-1", deactivatedAt: null },
+    });
+  });
+
+  it("throws when tenant has more than one active member", async () => {
+    const tx = { tenantMember: { count: vi.fn().mockResolvedValue(2) } } as unknown as Parameters<typeof assertBootstrapSingleMember>[0];
+    await expect(assertBootstrapSingleMember(tx, "tenant-1")).rejects.toThrow(/Bootstrap migration aborted/);
+  });
+});
 
 describe("ensureTenantMembershipForSignIn", () => {
   beforeEach(() => {

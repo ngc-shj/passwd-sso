@@ -4,11 +4,7 @@ import { hashToken } from "@/lib/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
-
-// ─── Constants ────────────────────────────────────────────────
-
-/** Fallback userId for audit logs when token creator has left the team. */
-export const SCIM_SYSTEM_USER_ID = "system:scim";
+import { resolveAuditUserId } from "@/lib/constants/app";
 
 /** Minimum interval (ms) between lastUsedAt updates to reduce DB writes. */
 const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
@@ -19,8 +15,10 @@ export interface ValidatedScimToken {
   tokenId: string;
   tenantId: string;
   createdById: string | null;
-  /** Always non-null: createdById ?? SCIM_SYSTEM_USER_ID. */
+  /** Always non-null: createdById if present, otherwise SYSTEM_ACTOR_ID sentinel. */
   auditUserId: string;
+  /** HUMAN when token was created by a real user; SYSTEM when createdById is null. */
+  actorType: "HUMAN" | "SYSTEM";
 }
 
 export type ScimTokenValidationError =
@@ -52,7 +50,7 @@ function extractBearer(req: NextRequest): string | null {
  * 3. SHA-256 hash → DB lookup
  * 4. Check revokedAt / expiresAt
  * 5. Best-effort lastUsedAt update (throttled to 5-min intervals)
- * 6. Return tenantId + auditUserId (with SCIM_SYSTEM_USER_ID fallback)
+ * 6. Return tenantId + auditUserId (SYSTEM_ACTOR_ID sentinel when createdById is null)
  */
 export async function validateScimToken(
   req: NextRequest,
@@ -116,7 +114,8 @@ export async function validateScimToken(
       tokenId: token.id,
       tenantId: token.tenantId,
       createdById: token.createdById,
-      auditUserId: token.createdById ?? SCIM_SYSTEM_USER_ID,
+      auditUserId: resolveAuditUserId(token.createdById, "system"),
+      actorType: token.createdById ? ("HUMAN" as const) : ("SYSTEM" as const),
     },
   };
 }

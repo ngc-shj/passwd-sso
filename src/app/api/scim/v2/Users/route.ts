@@ -24,6 +24,7 @@ import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import {
   SCIM_PAGE_COUNT_MIN,
   SCIM_PAGE_COUNT_MAX,
@@ -38,7 +39,7 @@ async function handleGET(req: NextRequest) {
   }
   const { tenantId } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -135,9 +136,9 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) {
     return scimError(401, API_ERROR[result.error]);
   }
-  const { tenantId, auditUserId } = result.data;
+  const { tenantId, auditUserId, actorType } = result.data;
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   if (!(await checkScimRateLimit(tenantId))) {
@@ -241,6 +242,7 @@ async function handlePOST(req: NextRequest) {
       scope: AUDIT_SCOPE.TENANT,
       action: AUDIT_ACTION.SCIM_USER_CREATE,
       userId: auditUserId,
+      actorType,
       tenantId,
       targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: created.user.id,

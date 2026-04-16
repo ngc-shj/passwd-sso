@@ -17,6 +17,24 @@ function getAuthRouteBasePath(): string {
   return `${basePath}/api/auth`;
 }
 
+// Exported for unit testing; must be called inside a Prisma transaction.
+export async function assertBootstrapSingleMember(
+  tx: Parameters<Parameters<typeof prisma.$transaction>[0]>[0],
+  tenantId: string,
+): Promise<void> {
+  const activeCount = await tx.tenantMember.count({
+    where: { tenantId, deactivatedAt: null },
+  });
+  if (activeCount > 1) {
+    console.error(
+      `[AUTH_BOOTSTRAP] tenantId=${tenantId} blocked bootstrap migration: expected 1 active member, found ${activeCount}`,
+    );
+    throw new Error(
+      `Bootstrap migration aborted: tenant ${tenantId} has ${activeCount} active members (expected 1)`,
+    );
+  }
+}
+
 export async function ensureTenantMembershipForSignIn(
   userId: string,
   account?: Account | null,
@@ -57,6 +75,8 @@ export async function ensureTenantMembershipForSignIn(
       // Allow one-time migration from bootstrap tenant to IdP tenant.
       if (isBootstrapTenant) {
         await prisma.$transaction(async (tx) => {
+          await assertBootstrapSingleMember(tx, existingTenantId);
+
           // Migrate user and account rows
           await tx.user.update({
             where: { id: userId },

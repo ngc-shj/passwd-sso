@@ -7,6 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { prisma } from "@/lib/prisma";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 // GET /api/scim/v2/Schemas
 async function handleGET(req: NextRequest) {
@@ -20,7 +21,7 @@ async function handleGET(req: NextRequest) {
     return scimError(429, "Too many requests");
   }
 
-  const denied = await enforceAccessRestriction(req, "scim", tenantId);
+  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
   if (denied) return denied;
 
   return withTenantRls(prisma, tenantId, async () =>

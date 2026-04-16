@@ -28,8 +28,8 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 
 import {
   validateScimToken,
-  SCIM_SYSTEM_USER_ID,
 } from "./scim-token";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 // ─── Helpers ────────────────────────────────────────────────────
 
@@ -79,12 +79,13 @@ describe("validateScimToken", () => {
         tenantId: "tenant-1",
         createdById: "user-1",
         auditUserId: "user-1",
+        actorType: "HUMAN",
       },
     });
     expect(result.ok && result.data).not.toHaveProperty("teamId");
   });
 
-  it("falls back to SCIM_SYSTEM_USER_ID when createdById is null", async () => {
+  it("falls back to SYSTEM_ACTOR_ID when createdById is null", async () => {
     mockFindUnique.mockResolvedValue(makeToken({ createdById: null }));
 
     const result = await validateScimToken(bearerRequest("scim_abc123"));
@@ -94,7 +95,8 @@ describe("validateScimToken", () => {
       data: expect.objectContaining({
         tenantId: "tenant-1",
         createdById: null,
-        auditUserId: SCIM_SYSTEM_USER_ID,
+        auditUserId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
       }),
     });
   });

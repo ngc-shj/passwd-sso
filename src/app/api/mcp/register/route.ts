@@ -18,6 +18,7 @@ import {
   DCR_RATE_LIMIT_MAX,
 } from "@/lib/constants/mcp";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { withRequestLog } from "@/lib/with-request-log";
 
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,
@@ -55,7 +56,7 @@ const dcrSchema = z.object({
   scope: z.string().optional(), // Space-separated scopes (ignored, server controls scopes)
 });
 
-export async function POST(req: NextRequest) {
+async function handlePOST(req: NextRequest) {
   // Rate limit by client IP (/64 prefix for IPv6)
   const ip = extractClientIp(req);
   const rl = await dcrRateLimiter.check(
@@ -198,3 +199,5 @@ export async function POST(req: NextRequest) {
 }
 
 class CapExceededError extends Error {}
+
+export const POST = withRequestLog(handlePOST);

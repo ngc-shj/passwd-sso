@@ -64,6 +64,7 @@ export {
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   TEAM_WEBHOOK_EVENT_GROUPS,
   TENANT_WEBHOOK_EVENT_GROUPS,
+  mergeActionGroups,
 } from "./audit";
 export type { AuditScopeValue, AuditActionValue } from "./audit";
 
