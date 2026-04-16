@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest, createParams } from "@/__tests__/helpers/request-builder";
+import { AUDIT_LOG_MAX_ROWS, AUDIT_LOG_BATCH_SIZE } from "@/lib/validations/common.server";
 
 const { mockAuth, mockPrismaAuditLog, mockPrismaUser, mockRequireTeamPermission, TeamAuthError, mockWithTeamTenantRls, mockLogAudit, mockExtractRequestMeta, mockAssertPolicyAllowsExport, PolicyViolationError, mockCheckRateLimit } = vi.hoisted(() => {
   class _TeamAuthError extends Error {
@@ -176,7 +177,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
   it("returns 400 for invalid action filters", async () => {
     const res = await GET(
       createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
-        searchParams: { actions: "ENTRY_CREATE,NOT_REAL" },
+        searchParams: { actions: "ENTRY_CREATE,NOT_REAL", from: "2025-06-01", to: "2025-06-30" },
       }),
       createParams({ teamId: TEAM_ID }),
     );
@@ -187,6 +188,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     const logEntry = {
       id: "log-1",
       userId: "u1",
+      actorType: "HUMAN",
       action: "ENTRY_CREATE",
       targetType: "password",
       targetId: "pw-1",
@@ -217,6 +219,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     expect(parsed.id).toBe("log-1");
     expect(parsed.action).toBe("ENTRY_CREATE");
     expect(parsed.user.email).toBe("test@example.com");
+    expect(parsed.actorType).toBe("HUMAN");
   });
 
   it("streams CSV format when requested", async () => {
@@ -246,6 +249,7 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
     const lines = text.trim().split("\n");
     expect(lines).toHaveLength(2); // header + 1 data row
     expect(lines[0]).toContain("id,action");
+    expect(lines[0]).toContain("actorType");
   });
 
   it("paginates when a full batch is returned", async () => {
@@ -301,5 +305,48 @@ describe("GET /api/teams/[teamId]/audit-logs/download", () => {
         teamId: TEAM_ID,
       }),
     );
+  });
+
+  it("returns 400 when neither from nor to is provided", async () => {
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`),
+      createParams({ teamId: TEAM_ID }),
+    );
+    expect(res.status).toBe(400);
+    const json = await res.json();
+    expect(json.details.date).toMatch(/from.*to|to.*from/i);
+  });
+
+  it("stops fetching after AUDIT_LOG_MAX_ROWS are reached", async () => {
+    const maxBatches = AUDIT_LOG_MAX_ROWS / AUDIT_LOG_BATCH_SIZE;
+    const fullBatch = Array.from({ length: AUDIT_LOG_BATCH_SIZE }, (_, index) => ({
+      id: `log-${index}`,
+      userId: "u1",
+      actorType: "HUMAN",
+      action: "ENTRY_CREATE",
+      targetType: null,
+      targetId: null,
+      metadata: null,
+      ip: null,
+      userAgent: null,
+      createdAt: new Date("2025-06-01T00:00:00Z"),
+    }));
+
+    let callCount = 0;
+    mockPrismaAuditLog.findMany.mockImplementation(async () => {
+      callCount++;
+      return fullBatch;
+    });
+
+    const res = await GET(
+      createRequest("GET", `http://localhost:3000/api/teams/${TEAM_ID}/audit-logs/download`, {
+        searchParams: { from: "2025-06-01", to: "2025-06-30" },
+      }),
+      createParams({ teamId: TEAM_ID }),
+    );
+    await streamToString(res);
+
+    expect(callCount).toBe(maxBatches);
+    expect(mockPrismaAuditLog.findMany).toHaveBeenCalledTimes(maxBatches);
   });
 });

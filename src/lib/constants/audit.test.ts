@@ -11,7 +11,60 @@ import {
   TEAM_WEBHOOK_EVENT_GROUPS,
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
+  mergeActionGroups,
 } from "@/lib/constants";
+
+describe("mergeActionGroups", () => {
+  it("merges duplicate key group:admin with Set-based union", () => {
+    const result = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+    const adminActions = result[AUDIT_ACTION_GROUP.ADMIN];
+
+    // Must contain actions from TENANT side
+    expect(adminActions).toContain(AUDIT_ACTION.TENANT_ROLE_UPDATE);
+    expect(adminActions).toContain(AUDIT_ACTION.ACCESS_DENIED);
+    expect(adminActions).toContain(AUDIT_ACTION.HISTORY_PURGE);
+
+    // Must contain actions from TEAM side
+    expect(adminActions).toContain(AUDIT_ACTION.MASTER_KEY_ROTATION);
+    expect(adminActions).toContain(AUDIT_ACTION.VAULT_KEY_ROTATION);
+    expect(adminActions).toContain(AUDIT_ACTION.TEAM_KEY_ROTATION);
+
+    // No duplicates (Set-based union)
+    expect(new Set(adminActions).size).toBe(adminActions.length);
+  });
+
+  it("merges duplicate key group:scim preserving all actions", () => {
+    const result = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+    const scimActions = result[AUDIT_ACTION_GROUP.SCIM];
+
+    // Both sides have the same 8 SCIM actions — union is idempotent
+    const tenantScim = AUDIT_ACTION_GROUPS_TENANT[AUDIT_ACTION_GROUP.SCIM];
+    const teamScim = AUDIT_ACTION_GROUPS_TEAM[AUDIT_ACTION_GROUP.SCIM];
+    const expectedUnion = [...new Set([...tenantScim, ...teamScim])];
+
+    expect(scimActions).toEqual(expectedUnion);
+    expect(new Set(scimActions).size).toBe(scimActions.length);
+  });
+
+  it("preserves unique keys from both sources", () => {
+    const result = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+
+    // Keys only in TENANT
+    expect(result[AUDIT_ACTION_GROUP.DIRECTORY_SYNC]).toBeDefined();
+    expect(result[AUDIT_ACTION_GROUP.BREAKGLASS]).toBeDefined();
+    expect(result[AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]).toBeDefined();
+
+    // Keys only in TEAM
+    expect(result[AUDIT_ACTION_GROUP.WEBHOOK]).toBeDefined();
+    expect(result[AUDIT_ACTION_GROUP.TEAM]).toBeDefined();
+    expect(result[AUDIT_ACTION_GROUP.ENTRY]).toBeDefined();
+  });
+
+  it("handles empty input", () => {
+    const result = mergeActionGroups();
+    expect(result).toEqual({});
+  });
+});
 
 describe("audit constants", () => {
   it("has AUDIT_ACTION_VALUES aligned with AUDIT_ACTION", () => {

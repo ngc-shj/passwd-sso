@@ -154,7 +154,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         let hasMore = true;
         let totalRows = 0;
 
-        while (hasMore) {
+        while (hasMore && totalRows < AUDIT_LOG_MAX_ROWS) {
           const remaining = AUDIT_LOG_MAX_ROWS - totalRows;
           const batchSize = Math.min(AUDIT_LOG_BATCH_SIZE, remaining);
 

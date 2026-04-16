@@ -338,8 +338,9 @@ async function handleGET(req: NextRequest) {
 
   return NextResponse.json({
     ok,
+    truncated,
     ...(reason ? { reason } : {}),
-    ...(truncated ? { truncated, verifiedUpToSeq } : {}),
+    ...(verifiedUpToSeq !== undefined ? { verifiedUpToSeq } : {}),
     firstTamperedSeq,
     firstGapAfterSeq,
     firstTimestampViolationSeq,
