@@ -32,6 +32,7 @@ DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config \
 |--------|----------|
 | `share-access-audit.ts` | Anonymous share-link access writes `audit_logs` directly (userId=NULL, actor_type=SYSTEM) and does **not** enter the outbox |
 | `test-delivery-targets.sh` | Audit delivery target CRUD — grabs an active session token from the DB and exercises the `/api/tenant/audit-delivery-targets` endpoints |
+| `test-codebase-review-fixes.sh` | Codebase review fixes (#379) — team download date boundary, CSV actorType column, chain-verify truncation, admin audit SYSTEM_ACTOR_ID |
 
 ### `test-delivery-targets.sh` — additional prerequisites
 
