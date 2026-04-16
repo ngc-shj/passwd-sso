@@ -19,18 +19,32 @@
 
 set -euo pipefail
 
+# Load .env.local if present (provides ADMIN_API_TOKEN, AUTH_URL, etc.)
+if [ -f .env.local ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env.local
+  set +a
+fi
+
 BASE="https://localhost:3001/passwd-sso"
 ADMIN_API_TOKEN="${ADMIN_API_TOKEN:-}"
 OPERATOR_ID="${OPERATOR_ID:-}"
 
-# Get session token from DB
+# Get session token and user ID from DB
 TOKEN=$(docker compose -f docker-compose.yml exec -T db \
   psql -U passwd_user -d passwd_sso -tA \
   -c "SELECT session_token FROM sessions WHERE expires > NOW() ORDER BY expires DESC LIMIT 1;" | tr -d '\r\n')
 COOKIE="__Secure-authjs.session-token=$TOKEN"
 
-ORIGIN=$(grep -m1 "^AUTH_URL=" .env.local | cut -d= -f2- | tr -d '\r\n')
-: "${ORIGIN:=https://localhost:3001}"
+# Auto-detect OPERATOR_ID from the active session if not set
+if [ -z "$OPERATOR_ID" ]; then
+  OPERATOR_ID=$(docker compose -f docker-compose.yml exec -T db \
+    psql -U passwd_user -d passwd_sso -tA \
+    -c "SELECT user_id FROM sessions WHERE session_token = '$TOKEN';" | tr -d '\r\n')
+fi
+
+: "${ORIGIN:=${AUTH_URL:-https://localhost:3001}}"
 
 api() {
   local method=$1 path=$2; shift 2
@@ -64,6 +78,10 @@ echo "=== Codebase Review Fixes Manual Tests ==="
 echo "  Team ID: ${TEAM_ID:-<none>}"
 echo "  Operator: ${OPERATOR_ID:-<not set>}"
 
+# Use a 30-day window that is valid for all date-bounded tests
+DATE_FROM=$(date -d "30 days ago" +%Y-%m-%d 2>/dev/null || date -v-30d +%Y-%m-%d)
+DATE_TO=$(date +%Y-%m-%d)
+
 # ── 1. Team audit download: 400 when no date params ──────────
 echo ""
 echo "▸ Finding 1: Team download — no date params → 400"
@@ -75,21 +93,25 @@ else
   fail "No team found in DB — skipped"
 fi
 
+sleep 2  # avoid rate limit
+
 # ── 2. Team audit download: 200 with date params ─────────────
 echo ""
 echo "▸ Finding 1: Team download — with date params → 200"
 if [ -n "$TEAM_ID" ]; then
-  STATUS=$(api GET "/api/teams/$TEAM_ID/audit-logs/download?from=2025-01-01&to=2025-12-31" \
+  STATUS=$(api GET "/api/teams/$TEAM_ID/audit-logs/download?from=$DATE_FROM&to=$DATE_TO" \
     -o /dev/null -w "%{http_code}")
   [ "$STATUS" = "200" ] && pass "Returned 200 with date params" || fail "Expected 200, got $STATUS"
 else
   fail "No team found in DB — skipped"
 fi
 
+sleep 2  # avoid rate limit
+
 # ── 3. Audit download CSV includes actorType column ──────────
 echo ""
 echo "▸ Finding 4: Audit download CSV — actorType in header"
-BODY=$(api GET "/api/audit-logs/download?format=csv&from=2025-01-01&to=2025-12-31" 2>/dev/null || echo "")
+BODY=$(api GET "/api/audit-logs/download?format=csv&from=$DATE_FROM&to=$DATE_TO" 2>/dev/null || echo "")
 HEADER=$(echo "$BODY" | head -1)
 if echo "$HEADER" | grep -q "actorType"; then
   pass "CSV header includes actorType"
