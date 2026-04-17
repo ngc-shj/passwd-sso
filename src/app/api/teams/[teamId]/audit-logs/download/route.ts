@@ -4,8 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/team-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
-import { assertPolicyAllowsExport } from "@/lib/team-policy";
-import { PolicyViolationError } from "@/lib/team-policy";
+import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team-policy";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   TEAM_PERMISSION,
@@ -15,8 +14,8 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
-import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
+import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { parseActionsCsvParam, parseActorType } from "@/lib/audit-query";
 import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
@@ -71,10 +70,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   // Require at least one date boundary
   if (!from && !to) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { date: "At least 'from' or 'to' is required for download" } },
-      { status: 400 },
-    );
+    return validationError({ date: "At least 'from' or 'to' is required for download" });
   }
 
   // Validate date range
@@ -82,26 +78,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
     const fromDate = from ? new Date(from) : undefined;
     const toDate = to ? new Date(to) : undefined;
     if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { date: "Invalid date format" } },
-        { status: 400 },
-      );
+      return validationError({ date: "Invalid date format" });
     }
     const now = new Date();
     const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
     const resolvedTo = toDate ?? now;
     const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
     if (diffMs < 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { date: "'from' must be before 'to'" } },
-        { status: 400 },
-      );
+      return validationError({ date: "'from' must be before 'to'" });
     }
     if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` } },
-        { status: 400 },
-      );
+      return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
     }
   }
 
@@ -111,16 +98,12 @@ async function handleGET(req: NextRequest, { params }: Params) {
     ...(validActorType ? { actorType: validActorType } : {}),
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a));
-    if (invalid.length > 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { actions: invalid } },
-        { status: 400 },
-      );
-    }
-    where.action = { in: requested as AuditAction[] };
+  const parsedActions = parseActionsCsvParam(actionsParam);
+  if ("invalid" in parsedActions) {
+    return validationError({ actions: parsedActions.invalid });
+  }
+  if (parsedActions.actions.length > 0) {
+    where.action = { in: parsedActions.actions };
   }
 
   if (from || to) {

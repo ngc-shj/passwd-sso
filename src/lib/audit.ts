@@ -13,7 +13,7 @@ import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit-l
 import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/ip-access";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
@@ -247,8 +247,6 @@ export function extractRequestMeta(req: NextRequest): {
 // the fields that vary (action, target, metadata). Omitting `scope` or
 // `extractRequestMeta(req)` at a call site is a common mistake — these
 // helpers make it impossible.
-
-import { AUDIT_SCOPE } from "@/lib/constants/audit";
 
 /** Build the invariant part of a PERSONAL-scope audit log payload. */
 export function personalAuditBase(req: NextRequest, userId: string) {

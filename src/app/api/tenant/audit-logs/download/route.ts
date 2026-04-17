@@ -9,7 +9,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { VALID_ACTIONS } from "@/lib/audit-query";
+import { parseActionsCsvParam } from "@/lib/audit-query";
 import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import type { AuditAction } from "@prisma/client";
 import {
@@ -80,13 +80,12 @@ async function handleGET(req: NextRequest) {
     tenantId: actor.tenantId,
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a));
-    if (invalid.length > 0) {
-      return validationError({ actions: invalid });
-    }
-    where.action = { in: requested as AuditAction[] };
+  const parsedActions = parseActionsCsvParam(actionsParam);
+  if ("invalid" in parsedActions) {
+    return validationError({ actions: parsedActions.invalid });
+  }
+  if (parsedActions.actions.length > 0) {
+    where.action = { in: parsedActions.actions };
   }
 
   where.createdAt = {

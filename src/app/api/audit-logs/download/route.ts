@@ -11,7 +11,7 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { VALID_ACTIONS } from "@/lib/audit-query";
+import { parseActionsCsvParam } from "@/lib/audit-query";
 import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
@@ -67,13 +67,12 @@ async function handleGET(req: NextRequest) {
     userId: session.user.id,
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a));
-    if (invalid.length > 0) {
-      return validationError({ actions: invalid });
-    }
-    where.action = { in: requested as AuditAction[] };
+  const parsedActions = parseActionsCsvParam(actionsParam);
+  if ("invalid" in parsedActions) {
+    return validationError({ actions: parsedActions.invalid });
+  }
+  if (parsedActions.actions.length > 0) {
+    where.action = { in: parsedActions.actions };
   }
 
   if (from || to) {

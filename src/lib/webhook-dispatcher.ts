@@ -60,12 +60,6 @@ interface WebhookRecord {
 const RETRY_DELAYS = [1_000, 5_000, 25_000];
 const USER_AGENT = "passwd-sso-webhook/1.0";
 
-/**
- * @deprecated Use EXTERNAL_DELIVERY_METADATA_BLOCKLIST from external-http.ts instead.
- * Re-exported for backward compatibility.
- */
-export const WEBHOOK_METADATA_BLOCKLIST = EXTERNAL_DELIVERY_METADATA_BLOCKLIST;
-
 // ─── Helpers ────────────────────────────────────────────────────
 
 function computeHmac(secret: string, payload: string): string {

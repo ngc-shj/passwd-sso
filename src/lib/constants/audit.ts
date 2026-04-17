@@ -619,7 +619,7 @@ export const TENANT_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
 
 export const TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
   TENANT_WEBHOOK_EVENT_GROUPS,
-).flat() as unknown as readonly AuditAction[];
+).flat() as AuditAction[];
 
 /**
  * Event groups subscribable via team webhooks.
@@ -657,7 +657,7 @@ export const TEAM_WEBHOOK_EVENT_GROUPS: Record<string, AuditAction[]> = {
 
 export const TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS = Object.values(
   TEAM_WEBHOOK_EVENT_GROUPS,
-).flat() as unknown as readonly AuditAction[];
+).flat() as AuditAction[];
 
 export const AUDIT_METADATA_KEY = {
   HISTORY_ID: "historyId",
