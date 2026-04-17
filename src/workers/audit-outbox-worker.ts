@@ -949,6 +949,18 @@ export function createWorker(config: WorkerConfig) {
 
     log.info({ count: rows.length }, "worker.batch_claimed");
 
+    // Cache checkChainEnabled per tenant within a batch to avoid
+    // one DB round-trip per row (the flag rarely changes mid-batch).
+    const chainEnabledCache = new Map<string, boolean>();
+    async function getChainEnabled(tenantId: string | null): Promise<boolean> {
+      if (!tenantId) return false;
+      const cached = chainEnabledCache.get(tenantId);
+      if (cached !== undefined) return cached;
+      const enabled = await checkChainEnabled(workerPrisma, tenantId);
+      chainEnabledCache.set(tenantId, enabled);
+      return enabled;
+    }
+
     for (const row of rows) {
       let payload: AuditOutboxPayload;
 
@@ -996,7 +1008,7 @@ export function createWorker(config: WorkerConfig) {
       }
 
       try {
-        const chainEnabled = await checkChainEnabled(workerPrisma, row.tenant_id);
+        const chainEnabled = await getChainEnabled(row.tenant_id);
         if (chainEnabled) {
           await deliverRowWithChain(workerPrisma, row, payload);
         } else {
