@@ -90,6 +90,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 }));
 
 import { GET, POST } from "./route";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const TENANT_ID = "tenant-1";
 const ACTOR_USER_ID = "test-user-id";
@@ -117,7 +118,7 @@ const TARGET_MEMBER = {
 };
 
 const NOW = new Date();
-const FUTURE = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
+const FUTURE = new Date(NOW.getTime() + MS_PER_DAY);
 
 const makeGrant = (overrides: Record<string, unknown> = {}) => ({
   id: GRANT_ID,

@@ -7,6 +7,7 @@
 
 import { loadCredentials, saveCredentials, loadConfig } from "./config.js";
 import { refreshTokenGrant } from "./oauth.js";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "./time.js";
 
 let cachedToken: string | null = null;
 let cachedExpiresAt: number | null = null;
@@ -72,7 +73,7 @@ export interface ApiResponse<T = unknown> {
   data: T;
 }
 
-const REFRESH_BUFFER_MS = 2 * 60 * 1000;
+const REFRESH_BUFFER_MS = 2 * MS_PER_MINUTE;
 
 function isTokenExpiringSoon(): boolean {
   if (!cachedExpiresAt) return false;
@@ -87,7 +88,7 @@ async function refreshToken(): Promise<boolean> {
     const result = await refreshTokenGrant(baseUrl, cachedRefreshToken, cachedClientId);
     if (!result || !result.refreshToken) return false;
 
-    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + result.expiresIn * MS_PER_SECOND).toISOString();
 
     saveCredentials({
       accessToken: result.accessToken,
@@ -159,7 +160,7 @@ export async function apiRequest<T = unknown>(
 
 // ─── Background Token Refresh Timer ─────────────────────────
 
-const BG_REFRESH_INTERVAL_MS = 50 * 60 * 1000;
+const BG_REFRESH_INTERVAL_MS = 50 * MS_PER_MINUTE;
 
 let bgRefreshTimer: ReturnType<typeof setInterval> | null = null;
 

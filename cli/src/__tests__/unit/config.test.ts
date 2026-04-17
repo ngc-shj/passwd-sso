@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { MS_PER_HOUR } from "../../lib/time.js";
 
 const origEnv = { ...process.env };
 
@@ -82,7 +83,7 @@ describe("credentials", () => {
     accessToken: "mcp_test_access",
     refreshToken: "mcpr_test_refresh",
     clientId: "mcpc_test_client",
-    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+    expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
   };
 
   it("saves and loads credentials with all 4 fields", () => {

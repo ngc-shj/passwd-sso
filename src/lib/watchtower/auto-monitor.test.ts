@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { shouldAutoCheck, hasNewBreaches } from "./auto-monitor";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
 describe("shouldAutoCheck", () => {
   const now = Date.now();
@@ -9,7 +10,7 @@ describe("shouldAutoCheck", () => {
       shouldAutoCheck({
         enabled: true,
         vaultUnlocked: true,
-        lastCheckAt: now - 25 * 60 * 60 * 1000,
+        lastCheckAt: now - 25 * MS_PER_HOUR,
         now,
       }),
     ).toBe(true);
@@ -31,7 +32,7 @@ describe("shouldAutoCheck", () => {
       shouldAutoCheck({
         enabled: false,
         vaultUnlocked: true,
-        lastCheckAt: now - 25 * 60 * 60 * 1000,
+        lastCheckAt: now - 25 * MS_PER_HOUR,
         now,
       }),
     ).toBe(false);
@@ -42,7 +43,7 @@ describe("shouldAutoCheck", () => {
       shouldAutoCheck({
         enabled: true,
         vaultUnlocked: false,
-        lastCheckAt: now - 25 * 60 * 60 * 1000,
+        lastCheckAt: now - 25 * MS_PER_HOUR,
         now,
       }),
     ).toBe(false);
@@ -53,7 +54,7 @@ describe("shouldAutoCheck", () => {
       shouldAutoCheck({
         enabled: true,
         vaultUnlocked: true,
-        lastCheckAt: now - 1 * 60 * 60 * 1000,
+        lastCheckAt: now - 1 * MS_PER_HOUR,
         now,
       }),
     ).toBe(false);
@@ -64,7 +65,7 @@ describe("shouldAutoCheck", () => {
       shouldAutoCheck({
         enabled: true,
         vaultUnlocked: true,
-        lastCheckAt: now - 24 * 60 * 60 * 1000,
+        lastCheckAt: now - MS_PER_DAY,
         now,
       }),
     ).toBe(true);
@@ -75,7 +76,7 @@ describe("shouldAutoCheck", () => {
       shouldAutoCheck({
         enabled: true,
         vaultUnlocked: true,
-        lastCheckAt: now - (24 * 60 * 60 * 1000 - 60_000),
+        lastCheckAt: now - (MS_PER_DAY - 60_000),
         now,
       }),
     ).toBe(false);

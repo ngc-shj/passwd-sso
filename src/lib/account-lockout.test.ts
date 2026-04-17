@@ -58,6 +58,7 @@ vi.mock("@/lib/lockout-admin-notify", () => ({
 }));
 
 import { checkLockout, recordFailure, resetLockout, invalidateLockoutThresholdCache } from "./account-lockout";
+import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
 describe("checkLockout", () => {
   beforeEach(() => {
@@ -184,7 +185,7 @@ describe("recordFailure", () => {
     // Simulates: existing 48h lock should not be replaced by a shorter 15min lock.
     // This verifies the max(existing, new) logic, not actual concurrent transactions
     // (which require integration tests with real DB row locking).
-    const farFuture = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48h from now
+    const farFuture = new Date(Date.now() + 48 * MS_PER_HOUR); // 48h from now
     setupTransaction({
       failed_unlock_attempts: 4,
       last_failed_unlock_at: new Date(),
@@ -235,7 +236,7 @@ describe("recordFailure", () => {
   });
 
   it("resets counter when lastFailedUnlockAt is older than 24h (observation window)", async () => {
-    const oldDate = new Date(Date.now() - 25 * 60 * 60 * 1000); // 25h ago
+    const oldDate = new Date(Date.now() - 25 * MS_PER_HOUR); // 25h ago
     setupTransaction({
       failed_unlock_attempts: 14,
       last_failed_unlock_at: oldDate,
@@ -397,7 +398,7 @@ describe("recordFailure", () => {
 
   it("keeps existing lock when it is still active and new attempts do not reach threshold", async () => {
     // existingLockedUntil is set and still active, newLockedUntil is null → keep existing
-    const activeLock = new Date(Date.now() + 60 * 60 * 1000); // 1h from now
+    const activeLock = new Date(Date.now() + MS_PER_HOUR); // 1h from now
     setupTransaction({
       failed_unlock_attempts: 1,
       last_failed_unlock_at: new Date(),
@@ -540,7 +541,7 @@ describe("getLockoutThresholds (via recordFailure with tenantId)", () => {
     expect(result!.attempts).toBe(3);
     expect(result!.locked).toBe(true);
     // 30min lock from custom threshold1
-    const expectedLockMs = 30 * 60 * 1000;
+    const expectedLockMs = 30 * MS_PER_MINUTE;
     expect(result!.lockedUntil).toBeInstanceOf(Date);
     expect(Math.abs(result!.lockedUntil!.getTime() - (Date.now() + expectedLockMs))).toBeLessThan(5000);
   });

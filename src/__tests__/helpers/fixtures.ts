@@ -1,4 +1,5 @@
 import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
+import { MS_PER_DAY } from "@/lib/constants/time";
 /**
  * Test data factories for creating mock database records.
  */
@@ -99,7 +100,7 @@ export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
     role: TEAM_ROLE.MEMBER,
     status: INVITATION_STATUS.PENDING,
     token: "token-abc-123",
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 7 * MS_PER_DAY),
     invitedById: "test-user-id",
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -113,7 +114,7 @@ export function makeSession(overrides: Record<string, unknown> = {}) {
     sessionToken: "token-abc",
     userId: "test-user-id",
     tenantId: "tenant-1",
-    expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    expires: new Date(Date.now() + MS_PER_DAY),
     ...overrides,
   };
 }
@@ -125,7 +126,7 @@ export function makeExtensionToken(overrides: Record<string, unknown> = {}) {
     tenantId: "tenant-1",
     tokenHash: "a".repeat(64),
     revokedAt: null as Date | null,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 7 * MS_PER_DAY),
     createdAt: new Date(),
     ...overrides,
   };

@@ -29,40 +29,38 @@ async function handleGET(req: NextRequest) {
     return handleAuthError(err);
   }
 
-  const members = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findMany({
-      where: { tenantId: actor.tenantId },
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        deactivatedAt: true,
-        scimManaged: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
+  const [members, pendingCounts] = await withTenantRls(prisma, actor.tenantId, async () =>
+    Promise.all([
+      prisma.tenantMember.findMany({
+        where: { tenantId: actor.tenantId },
+        select: {
+          id: true,
+          userId: true,
+          role: true,
+          deactivatedAt: true,
+          scimManaged: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: "asc" },
-    }),
-  );
-
-  // Count pending resets per member
-  const pendingCounts = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.groupBy({
-      by: ["targetUserId"],
-      where: {
-        tenantId: actor.tenantId,
-        executedAt: null,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      _count: true,
-    }),
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.adminVaultReset.groupBy({
+        by: ["targetUserId"],
+        where: {
+          tenantId: actor.tenantId,
+          executedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        _count: true,
+      }),
+    ]),
   );
 
   const pendingMap = new Map(

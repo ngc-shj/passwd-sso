@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createShareAccessToken, verifyShareAccessToken } from "./share-access-token";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 describe("share-access-token", () => {
   afterEach(() => {
@@ -48,7 +49,7 @@ describe("share-access-token", () => {
     const token = createShareAccessToken("share-1");
 
     // Advance 6 minutes (past 5-min TTL)
-    vi.spyOn(Date, "now").mockReturnValue(start + 6 * 60 * 1000);
+    vi.spyOn(Date, "now").mockReturnValue(start + 6 * MS_PER_MINUTE);
     expect(verifyShareAccessToken(token, "share-1")).toBe(false);
 
     vi.spyOn(Date, "now").mockReturnValue(realNow());
@@ -62,7 +63,7 @@ describe("share-access-token", () => {
     const token = createShareAccessToken("share-1");
 
     // Advance 4 minutes (within 5-min TTL)
-    vi.spyOn(Date, "now").mockReturnValue(start + 4 * 60 * 1000);
+    vi.spyOn(Date, "now").mockReturnValue(start + 4 * MS_PER_MINUTE);
     expect(verifyShareAccessToken(token, "share-1")).toBe(true);
 
     vi.spyOn(Date, "now").mockReturnValue(realNow());
@@ -71,7 +72,7 @@ describe("share-access-token", () => {
   it("accepts a token at exactly the TTL boundary (> not >=)", () => {
     const realNow = Date.now;
     const start = realNow();
-    const TTL_MS = 5 * 60 * 1000;
+    const TTL_MS = 5 * MS_PER_MINUTE;
 
     vi.spyOn(Date, "now").mockReturnValue(start);
     const token = createShareAccessToken("share-1");

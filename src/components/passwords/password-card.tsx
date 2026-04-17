@@ -276,48 +276,33 @@ export function PasswordCard({
   };
 
   const fetchIdentityField = async (field: "idNumber"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchBankField = async (field: "accountNumber" | "routingNumber"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchLicenseField = async (field: "licenseKey"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchSshField = async (field: "fingerprint" | "publicKey"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchCardField = async (field: "cardNumber" | "cvv"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   // Clear cached detail and loading state when collapsed
@@ -479,12 +464,9 @@ export function PasswordCard({
   };
 
   const fetchPasskeyField = async (field: "credentialId" | "username"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const handleCopyCredentialId = async () => {

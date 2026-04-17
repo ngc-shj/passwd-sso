@@ -64,9 +64,12 @@ async function handleGET(req: NextRequest) {
   if (!trashOnly) {
     const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
     await withUserTenantRls(userId, async () => {
+      // Cap per-request cleanup to avoid pathological cases (very old users with
+      // thousands of trashed entries); remaining entries purged on next load.
       const staleEntries = await prisma.passwordEntry.findMany({
         where: { userId, deletedAt: { lt: thirtyDaysAgo } },
         select: { id: true },
+        take: 500,
       });
       if (staleEntries.length === 0) return;
 

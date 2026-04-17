@@ -7,6 +7,7 @@ import { loadConfig, saveConfig, loadCredentials, saveCredentials } from "../lib
 import { setTokenCache } from "../lib/api-client.js";
 import { runOAuthFlow, revokeTokenRequest, validateServerUrl } from "../lib/oauth.js";
 import * as output from "../lib/output.js";
+import { MS_PER_MINUTE, MS_PER_SECOND } from "../lib/time.js";
 
 async function prompt(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -76,7 +77,7 @@ async function oauthLogin(serverUrl: string): Promise<void> {
   try {
     const result = await runOAuthFlow(serverUrl);
 
-    const expiresAt = new Date(Date.now() + result.expiresIn * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + result.expiresIn * MS_PER_SECOND).toISOString();
     saveCredentials({
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
@@ -104,7 +105,8 @@ async function manualTokenLogin(serverUrl: string): Promise<void> {
     return;
   }
 
-  const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+  // 15 minutes — rough default for manually-pasted tokens; server re-verifies expiry
+  const expiresAt = new Date(Date.now() + 15 * MS_PER_MINUTE).toISOString();
   saveCredentials({
     accessToken: token,
     refreshToken: "",

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MS_PER_MINUTE, MS_PER_HOUR } from "../../lib/time.js";
 
 // Mock config
 vi.mock("../../lib/config.js", () => ({
@@ -69,7 +70,7 @@ describe("apiRequest", () => {
   it("attempts token refresh on 401 via OAuth refresh_token grant", async () => {
     // Set up OAuth credentials with refresh token
     clearTokenCache();
-    setTokenCache("old-token", new Date(Date.now() + 60 * 60 * 1000).toISOString(), "mcpr_refresh123", "mcpc_client123");
+    setTokenCache("old-token", new Date(Date.now() + MS_PER_HOUR).toISOString(), "mcpr_refresh123", "mcpc_client123");
 
     // First call returns 401
     mockFetch.mockResolvedValueOnce({
@@ -125,7 +126,7 @@ describe("apiRequest", () => {
 
   it("returns 401 response when refresh also fails", async () => {
     clearTokenCache();
-    setTokenCache("old-token", new Date(Date.now() + 60 * 60 * 1000).toISOString(), "mcpr_refresh", "mcpc_client");
+    setTokenCache("old-token", new Date(Date.now() + MS_PER_HOUR).toISOString(), "mcpr_refresh", "mcpc_client");
 
     // First call: 401
     mockFetch.mockResolvedValueOnce({
@@ -149,7 +150,7 @@ describe("apiRequest", () => {
   it("proactively refreshes when token is expiring soon", async () => {
     clearTokenCache();
     // Set token with expiresAt within the 2-min refresh buffer
-    const soonExpiry = new Date(Date.now() + 60 * 1000).toISOString();
+    const soonExpiry = new Date(Date.now() + MS_PER_MINUTE).toISOString();
     setTokenCache("old-token", soonExpiry, "mcpr_refresh_old", "mcpc_client123");
 
     // Refresh call: OAuth token endpoint
@@ -194,7 +195,7 @@ describe("apiRequest", () => {
   it("skips refresh when no refresh token cached (--token login)", async () => {
     clearTokenCache();
     // Manual token login: no refresh token
-    setTokenCache("manual-token", new Date(Date.now() + 60 * 1000).toISOString());
+    setTokenCache("manual-token", new Date(Date.now() + MS_PER_MINUTE).toISOString());
 
     // API call returns 401
     mockFetch.mockResolvedValueOnce({

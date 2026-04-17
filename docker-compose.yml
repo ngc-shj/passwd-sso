@@ -47,15 +47,15 @@ services:
     # Do NOT expose port 5432 to host in production
 
   jackson:
-    image: boxyhq/jackson:latest
+    image: boxyhq/jackson:1.49.4
     environment:
-      JACKSON_API_KEYS: ${JACKSON_API_KEY:-secret}
+      JACKSON_API_KEYS: ${JACKSON_API_KEY:?JACKSON_API_KEY is required}
       DB_ENGINE: sql
       DB_TYPE: postgres
       DB_URL: postgresql://passwd_user:passwd_pass@db:5432/jackson
       NEXTAUTH_URL: http://localhost:5225
       EXTERNAL_URL: http://localhost:5225
-      NEXTAUTH_SECRET: ${AUTH_SECRET:-secret}
+      NEXTAUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET is required}
       NEXTAUTH_ACL: "*"
     depends_on:
       db:

@@ -28,9 +28,10 @@ vi.mock("./recovery-key-dialog", () => ({
 }));
 
 import { isDismissedInStorage } from "./recovery-key-banner";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
 const DISMISS_KEY = "psso:recovery-key-banner-dismissed";
-const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+const TWENTY_FOUR_HOURS = MS_PER_DAY;
 
 describe("isDismissedInStorage", () => {
   beforeEach(() => {
@@ -48,7 +49,7 @@ describe("isDismissedInStorage", () => {
   });
 
   it("returns true when dismissed less than 24h ago", () => {
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const oneHourAgo = Date.now() - MS_PER_HOUR;
     storageMap.set(DISMISS_KEY, String(oneHourAgo));
     expect(isDismissedInStorage()).toBe(true);
   });

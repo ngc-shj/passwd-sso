@@ -63,6 +63,7 @@ function restoreEnv() {
 
 import { POST } from "./route";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 function createRequest(
   body: unknown,
@@ -201,7 +202,7 @@ describe("POST /api/maintenance/purge-history", () => {
     await POST(req);
 
     const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
-    const expectedMs = 90 * 24 * 60 * 60 * 1000;
+    const expectedMs = 90 * MS_PER_DAY;
     const expectedDate = new Date(Date.now() - expectedMs);
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
   });
@@ -217,7 +218,7 @@ describe("POST /api/maintenance/purge-history", () => {
     await POST(req);
 
     const cutoff = mockDeleteMany.mock.calls[0][0].where.changedAt.lt as Date;
-    const expectedMs = 30 * 24 * 60 * 60 * 1000;
+    const expectedMs = 30 * MS_PER_DAY;
     const expectedDate = new Date(Date.now() - expectedMs);
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
   });
@@ -245,7 +246,7 @@ describe("POST /api/maintenance/purge-history", () => {
 
     // Verify count uses the same cutoff date as deleteMany would
     const cutoff = mockCount.mock.calls[0][0].where.changedAt.lt as Date;
-    const expectedMs = 90 * 24 * 60 * 60 * 1000;
+    const expectedMs = 90 * MS_PER_DAY;
     const expectedDate = new Date(Date.now() - expectedMs);
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
   });
