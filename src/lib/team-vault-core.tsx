@@ -18,6 +18,7 @@ import {
 } from "./crypto-team";
 import { buildItemKeyWrapAAD } from "./crypto-aad";
 import { apiPath, API_PATH } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { fetchApi } from "@/lib/url-helpers";
 
 // ─── Types ────────────────────────────────────────────────────
@@ -82,8 +83,8 @@ export function useTeamVaultOptional(): TeamVaultContextValue | null {
 
 // ─── Constants ────────────────────────────────────────────────
 
-const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const KEY_DISTRIBUTE_INTERVAL_MS = 2 * 60 * 1000; // check pending distributions every 2 minutes
+const CACHE_TTL_MS = 5 * MS_PER_MINUTE;
+const KEY_DISTRIBUTE_INTERVAL_MS = 2 * MS_PER_MINUTE; // check pending distributions every 2 minutes
 
 type TeamMemberKeyResponse = {
   encryptedTeamKey: string;

@@ -113,3 +113,5 @@ export { REVEAL_TIMEOUT_MS, CLIPBOARD_CLEAR_TIMEOUT_MS } from "./timing";
 
 export { GRANT_STATUS } from "./breakglass";
 export type { GrantStatus } from "./breakglass";
+
+export { MS_PER_SECOND, MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from "./time";

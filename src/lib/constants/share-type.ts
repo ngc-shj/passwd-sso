@@ -1,5 +1,7 @@
 import type { ShareType } from "@prisma/client";
 
+import { MS_PER_DAY, MS_PER_HOUR } from "./time";
+
 export const SHARE_TYPE = {
   ENTRY_SHARE: "ENTRY_SHARE",
   TEXT: "TEXT",
@@ -16,8 +18,8 @@ export const SHARE_TYPE_VALUES = [
 
 /** Millisecond durations for Send expiry options. */
 export const SEND_EXPIRY_MAP: Record<string, number> = {
-  "1h": 60 * 60 * 1000,
-  "1d": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
+  "1h": MS_PER_HOUR,
+  "1d": MS_PER_DAY,
+  "7d": 7 * MS_PER_DAY,
+  "30d": 30 * MS_PER_DAY,
 };

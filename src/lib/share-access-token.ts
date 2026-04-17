@@ -8,8 +8,9 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { getMasterKeyByVersion } from "@/lib/crypto-server";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const TOKEN_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TOKEN_TTL_MS = 5 * MS_PER_MINUTE;
 
 function getSigningKey(): Buffer {
   return createHmac("sha256", getMasterKeyByVersion(1))

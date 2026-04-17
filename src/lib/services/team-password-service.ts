@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import type { EntryType } from "@prisma/client";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -183,7 +184,7 @@ export async function listTeamPasswords(
 // ---------------------------------------------------------------------------
 
 export async function purgeExpiredTeamPasswords(teamId: string): Promise<void> {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
   await prisma.teamPasswordEntry.deleteMany({
     where: {
       teamId,

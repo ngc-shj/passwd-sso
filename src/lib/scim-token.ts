@@ -6,9 +6,10 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /** Minimum interval (ms) between lastUsedAt updates to reduce DB writes. */
-const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
+const LAST_USED_AT_THROTTLE_MS = 5 * MS_PER_MINUTE;
 
 // ─── Types ────────────────────────────────────────────────────
 

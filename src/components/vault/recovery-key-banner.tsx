@@ -4,12 +4,13 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, X } from "lucide-react";
 import { RecoveryKeyDialog } from "./recovery-key-dialog";
 
 const DISMISS_KEY = "psso:recovery-key-banner-dismissed";
-const DISMISS_DURATION_MS = 24 * 60 * 60 * 1000; // 24 hours
+const DISMISS_DURATION_MS = MS_PER_DAY;
 
 /** @internal Exported for testing */
 export function isDismissedInStorage(): boolean {

@@ -1,3 +1,5 @@
+import { MS_PER_MINUTE } from "./time";
+
 export const EXTENSION_TOKEN_SCOPE = {
   PASSWORDS_READ: "passwords:read",
   PASSWORDS_WRITE: "passwords:write",
@@ -20,7 +22,7 @@ export const EXTENSION_TOKEN_DEFAULT_SCOPES = [
 ] as const satisfies readonly ExtensionTokenScope[];
 
 /** Token TTL in milliseconds (15 minutes) */
-export const EXTENSION_TOKEN_TTL_MS = 15 * 60 * 1000;
+export const EXTENSION_TOKEN_TTL_MS = 15 * MS_PER_MINUTE;
 
 /** Maximum active (non-revoked, non-expired) tokens per user */
 export const EXTENSION_TOKEN_MAX_ACTIVE = 3;

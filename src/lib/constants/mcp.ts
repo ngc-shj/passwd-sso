@@ -1,3 +1,5 @@
+import { MS_PER_MINUTE } from "./time";
+
 export const MCP_TOKEN_PREFIX = "mcp_";
 export const MCP_CLIENT_ID_PREFIX = "mcpc_";
 
@@ -35,7 +37,7 @@ export const MCP_TOKEN_MAX_EXPIRY_SEC = 86400; // 24 hours
 
 // Limits
 export const MAX_MCP_CLIENTS_PER_TENANT = 10;
-export const MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
+export const MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS = 5 * MS_PER_MINUTE;
 
 // MCP protocol
 export const MCP_PROTOCOL_VERSION = "2025-03-26";

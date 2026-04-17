@@ -15,11 +15,12 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { notifyAdminsOfLockout } from "@/lib/lockout-admin-notify";
 import type { NextRequest } from "next/server";
 
 /** Observation window: reset counter if last failure was this long ago */
-const OBSERVATION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const OBSERVATION_WINDOW_MS = MS_PER_DAY;
 
 /**
  * Default lockout thresholds — ordered descending by attempts.
@@ -227,7 +228,7 @@ export async function recordFailure(
         if (newAttempts >= threshold.attempts) {
           lockMinutes = threshold.lockMinutes;
           newLockedUntil = new Date(
-            now.getTime() + threshold.lockMinutes * 60 * 1000,
+            now.getTime() + threshold.lockMinutes * MS_PER_MINUTE,
           );
           break;
         }
