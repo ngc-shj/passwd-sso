@@ -36,6 +36,7 @@ type LockoutThreshold = { attempts: number; lockMinutes: number };
 
 const lockoutThresholdCache = new Map<string, { thresholds: LockoutThreshold[]; expiresAt: number }>();
 const LOCKOUT_THRESHOLD_CACHE_TTL_MS = 60_000;
+const LOCKOUT_THRESHOLD_CACHE_MAX_SIZE = 1_000;
 
 /**
  * Return per-tenant lockout thresholds, falling back to defaults if tenant
@@ -47,6 +48,12 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
     return cached.thresholds;
   }
   if (cached) lockoutThresholdCache.delete(tenantId);
+
+  // Evict oldest entry when cache is full (Map iterates in insertion order)
+  if (lockoutThresholdCache.size >= LOCKOUT_THRESHOLD_CACHE_MAX_SIZE) {
+    const oldest = lockoutThresholdCache.keys().next().value;
+    if (oldest !== undefined) lockoutThresholdCache.delete(oldest);
+  }
 
   try {
     const tenant = await withBypassRls(

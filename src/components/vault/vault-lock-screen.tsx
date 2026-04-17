@@ -187,7 +187,7 @@ export function VaultLockScreen() {
     // If sign-in did not produce PRF output (authenticator doesn't support PRF),
     // do NOT auto-trigger a separate ceremony — the user can manually unlock
     // with passphrase or click the passkey unlock button.
-  }, [prfChecked, hasPrfPasskeys, handlePasskeyUnlock, unlockWithStoredPrf, t, tw]);
+  }, [prfChecked, unlockWithStoredPrf, t, tw]);
 
   if (sessionExpired) {
     return (
