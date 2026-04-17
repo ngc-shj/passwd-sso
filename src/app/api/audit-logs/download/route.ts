@@ -12,7 +12,7 @@ import type { AuditAction, Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { VALID_ACTIONS } from "@/lib/audit-query";
-import { formatCsvRow } from "@/lib/audit-csv";
+import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
@@ -21,7 +21,7 @@ const downloadLimiter = createRateLimiter({
   max: 2,
 });
 
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
+const CSV_HEADERS = AUDIT_LOG_CSV_HEADERS;
 
 // GET /api/audit-logs/download — Download personal audit logs (JSONL or CSV)
 async function handleGET(req: NextRequest) {
@@ -105,12 +105,15 @@ async function handleGET(req: NextRequest) {
         let hasMore = true;
         let totalRows = 0;
 
-        while (hasMore) {
+        while (hasMore && totalRows < AUDIT_LOG_MAX_ROWS) {
+          const remaining = AUDIT_LOG_MAX_ROWS - totalRows;
+          const batchSize = Math.min(AUDIT_LOG_BATCH_SIZE, remaining);
+
           const batch = await withUserTenantRls(userId, async () =>
             prisma.auditLog.findMany({
               where,
               orderBy: { createdAt: "asc" },
-              take: AUDIT_LOG_BATCH_SIZE,
+              take: batchSize,
               ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
             }),
           );
@@ -163,7 +166,7 @@ async function handleGET(req: NextRequest) {
           }
 
           totalRows += batch.length;
-          if (batch.length < AUDIT_LOG_BATCH_SIZE || totalRows >= AUDIT_LOG_MAX_ROWS) {
+          if (batch.length < batchSize || totalRows >= AUDIT_LOG_MAX_ROWS) {
             hasMore = false;
           } else {
             cursor = batch[batch.length - 1].id;

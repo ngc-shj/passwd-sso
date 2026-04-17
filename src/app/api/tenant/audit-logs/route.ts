@@ -19,6 +19,8 @@ import {
 } from "@/lib/audit-query";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
+const MERGED_ACTION_GROUPS = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+
 // GET /api/tenant/audit-logs — Tenant-scoped audit logs (TENANT + TEAM scope, ADMIN/OWNER only)
 async function handleGET(req: NextRequest) {
   const session = await auth();
@@ -79,7 +81,7 @@ async function handleGET(req: NextRequest) {
       ? AUDIT_ACTION_GROUPS_TEAM
       : scopeParam === AUDIT_SCOPE.TENANT
         ? AUDIT_ACTION_GROUPS_TENANT
-        : mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+        : MERGED_ACTION_GROUPS;
 
   try {
     const actionFilter = buildAuditLogActionFilter(

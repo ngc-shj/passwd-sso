@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -301,25 +301,25 @@ async function handleGET(req: NextRequest) {
   const ok = integrityOk && !truncated;
 
   // Machine-readable failure reason
-  const reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined =
-    !ok
-      ? truncated && integrityOk
-        ? "TRUNCATED"
-        : firstTamperedSeq !== null
-          ? "TAMPER_DETECTED"
-          : firstGapAfterSeq !== null
-            ? "GAP_DETECTED"
-            : firstTimestampViolationSeq !== null
-              ? "TIMESTAMP_VIOLATION"
-              : undefined
-      : undefined;
+  let reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined;
+  if (!ok) {
+    if (truncated && integrityOk) {
+      reason = "TRUNCATED";
+    } else if (firstTamperedSeq !== null) {
+      reason = "TAMPER_DETECTED";
+    } else if (firstGapAfterSeq !== null) {
+      reason = "GAP_DETECTED";
+    } else if (firstTimestampViolationSeq !== null) {
+      reason = "TIMESTAMP_VIOLATION";
+    }
+  }
 
   const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
     userId: SYSTEM_ACTOR_ID,
-    actorType: "SYSTEM",
+    actorType: ACTOR_TYPE.SYSTEM,
     tenantId: membership.tenantId,
     metadata: {
       operatorId,

@@ -10,7 +10,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { VALID_ACTIONS } from "@/lib/audit-query";
-import { formatCsvRow } from "@/lib/audit-csv";
+import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import type { AuditAction } from "@prisma/client";
 import {
   AUDIT_LOG_MAX_RANGE_DAYS,
@@ -24,7 +24,7 @@ const downloadLimiter = createRateLimiter({
   max: 3,
 });
 
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
+const CSV_HEADERS = AUDIT_LOG_CSV_HEADERS;
 
 // GET /api/tenant/audit-logs/download — Download tenant audit logs (JSONL or CSV, ADMIN/OWNER only)
 async function handleGET(req: NextRequest) {
@@ -120,7 +120,7 @@ async function handleGET(req: NextRequest) {
         let hasMore = true;
         let totalRows = 0;
 
-        while (hasMore) {
+        while (hasMore && totalRows < AUDIT_LOG_MAX_ROWS) {
           const remaining = AUDIT_LOG_MAX_ROWS - totalRows;
           const batchSize = Math.min(AUDIT_LOG_BATCH_SIZE, remaining);
 

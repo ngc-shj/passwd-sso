@@ -10,6 +10,7 @@ import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
+import { getLogger } from "@/lib/logger";
 import authConfig from "./auth.config";
 
 function getAuthRouteBasePath(): string {
@@ -26,8 +27,9 @@ export async function assertBootstrapSingleMember(
     where: { tenantId, deactivatedAt: null },
   });
   if (activeCount > 1) {
-    console.error(
-      `[AUTH_BOOTSTRAP] tenantId=${tenantId} blocked bootstrap migration: expected 1 active member, found ${activeCount}`,
+    getLogger().error(
+      { tenantId, activeCount, reason: "expected 1 active member" },
+      "auth.bootstrap.migration_blocked",
     );
     throw new Error(
       `Bootstrap migration aborted: tenant ${tenantId} has ${activeCount} active members (expected 1)`,
@@ -290,10 +292,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED is handled inside
         // ensureTenantMembershipForSignIn and returns false (not thrown here).
         // Any other error is unexpected — log and block sign-in.
-        console.error(
-          `[AUTH_SIGNIN] provider=${provider ?? "unknown"} action=ensureTenantMembership error=${
-            error instanceof Error ? error.constructor.name : "unknown"
-          }`,
+        getLogger().error(
+          { err: error, provider: provider ?? "unknown" },
+          "auth.signin.ensureTenantMembership_failed",
         );
         return false;
       }

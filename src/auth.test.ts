@@ -138,6 +138,10 @@ vi.mock("@/lib/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimGetStore },
 }));
 
+vi.mock("@/lib/logger", () => ({
+  getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+}));
+
 vi.mock("./auth.config", () => ({
   default: { callbacks: {} },
 }));

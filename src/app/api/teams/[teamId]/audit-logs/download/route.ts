@@ -17,7 +17,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
-import { formatCsvRow } from "@/lib/audit-csv";
+import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
@@ -28,7 +28,7 @@ const downloadLimiter = createRateLimiter({
   max: 2,
 });
 
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
+const CSV_HEADERS = AUDIT_LOG_CSV_HEADERS;
 
 // GET /api/teams/[teamId]/audit-logs/download — Download team audit logs (ADMIN/OWNER)
 async function handleGET(req: NextRequest, { params }: Params) {

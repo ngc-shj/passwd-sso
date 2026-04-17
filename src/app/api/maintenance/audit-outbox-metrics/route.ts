@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -103,7 +103,7 @@ async function handleGET(req: NextRequest) {
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_OUTBOX_METRICS_VIEW,
     userId: SYSTEM_ACTOR_ID,
-    actorType: "SYSTEM",
+    actorType: ACTOR_TYPE.SYSTEM,
     tenantId: membership.tenantId,
     metadata: { operatorId, pending: metrics.pending, failed: metrics.failed },
     ip,

@@ -1,5 +1,8 @@
 // Shared CSV utilities for audit log download routes
 
+/** Column headers for audit log CSV exports. */
+export const AUDIT_LOG_CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"] as const;
+
 /**
  * Escapes a value for CSV output.
  * Prevents CSV injection by prefixing formula-triggering characters with a single quote.
