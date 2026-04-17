@@ -279,9 +279,20 @@ export function extractClientIp(request: NextRequest): string | null {
   const socketIp = (request as unknown as Record<string, unknown>).ip as
     | string
     | undefined;
+  return extractClientIpFromHeaders(request.headers, socketIp);
+}
 
-  const xff = request.headers.get("x-forwarded-for");
-  const xRealIp = request.headers.get("x-real-ip");
+/**
+ * Header-only variant of extractClientIp for Server Components and contexts
+ * without a NextRequest (e.g., `next/headers` in RSC, Request in generic handlers).
+ * Same rightmost-untrusted algorithm as extractClientIp; socketIp is optional.
+ */
+export function extractClientIpFromHeaders(
+  headers: Headers,
+  socketIp?: string,
+): string | null {
+  const xff = headers.get("x-forwarded-for");
+  const xRealIp = headers.get("x-real-ip");
 
   // If no forwarded headers, use socket IP or x-real-ip
   if (!xff) {

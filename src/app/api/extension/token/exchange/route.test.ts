@@ -71,6 +71,7 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
+  rateLimitKeyFromIp: (ip: string) => ip,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { warn: mockWarn, error: mockError, info: vi.fn() },

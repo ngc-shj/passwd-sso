@@ -23,27 +23,14 @@ import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url-validation";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
-    (u) => {
-      try {
-        const parsed = new URL(u);
-        if (parsed.protocol !== "https:") return false;
-        const host = parsed.hostname.toLowerCase();
-        if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
-        if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-        // Block all IP address literals (IPv4 and IPv6) — only allow FQDNs
-        // URL.hostname strips brackets from IPv6 (e.g. "[::1]" → "::1"), so check for colons
-        if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "URL must use HTTPS and must not point to private/internal addresses" },
+    isSsrfSafeWebhookUrl,
+    { message: SSRF_URL_VALIDATION_MESSAGE },
   ),
   events: z.array(z.enum(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]])).min(1).max(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
 });

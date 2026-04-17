@@ -23,23 +23,12 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url-validation";
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
-    (u) => {
-      try {
-        const parsed = new URL(u);
-        if (parsed.protocol !== "https:") return false;
-        const host = parsed.hostname.toLowerCase();
-        if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
-        if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-        if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "URL must use HTTPS and must not point to private/internal addresses" },
+    isSsrfSafeWebhookUrl,
+    { message: SSRF_URL_VALIDATION_MESSAGE },
   ),
   events: z.array(
     z.enum(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]]),

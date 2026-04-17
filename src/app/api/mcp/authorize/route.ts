@@ -29,7 +29,7 @@ async function validateOAuthRequest(clientId: string | null, redirectUri: string
 export async function GET(req: NextRequest) {
   // Rate limit by IP to prevent brute-force client_id enumeration
   const ip = extractClientIp(req);
-  const rl = await authorizeLimiter.check(`mcp_authz:${rateLimitKeyFromIp(ip ?? "unknown")}`);
+  const rl = await authorizeLimiter.check(`rl:mcp_authz:${rateLimitKeyFromIp(ip ?? "unknown")}`);
   if (!rl.allowed) {
     return NextResponse.json({ error: "rate_limit_exceeded" }, { status: 429 });
   }

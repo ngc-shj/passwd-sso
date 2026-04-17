@@ -27,21 +27,7 @@ import {
   WEBHOOK_URL_MAX_LENGTH,
 } from "@/lib/validations/common";
 
-const ssrfSafeUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:") return false;
-    const host = parsed.hostname.toLowerCase();
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
-    if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-    if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const ssrfMessage = "URL must use HTTPS and must not point to private/internal addresses";
+import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url-validation";
 
 const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({
