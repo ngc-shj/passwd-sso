@@ -240,3 +240,27 @@ export function extractRequestMeta(req: NextRequest): {
   const acceptLanguage = req.headers.get("accept-language");
   return { ip, userAgent, acceptLanguage };
 }
+
+// ─── Scope-specific audit helpers ────────────────────────────
+//
+// These builders fill in scope + extractRequestMeta so callers only pass
+// the fields that vary (action, target, metadata). Omitting `scope` or
+// `extractRequestMeta(req)` at a call site is a common mistake — these
+// helpers make it impossible.
+
+import { AUDIT_SCOPE } from "@/lib/constants/audit";
+
+/** Build the invariant part of a PERSONAL-scope audit log payload. */
+export function personalAuditBase(req: NextRequest, userId: string) {
+  return { scope: AUDIT_SCOPE.PERSONAL, userId, ...extractRequestMeta(req) };
+}
+
+/** Build the invariant part of a TEAM-scope audit log payload. */
+export function teamAuditBase(req: NextRequest, userId: string, teamId: string) {
+  return { scope: AUDIT_SCOPE.TEAM, userId, teamId, ...extractRequestMeta(req) };
+}
+
+/** Build the invariant part of a TENANT-scope audit log payload. */
+export function tenantAuditBase(req: NextRequest, userId: string, tenantId: string) {
+  return { scope: AUDIT_SCOPE.TENANT, userId, tenantId, ...extractRequestMeta(req) };
+}

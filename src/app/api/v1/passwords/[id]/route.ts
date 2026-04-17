@@ -7,12 +7,11 @@ import { parseBody } from "@/lib/parse-body";
 import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 
-const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
 import { notFound, rateLimited, validationError } from "@/lib/api-response";
 import type { V1AuthResult } from "@/lib/v1-auth";
@@ -34,7 +33,7 @@ async function checkAuth(
     return { ok: false, error: NextResponse.json({ error }, { status }) };
   }
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${authResult.data.rateLimitKey}`);
+  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${authResult.data.rateLimitKey}`);
   if (!rl.allowed) {
     return { ok: false, error: rateLimited(rl.retryAfterMs) };
   }

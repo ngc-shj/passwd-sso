@@ -3,6 +3,34 @@ import { type ZodSchema } from "zod";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { zodValidationError } from "@/lib/api-response";
 
+/**
+ * Parse and validate URL query parameters against a Zod schema.
+ *
+ * Flattens URLSearchParams into a plain object (multi-value keys become arrays)
+ * before calling safeParse. Returns a 400 VALIDATION_ERROR response on failure.
+ *
+ * Usage:
+ *   const result = parseQuery(req, mySchema);
+ *   if (!result.ok) return result.response;
+ *   const { data } = result;
+ */
+export function parseQuery<T>(
+  req: NextRequest,
+  schema: ZodSchema<T>,
+): ParseResult<T> {
+  const params = req.nextUrl.searchParams;
+  const obj: Record<string, string | string[]> = {};
+  for (const key of new Set(params.keys())) {
+    const values = params.getAll(key);
+    obj[key] = values.length > 1 ? values : values[0];
+  }
+  const parsed = schema.safeParse(obj);
+  if (!parsed.success) {
+    return { ok: false, response: zodValidationError(parsed.error) };
+  }
+  return { ok: true, data: parsed.data };
+}
+
 type ParseOk<T> = { ok: true; data: T };
 type ParseFail = { ok: false; response: NextResponse };
 export type ParseResult<T> = ParseOk<T> | ParseFail;

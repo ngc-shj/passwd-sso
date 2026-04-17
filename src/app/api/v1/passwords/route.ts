@@ -7,7 +7,7 @@ import { parseBody } from "@/lib/parse-body";
 import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
@@ -17,7 +17,6 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
-const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
 // GET /api/v1/passwords — List passwords (API key or SA token)
 async function handleGET(req: NextRequest) {
@@ -44,7 +43,7 @@ async function handleGET(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
+  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -136,7 +135,7 @@ async function handlePOST(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
+  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

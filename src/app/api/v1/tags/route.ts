@@ -4,13 +4,12 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
-const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
 // GET /api/v1/tags — List tags (API key or SA token)
 async function handleGET(req: NextRequest) {
@@ -37,7 +36,7 @@ async function handleGET(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
+  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
