@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { parseBody } from "@/lib/parse-body";
@@ -12,7 +12,7 @@ import {
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import { z } from "zod";
 
 type Params = { params: Promise<{ id: string }> };
@@ -37,10 +37,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, patchSchema);

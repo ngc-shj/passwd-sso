@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { randomBytes } from "node:crypto";
 import { hashToken } from "@/lib/crypto-server";
 import { logAuditAsync } from "@/lib/audit";
@@ -11,7 +11,8 @@ import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -39,10 +40,7 @@ async function handleGET(_req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const clients = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -108,25 +106,12 @@ async function handlePOST(req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = createSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const { name, redirectUris, allowedScopes } = parsed.data;
+  const result = await parseBody(req, createSchema);
+  if (!result.ok) return result.response;
+  const { name, redirectUris, allowedScopes } = result.data;
 
   // Enforce tenant limit
   const count = await withTenantRls(prisma, actor.tenantId, async () =>

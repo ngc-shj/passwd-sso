@@ -10,6 +10,7 @@ import { EXTENSION_TOKEN_DEFAULT_SCOPES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 function internalError() {
   return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
@@ -18,7 +19,7 @@ function internalError() {
 export const runtime = "nodejs";
 
 const tokenLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 10,
 });
 

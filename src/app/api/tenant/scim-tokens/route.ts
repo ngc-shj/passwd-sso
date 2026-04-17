@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { generateScimToken } from "@/lib/scim/token-utils";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
@@ -13,15 +13,16 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,
   SCIM_TOKEN_EXPIRY_MAX_DAYS,
   SCIM_TOKEN_EXPIRY_DEFAULT_DAYS,
 } from "@/lib/validations/common";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
-const scimTokenCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 5 });
+const scimTokenCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
 
 export const runtime = "nodejs";
 
@@ -47,10 +48,7 @@ async function handleGET(req: NextRequest) {
       TENANT_PERMISSION.SCIM_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const tokens = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -86,10 +84,7 @@ async function handlePOST(req: NextRequest) {
       TENANT_PERMISSION.SCIM_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const rl = await scimTokenCreateLimiter.check(`rl:scim_token_create:${actor.tenantId}`);
@@ -119,7 +114,7 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(plaintext);
 
   const expiresAt = result.data.expiresInDays
-    ? new Date(Date.now() + result.data.expiresInDays * 24 * 60 * 60 * 1000)
+    ? new Date(Date.now() + result.data.expiresInDays * MS_PER_DAY)
     : null;
 
   const token = await withTenantRls(prisma, actor.tenantId, async () =>

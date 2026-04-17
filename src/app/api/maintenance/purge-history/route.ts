@@ -18,6 +18,7 @@ import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
@@ -66,7 +67,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Build where clause (shared between count and delete)
-  const cutoffDate = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000);
+  const cutoffDate = new Date(Date.now() - retentionDays * MS_PER_DAY);
   const whereClause = { changedAt: { lt: cutoffDate } };
 
   if (dryRun) {

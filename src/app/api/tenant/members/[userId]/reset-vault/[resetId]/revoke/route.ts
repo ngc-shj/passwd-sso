@@ -18,7 +18,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -49,10 +49,7 @@ async function handlePOST(
       TENANT_PERMISSION.MEMBER_VAULT_RESET,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   // Atomic revoke with TOCTOU prevention: only revoke if still pending

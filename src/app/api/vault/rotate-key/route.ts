@@ -26,10 +26,11 @@ import {
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
 } from "@/lib/validations/common";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const rotateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
+const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
 
 const rotateKeySchema = z.object({
   // Current passphrase verification
@@ -94,14 +95,14 @@ async function handlePOST(request: NextRequest) {
 
   const parsed = rotateKeySchema.safeParse(body);
   if (!parsed.success) {
-    // Cap error details to prevent response amplification on bulk payloads
+    // Truncate verbose Zod errors — the schema has ~3000 potential issues
+    // (entries array × many fields each) that would blow up the response.
     if (parsed.error.issues.length > 10) {
-      return validationError({
-        errors: [`Validation failed with ${parsed.error.issues.length} errors`],
-      });
+      return validationError({ errors: [`Validation failed with ${parsed.error.issues.length} errors`] });
     }
     return zodValidationError(parsed.error);
   }
+  const result = { ok: true as const, data: parsed.data };
 
   const userId = session.user.id;
 
@@ -124,7 +125,7 @@ async function handlePOST(request: NextRequest) {
 
   // Verify current passphrase
   const computedHash = createHash("sha256")
-    .update(parsed.data.currentAuthHash + user.masterPasswordServerSalt)
+    .update(result.data.currentAuthHash + user.masterPasswordServerSalt)
     .digest("hex");
 
   const hashA = Buffer.from(computedHash, "hex");
@@ -136,7 +137,7 @@ async function handlePOST(request: NextRequest) {
   const newKeyVersion = user.keyVersion + 1;
   const newServerSalt = randomBytes(32).toString("hex");
   const newServerHash = createHash("sha256")
-    .update(parsed.data.newAuthHash + newServerSalt)
+    .update(result.data.newAuthHash + newServerSalt)
     .digest("hex");
 
   const {
@@ -145,7 +146,7 @@ async function handlePOST(request: NextRequest) {
     encryptedEcdhPrivateKey,
     ecdhPrivateKeyIv,
     ecdhPrivateKeyAuthTag,
-  } = parsed.data;
+  } = result.data;
 
   // Update vault wrapping, bump keyVersion, re-encrypt all entries, and mark EA grants as STALE.
   // Interactive transaction with advisory lock prevents concurrent rotations for the same user.
@@ -253,17 +254,17 @@ async function handlePOST(request: NextRequest) {
         await tx.user.update({
           where: { id: userId },
           data: {
-            encryptedSecretKey: parsed.data.encryptedSecretKey,
-            secretKeyIv: parsed.data.secretKeyIv,
-            secretKeyAuthTag: parsed.data.secretKeyAuthTag,
-            accountSalt: parsed.data.accountSalt,
+            encryptedSecretKey: result.data.encryptedSecretKey,
+            secretKeyIv: result.data.secretKeyIv,
+            secretKeyAuthTag: result.data.secretKeyAuthTag,
+            accountSalt: result.data.accountSalt,
             masterPasswordServerHash: newServerHash,
             masterPasswordServerSalt: newServerSalt,
             keyVersion: newKeyVersion,
             // Sync verifier with new accountSalt to keep change-passphrase working
-            ...(parsed.data.newVerifierHash
+            ...(result.data.newVerifierHash
               ? {
-                  passphraseVerifierHmac: hmacVerifier(parsed.data.newVerifierHash),
+                  passphraseVerifierHmac: hmacVerifier(result.data.newVerifierHash),
                   passphraseVerifierVersion: VERIFIER_VERSION,
                 }
               : {}),
@@ -279,9 +280,9 @@ async function handlePOST(request: NextRequest) {
             userId,
             tenantId: user.tenantId,
             version: newKeyVersion,
-            verificationCiphertext: parsed.data.verificationArtifact.ciphertext,
-            verificationIv: parsed.data.verificationArtifact.iv,
-            verificationAuthTag: parsed.data.verificationArtifact.authTag,
+            verificationCiphertext: result.data.verificationArtifact.ciphertext,
+            verificationIv: result.data.verificationArtifact.iv,
+            verificationAuthTag: result.data.verificationArtifact.authTag,
           },
         });
       }, { timeout: 120_000 }),

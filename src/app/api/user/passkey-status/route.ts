@@ -6,6 +6,7 @@ import { checkAuth } from "@/lib/check-auth";
 import { errorResponse, rateLimited } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -54,9 +55,9 @@ async function handleGET(request: NextRequest) {
     let gracePeriodRemaining: number | null = null;
     if (required && !hasPasskey && enabledAt && gracePeriodDays != null && gracePeriodDays > 0) {
       const enabledAtMs = new Date(enabledAt).getTime();
-      const gracePeriodMs = gracePeriodDays * 24 * 60 * 60 * 1000;
+      const gracePeriodMs = gracePeriodDays * MS_PER_DAY;
       const remainingMs = enabledAtMs + gracePeriodMs - Date.now();
-      gracePeriodRemaining = remainingMs > 0 ? Math.ceil(remainingMs / (24 * 60 * 60 * 1000)) : 0;
+      gracePeriodRemaining = remainingMs > 0 ? Math.ceil(remainingMs / MS_PER_DAY) : 0;
     }
 
     return NextResponse.json({

@@ -8,11 +8,13 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited, zodValidationError } from "@/lib/api-response";
+import { rateLimited } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -26,7 +28,7 @@ const generateSchema = z.object({
 });
 
 const generateLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 3,
 });
 
@@ -53,22 +55,9 @@ async function handlePOST(request: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  const parsed = generateSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const data = parsed.data;
+  const result = await parseBody(request, generateSchema);
+  if (!result.ok) return result.response;
+  const data = result.data;
 
   const user = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { assertPolicyAllowsExport } from "@/lib/team-policy";
@@ -15,11 +15,12 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
 import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
 import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -42,10 +43,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   // Check team policy allows export
@@ -90,7 +88,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       );
     }
     const now = new Date();
-    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
     const resolvedTo = toDate ?? now;
     const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
     if (diffMs < 0) {
@@ -99,7 +97,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         { status: 400 },
       );
     }
-    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
       return NextResponse.json(
         { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` } },
         { status: 400 },

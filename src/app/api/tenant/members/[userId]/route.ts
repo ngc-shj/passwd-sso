@@ -12,7 +12,7 @@ import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -35,10 +35,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.MEMBER_MANAGE,
     );
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   // Only OWNER can change roles

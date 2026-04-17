@@ -7,6 +7,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
@@ -80,26 +81,9 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  // Inline parsing: unauthenticated endpoint — do not expose schema details
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  const parsed = emailSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 },
-    );
-  }
-
-  const { email } = parsed.data;
+  const result = await parseBody(req, emailSchema);
+  if (!result.ok) return result.response;
+  const { email } = result.data;
 
   // Look up user and their credentials (cross-tenant, unauthenticated)
   let allowCredentials: Array<{ credentialId: string; transports: string[] }>;

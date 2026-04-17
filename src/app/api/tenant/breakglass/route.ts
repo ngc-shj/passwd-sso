@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { GRANT_STATUS } from "@/lib/constants/breakglass";
 import type { GrantStatus } from "@/lib/constants/breakglass";
@@ -14,14 +14,15 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, forbidden, rateLimited, validationError, zodValidationError } from "@/lib/api-response";
+import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const breakglassRateLimiter = createRateLimiter({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: MS_PER_HOUR,
   max: 5,
 });
 
@@ -44,10 +45,7 @@ async function handlePOST(req: NextRequest) {
       TENANT_PERMISSION.BREAKGLASS_REQUEST,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   // Parse and validate request body
@@ -128,7 +126,7 @@ async function handlePOST(req: NextRequest) {
 
       if (duplicate) return { status: "duplicate" as const };
 
-      const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000);
+      const expiresAt = new Date(now.getTime() + MS_PER_DAY);
       const grant = await prisma.personalLogAccessGrant.create({
         data: {
           tenantId: actor.tenantId,
@@ -225,10 +223,7 @@ async function handleGET(_req: NextRequest) {
       TENANT_PERMISSION.AUDIT_LOG_VIEW,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const grants = await withTenantRls(prisma, actor.tenantId, async () =>

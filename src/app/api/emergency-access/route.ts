@@ -15,8 +15,9 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
+import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 
-const createLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 5 });
+const createLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 5 });
 
 // POST /api/emergency-access — Create a new emergency access grant
 async function handlePOST(req: NextRequest) {
@@ -56,7 +57,7 @@ async function handlePOST(req: NextRequest) {
   }
 
   const token = generateShareToken();
-  const tokenExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const tokenExpiresAt = new Date(Date.now() + 7 * MS_PER_DAY);
   const operator = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
       where: { id: session.user.id },

@@ -15,7 +15,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; memberId: string }> };
 
@@ -37,10 +37,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
         req
       );
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const target = await withTeamTenantRls(teamId, async () =>
@@ -162,10 +159,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
         req
       );
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const target = await withTeamTenantRls(teamId, async () =>

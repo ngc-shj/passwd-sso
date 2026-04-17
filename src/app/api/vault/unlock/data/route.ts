@@ -7,13 +7,14 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/check-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited } from "@/lib/api-response";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 // Higher limit than vault/unlock — this endpoint only returns encrypted data
 // and cannot be used for brute-force (passphrase verification is separate).
 // 120 req/5min accounts for ~40 E2E unlock calls + CI retries (×2) + headroom.
-const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 120 });
+const vaultUnlockDataLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 120 });
 
 /**
  * GET /api/vault/unlock/data

@@ -6,6 +6,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { z } from "zod/v4";
@@ -19,7 +21,7 @@ const resetSchema = z.object({
 });
 
 const resetLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 3,
 });
 
@@ -45,25 +47,10 @@ async function handlePOST(request: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(request, resetSchema);
+  if (!result.ok) return result.response;
 
-  const parsed = resetSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 },
-    );
-  }
-
-  if (parsed.data.confirmation !== CONFIRMATION_TOKEN) {
+  if (result.data.confirmation !== CONFIRMATION_TOKEN) {
     return NextResponse.json(
       { error: API_ERROR.VAULT_RESET_CONFIRMATION_MISMATCH },
       { status: 400 },

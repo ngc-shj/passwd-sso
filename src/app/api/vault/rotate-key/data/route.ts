@@ -5,12 +5,13 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { rateLimited, unauthorized } from "@/lib/api-response";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 // Same config as rotateLimiter in parent route — shared key space ensures
 // the two endpoints count against the same budget per user.
-const rotateLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
+const rotateLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
 
 /**
  * GET /api/vault/rotate-key/data

@@ -14,8 +14,9 @@ import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
+const acceptLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 10 });
 
 // POST /api/emergency-access/accept — Accept an emergency access invitation
 async function handlePOST(req: NextRequest) {

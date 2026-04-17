@@ -21,20 +21,21 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, rateLimited, unauthorized } from "@/lib/api-response";
+import { errorResponse, forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const RESET_TOKEN_TTL_MS = MS_PER_DAY;
 
 const adminResetLimiter = createRateLimiter({
-  windowMs: 24 * 60 * 60 * 1000,
+  windowMs: MS_PER_DAY,
   max: 3,
 });
 
 const targetResetLimiter = createRateLimiter({
-  windowMs: 24 * 60 * 60 * 1000,
+  windowMs: MS_PER_DAY,
   max: 1,
 });
 
@@ -62,10 +63,7 @@ async function handlePOST(
       TENANT_PERMISSION.MEMBER_VAULT_RESET,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   // Cannot reset own vault
@@ -201,10 +199,7 @@ async function handleGET(
       TENANT_PERMISSION.MEMBER_VAULT_RESET,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const resets = await withTenantRls(prisma, actor.tenantId, async () =>

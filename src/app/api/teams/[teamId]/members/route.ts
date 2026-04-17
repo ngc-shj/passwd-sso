@@ -10,7 +10,7 @@ import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -26,10 +26,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const members = await withTeamTenantRls(teamId, async () =>
@@ -82,10 +79,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, addMemberSchema);
@@ -174,14 +168,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof ScimManagedError) {
       return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
     }
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
     // Prisma unique constraint violation (race condition)
     if (isPrismaUniqueConstraintError(e)) {
       return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
     }
-    throw e;
+    return handleAuthError(e);
   }
 
   await logAuditAsync({

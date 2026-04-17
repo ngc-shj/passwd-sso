@@ -11,7 +11,8 @@ import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import {
   hexIv,
   hexAuthTag,
@@ -28,10 +29,11 @@ import {
   KDF_ARGON2_PARALLELISM_MIN,
   KDF_ARGON2_PARALLELISM_MAX,
 } from "@/lib/validations/common.server";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
+const setupLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 5 });
 
 const kdfParamsSchema = z.discriminatedUnion("kdfType", [
   z.object({
@@ -97,19 +99,9 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.VAULT_ALREADY_SETUP, 409);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = setupSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const data = parsed.data;
+  const result = await parseBody(request, setupSchema);
+  if (!result.ok) return result.response;
+  const data = result.data;
 
   // Apply KDF defaults if client omits kdfParams
   const kdfType = data.kdfParams?.kdfType ?? 0;

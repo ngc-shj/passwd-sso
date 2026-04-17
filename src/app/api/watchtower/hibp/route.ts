@@ -5,11 +5,12 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { HIBP_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const PREFIX_REGEX = /^[0-9A-F]{5}$/;
-const CACHE_TTL_MS = 5 * 60 * 1000;
+const CACHE_TTL_MS = 5 * MS_PER_MINUTE;
 const MAX_CACHE_ENTRIES = 5_000;
 
 type CacheEntry = { expiresAt: number; body: string };

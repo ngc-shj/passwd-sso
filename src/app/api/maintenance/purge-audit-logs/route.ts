@@ -18,6 +18,7 @@ import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
@@ -79,7 +80,7 @@ async function handlePOST(req: NextRequest) {
     const effectiveRetentionDays = tenantRetention
       ? Math.max(retentionDays, tenantRetention)
       : retentionDays;
-    const tenantCutoff = new Date(Date.now() - effectiveRetentionDays * 24 * 60 * 60 * 1000);
+    const tenantCutoff = new Date(Date.now() - effectiveRetentionDays * MS_PER_DAY);
 
     if (dryRun) {
       const count = await withBypassRls(prisma, async () =>

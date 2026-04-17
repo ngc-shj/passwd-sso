@@ -3,14 +3,14 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import { serviceAccountUpdateSchema } from "@/lib/validations/service-account";
 
 type Params = { params: Promise<{ id: string }> };
@@ -33,10 +33,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const { id } = await params;
@@ -85,10 +82,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const { id } = await params;
@@ -168,10 +162,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const { id } = await params;

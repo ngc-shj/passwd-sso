@@ -22,10 +22,11 @@ import {
   computeCanonicalBytes,
   computeEventHash,
 } from "@/lib/audit-chain";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });
 
-const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+const FIVE_YEARS_MS = 5 * 365 * MS_PER_DAY;
 const MAX_ROWS_PER_REQUEST = 10_000;
 
 function buildQuerySchema() {

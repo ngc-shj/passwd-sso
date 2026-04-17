@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
-import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { requireTeamMember } from "@/lib/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -38,10 +38,7 @@ async function handleGET(req: NextRequest) {
       const membership = await requireTeamMember(session.user.id, teamId);
       membershipRole = membership.role;
     } catch (e) {
-      if (e instanceof TeamAuthError) {
-        return errorResponse(e.message, e.status);
-      }
-      throw e;
+      return handleAuthError(e);
     }
     // Send is personal-only — team context never returns Send items
     if (shareType === "send") {

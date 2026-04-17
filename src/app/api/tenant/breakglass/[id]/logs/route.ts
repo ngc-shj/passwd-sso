@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { extractRequestMeta } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUPS_PERSONAL, AUDIT_SCOPE } from "@/lib/constants";
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/lib/audit-query";
 import type { Prisma } from "@prisma/client";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -27,7 +28,7 @@ export const runtime = "nodejs";
 const MAX_CACHE_ENTRIES = 10_000;
 const viewAuditCache = new Map<string, number>(); // grantId -> last VIEW audit ts
 const expireAuditCache = new Set<string>(); // grantId set — recorded once per grant
-const VIEW_AUDIT_DEDUP_MS = 60 * 60 * 1000; // 1 hour
+const VIEW_AUDIT_DEDUP_MS = MS_PER_HOUR;
 
 function evictStaleCacheEntries(): void {
   if (viewAuditCache.size >= MAX_CACHE_ENTRIES) {
@@ -60,10 +61,7 @@ async function handleGET(
       TENANT_PERMISSION.AUDIT_LOG_VIEW,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   // Find grant — must belong to this tenant and be requested by the caller

@@ -12,8 +12,9 @@ import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
-const requestLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 3 });
+const requestLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 3 });
 
 // POST /api/emergency-access/[id]/request — Grantee requests emergency access
 async function handlePOST(
@@ -48,7 +49,7 @@ async function handlePOST(
   }
 
   const now = new Date();
-  const waitExpiresAt = new Date(now.getTime() + grant.waitDays * 24 * 60 * 60 * 1000);
+  const waitExpiresAt = new Date(now.getTime() + grant.waitDays * MS_PER_DAY);
 
   await withBypassRls(prisma, async () =>
     prisma.emergencyAccessGrant.update({

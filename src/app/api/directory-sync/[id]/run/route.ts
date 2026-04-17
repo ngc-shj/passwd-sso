@@ -15,7 +15,7 @@ import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { rateLimited, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, zodValidationError } from "@/lib/api-response";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -68,25 +68,18 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     );
   }
 
-  // Parse body (optional — empty body defaults to {})
-  let body: unknown = {};
+  // Empty body is allowed: defaults are used.
+  const rawText = await req.text();
+  let body: unknown;
   try {
-    const text = await req.text();
-    if (text.trim()) {
-      body = JSON.parse(text);
-    }
+    body = rawText ? JSON.parse(rawText) : {};
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
-
   const parsed = runSchema.safeParse(body);
   if (!parsed.success) {
     return zodValidationError(parsed.error);
   }
-
   const { dryRun, force } = parsed.data;
 
   // Run sync

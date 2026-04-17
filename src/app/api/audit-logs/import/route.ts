@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { z } from "zod/v4";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_ACTION, AUDIT_SCOPE, IMPORT_FORMAT_VALUES } from "@/lib/constants";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
@@ -36,10 +36,7 @@ async function handlePOST(req: NextRequest) {
     try {
       await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_CREATE);
     } catch (e) {
-      if (e instanceof TeamAuthError) {
-        return errorResponse(e.message, e.status);
-      }
-      throw e;
+      return handleAuthError(e);
     }
   }
 

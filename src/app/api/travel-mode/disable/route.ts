@@ -9,7 +9,8 @@ import { checkLockout, recordFailure } from "@/lib/account-lockout";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 
 export const runtime = "nodejs";
 
@@ -37,17 +38,8 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = disableSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
+  const result = await parseBody(request, disableSchema);
+  if (!result.ok) return result.response;
 
   const user = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
@@ -76,7 +68,7 @@ async function handlePOST(request: NextRequest) {
   }
 
   const valid = verifyPassphraseVerifier(
-    parsed.data.verifierHash,
+    result.data.verifierHash,
     user.passphraseVerifierHmac,
   );
 

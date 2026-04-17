@@ -41,6 +41,7 @@ vi.mock("@/lib/team-auth", () => ({
     status: number;
     constructor(msg: string, status: number) {
       super(msg);
+      this.name = "TeamAuthError";
       this.status = status;
     }
   },

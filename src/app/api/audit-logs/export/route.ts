@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team-policy";
 import { z } from "zod/v4";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, EXPORT_FORMAT_VALUES } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
@@ -43,10 +43,7 @@ async function handlePOST(req: NextRequest) {
     try {
       await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE);
     } catch (e) {
-      if (e instanceof TeamAuthError) {
-        return errorResponse(e.message, e.status);
-      }
-      throw e;
+      return handleAuthError(e);
     }
 
     // Check team policy allows export

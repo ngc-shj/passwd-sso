@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { notFound, forbidden, validationError } from "@/lib/api-response";
+import { forbidden, notFound, rateLimited, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/check-auth";
 import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { rateLimited } from "@/lib/api-response";
+
 import { withRequestLog } from "@/lib/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";

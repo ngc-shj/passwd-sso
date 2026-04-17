@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
-import { unauthorized, validationError } from "@/lib/api-response";
+import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { checkAuth } from "@/lib/check-auth";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -10,10 +10,11 @@ import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { rateLimited } from "@/lib/api-response";
+
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
@@ -60,7 +61,7 @@ async function handleGET(req: NextRequest) {
 
   // Auto-purge items deleted more than 30 days ago
   if (!trashOnly) {
-    const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const thirtyDaysAgo = new Date(Date.now() - 30 * MS_PER_DAY);
     await withUserTenantRls(userId, async () => {
       const staleEntries = await prisma.passwordEntry.findMany({
         where: { userId, deletedAt: { lt: thirtyDaysAgo } },

@@ -7,11 +7,13 @@ import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/cryp
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited, zodValidationError } from "@/lib/api-response";
+import { rateLimited } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -37,12 +39,14 @@ const resetSchema = z.object({
   recoveryVerifierHash: hexHash,
 });
 
+const recoverSchema = z.discriminatedUnion("step", [verifySchema, resetSchema]);
+
 const verifyLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 5,
 });
 const resetLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 3,
 });
 
@@ -64,34 +68,18 @@ async function handlePOST(request: NextRequest) {
 
   const userId = session.user.id;
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
-  }
-
-  // Determine step
-  const stepCheck = z.object({ step: z.enum(["verify", "reset"]) }).safeParse(body);
-  if (!stepCheck.success) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR },
-      { status: 400 },
-    );
-  }
+  const result = await parseBody(request, recoverSchema);
+  if (!result.ok) return result.response;
 
   // Per-step rate limiting
-  if (stepCheck.data.step === "verify") {
+  if (result.data.step === "verify") {
     const rl = await verifyLimiter.check(`rl:recovery_verify:${userId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
-    return handleVerify(body, userId);
+    return handleVerify(result.data, userId);
   } else {
     const rl = await resetLimiter.check(`rl:recovery_reset:${userId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
-    const response = await handleReset(body, userId, request);
+    const response = await handleReset(result.data, userId, request);
     // Clear reset limiter on success
     if (response.status === 200) {
       await resetLimiter.clear(`rl:recovery_reset:${userId}`);
@@ -100,12 +88,7 @@ async function handlePOST(request: NextRequest) {
   }
 }
 
-async function handleVerify(body: unknown, userId: string) {
-  const parsed = verifySchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
+async function handleVerify(data: z.infer<typeof verifySchema>, userId: string) {
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({
       where: { id: userId },
@@ -129,7 +112,7 @@ async function handleVerify(body: unknown, userId: string) {
   }
 
   // Verify recovery key via HMAC comparison
-  if (!verifyHmac(parsed.data.verifierHash, user.recoveryVerifierHmac)) {
+  if (!verifyHmac(data.verifierHash, user.recoveryVerifierHmac)) {
     return NextResponse.json(
       { error: API_ERROR.INVALID_RECOVERY_KEY },
       { status: 401 },
@@ -148,14 +131,7 @@ async function handleVerify(body: unknown, userId: string) {
   });
 }
 
-async function handleReset(body: unknown, userId: string, request: NextRequest) {
-  const parsed = resetSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const data = parsed.data;
-
+async function handleReset(data: z.infer<typeof resetSchema>, userId: string, request: NextRequest) {
   // Re-verify recovery key (verifierHash serves as implicit token)
   const user = await withUserTenantRls(userId, async () =>
     prisma.user.findUnique({

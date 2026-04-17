@@ -26,11 +26,12 @@ import {
   BRIDGE_CODE_TTL_MS,
   BRIDGE_CODE_MAX_ACTIVE,
 } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const bridgeCodeLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 10,
 });
 

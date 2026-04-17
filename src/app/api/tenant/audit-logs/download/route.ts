@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { errorResponse, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { VALID_ACTIONS } from "@/lib/audit-query";
 import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
@@ -18,6 +18,7 @@ import {
   AUDIT_LOG_MAX_ROWS,
 } from "@/lib/validations/common.server";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
@@ -37,10 +38,7 @@ async function handleGET(req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.AUDIT_LOG_VIEW);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const rateKey = `rl:tenant_audit_download:${session.user.id}`;
@@ -67,13 +65,13 @@ async function handleGET(req: NextRequest) {
     return validationError({ date: "Invalid date format" });
   }
   const now = new Date();
-  const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+  const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
   const resolvedTo = toDate ?? now;
   const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
   if (diffMs < 0) {
     return validationError({ date: "'from' must be before 'to'" });
   }
-  if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+  if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
     return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
   }
 

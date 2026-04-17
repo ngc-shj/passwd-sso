@@ -4,14 +4,12 @@ import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { unauthorized } from "@/lib/api-response";
-import { rateLimited } from "@/lib/api-response";
-import { errorResponse } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 
 type Params = { params: Promise<{ teamId: string }> };
@@ -31,10 +29,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_CREATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const rl = await teamBulkImportLimiter.check(`rl:team_bulk_import:${teamId}:${userId}`);

@@ -3,19 +3,20 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/service-account";
 import { serviceAccountCreateSchema } from "@/lib/validations/service-account";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
-const saCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 10 });
+const saCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 10 });
 
 export const runtime = "nodejs";
 
@@ -35,10 +36,7 @@ async function handleGET(req: NextRequest) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const accounts = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -81,10 +79,7 @@ async function handlePOST(req: NextRequest) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const rl = await saCreateLimiter.check(`rl:sa_create:${actor.tenantId}`);
