@@ -228,7 +228,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
 
       usedNames.add(existing.name);
 
-      const renames: Array<{ childId: string; newName: string }> = [];
+      const renames = new Map<string, string>();
       for (const child of children) {
         if (usedNames.has(child.name)) {
           let suffix = 2;
@@ -237,7 +237,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
             suffix++;
             newName = `${child.name} (${suffix})`;
           }
-          renames.push({ childId: child.id, newName });
+          renames.set(child.id, newName);
           usedNames.add(newName);
         } else {
           usedNames.add(child.name);
@@ -245,12 +245,12 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       }
 
       for (const child of children) {
-        const rename = renames.find((r) => r.childId === child.id);
+        const newName = renames.get(child.id);
         await tx.teamFolder.update({
           where: { id: child.id },
           data: {
             parentId: existing.parentId,
-            ...(rename ? { name: rename.newName } : {}),
+            ...(newName ? { name: newName } : {}),
           },
         });
       }

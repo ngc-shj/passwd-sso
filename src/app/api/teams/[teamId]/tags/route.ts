@@ -67,6 +67,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (wantTree) {
     const tree = buildTagTree(flat);
     const ordered = flattenTagTree(tree);
+    const countMap = new Map(flat.map((f) => [f.id, f.count]));
     return NextResponse.json(
       ordered.map((n) => ({
         id: n.id,
@@ -74,7 +75,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         color: n.color,
         parentId: n.parentId,
         depth: n.depth,
-        count: flat.find((f) => f.id === n.id)?.count ?? 0,
+        count: countMap.get(n.id) ?? 0,
       })),
     );
   }

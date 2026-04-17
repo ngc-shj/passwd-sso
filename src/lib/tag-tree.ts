@@ -105,7 +105,15 @@ export function buildTagPath(
   tagId: string,
   tags: FlatTag[],
 ): string | null {
-  const tag = tags.find((t) => t.id === tagId);
+  const byId = new Map(tags.map((t) => [t.id, t]));
+  return buildTagPathWithMap(tagId, byId);
+}
+
+function buildTagPathWithMap(
+  tagId: string,
+  byId: Map<string, FlatTag>,
+): string | null {
+  const tag = byId.get(tagId);
   if (!tag) return null;
 
   const parts: string[] = [tag.name];
@@ -116,7 +124,7 @@ export function buildTagPath(
     if (visited.has(currentId)) break;
     visited.add(currentId);
 
-    const parent = tags.find((t) => t.id === currentId);
+    const parent = byId.get(currentId);
     if (!parent) break;
 
     parts.unshift(parent.name);
@@ -124,6 +132,22 @@ export function buildTagPath(
   }
 
   return parts.join(" / ");
+}
+
+/**
+ * Build a path for every tag in one pass.
+ *
+ * Callers rendering many tags at once should prefer this over repeated
+ * `buildTagPath` calls, which would be O(N² × D) overall.
+ */
+export function buildTagPathMap(tags: FlatTag[]): Map<string, string> {
+  const byId = new Map(tags.map((t) => [t.id, t]));
+  const paths = new Map<string, string>();
+  for (const tag of tags) {
+    const path = buildTagPathWithMap(tag.id, byId);
+    if (path) paths.set(tag.id, path);
+  }
+  return paths;
 }
 
 export class TagTreeError extends Error {
