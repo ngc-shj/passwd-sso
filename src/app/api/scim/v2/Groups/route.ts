@@ -88,16 +88,29 @@ async function handleGET(req: NextRequest) {
       orderBy: [{ createdAt: "asc" }],
     });
 
-    const groups = await Promise.all(
-      mappings.map(async (mapping) => {
-        const members = await loadGroupMembers(mapping.teamId, mapping.role);
-        return buildGroupResource(
-          mapping.externalGroupId,
-          toDisplayName(mapping.team.slug, mapping.role),
-          members,
-          baseUrl,
-        );
-      }),
+    // Batch-load team members for all mappings in one query, then group in-memory
+    const teamIds = Array.from(new Set(mappings.map((m) => m.teamId)));
+    const roles = Array.from(new Set(mappings.map((m) => m.role)));
+    const allMembers = teamIds.length === 0 ? [] : await prisma.teamMember.findMany({
+      where: { teamId: { in: teamIds }, role: { in: roles }, deactivatedAt: null },
+      include: { user: { select: { id: true, email: true } } },
+    });
+    const membersByTeamRole = new Map<string, ScimGroupMemberInput[]>();
+    for (const m of allMembers) {
+      if (m.user.email == null) continue;
+      const key = `${m.teamId}:${m.role}`;
+      const list = membersByTeamRole.get(key) ?? [];
+      list.push({ userId: m.userId, email: m.user.email });
+      membersByTeamRole.set(key, list);
+    }
+
+    const groups = mappings.map((mapping) =>
+      buildGroupResource(
+        mapping.externalGroupId,
+        toDisplayName(mapping.team.slug, mapping.role),
+        membersByTeamRole.get(`${mapping.teamId}:${mapping.role}`) ?? [],
+        baseUrl,
+      ),
     );
 
     const filterParam = req.nextUrl.searchParams.get("filter");

@@ -43,6 +43,9 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+    for (const e of entries) await mockLogAudit(e);
+  }),
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));

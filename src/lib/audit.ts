@@ -18,7 +18,7 @@ import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client"
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
-import { enqueueAudit, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit-outbox";
+import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit-outbox";
 
 /** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -222,6 +222,73 @@ export async function logAuditAsync(params: AuditLogParams): Promise<void> {
       deadLetterEntry(params, "logAuditAsync_failed", String(err)),
       "audit.dead_letter",
     );
+  }
+}
+
+/**
+ * Enqueue many audit events in a single DB transaction.
+ * Prefer over a loop of logAuditAsync() for bulk operations.
+ *
+ * All params must share the same effective tenantId — the helper resolves
+ * tenantId from the first entry and applies it to all. Caller guarantees
+ * consistency (typical usage: bulk-import, where all entries belong to
+ * one user / one tenant).
+ *
+ * Never throws. On resolution/insert failure, logs the entire batch to
+ * the dead-letter logger.
+ */
+export async function logAuditBulkAsync(paramsList: AuditLogParams[]): Promise<void> {
+  if (paramsList.length === 0) return;
+
+  // Emit structured JSON for each (synchronous, never fails caller)
+  for (const params of paramsList) {
+    const payload = buildOutboxPayload(params);
+    try {
+      auditLogger.info(
+        {
+          audit: {
+            scope: payload.scope,
+            action: payload.action,
+            userId: payload.userId,
+            actorType: payload.actorType,
+            serviceAccountId: payload.serviceAccountId,
+            tenantId: params.tenantId ?? null,
+            teamId: payload.teamId,
+            targetType: payload.targetType,
+            targetId: payload.targetId,
+            metadata: payload.metadata,
+            ip: payload.ip,
+            userAgent: payload.userAgent,
+          },
+        },
+        `audit.${payload.action}`,
+      );
+    } catch {
+      // Never let forwarding break the app
+    }
+  }
+
+  try {
+    // Resolve tenantId once; assume all entries share it.
+    const tenantId = await resolveTenantId(paramsList[0]);
+    if (!tenantId) {
+      for (const params of paramsList) {
+        deadLetterLogger.warn(
+          deadLetterEntry(params, "tenant_not_found"),
+          "audit.dead_letter",
+        );
+      }
+      return;
+    }
+    const payloads = paramsList.map((params) => buildOutboxPayload(params));
+    await enqueueAuditBulk(tenantId, payloads);
+  } catch (err) {
+    for (const params of paramsList) {
+      deadLetterLogger.warn(
+        deadLetterEntry(params, "logAuditBulkAsync_failed", String(err)),
+        "audit.dead_letter",
+      );
+    }
   }
 }
 

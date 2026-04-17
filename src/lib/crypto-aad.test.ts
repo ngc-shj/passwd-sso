@@ -150,6 +150,14 @@ describe("crypto-aad", () => {
   });
 
   // ─── Known Vector Test ────────────────────────────────────────
+  //
+  // IMPORTANT: Keep the PV snapshot below BYTE-IDENTICAL to the matching
+  // `known vectors (interop with web client)` block in
+  // cli/src/__tests__/unit/crypto-aad.test.ts. If either side diverges,
+  // the CLI cannot decrypt server-encrypted entries (or vice versa).
+  // Any change to the AAD wire format (AAD_VERSION bump, field order, etc.)
+  // MUST be applied to src/lib/crypto-aad.ts, cli/src/lib/crypto-aad.ts,
+  // and BOTH snapshot blocks in the same PR.
 
   describe("known vectors", () => {
     it("PV AAD matches hand-computed bytes", () => {

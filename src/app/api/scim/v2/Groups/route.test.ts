@@ -121,8 +121,8 @@ describe("GET /api/scim/v2/Groups", () => {
       { externalGroupId: "grp-1", role: "ADMIN", teamId: "team-1", team: { slug: "core" } },
     ]);
     mockTeamMember.findMany.mockResolvedValue([
-      { userId: "user-1", user: { id: "user-1", email: null } },
-      { userId: "user-2", user: { id: "user-2", email: "u2@example.com" } },
+      { userId: "user-1", teamId: "team-1", role: "ADMIN", user: { id: "user-1", email: null } },
+      { userId: "user-2", teamId: "team-1", role: "ADMIN", user: { id: "user-2", email: "u2@example.com" } },
     ]);
 
     const res = await GET(makeReq());

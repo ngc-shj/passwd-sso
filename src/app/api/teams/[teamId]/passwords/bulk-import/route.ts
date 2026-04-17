@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
@@ -93,19 +93,18 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     },
   });
 
-  const auditEntries = createdIds.map((entryId) => ({
-    ...requestMeta,
-    action: AUDIT_ACTION.ENTRY_CREATE,
-    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-    targetId: entryId,
-    metadata: {
-      source: "bulk-import",
-      parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
-    },
-  }));
-  for (const entry of auditEntries) {
-    await logAuditAsync(entry);
-  }
+  await logAuditBulkAsync(
+    createdIds.map((entryId) => ({
+      ...requestMeta,
+      action: AUDIT_ACTION.ENTRY_CREATE,
+      targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+      targetId: entryId,
+      metadata: {
+        source: "bulk-import",
+        parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
+      },
+    })),
+  );
 
   return NextResponse.json(
     { success: createdIds.length, failed: failedCount },

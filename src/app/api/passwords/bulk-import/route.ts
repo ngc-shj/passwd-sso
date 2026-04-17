@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
@@ -121,19 +121,18 @@ async function handlePOST(req: NextRequest) {
     },
   });
 
-  const auditEntries = createdIds.map((entryId) => ({
-    ...requestMeta,
-    action: AUDIT_ACTION.ENTRY_CREATE,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-    targetId: entryId,
-    metadata: {
-      source: "bulk-import",
-      parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
-    },
-  }));
-  for (const entry of auditEntries) {
-    await logAuditAsync(entry);
-  }
+  await logAuditBulkAsync(
+    createdIds.map((entryId) => ({
+      ...requestMeta,
+      action: AUDIT_ACTION.ENTRY_CREATE,
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      targetId: entryId,
+      metadata: {
+        source: "bulk-import",
+        parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
+      },
+    })),
+  );
 
   return NextResponse.json(
     { success: createdIds.length, failed: failedCount },
