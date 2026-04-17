@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,7 @@ import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 export function TeamSecureNoteForm({
   teamId,
@@ -54,36 +55,17 @@ export function TeamSecureNoteForm({
   // Entry-specific state
   const [content, setContent] = useState(editData?.content ?? "");
 
-  // hasChanges
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: editData?.title ?? "",
-        notes: editData?.notes ?? "",
-        content: editData?.content ?? "",
-        selectedTagIds: (editData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
-        requireReprompt: editData?.requireReprompt ?? false,
-        travelSafe: editData?.travelSafe ?? true,
-        expiresAt: editData?.expiresAt ?? null,
-      }),
-    [editData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        notes: base.notes,
-        content,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        teamFolderId: base.teamFolderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe: base.travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      notes: base.notes,
+      content,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      teamFolderId: base.teamFolderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe: base.travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       base.notes,
@@ -95,8 +77,6 @@ export function TeamSecureNoteForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;

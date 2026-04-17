@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +26,7 @@ import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 interface IdentityFormProps {
   mode: "create" | "edit";
@@ -97,51 +98,25 @@ export function IdentityForm({
   const [expiryError, setExpiryError] = useState<string | null>(null);
   const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: initialData?.title ?? "",
-        fullName: initialData?.fullName ?? "",
-        address: initialData?.address ?? "",
-        phone: initialData?.phone ?? "",
-        email: initialData?.email ?? "",
-        dateOfBirth: initialData?.dateOfBirth ?? "",
-        nationality: initialData?.nationality ?? "",
-        idNumber: initialData?.idNumber ?? "",
-        issueDate: initialData?.issueDate ?? "",
-        expiryDate: initialData?.expiryDate ?? "",
-        notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        folderId: initialData?.folderId ?? defaultFolderId ?? null,
-        requireReprompt: initialData?.requireReprompt ?? false,
-        travelSafe: initialData?.travelSafe ?? true,
-        expiresAt: initialData?.expiresAt ?? null,
-      }),
-    [initialData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        fullName,
-        address,
-        phone,
-        email,
-        dateOfBirth,
-        nationality,
-        idNumber,
-        issueDate,
-        expiryDate,
-        notes,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        folderId: base.folderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      fullName,
+      address,
+      phone,
+      email,
+      dateOfBirth,
+      nationality,
+      idNumber,
+      issueDate,
+      expiryDate,
+      notes,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      folderId: base.folderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       fullName,
@@ -161,8 +136,6 @@ export function IdentityForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS

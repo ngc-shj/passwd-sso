@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 export function TeamPasskeyForm({
   teamId,
@@ -52,46 +53,22 @@ export function TeamPasskeyForm({
   const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
   const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
 
-  // hasChanges
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: editData?.title ?? "",
-        notes: editData?.notes ?? "",
-        relyingPartyId: editData?.relyingPartyId ?? "",
-        relyingPartyName: editData?.relyingPartyName ?? "",
-        username: editData?.username ?? "",
-        credentialId: editData?.credentialId ?? "",
-        creationDate: editData?.creationDate ?? "",
-        deviceInfo: editData?.deviceInfo ?? "",
-        selectedTagIds: (editData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
-        requireReprompt: editData?.requireReprompt ?? false,
-        travelSafe: editData?.travelSafe ?? true,
-        expiresAt: editData?.expiresAt ?? null,
-      }),
-    [editData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        notes: base.notes,
-        relyingPartyId,
-        relyingPartyName,
-        username,
-        credentialId,
-        creationDate,
-        deviceInfo,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        teamFolderId: base.teamFolderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe: base.travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      notes: base.notes,
+      relyingPartyId,
+      relyingPartyName,
+      username,
+      credentialId,
+      creationDate,
+      deviceInfo,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      teamFolderId: base.teamFolderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe: base.travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       base.notes,
@@ -108,8 +85,6 @@ export function TeamPasskeyForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   const submitDisabled = !base.title.trim() || !relyingPartyId.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;

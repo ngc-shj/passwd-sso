@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   CARD_BRANDS,
@@ -35,6 +35,7 @@ import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";
@@ -106,48 +107,22 @@ export function CreditCardForm({
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: initialData?.title ?? "",
-        cardholderName: initialData?.cardholderName ?? "",
-        cardNumber: formatCardNumber(
-          initialData?.cardNumber ?? "",
-          initialData?.brand ?? "",
-        ),
-        brand: initialData?.brand ?? "",
-        expiryMonth: initialData?.expiryMonth ?? "",
-        expiryYear: initialData?.expiryYear ?? "",
-        cvv: initialData?.cvv ?? "",
-        notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        folderId: initialData?.folderId ?? defaultFolderId ?? null,
-        requireReprompt: initialData?.requireReprompt ?? false,
-        travelSafe: initialData?.travelSafe ?? true,
-        expiresAt: initialData?.expiresAt ?? null,
-      }),
-    [initialData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        cardholderName,
-        cardNumber,
-        brand,
-        expiryMonth,
-        expiryYear,
-        cvv,
-        notes,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        folderId: base.folderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      cardholderName,
+      cardNumber,
+      brand,
+      expiryMonth,
+      expiryYear,
+      cvv,
+      notes,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      folderId: base.folderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       cardholderName,
@@ -164,8 +139,6 @@ export function CreditCardForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS

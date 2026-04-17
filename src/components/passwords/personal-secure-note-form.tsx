@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,6 +34,7 @@ import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 interface SecureNoteFormProps {
   mode: "create" | "edit";
@@ -84,33 +85,16 @@ export function SecureNoteForm({
   const [content, setContent] = useState(initialData?.content ?? "");
   const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: initialData?.title ?? "",
-        content: initialData?.content ?? "",
-        selectedTagIds: (initialData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        folderId: initialData?.folderId ?? defaultFolderId ?? null,
-        requireReprompt: initialData?.requireReprompt ?? false,
-        travelSafe: initialData?.travelSafe ?? true,
-        expiresAt: initialData?.expiresAt ?? null,
-      }),
-    [initialData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        content,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        folderId: base.folderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      content,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      folderId: base.folderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       content,
@@ -121,8 +105,6 @@ export function SecureNoteForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +22,7 @@ import { getTeamCardValidationState } from "@/components/team/team-credit-card-v
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 export function TeamCreditCardForm({
   teamId,
@@ -87,46 +88,22 @@ export function TeamCreditCardForm({
     });
   };
 
-  // hasChanges
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: editData?.title ?? "",
-        notes: editData?.notes ?? "",
-        cardholderName: editData?.cardholderName ?? "",
-        brand: editData?.brand ?? "",
-        cardNumber: editData?.cardNumber ?? "",
-        expiryMonth: editData?.expiryMonth ?? "",
-        expiryYear: editData?.expiryYear ?? "",
-        cvv: editData?.cvv ?? "",
-        selectedTagIds: (editData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        teamFolderId: editData?.teamFolderId ?? defaultFolderId ?? null,
-        requireReprompt: editData?.requireReprompt ?? false,
-        travelSafe: editData?.travelSafe ?? true,
-        expiresAt: editData?.expiresAt ?? null,
-      }),
-    [editData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        notes: base.notes,
-        cardholderName,
-        brand,
-        cardNumber,
-        expiryMonth,
-        expiryYear,
-        cvv,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        teamFolderId: base.teamFolderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe: base.travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      notes: base.notes,
+      cardholderName,
+      brand,
+      cardNumber,
+      expiryMonth,
+      expiryYear,
+      cvv,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      teamFolderId: base.teamFolderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe: base.travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       base.notes,
@@ -143,8 +120,6 @@ export function TeamCreditCardForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   const submitDisabled = !base.title.trim() || !cardNumberValid;
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
