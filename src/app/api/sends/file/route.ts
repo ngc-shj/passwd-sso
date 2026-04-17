@@ -15,14 +15,13 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto-server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -179,16 +178,12 @@ async function handlePOST(req: NextRequest) {
   );
 
   // Audit log
-  const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.SEND_CREATE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { sendType: "FILE", filename, sizeBytes: file.size },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({

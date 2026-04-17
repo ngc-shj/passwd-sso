@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/tenant-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
@@ -753,12 +753,9 @@ async function handlePATCH(req: NextRequest) {
   invalidateTenantPolicyCache(membership.tenantId);
   invalidateLockoutThresholdCache(membership.tenantId);
 
-  const meta = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, membership.tenantId),
     action: AUDIT_ACTION.POLICY_UPDATE,
-    userId: session.user.id,
-    tenantId: membership.tenantId,
     metadata: {
       maxConcurrentSessions: updated.maxConcurrentSessions,
       sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
@@ -790,8 +787,6 @@ async function handlePATCH(req: NextRequest) {
       delegationDefaultTtlSec: updated.delegationDefaultTtlSec,
       delegationMaxTtlSec: updated.delegationMaxTtlSec,
     },
-    ip: meta.ip,
-    userAgent: meta.userAgent,
   });
 
   return NextResponse.json({

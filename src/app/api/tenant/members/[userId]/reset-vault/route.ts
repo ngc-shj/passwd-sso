@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
@@ -18,7 +18,7 @@ import {
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
@@ -142,14 +142,11 @@ async function handlePOST(
 
   // Audit log
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: "User",
     targetId: targetUserId,
     metadata: { resetId: resetRecord.id },
-    ...extractRequestMeta(req),
   });
 
   // In-app notification to target user

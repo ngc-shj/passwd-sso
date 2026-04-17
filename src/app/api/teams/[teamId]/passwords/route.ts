@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { checkAuth } from "@/lib/check-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { createTeamE2EPasswordSchema } from "@/lib/validations";
 import { requireTeamPermission } from "@/lib/team-auth";
 import { parseBody } from "@/lib/parse-body";
 import type { EntryType } from "@prisma/client";
-import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -112,10 +112,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.ENTRY_CREATE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: entry.id,
     metadata: (() => {
@@ -139,7 +137,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
             parentAction: AUDIT_ACTION.ENTRY_IMPORT,
           };
     })(),
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

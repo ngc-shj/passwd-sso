@@ -39,16 +39,6 @@ async function handlePOST() {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
   // Migration metric (Step 11): emit a counter so we can track when the legacy
   // direct-issuance endpoint stops being called and the bridge code flow has
   // fully replaced it.
@@ -60,11 +50,13 @@ async function handlePOST() {
     "legacy direct extension token issuance — track for migration completion",
   );
 
-  const issued = await issueExtensionToken({
-    userId: session.user.id,
-    tenantId: actor.tenantId,
-    scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
-  });
+  const issued = await withUserTenantRls(session.user.id, async (tenantId) =>
+    issueExtensionToken({
+      userId: session.user.id,
+      tenantId,
+      scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
+    }),
+  );
 
   const body = {
     token: issued.token,

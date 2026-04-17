@@ -31,7 +31,7 @@ const {
     mockPrismaTenant: { delete: vi.fn() },
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
     mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
     TeamAuthError: _TeamAuthError,
   };
@@ -339,7 +339,7 @@ describe("DELETE /api/teams/[teamId]", () => {
   });
 
   it("returns 404 when team no longer exists", async () => {
-    mockPrismaTeam.findUnique.mockResolvedValue(null);
+    mockWithTeamTenantRls.mockRejectedValueOnce(new Error("TENANT_NOT_RESOLVED"));
 
     const res = await DELETE(
       createRequest("DELETE", `http://localhost:3000/api/teams/${TEAM_ID}`),

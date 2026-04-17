@@ -11,8 +11,8 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { errorResponse, rateLimited, zodValidationError } from "@/lib/api-response";
@@ -92,10 +92,8 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   });
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_RUN,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: {
@@ -108,7 +106,6 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
       usersDeactivated: result.usersDeactivated,
       abortedSafety: result.abortedSafety,
     },
-    ...extractRequestMeta(req),
   });
 
   if (!result.success) {

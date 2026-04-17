@@ -69,6 +69,7 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));

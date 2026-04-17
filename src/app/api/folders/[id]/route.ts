@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound, forbidden } from "@/lib/api-response";
@@ -13,7 +13,7 @@ import {
   checkCircularReference,
   type ParentNode,
 } from "@/lib/folder-utils";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -156,12 +156,10 @@ async function handlePUT(
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.FOLDER_UPDATE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.FOLDER,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({
@@ -259,12 +257,10 @@ async function handleDELETE(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.FOLDER_DELETE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.FOLDER,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

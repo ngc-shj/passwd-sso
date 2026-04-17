@@ -17,6 +17,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
+import { parseQuery } from "@/lib/parse-body";
 import {
   buildChainInput,
   computeCanonicalBytes,
@@ -97,20 +98,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const querySchema = buildQuerySchema();
-  const params = querySchema.safeParse({
-    tenantId: req.nextUrl.searchParams.get("tenantId"),
-    operatorId: req.nextUrl.searchParams.get("operatorId"),
-    from: req.nextUrl.searchParams.get("from") ?? undefined,
-    to: req.nextUrl.searchParams.get("to") ?? undefined,
-  });
-  if (!params.success) {
-    return NextResponse.json(
-      { error: params.error.issues[0]?.message ?? "Invalid query parameters" },
-      { status: 400 },
-    );
-  }
-
-  const { tenantId, operatorId, from, to } = params.data;
+  const result = parseQuery(req, querySchema);
+  if (!result.ok) return result.response;
+  const { tenantId, operatorId, from, to } = result.data;
 
   const membership = await withBypassRls(
     prisma,

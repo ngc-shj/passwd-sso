@@ -44,13 +44,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   let results: { id: string; name: string | null; email: string | null; image: string | null }[];
   try {
-    results = await withTeamTenantRls(teamId, async () => {
-      const team = await prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      });
-      if (!team) return [];
-
+    results = await withTeamTenantRls(teamId, async (tenantId) => {
       // Get active team member userIds to exclude
       const activeMembers = await prisma.teamMember.findMany({
         where: { teamId, deactivatedAt: null },
@@ -72,7 +66,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       let pendingUserIds = new Set<string>();
       if (pendingEmails.length > 0) {
         const pendingUsers = await prisma.user.findMany({
-          where: { email: { in: pendingEmails }, tenantId: team.tenantId },
+          where: { email: { in: pendingEmails }, tenantId },
           select: { id: true },
         });
         pendingUserIds = new Set(pendingUsers.map((u) => u.id));
@@ -84,10 +78,10 @@ async function handleGET(req: NextRequest, { params }: Params) {
       // Search tenant members
       return prisma.user.findMany({
         where: {
-          tenantId: team.tenantId,
+          tenantId,
           ...(excludeIds.length > 0 && { id: { notIn: excludeIds } }),
           tenantMemberships: {
-            some: { tenantId: team.tenantId, deactivatedAt: null },
+            some: { tenantId, deactivatedAt: null },
           },
           OR: [
             { name: { contains: query, mode: "insensitive" } },

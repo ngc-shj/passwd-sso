@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -104,16 +104,14 @@ async function handlePOST(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
     metadata: {
       [AUDIT_METADATA_KEY.HISTORY_ID]: historyId,
       [AUDIT_METADATA_KEY.RESTORED_FROM_CHANGED_AT]: history.changedAt.toISOString(),
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

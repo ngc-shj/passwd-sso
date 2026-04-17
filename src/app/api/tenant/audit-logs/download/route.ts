@@ -5,7 +5,7 @@ import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
@@ -96,12 +96,9 @@ async function handleGET(req: NextRequest) {
 
   // Record the download itself
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     metadata: { format },
-    ...extractRequestMeta(req),
   });
 
   const tenantId = actor.tenantId;

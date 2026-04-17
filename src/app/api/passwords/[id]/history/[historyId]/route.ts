@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, forbidden, notFound, unauthorized } from "@/lib/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -148,11 +148,9 @@ async function handlePATCH(
     );
   }
 
-  const meta = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.ENTRY_HISTORY_REENCRYPT,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
     metadata: {
@@ -160,8 +158,6 @@ async function handlePATCH(
       oldKeyVersion: history.keyVersion,
       newKeyVersion: keyVersion,
     },
-    ip: meta.ip,
-    userAgent: meta.userAgent,
   });
 
   return NextResponse.json({ success: true });

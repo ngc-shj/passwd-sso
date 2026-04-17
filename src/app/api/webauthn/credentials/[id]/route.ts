@@ -6,8 +6,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { WEBAUTHN_NICKNAME_MAX_LENGTH } from "@/lib/validations/common";
 
 export const runtime = "nodejs";
@@ -52,13 +52,11 @@ async function handleDELETE(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.WEBAUTHN_CREDENTIAL_DELETE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
     targetId: id,
     metadata: { credentialId: existing.credentialId },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

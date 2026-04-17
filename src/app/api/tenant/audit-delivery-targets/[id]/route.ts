@@ -2,13 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/tenant-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { parseBody } from "@/lib/parse-body";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -68,14 +67,11 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: data.isActive
       ? AUDIT_ACTION.AUDIT_DELIVERY_TARGET_REACTIVATE
       : AUDIT_ACTION.AUDIT_DELIVERY_TARGET_DEACTIVATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     metadata: { targetId: id, kind: target.kind },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true, target: { id, kind: updated.kind, isActive: updated.isActive } });

@@ -27,7 +27,7 @@ const {
     mockPrismaUser: { findMany: vi.fn() },
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-456")),
   };
 });
 

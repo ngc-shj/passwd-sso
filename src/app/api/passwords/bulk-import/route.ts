@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
@@ -40,18 +41,8 @@ async function handlePOST(req: NextRequest) {
 
   const createdIds: string[] = [];
   let failedCount = 0;
-  let actorMissing = false;
 
-  await withUserTenantRls(userId, async () => {
-    const actor = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true },
-    });
-    if (!actor) {
-      actorMissing = true;
-      return;
-    }
-
+  await withUserTenantRls(userId, async (tenantId) => {
     for (const entryData of entries) {
       try {
         const {
@@ -89,12 +80,8 @@ async function handlePOST(req: NextRequest) {
         const entry = await prisma.passwordEntry.create({
           data: {
             ...(clientId ? { id: clientId } : {}),
-            encryptedBlob: encryptedBlob.ciphertext,
-            blobIv: encryptedBlob.iv,
-            blobAuthTag: encryptedBlob.authTag,
-            encryptedOverview: encryptedOverview.ciphertext,
-            overviewIv: encryptedOverview.iv,
-            overviewAuthTag: encryptedOverview.authTag,
+            ...toBlobColumns(encryptedBlob),
+            ...toOverviewColumns(encryptedOverview),
             keyVersion,
             aadVersion,
             entryType,
@@ -103,7 +90,7 @@ async function handlePOST(req: NextRequest) {
             ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
             ...(folderId ? { folderId } : {}),
             userId,
-            tenantId: actor.tenantId,
+            tenantId,
             ...(tagIds?.length
               ? { tags: { connect: tagIds.map((id) => ({ id })) } }
               : {}),
@@ -118,14 +105,11 @@ async function handlePOST(req: NextRequest) {
     }
   });
 
-  if (actorMissing) return unauthorized();
-
-  const requestMeta = extractRequestMeta(req);
+  const requestMeta = personalAuditBase(req, userId);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...requestMeta,
     action: AUDIT_ACTION.ENTRY_BULK_IMPORT,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     // targetId omitted for bulk operations
     metadata: {
@@ -135,20 +119,17 @@ async function handlePOST(req: NextRequest) {
       failedCount,
       ...(sanitizedFilename ? { filename: sanitizedFilename } : {}),
     },
-    ...requestMeta,
   });
 
   const auditEntries = createdIds.map((entryId) => ({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...requestMeta,
     action: AUDIT_ACTION.ENTRY_CREATE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: entryId,
     metadata: {
       source: "bulk-import",
       parentAction: AUDIT_ACTION.ENTRY_BULK_IMPORT,
     },
-    ...requestMeta,
   }));
   for (const entry of auditEntries) {
     await logAuditAsync(entry);

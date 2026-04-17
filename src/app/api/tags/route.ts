@@ -78,16 +78,6 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
 
   const { name, color, parentId } = result.data;
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
   // Validate parent chain if parentId is provided
   if (parentId) {
     const allTags = await withUserTenantRls(session.user.id, async () =>
@@ -123,14 +113,14 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
   }
 
-  const tag = await withUserTenantRls(session.user.id, async () =>
+  const tag = await withUserTenantRls(session.user.id, async (tenantId) =>
     prisma.tag.create({
       data: {
         name,
         color: color || null,
         parentId: parentId ?? null,
         userId: session.user.id,
-        tenantId: actor.tenantId,
+        tenantId,
       },
     }),
   );

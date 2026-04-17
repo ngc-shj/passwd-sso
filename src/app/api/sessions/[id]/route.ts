@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -67,15 +67,11 @@ async function handleDELETE(
     );
   }
 
-  const meta = extractRequestMeta(request);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(request, session.user.id),
     action: AUDIT_ACTION.SESSION_REVOKE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.SESSION,
     targetId: id,
-    ip: meta.ip,
-    userAgent: meta.userAgent,
   });
 
   return NextResponse.json({ success: true });

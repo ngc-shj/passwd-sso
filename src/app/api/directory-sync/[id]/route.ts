@@ -12,8 +12,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 import {
   SYNC_INTERVAL_MIN,
@@ -190,10 +190,8 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_UPDATE,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: {
@@ -201,7 +199,6 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
       displayName: displayName ?? config.displayName,
       credentialsRotated: !!credentials,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(updated);
@@ -249,17 +246,14 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_DELETE,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: {
       provider: config.provider,
       displayName: config.displayName,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

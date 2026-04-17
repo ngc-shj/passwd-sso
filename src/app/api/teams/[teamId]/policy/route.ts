@@ -9,9 +9,9 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 
@@ -82,39 +82,24 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   const result = await parseBody(req, upsertTeamPolicySchema);
   if (!result.ok) return result.response;
 
-  // Resolve tenantId from team
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!team) {
-    return errorResponse(API_ERROR.TEAM_NOT_FOUND, 404);
-  }
-
-  const policy = await withTeamTenantRls(teamId, async () =>
+  const policy = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.teamPolicy.upsert({
       where: { teamId },
       create: {
         teamId,
-        tenantId: team.tenantId,
+        tenantId,
         ...result.data,
       },
       update: result.data,
     }),
   );
 
-  const meta = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.POLICY_UPDATE,
-    userId: session.user.id,
-    teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM,
     targetId: teamId,
     metadata: result.data,
-    ...meta,
   });
 
   return NextResponse.json({

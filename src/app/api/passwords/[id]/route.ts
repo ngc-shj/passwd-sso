@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { forbidden, notFound, rateLimited, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/check-auth";
@@ -8,7 +8,7 @@ import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 import { withRequestLog } from "@/lib/with-request-log";
-import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 
 const getLimiter = createRateLimiter({ windowMs: 60_000, max: 60 });
@@ -192,12 +192,10 @@ async function handlePUT(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.ENTRY_UPDATE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({
@@ -261,15 +259,13 @@ async function handleDELETE(
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: permanent
       ? AUDIT_ACTION.ENTRY_PERMANENT_DELETE
       : AUDIT_ACTION.ENTRY_TRASH,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

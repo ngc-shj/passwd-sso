@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
@@ -10,7 +10,7 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
@@ -77,14 +77,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     );
 
     await logAuditAsync({
-      scope: AUDIT_SCOPE.TEAM,
+      ...teamAuditBase(req, session.user.id, teamId),
       action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
-      userId: session.user.id,
-      teamId: teamId,
       targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: memberId,
       metadata: { newRole: TEAM_ROLE.OWNER, previousRole: target.role, transfer: true },
-      ...extractRequestMeta(req),
     });
 
     return NextResponse.json({
@@ -121,14 +118,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.TEAM_ROLE_UPDATE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: memberId,
     metadata: { newRole: result.data.role, previousRole: target.role },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({
@@ -204,10 +198,8 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.TEAM_MEMBER_REMOVE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: memberId,
     metadata: {
@@ -216,7 +208,6 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
       ...(invalidationCounts ?? {}),
       ...(sessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

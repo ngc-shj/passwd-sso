@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { checkAuth } from "@/lib/check-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
-import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/rate-limit";
 
@@ -140,7 +141,7 @@ async function handlePOST(req: NextRequest) {
 
   const { id: clientId, encryptedBlob, encryptedOverview, keyVersion, aadVersion, tagIds, folderId, isFavorite, entryType, requireReprompt, expiresAt } = result.data;
 
-  const createResult = await withUserTenantRls(userId, async () => {
+  const createResult = await withUserTenantRls(userId, async (tenantId) => {
     // Verify folder ownership
     if (folderId) {
       const folder = await prisma.folder.findFirst({ where: { id: folderId, userId } });
@@ -157,23 +158,11 @@ async function handlePOST(req: NextRequest) {
       }
     }
 
-    const actor = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true },
-    });
-    if (!actor) {
-      return { error: "UNAUTHORIZED" as const };
-    }
-
     const entry = await prisma.passwordEntry.create({
       data: {
         ...(clientId ? { id: clientId } : {}),
-        encryptedBlob: encryptedBlob.ciphertext,
-        blobIv: encryptedBlob.iv,
-        blobAuthTag: encryptedBlob.authTag,
-        encryptedOverview: encryptedOverview.ciphertext,
-        overviewIv: encryptedOverview.iv,
-        overviewAuthTag: encryptedOverview.authTag,
+        ...toBlobColumns(encryptedBlob),
+        ...toOverviewColumns(encryptedOverview),
         keyVersion,
         aadVersion,
         entryType,
@@ -182,7 +171,7 @@ async function handlePOST(req: NextRequest) {
         ...(expiresAt !== undefined ? { expiresAt: expiresAt ? new Date(expiresAt) : null } : {}),
         ...(folderId ? { folderId } : {}),
         userId,
-        tenantId: actor.tenantId,
+        tenantId,
         ...(tagIds?.length
           ? { tags: { connect: tagIds.map((id) => ({ id })) } }
           : {}),
@@ -194,9 +183,6 @@ async function handlePOST(req: NextRequest) {
   });
 
   if ("error" in createResult) {
-    if (createResult.error === "UNAUTHORIZED") {
-      return unauthorized();
-    }
     const detail = createResult.error === "INVALID_FOLDER" ? "Invalid folderId" : "Invalid tagIds";
     return validationError(detail);
   }
@@ -204,9 +190,8 @@ async function handlePOST(req: NextRequest) {
   const { entry } = createResult;
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.ENTRY_CREATE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: entry.id,
     metadata: (() => {
@@ -230,7 +215,6 @@ async function handlePOST(req: NextRequest) {
             parentAction: AUDIT_ACTION.ENTRY_IMPORT,
           };
     })(),
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

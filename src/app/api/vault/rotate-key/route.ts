@@ -11,7 +11,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
@@ -25,7 +25,8 @@ import {
   VAULT_ROTATE_HISTORY_MAX,
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
 } from "@/lib/validations/common";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -211,12 +212,8 @@ async function handlePOST(request: NextRequest) {
             const result = await tx.passwordEntry.updateMany({
               where: { id: entry.id, userId },
               data: {
-                encryptedBlob: entry.encryptedBlob.ciphertext,
-                blobIv: entry.encryptedBlob.iv,
-                blobAuthTag: entry.encryptedBlob.authTag,
-                encryptedOverview: entry.encryptedOverview.ciphertext,
-                overviewIv: entry.encryptedOverview.iv,
-                overviewAuthTag: entry.encryptedOverview.authTag,
+                ...toBlobColumns(entry.encryptedBlob),
+                ...toOverviewColumns(entry.encryptedOverview),
                 aadVersion: entry.aadVersion,
                 keyVersion: newKeyVersion,
               },
@@ -237,9 +234,7 @@ async function handlePOST(request: NextRequest) {
             const result = await tx.passwordEntryHistory.updateMany({
               where: { id: historyEntry.id, entry: { userId } },
               data: {
-                encryptedBlob: historyEntry.encryptedBlob.ciphertext,
-                blobIv: historyEntry.encryptedBlob.iv,
-                blobAuthTag: historyEntry.encryptedBlob.authTag,
+                ...toBlobColumns(historyEntry.encryptedBlob),
                 aadVersion: historyEntry.aadVersion,
                 keyVersion: newKeyVersion,
               },
@@ -306,9 +301,8 @@ async function handlePOST(request: NextRequest) {
   await revokeAllDelegationSessions(userId, user.tenantId, "KEY_ROTATION").catch(() => {});
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(request, userId),
     action: AUDIT_ACTION.VAULT_KEY_ROTATION,
-    userId,
     targetType: "User",
     targetId: userId,
     metadata: {
@@ -317,7 +311,6 @@ async function handlePOST(request: NextRequest) {
       entriesRotated: entries.length,
       historyEntriesRotated: historyEntries.length,
     },
-    ...extractRequestMeta(request),
   });
 
   getLogger().info({ userId }, "vault.rotateKey.success");

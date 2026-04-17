@@ -21,7 +21,7 @@ const { mockAuth, mockPrismaTeamTag, mockPrismaTeam, mockRequireTeamMember, mock
     mockRequireTeamMember: vi.fn(),
     mockRequireTeamPermission: vi.fn(),
     TeamAuthError: _TeamAuthError,
-    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+    mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
   };
 });
 
@@ -224,18 +224,6 @@ describe("POST /api/teams/[teamId]/tags", () => {
     expect(res.status).toBe(201);
     expect(json.name).toBe("Finance");
     expect(json.count).toBe(0);
-  });
-
-  it("returns 404 when team is missing", async () => {
-    mockPrismaTeam.findUnique.mockResolvedValue(null);
-    mockPrismaTeamTag.findFirst.mockResolvedValue(null);
-
-    const res = await POST(
-      createRequest("POST", `http://localhost:3000/api/teams/${TEAM_ID}/tags`, { body: { name: "Finance" } }),
-      createParams({ teamId: TEAM_ID }),
-    );
-
-    expect(res.status).toBe(404);
   });
 
   it("returns 400 when parent chain is invalid", async () => {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
@@ -9,7 +9,8 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
-import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import type { EntryType } from "@prisma/client";
@@ -159,12 +160,8 @@ async function handlePOST(req: NextRequest) {
     const entry = await prisma.passwordEntry.create({
       data: {
         ...(clientId ? { id: clientId } : {}),
-        encryptedBlob: encryptedBlob.ciphertext,
-        blobIv: encryptedBlob.iv,
-        blobAuthTag: encryptedBlob.authTag,
-        encryptedOverview: encryptedOverview.ciphertext,
-        overviewIv: encryptedOverview.iv,
-        overviewAuthTag: encryptedOverview.authTag,
+        ...toBlobColumns(encryptedBlob),
+        ...toOverviewColumns(encryptedOverview),
         keyVersion,
         aadVersion,
         entryType,
@@ -195,12 +192,10 @@ async function handlePOST(req: NextRequest) {
   const { entry } = createResult;
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.ENTRY_CREATE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: entry.id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

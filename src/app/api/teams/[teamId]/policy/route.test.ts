@@ -21,7 +21,7 @@ const {
   mockRequireTeamMember: vi.fn(),
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(
-    async (_teamId: string, fn: () => unknown) => fn(),
+    async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
   ),
   mockLogAudit: vi.fn(),
 }));
@@ -51,6 +51,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/logger", () => ({
   default: {

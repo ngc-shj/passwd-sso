@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { verifyPassphraseVerifier } from "@/lib/crypto-server";
 import { checkLockout, recordFailure } from "@/lib/account-lockout";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -76,10 +76,8 @@ async function handlePOST(request: NextRequest) {
     await recordFailure(session.user.id, request);
 
     await logAuditAsync({
+      ...personalAuditBase(request, session.user.id),
       action: AUDIT_ACTION.TRAVEL_MODE_DISABLE_FAILED,
-      scope: AUDIT_SCOPE.PERSONAL,
-      userId: session.user.id,
-      ...extractRequestMeta(request),
     });
 
     return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
@@ -96,10 +94,8 @@ async function handlePOST(request: NextRequest) {
   );
 
   await logAuditAsync({
+    ...personalAuditBase(request, session.user.id),
     action: AUDIT_ACTION.TRAVEL_MODE_DISABLE,
-    scope: AUDIT_SCOPE.PERSONAL,
-    userId: session.user.id,
-    ...extractRequestMeta(request),
   });
 
   return NextResponse.json({ active: false });

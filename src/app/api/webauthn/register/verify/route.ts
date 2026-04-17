@@ -9,8 +9,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import {
   PIN_LENGTH_MIN,
   PIN_LENGTH_MAX,
@@ -211,9 +211,8 @@ async function handlePOST(req: NextRequest) {
   });
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.WEBAUTHN_CREDENTIAL_REGISTER,
-    userId,
     targetType: AUDIT_TARGET_TYPE.WEBAUTHN_CREDENTIAL,
     targetId: credential.id,
     metadata: {
@@ -225,7 +224,6 @@ async function handlePOST(req: NextRequest) {
       minPinLength,
       largeBlobSupported,
     },
-    ...extractRequestMeta(req),
   });
 
   // Send notification email (non-blocking)

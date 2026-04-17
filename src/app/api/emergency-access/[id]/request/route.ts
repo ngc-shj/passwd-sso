@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { canTransition } from "@/lib/emergency-access-state";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -63,13 +63,11 @@ async function handlePOST(
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.EMERGENCY_ACCESS_REQUEST,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
     metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, waitDays: grant.waitDays },
-    ...extractRequestMeta(req),
   });
 
   const [owner, grantee] = await Promise.all([

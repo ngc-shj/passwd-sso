@@ -17,6 +17,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),

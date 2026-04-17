@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_ACTION,
@@ -85,11 +85,9 @@ async function handleGET(req: NextRequest) {
 
   // Record the download itself
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    userId: session.user.id,
     metadata: { format },
-    ...extractRequestMeta(req),
   });
 
   const userId = session.user.id;

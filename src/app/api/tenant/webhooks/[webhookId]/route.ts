@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/tenant-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -46,12 +45,9 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.TENANT_WEBHOOK_DELETE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     metadata: { webhookId, url: webhook.url },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

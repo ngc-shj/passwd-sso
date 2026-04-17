@@ -101,16 +101,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   if (!result.ok) return result.response;
 
   const { name, color, parentId } = result.data;
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!team) {
-    return notFound();
-  }
-
   // Validate parent chain if parentId is provided
   if (parentId) {
     const allTags = await withTeamTenantRls(teamId, async () =>
@@ -146,14 +136,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
   }
 
-  const tag = await withTeamTenantRls(teamId, async () =>
+  const tag = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.teamTag.create({
       data: {
         name,
         color: color || null,
         parentId: parentId ?? null,
         teamId: teamId,
-        tenantId: team.tenantId,
+        tenantId,
       },
     }),
   );

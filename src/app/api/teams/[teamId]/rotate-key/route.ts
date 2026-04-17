@@ -4,10 +4,10 @@ import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/team-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -242,10 +242,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.TEAM_KEY_ROTATION,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: teamId,
     metadata: {
@@ -254,7 +252,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       entriesRotated: entries.length,
       membersUpdated: memberKeys.length,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({

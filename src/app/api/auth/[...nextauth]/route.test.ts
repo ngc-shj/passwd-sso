@@ -13,6 +13,7 @@ vi.mock("@/lib/with-request-log", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({}),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/session-meta", () => ({
   sessionMetaStorage: { run: (_meta: unknown, fn: () => unknown) => fn() },

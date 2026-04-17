@@ -44,6 +44,12 @@ vi.mock("@/lib/audit", () => ({
     userAgent: null,
     acceptLanguage: null,
   }),
+  personalAuditBase: (_req: unknown, userId: string) => ({
+    scope: "PERSONAL",
+    userId,
+    ip: null,
+    userAgent: null,
+  }),
 }));
 
 vi.mock("@/lib/constants", () => ({

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
@@ -53,13 +53,11 @@ async function handleGET(
     grant.status = EA_STATUS.ACTIVATED;
 
     await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
+      ...personalAuditBase(req, session.user.id),
       action: AUDIT_ACTION.EMERGENCY_ACCESS_ACTIVATE,
-      userId: session.user.id,
       targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
       targetId: id,
       metadata: { ownerId: grant.ownerId },
-      ...extractRequestMeta(req),
     });
   }
 

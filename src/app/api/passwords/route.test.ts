@@ -640,16 +640,6 @@ describe("POST /api/passwords", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 401 when actor cannot be resolved", async () => {
-    mockPrismaUser.findUnique.mockResolvedValue(null);
-
-    const res = await POST(createRequest("POST", "http://localhost:3000/api/passwords", {
-      body: validBody,
-    }));
-
-    expect(res.status).toBe(401);
-  });
-
   it("strips null bytes and control chars from import filename", async () => {
     mockPrismaPasswordEntry.create.mockResolvedValue({
       id: "new-pw",

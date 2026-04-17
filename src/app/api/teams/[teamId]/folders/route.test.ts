@@ -24,7 +24,7 @@ const { mockAuth, mockPrismaTeamFolder, mockPrismaTeam, mockRequireTeamMember, m
       mockRequireTeamPermission: vi.fn(),
       TeamAuthError: _TeamAuthError,
       mockLogAudit: vi.fn(),
-      mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: () => unknown) => fn()),
+      mockWithTeamTenantRls: vi.fn(async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1")),
     };
   });
 
@@ -40,6 +40,7 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,

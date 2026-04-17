@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // DELETE /api/api-keys/[id] — Revoke an API key (session or extension token, NOT API key)
 async function handleDELETE(
@@ -48,13 +48,11 @@ async function handleDELETE(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.API_KEY_REVOKE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.API_KEY,
     targetId: id,
     metadata: { name: key.name },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

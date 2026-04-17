@@ -5,11 +5,11 @@ import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE, TENANT_ROLE } from "@/lib/constants";
+import { AUDIT_ACTION, TENANT_ROLE } from "@/lib/constants";
 
 export const runtime = "nodejs";
 
@@ -90,12 +90,9 @@ async function handleDELETE(
   }
 
   // Audit log (non-blocking)
-  const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, userId, actor.tenantId),
     action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REVOKE,
-    userId,
-    tenantId: actor.tenantId,
     targetType: "User",
     targetId: grant.targetUserId,
     metadata: {
@@ -104,8 +101,6 @@ async function handleDELETE(
       targetUserId: grant.targetUserId,
       revokedById: userId,
     },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({ ok: true });

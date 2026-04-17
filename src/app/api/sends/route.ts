@@ -9,14 +9,13 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto-server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -59,17 +58,7 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(token);
 
   const expiresAt = new Date(Date.now() + SEND_EXPIRY_MAP[expiresIn]);
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
-  const share = await withUserTenantRls(session.user.id, async () =>
+  const share = await withUserTenantRls(session.user.id, async (tenantId) =>
     prisma.passwordShare.create({
       data: {
         tokenHash,
@@ -84,22 +73,18 @@ async function handlePOST(req: NextRequest) {
         maxViews: maxViews ?? null,
         accessPasswordHash,
         createdById: session.user.id,
-        tenantId: actor.tenantId,
+        tenantId,
       },
     }),
   );
 
   // Audit log
-  const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.SEND_CREATE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { sendType: "TEXT", expiresIn, maxViews: maxViews ?? null },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({

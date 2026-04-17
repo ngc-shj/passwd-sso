@@ -8,14 +8,14 @@ import type { GrantStatus } from "@/lib/constants/breakglass";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, forbidden, handleAuthError, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
@@ -155,12 +155,9 @@ async function handlePOST(req: NextRequest) {
   const { grant, targetUser: targetMemberUser } = result;
 
   // Audit log (non-blocking)
-  const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, userId, actor.tenantId),
     action: AUDIT_ACTION.PERSONAL_LOG_ACCESS_REQUEST,
-    userId,
-    tenantId: actor.tenantId,
     targetType: "User",
     targetId: targetUserId,
     metadata: {
@@ -170,8 +167,6 @@ async function handlePOST(req: NextRequest) {
       incidentRef: incidentRef ?? null,
       grantId: grant.id,
     },
-    ip,
-    userAgent,
   });
 
   // Notify target user (non-blocking)

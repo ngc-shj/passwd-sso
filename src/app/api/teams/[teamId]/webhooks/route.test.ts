@@ -23,7 +23,7 @@ const {
   },
   mockRequireTeamPermission: vi.fn(),
   mockWithTeamTenantRls: vi.fn(
-    async (_teamId: string, fn: () => unknown) => fn(),
+    async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
   ),
   mockLogAudit: vi.fn(),
   mockEncryptServerData: vi.fn(() => ({
@@ -59,6 +59,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/crypto-server", () => ({
   encryptServerData: mockEncryptServerData,
@@ -135,7 +136,6 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue(undefined);
     mockPrismaTeamWebhook.count.mockResolvedValue(0);
-    mockPrismaTeam.findUniqueOrThrow.mockResolvedValue({ tenantId: "tenant-1" });
     mockPrismaTeamWebhook.create.mockResolvedValue({
       id: "wh-new",
       url: "https://example.com/hook",
