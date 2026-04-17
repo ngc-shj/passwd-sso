@@ -243,7 +243,7 @@ model ScimExternalMapping {
 
   @@unique([tenantId, externalId, resourceType])
   @@unique([tenantId, internalId, resourceType])
-  @@index([tenantId, resourceType])
+  // @@index([tenantId, resourceType]) — removed: covered by leftmost prefix of both @@unique above
   @@map("scim_external_mappings")
 }
 
@@ -1625,7 +1625,7 @@ model PersonalLogAccessGrant {
   targetUser User   @relation("BreakGlassTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, targetUserId])
-  @@index([requesterId])
+  // @@index([requesterId]) — removed: covered by leftmost prefix of composite below
   @@index([expiresAt])
   @@index([requesterId, targetUserId, tenantId])
   @@map("personal_log_access_grants")
