@@ -15,7 +15,6 @@ export {
   TEAM_ROLE,
   TEAM_ROLE_VALUES,
   TEAM_INVITE_ROLE_VALUES,
-  INVITE_ROLE_VALUES,
   isTeamAdminRole,
 } from "./team-role";
 export type { TeamRoleValue } from "./team-role";

@@ -51,6 +51,7 @@ async function handleGET(req: NextRequest) {
   if (wantTree) {
     const tree = buildTagTree(flat);
     const ordered = flattenTagTree(tree);
+    const countMap = new Map(flat.map((f) => [f.id, f.passwordCount]));
     return NextResponse.json(
       ordered.map((n) => ({
         id: n.id,
@@ -58,7 +59,7 @@ async function handleGET(req: NextRequest) {
         color: n.color,
         parentId: n.parentId,
         depth: n.depth,
-        passwordCount: flat.find((f) => f.id === n.id)?.passwordCount ?? 0,
+        passwordCount: countMap.get(n.id) ?? 0,
       })),
     );
   }

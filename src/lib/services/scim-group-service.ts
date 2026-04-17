@@ -47,12 +47,8 @@ export class ScimGroupNotFoundError extends Error {
   }
 }
 
-export class ScimOwnerProtectedError extends Error {
-  constructor() {
-    super("SCIM_OWNER_PROTECTED");
-    this.name = "ScimOwnerProtectedError";
-  }
-}
+import { ScimOwnerProtectedError } from "@/lib/scim/errors";
+export { ScimOwnerProtectedError };
 
 export class ScimNoSuchMemberError extends Error {
   readonly userId: string;

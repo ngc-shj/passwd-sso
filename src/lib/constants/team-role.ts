@@ -22,8 +22,6 @@ export const TEAM_INVITE_ROLE_VALUES = [
   TEAM_ROLE.VIEWER,
 ] as const satisfies readonly [TeamRole, ...TeamRole[]];
 
-export const INVITE_ROLE_VALUES = TEAM_INVITE_ROLE_VALUES;
-
 /** Check if a team role has admin-level privileges (OWNER or ADMIN). */
 export function isTeamAdminRole(role: string | null | undefined): boolean {
   return role === TEAM_ROLE.OWNER || role === TEAM_ROLE.ADMIN;
