@@ -16,6 +16,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
+import { requireMaintenanceOperator } from "@/lib/maintenance-auth";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
@@ -43,22 +44,9 @@ async function handlePOST(req: NextRequest) {
 
   const { operatorId, tenantId: filterTenantId, olderThanDays } = result.data;
 
-  const membership = await withBypassRls(prisma, async () =>
-    prisma.tenantMember.findFirst({
-      where: {
-        userId: operatorId,
-        role: { in: ["OWNER", "ADMIN"] },
-        deactivatedAt: null,
-      },
-      select: { tenantId: true },
-    }),
-  BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-  if (!membership) {
-    return NextResponse.json(
-      { error: "operatorId is not an active tenant admin" },
-      { status: 400 },
-    );
-  }
+  const op = await requireMaintenanceOperator(operatorId);
+  if (!op.ok) return op.response;
+  const membership = op.operator;
 
   const tenantFilter = filterTenantId ?? null;
   const daysFilter = olderThanDays ?? null;

@@ -4,7 +4,7 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 
 const {
   mockAuth,
-  mockTenantMemberFindFirst,
+  mockRequireTenantPermission,
   mockConfigFindMany,
   mockConfigFindFirst,
   mockTransaction,
@@ -13,7 +13,7 @@ const {
   mockEncryptCredentials,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockTenantMemberFindFirst: vi.fn(),
+  mockRequireTenantPermission: vi.fn(),
   mockConfigFindMany: vi.fn(),
   mockConfigFindFirst: vi.fn(),
   mockTransaction: vi.fn(),
@@ -25,15 +25,15 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    tenantMember: {
-      findFirst: mockTenantMemberFindFirst,
-    },
     directorySyncConfig: {
       findMany: mockConfigFindMany,
       findFirst: mockConfigFindFirst,
     },
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/tenant-auth", () => ({
+  requireTenantPermission: mockRequireTenantPermission,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -94,7 +94,8 @@ describe("GET /api/directory-sync", () => {
 
   it("returns 403 when user is not ADMIN/OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const err = Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 });
+    mockRequireTenantPermission.mockRejectedValue(err);
 
     const req = createRequest("GET", "http://localhost/api/directory-sync");
     const res = await GET(req);
@@ -106,7 +107,7 @@ describe("GET /api/directory-sync", () => {
 
   it("returns list of configs for the tenant", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindMany.mockResolvedValue([BASE_CONFIG]);
 
     const req = createRequest("GET", "http://localhost/api/directory-sync");
@@ -140,7 +141,8 @@ describe("POST /api/directory-sync", () => {
 
   it("returns 403 when user is not ADMIN/OWNER", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const err = Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 });
+    mockRequireTenantPermission.mockRejectedValue(err);
 
     const req = createRequest("POST", "http://localhost/api/directory-sync", {
       body: { provider: "AZURE_AD", displayName: "Test", credentials: {} },
@@ -154,7 +156,7 @@ describe("POST /api/directory-sync", () => {
 
   it("returns 400 for invalid body (missing provider)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
 
     const req = createRequest("POST", "http://localhost/api/directory-sync", {
       body: { displayName: "Test", credentials: {} },
@@ -168,7 +170,7 @@ describe("POST /api/directory-sync", () => {
 
   it("returns 400 for invalid body (missing displayName)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
 
     const req = createRequest("POST", "http://localhost/api/directory-sync", {
       body: { provider: "AZURE_AD", credentials: {} },
@@ -182,7 +184,7 @@ describe("POST /api/directory-sync", () => {
 
   it("returns 400 for invalid body (unknown provider)", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
 
     const req = createRequest("POST", "http://localhost/api/directory-sync", {
       body: { provider: "UNKNOWN_PROVIDER", displayName: "Test", credentials: {} },
@@ -196,7 +198,7 @@ describe("POST /api/directory-sync", () => {
 
   it("returns 409 when duplicate provider config exists", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue({ id: "existing-config" });
 
     const req = createRequest("POST", "http://localhost/api/directory-sync", {
@@ -211,7 +213,7 @@ describe("POST /api/directory-sync", () => {
 
   it("creates config successfully and returns 201", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(null);
     mockEncryptCredentials.mockReturnValue({
       ciphertext: "encrypted-data",
@@ -245,7 +247,7 @@ describe("POST /api/directory-sync", () => {
 
   it("calls encryptCredentials with the config ID and tenant ID", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(null);
     mockEncryptCredentials.mockReturnValue({
       ciphertext: "encrypted-data",
@@ -282,7 +284,7 @@ describe("POST /api/directory-sync", () => {
 
   it("calls logAuditAsync after successful creation", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(null);
     mockEncryptCredentials.mockReturnValue({
       ciphertext: "encrypted-data",

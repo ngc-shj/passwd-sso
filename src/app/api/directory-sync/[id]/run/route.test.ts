@@ -6,7 +6,7 @@ import { createRequest, createParams, parseResponse } from "@/__tests__/helpers/
 
 const {
   mockAuth,
-  mockTenantMemberFindFirst,
+  mockRequireTenantPermission,
   mockConfigFindFirst,
   mockWithUserTenantRls,
   mockLogAudit,
@@ -15,7 +15,7 @@ const {
   mockRateLimitCheck,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockTenantMemberFindFirst: vi.fn(),
+  mockRequireTenantPermission: vi.fn(),
   mockConfigFindFirst: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockLogAudit: vi.fn(),
@@ -27,9 +27,11 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    tenantMember: { findFirst: mockTenantMemberFindFirst },
     directorySyncConfig: { findFirst: mockConfigFindFirst },
   },
+}));
+vi.mock("@/lib/tenant-auth", () => ({
+  requireTenantPermission: mockRequireTenantPermission,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -94,7 +96,7 @@ describe("POST /api/directory-sync/[id]/run", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(BASE_CONFIG);
     mockRunDirectorySync.mockResolvedValue(SUCCESS_RESULT);
     mockRateLimitCheck.mockResolvedValue({ allowed: true });
@@ -111,7 +113,8 @@ describe("POST /api/directory-sync/[id]/run", () => {
   });
 
   it("returns 403 when user is not ADMIN/OWNER", async () => {
-    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const err = Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 });
+    mockRequireTenantPermission.mockRejectedValue(err);
 
     const req = createRequest("POST", ROUTE_URL);
     const { status, json } = await parseResponse(await POST(req, CTX));

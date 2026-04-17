@@ -15,7 +15,9 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { errorResponse, rateLimited, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, zodValidationError, handleAuthError } from "@/lib/api-response";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -37,17 +39,11 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  const member = await withUserTenantRls(session.user.id, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
-    );
+  let member;
+  try {
+    member = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SCIM_MANAGE);
+  } catch (e) {
+    return handleAuthError(e);
   }
   const tenantId = member.tenantId;
 

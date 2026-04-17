@@ -1,17 +1,14 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { validateScimToken } from "@/lib/scim-token";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimPatchOpSchema, scimGroupSchema } from "@/lib/scim/validations";
 import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
-import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { authorizeScim } from "@/lib/scim/with-scim-auth";
 import {
   fetchScimGroup,
   replaceScimGroup,
@@ -26,18 +23,9 @@ type Params = { params: Promise<{ id: string }> };
 
 // GET /api/scim/v2/Groups/[id]
 async function handleGET(req: NextRequest, { params }: Params) {
-  const result = await validateScimToken(req);
-  if (!result.ok) {
-    return scimError(401, API_ERROR[result.error]);
-  }
-  const { tenantId } = result.data;
-
-  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
-  if (denied) return denied;
-
-  if (!(await checkScimRateLimit(tenantId))) {
-    return scimError(429, "Too many requests");
-  }
+  const auth = await authorizeScim(req);
+  if (!auth.ok) return auth.response;
+  const { tenantId } = auth.data;
 
   const { id } = await params;
 
@@ -52,18 +40,9 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
 // PUT /api/scim/v2/Groups/[id] — Full member replacement
 async function handlePUT(req: NextRequest, { params }: Params): Promise<Response> {
-  const result = await validateScimToken(req);
-  if (!result.ok) {
-    return scimError(401, API_ERROR[result.error]);
-  }
-  const { tenantId, auditUserId, actorType: putActorType } = result.data;
-
-  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
-  if (denied) return denied;
-
-  if (!(await checkScimRateLimit(tenantId))) {
-    return scimError(429, "Too many requests");
-  }
+  const auth = await authorizeScim(req);
+  if (!auth.ok) return auth.response;
+  const { tenantId, auditUserId, actorType: putActorType } = auth.data;
 
   let body: unknown;
   try {
@@ -125,18 +104,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
 
 // PATCH /api/scim/v2/Groups/[id] — Add/remove members
 async function handlePATCH(req: NextRequest, { params }: Params): Promise<Response> {
-  const result = await validateScimToken(req);
-  if (!result.ok) {
-    return scimError(401, API_ERROR[result.error]);
-  }
-  const { tenantId, auditUserId, actorType: patchActorType } = result.data;
-
-  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
-  if (denied) return denied;
-
-  if (!(await checkScimRateLimit(tenantId))) {
-    return scimError(429, "Too many requests");
-  }
+  const auth = await authorizeScim(req);
+  if (!auth.ok) return auth.response;
+  const { tenantId, auditUserId, actorType: patchActorType } = auth.data;
 
   let body: unknown;
   try {
@@ -201,19 +171,8 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
 
 // DELETE /api/scim/v2/Groups/[id] — Not allowed
 async function handleDELETE(req: NextRequest, { params }: Params): Promise<Response> {
-  const result = await validateScimToken(req);
-  if (!result.ok) {
-    return scimError(401, API_ERROR[result.error]);
-  }
-
-  const { tenantId } = result.data;
-
-  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
-  if (denied) return denied;
-
-  if (!(await checkScimRateLimit(tenantId))) {
-    return scimError(429, "Too many requests");
-  }
+  const auth = await authorizeScim(req);
+  if (!auth.ok) return auth.response;
 
   await params;
 

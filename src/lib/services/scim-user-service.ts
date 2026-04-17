@@ -55,6 +55,7 @@ export class ScimUserNotFoundError extends Error {
 }
 
 import { ScimOwnerProtectedError } from "@/lib/scim/errors";
+import { TENANT_ROLE } from "@/lib/constants/tenant-role";
 export { ScimOwnerProtectedError };
 
 export class ScimExternalIdConflictError extends Error {
@@ -161,7 +162,7 @@ export async function replaceScimUser(
     select: { id: true, role: true, deactivatedAt: true },
   });
   if (!member) throw new ScimUserNotFoundError();
-  if (member.role === "OWNER" && active === false) throw new ScimOwnerProtectedError();
+  if (member.role === TENANT_ROLE.OWNER && active === false) throw new ScimOwnerProtectedError();
 
   let auditAction: AuditAction = AUDIT_ACTION.SCIM_USER_UPDATE;
   if (active === false && member.deactivatedAt === null) {
@@ -243,7 +244,7 @@ export async function patchScimUser(
   });
   if (!member) throw new ScimUserNotFoundError();
 
-  if (member.role === "OWNER" && operations.active === false) throw new ScimOwnerProtectedError();
+  if (member.role === TENANT_ROLE.OWNER && operations.active === false) throw new ScimOwnerProtectedError();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const updateData: Record<string, any> = {
@@ -301,7 +302,7 @@ export async function deactivateScimUser(
     select: { id: true, role: true, user: { select: { email: true } } },
   });
   if (!member) throw new ScimUserNotFoundError();
-  if (member.role === "OWNER") throw new ScimOwnerProtectedError();
+  if (member.role === TENANT_ROLE.OWNER) throw new ScimOwnerProtectedError();
 
   try {
     await prisma.$transaction([

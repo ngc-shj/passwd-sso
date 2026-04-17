@@ -449,7 +449,7 @@ export async function runDirectorySync(
                 data: {
                   tenantId,
                   userId: user.id,
-                  role: "MEMBER",
+                  role: TENANT_ROLE.MEMBER,
                   deactivatedAt: pu.active ? null : new Date(),
                   scimManaged: true,
                   provisioningSource: "SCIM",

@@ -15,6 +15,7 @@ import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { TENANT_ROLE } from "@/lib/constants/tenant-role";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseQuery } from "@/lib/parse-body";
@@ -109,7 +110,7 @@ async function handleGET(req: NextRequest) {
         where: {
           userId: operatorId,
           tenantId,
-          role: { in: ["OWNER", "ADMIN"] },
+          role: { in: [TENANT_ROLE.OWNER, TENANT_ROLE.ADMIN] },
           deactivatedAt: null,
         },
         select: { tenantId: true },
