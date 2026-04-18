@@ -49,7 +49,7 @@
     "showBadgeCountHint": "Display the number of matching credentials on the extension icon.",
     "enableInlineSuggestions": "Show inline suggestions",
     "enableInlineSuggestionsHint": "Display a dropdown with matching credentials when a login field is focused.",
-    "enableContextMenu": "Context menu autofill",
+    "enableContextMenu": "Offer autofill via the context menu",
     "enableContextMenuHint": "Show autofill options in the right-click context menu.",
     "autoCopyTotp": "Copy TOTP to clipboard after autofill",
     "autoCopyTotpHint": "After autofilling ID and password, copy the TOTP code to the clipboard. Useful when the site asks for TOTP on a separate page.",

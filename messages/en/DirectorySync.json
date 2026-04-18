@@ -12,7 +12,7 @@
   "displayNamePlaceholder": "e.g. Production Azure AD",
   "provider": "Provider",
   "selectProvider": "Select a provider",
-  "enabled": "Enabled",
+  "enabled": "Enable this directory sync configuration",
   "syncInterval": "Sync Interval (minutes)",
   "credentials": "Credentials",
   "credentialsHint": "Enter the provider-specific credentials.",
