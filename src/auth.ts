@@ -6,6 +6,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant-claim";
 import { sessionMetaStorage } from "@/lib/session-meta";
+import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
@@ -213,9 +214,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: createCustomAdapter(),
   session: {
     strategy: "database",
-    // Session expires after 8 hours (workday)
-    maxAge: 8 * 60 * 60,
-    // Check session freshness every 30 seconds (required for idle timeout enforcement)
+    // Outer cookie/session ceiling. Matches the policy ceiling
+    // SESSION_ABSOLUTE_TIMEOUT_MAX (in minutes) converted to seconds.
+    // Authoritative expiry is DB session.expires, computed per user by the
+    // custom adapter via `resolveEffectiveSessionTimeouts`. See
+    // docs/security/session-timeout-design.md.
+    maxAge: SESSION_ABSOLUTE_TIMEOUT_MAX * 60,
+    // Throttle how often `updateSession` runs. Not a scheduled heartbeat.
     updateAge: 30,
   },
   ...authConfig,
@@ -234,6 +239,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       // Note: WebAuthn sign-in uses a custom route (/api/auth/passkey/verify)
       // that has its own SSO tenant guard, bypassing Auth.js entirely.
       const provider = params.account?.provider;
+
+      // Propagate provider to the adapter via sessionMetaStorage so
+      // createSession can record Session.provider for AAL3 enforcement.
+      // The meta object is the one established by withSessionMeta at the
+      // route handler entry; AsyncLocalStorage returns the same reference
+      // throughout the async chain, so mutating it is the intended pattern.
+      const meta = sessionMetaStorage.getStore();
+      if (meta) meta.provider = provider ?? null;
       if (provider === "nodemailer") {
         // Nodemailer requires email by definition. Block null-email as a safeguard.
         if (!params.user?.email) return false;

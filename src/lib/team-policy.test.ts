@@ -45,7 +45,6 @@ import {
   assertPolicyAllowsExport,
   assertPolicyAllowsSharing,
   assertPolicySharePassword,
-  getStrictestSessionDuration,
   checkTeamAccessRestriction,
   PolicyViolationError,
   type TeamPolicyData,
@@ -168,46 +167,8 @@ describe("assertPolicySharePassword", () => {
   });
 });
 
-describe("getStrictestSessionDuration", () => {
-  const mockFindMany = prisma.teamMember.findMany as ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    mockFindMany.mockReset();
-  });
-
-  it("returns null for user with no teams", async () => {
-    mockFindMany.mockResolvedValue([]);
-    const result = await getStrictestSessionDuration("user-no-teams");
-    expect(result).toBeNull();
-  });
-
-  it("returns null when all teams have null duration", async () => {
-    mockFindMany.mockResolvedValue([
-      { team: { policy: null } },
-      { team: { policy: { maxSessionDurationMinutes: null } } },
-    ]);
-    const result = await getStrictestSessionDuration("user-all-null");
-    expect(result).toBeNull();
-  });
-
-  it("returns minimum non-null duration across teams", async () => {
-    mockFindMany.mockResolvedValue([
-      { team: { policy: { maxSessionDurationMinutes: 120 } } },
-      { team: { policy: { maxSessionDurationMinutes: 60 } } },
-      { team: { policy: { maxSessionDurationMinutes: 240 } } },
-    ]);
-    const result = await getStrictestSessionDuration("user-multi-teams");
-    expect(result).toBe(60);
-  });
-
-  it("returns single team's duration", async () => {
-    mockFindMany.mockResolvedValue([
-      { team: { policy: { maxSessionDurationMinutes: 90 } } },
-    ]);
-    const result = await getStrictestSessionDuration("user-single-team");
-    expect(result).toBe(90);
-  });
-});
+// getStrictestSessionDuration was removed in the unify-session-timeout-policy plan.
+// Its replacement (resolveEffectiveSessionTimeouts) is covered by src/lib/session-timeout.test.ts.
 
 describe("PolicyViolationError", () => {
   it("is an instance of Error", () => {

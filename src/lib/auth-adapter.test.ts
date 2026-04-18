@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockGetStrictestSessionDuration } = vi.hoisted(() => ({
+const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMember, mockPrismaAccount, mockPrismaTransaction, mockSessionMetaGetStore, mockTenantClaimStoreGetStore, mockFindOrCreateSsoTenant, mockWithBypassRls, mockTxSession, mockTxTenant, mockLogAudit, mockCreateNotification, mockResolveEffectiveSessionTimeouts } = vi.hoisted(() => ({
   mockPrismaSession: {
     create: vi.fn(),
     update: vi.fn(),
@@ -41,7 +41,7 @@ const { mockPrismaSession, mockPrismaUser, mockPrismaTenant, mockPrismaTenantMem
   },
   mockLogAudit: vi.fn(),
   mockCreateNotification: vi.fn(),
-  mockGetStrictestSessionDuration: vi.fn(),
+  mockResolveEffectiveSessionTimeouts: vi.fn(),
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -80,8 +80,8 @@ vi.mock("@/lib/notification", () => ({
 vi.mock("@/lib/new-device-detection", () => ({
   checkNewDeviceAndNotify: vi.fn(),
 }));
-vi.mock("@/lib/team-policy", () => ({
-  getStrictestSessionDuration: mockGetStrictestSessionDuration,
+vi.mock("@/lib/session-timeout", () => ({
+  resolveEffectiveSessionTimeouts: mockResolveEffectiveSessionTimeouts,
 }));
 
 import { createCustomAdapter } from "./auth-adapter";
@@ -105,8 +105,12 @@ describe("createCustomAdapter", () => {
     // Default: no session limit
     mockTxTenant.findUnique.mockResolvedValue({ maxConcurrentSessions: null });
     mockTxSession.findMany.mockResolvedValue([]);
-    // Default: no team session duration limit
-    mockGetStrictestSessionDuration.mockResolvedValue(null);
+    // Default: generous resolver values (no tenant/team restrictions hit in tests)
+    mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+      idleMinutes: 480,       // 8h
+      absoluteMinutes: 43200, // 30d
+      tenantId: "tenant-1",
+    });
   });
 
   describe("createUser", () => {
@@ -310,26 +314,46 @@ describe("createCustomAdapter", () => {
         expires,
       });
 
-      expect(mockTxSession.create).toHaveBeenCalledWith({
-        data: {
-          sessionToken: "tok-1",
-          userId: "u-1",
-          tenantId: "tenant-1",
-          expires,
-          ipAddress: "192.168.1.1",
-          userAgent: "Mozilla/5.0",
-        },
-        select: {
-          sessionToken: true,
-          userId: true,
-          expires: true,
-        },
+      // createSession now overrides Auth.js's default expires with resolver
+      // values. Default resolver mock returns idleMinutes=480 → expires = now + 480min.
+      // We assert on field presence and resolver-sourced expires, not the caller-passed expires.
+      const call = mockTxSession.create.mock.calls[0][0];
+      expect(call.data).toMatchObject({
+        sessionToken: "tok-1",
+        userId: "u-1",
+        tenantId: "tenant-1",
+        ipAddress: "192.168.1.1",
+        userAgent: "Mozilla/5.0",
+        provider: null,
       });
+      expect(call.data.expires).toBeInstanceOf(Date);
+      expect(call.data.expires.getTime()).not.toBe(expires.getTime()); // overridden, not pass-through
+      expect(call.select).toEqual({ sessionToken: true, userId: true, expires: true });
       expect(result).toEqual({
         sessionToken: "tok-1",
         userId: "u-1",
         expires,
       });
+    });
+
+    it("records provider from sessionMetaStorage on the session row", async () => {
+      mockSessionMetaGetStore.mockReturnValue({
+        ip: null,
+        userAgent: null,
+        provider: "google",
+      });
+      mockPrismaUser.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+      mockTxSession.create.mockResolvedValue({
+        sessionToken: "tok-prov",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.createSession!({ sessionToken: "tok-prov", userId: "u-1", expires });
+
+      expect(mockTxSession.create.mock.calls[0][0].data.provider).toBe("google");
+      expect(mockResolveEffectiveSessionTimeouts).toHaveBeenCalledWith("u-1", "google");
     });
 
     it("sets null when sessionMetaStorage has no store (undefined)", async () => {
@@ -536,17 +560,35 @@ describe("createCustomAdapter", () => {
   describe("updateSession", () => {
     afterEach(() => vi.useRealTimers());
 
-    it("reads current session, checks idle, then updates lastActiveAt", async () => {
+    function seedSession(params: {
+      userId?: string;
+      createdAt: Date;
+      lastActiveAt: Date;
+      tenantId?: string;
+      provider?: string | null;
+    }) {
+      mockPrismaSession.findUnique.mockResolvedValue({
+        userId: params.userId ?? "u-1",
+        createdAt: params.createdAt,
+        lastActiveAt: params.lastActiveAt,
+        tenantId: params.tenantId ?? "tenant-1",
+        provider: params.provider ?? null,
+      });
+    }
+
+    it("reads current session with provider and updates expires from resolver", async () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 
-      // findUnique returns current session with tenant relation included
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
+      seedSession({
         createdAt: new Date("2025-03-15T11:00:00Z"),
         lastActiveAt: new Date("2025-03-15T11:59:00Z"),
+        provider: "google",
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 480,
+        absoluteMinutes: 43200,
         tenantId: "tenant-1",
-        tenant: { sessionIdleTimeoutMinutes: null },
       });
       mockPrismaSession.update.mockResolvedValue({
         sessionToken: "tok-1",
@@ -555,78 +597,178 @@ describe("createCustomAdapter", () => {
       });
 
       const adapter = createCustomAdapter();
-      const result = await adapter.updateSession!({
-        sessionToken: "tok-1",
-        expires,
-      });
+      const result = await adapter.updateSession!({ sessionToken: "tok-1", expires });
 
-      // Should first read current session (with tenant included)
       expect(mockPrismaSession.findUnique).toHaveBeenCalledWith({
         where: { sessionToken: "tok-1" },
-        select: { userId: true, createdAt: true, lastActiveAt: true, tenantId: true, tenant: { select: { sessionIdleTimeoutMinutes: true } } },
+        select: { userId: true, createdAt: true, lastActiveAt: true, tenantId: true, provider: true },
       });
-      // Then update
-      expect(mockPrismaSession.update).toHaveBeenCalledWith({
-        where: { sessionToken: "tok-1" },
-        data: { expires, lastActiveAt: now },
-        select: {
-          sessionToken: true,
-          userId: true,
-          expires: true,
-        },
-      });
-      expect(result).toEqual({
-        sessionToken: "tok-1",
-        userId: "u-1",
-        expires,
-      });
+      expect(mockResolveEffectiveSessionTimeouts).toHaveBeenCalledWith("u-1", "google");
+      // expires = min(now + 480min, createdAt + 43200min) = now + 480min
+      const expected = new Date(now.getTime() + 480 * 60_000);
+      const updateCall = mockPrismaSession.update.mock.calls[0][0];
+      expect(updateCall.data.expires.getTime()).toBe(expected.getTime());
+      expect(updateCall.data.lastActiveAt.getTime()).toBe(now.getTime());
+      expect(result).toEqual({ sessionToken: "tok-1", userId: "u-1", expires });
     });
 
-    it("omits expires from data when not provided", async () => {
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
-        createdAt: new Date(),
-        lastActiveAt: new Date(),
-        tenantId: "tenant-1",
-        tenant: { sessionIdleTimeoutMinutes: null },
-      });
-      mockPrismaSession.update.mockResolvedValue({
-        sessionToken: "tok-1",
-        userId: "u-1",
-        expires,
-      });
-
-      const adapter = createCustomAdapter();
-      await adapter.updateSession!({ sessionToken: "tok-1" });
-
-      const callData = mockPrismaSession.update.mock.calls[0][0].data;
-      expect(callData).not.toHaveProperty("expires");
-      expect(callData).toHaveProperty("lastActiveAt");
-    });
-
-    it("deletes session when idle timeout exceeded", async () => {
+    it("expires is clamped to the absolute deadline when idle window would exceed it", async () => {
       const now = new Date("2025-03-15T12:00:00Z");
       vi.setSystemTime(now);
 
-      // Session was last active 10 minutes ago; tenant has 5 minute idle timeout
-      mockPrismaSession.findUnique.mockResolvedValue({
+      // createdAt = 11.5h ago, absolute = 12h ⇒ remaining absolute = 30min
+      seedSession({
+        createdAt: new Date("2025-03-15T00:30:00Z"),
+        lastActiveAt: new Date("2025-03-15T11:59:00Z"),
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 480,       // 8h idle (would extend past absolute)
+        absoluteMinutes: 720,   // 12h absolute cap
+        tenantId: "tenant-1",
+      });
+      mockPrismaSession.update.mockResolvedValue({
+        sessionToken: "tok-abs",
         userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.updateSession!({ sessionToken: "tok-abs" });
+
+      const updateCall = mockPrismaSession.update.mock.calls[0][0];
+      const expectedAbsDeadline = new Date("2025-03-15T00:30:00Z").getTime() + 720 * 60_000;
+      expect(updateCall.data.expires.getTime()).toBe(expectedAbsDeadline);
+    });
+
+    it("deletes session when idle timeout exceeded (rolling)", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // 10 min idle, tenant allows 5 min
+      seedSession({
         createdAt: new Date("2025-03-15T11:00:00Z"),
         lastActiveAt: new Date("2025-03-15T11:49:00Z"),
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 5,
+        absoluteMinutes: 43200,
         tenantId: "tenant-1",
-        tenant: { sessionIdleTimeoutMinutes: 5 },
       });
       mockPrismaSession.delete.mockResolvedValue({});
 
       const adapter = createCustomAdapter();
-      const result = await adapter.updateSession!({ sessionToken: "tok-1" });
+      const result = await adapter.updateSession!({ sessionToken: "tok-idle" });
 
       expect(result).toBeNull();
-      expect(mockPrismaSession.delete).toHaveBeenCalledWith({
-        where: { sessionToken: "tok-1" },
-      });
-      // Should NOT call update
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-idle" } });
       expect(mockPrismaSession.update).not.toHaveBeenCalled();
+    });
+
+    it("deletes session when absolute timeout exceeded and emits SESSION_REVOKE audit", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // createdAt = 2h ago, absolute = 60min ⇒ exceeded
+      seedSession({
+        createdAt: new Date("2025-03-15T10:00:00Z"),
+        lastActiveAt: new Date("2025-03-15T11:55:00Z"),
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 480,
+        absoluteMinutes: 60,
+        tenantId: "tenant-1",
+      });
+      mockPrismaSession.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-abs-ex" });
+
+      expect(result).toBeNull();
+      expect(mockPrismaSession.delete).toHaveBeenCalledWith({ where: { sessionToken: "tok-abs-ex" } });
+      expect(mockLogAudit).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: "SESSION_REVOKE",
+          metadata: expect.objectContaining({
+            reason: "tenant_absolute_session_duration_exceeded",
+            absoluteMinutes: 60,
+          }),
+        }),
+      );
+    });
+
+    it("survives when createdAt + absolute is 1s in the future (off-by-one)", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      // absolute deadline = now + 1s
+      seedSession({
+        createdAt: new Date(now.getTime() - 60 * 60_000 + 1_000), // 60min - 1s ago
+        lastActiveAt: new Date(now.getTime() - 1_000),
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 480,
+        absoluteMinutes: 60,
+        tenantId: "tenant-1",
+      });
+      mockPrismaSession.update.mockResolvedValue({
+        sessionToken: "tok-boundary",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-boundary" });
+
+      expect(result).not.toBeNull();
+      expect(mockPrismaSession.delete).not.toHaveBeenCalled();
+    });
+
+    it("deletes when createdAt + absolute is 1s in the past (off-by-one)", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      seedSession({
+        createdAt: new Date(now.getTime() - 60 * 60_000 - 1_000), // 60min + 1s ago
+        lastActiveAt: new Date(now.getTime() - 1_000),
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 480,
+        absoluteMinutes: 60,
+        tenantId: "tenant-1",
+      });
+      mockPrismaSession.delete.mockResolvedValue({});
+
+      const adapter = createCustomAdapter();
+      const result = await adapter.updateSession!({ sessionToken: "tok-boundary-neg" });
+
+      expect(result).toBeNull();
+      expect(mockPrismaSession.delete).toHaveBeenCalled();
+    });
+
+    it("passes webauthn provider to resolver (AAL3 clamp relies on it)", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      seedSession({
+        createdAt: new Date(now.getTime() - 60_000),
+        lastActiveAt: new Date(now.getTime() - 60_000),
+        provider: "webauthn",
+      });
+      mockResolveEffectiveSessionTimeouts.mockResolvedValue({
+        idleMinutes: 15,
+        absoluteMinutes: 720,
+        tenantId: "tenant-1",
+      });
+      mockPrismaSession.update.mockResolvedValue({
+        sessionToken: "tok-wa",
+        userId: "u-1",
+        expires,
+      });
+
+      const adapter = createCustomAdapter();
+      await adapter.updateSession!({ sessionToken: "tok-wa" });
+
+      expect(mockResolveEffectiveSessionTimeouts).toHaveBeenCalledWith("u-1", "webauthn");
     });
 
     it("returns null when session not found", async () => {
@@ -639,16 +781,17 @@ describe("createCustomAdapter", () => {
     });
 
     it("returns null on P2025 during update", async () => {
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
       const { Prisma } = await import("@prisma/client");
       const p2025 = new Prisma.PrismaClientKnownRequestError(
         "Record not found",
         { code: "P2025", clientVersion: "7.0.0" },
       );
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
-        createdAt: new Date(),
-        lastActiveAt: new Date(),
-        tenantId: null,
+      seedSession({
+        createdAt: new Date(now.getTime() - 60_000),
+        lastActiveAt: new Date(now.getTime() - 60_000),
       });
       mockPrismaSession.update.mockRejectedValue(p2025);
 
@@ -659,106 +802,19 @@ describe("createCustomAdapter", () => {
     });
 
     it("re-throws non-P2025 Prisma errors", async () => {
-      const otherErr = new Error("connection lost");
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
-        createdAt: new Date(),
-        lastActiveAt: new Date(),
-        tenantId: null,
+      const now = new Date("2025-03-15T12:00:00Z");
+      vi.setSystemTime(now);
+
+      seedSession({
+        createdAt: new Date(now.getTime() - 60_000),
+        lastActiveAt: new Date(now.getTime() - 60_000),
       });
-      mockPrismaSession.update.mockRejectedValue(otherErr);
+      mockPrismaSession.update.mockRejectedValue(new Error("connection lost"));
 
       const adapter = createCustomAdapter();
       await expect(
         adapter.updateSession!({ sessionToken: "tok-1" }),
       ).rejects.toThrow("connection lost");
-    });
-
-    it("deletes session when team session duration exceeded", async () => {
-      const now = new Date("2025-03-15T12:00:00Z");
-      vi.setSystemTime(now);
-
-      // Session created 2 hours ago; team limit is 60 minutes
-      mockGetStrictestSessionDuration.mockResolvedValue(60);
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
-        createdAt: new Date("2025-03-15T10:00:00Z"),
-        lastActiveAt: new Date("2025-03-15T11:55:00Z"),
-        tenantId: "tenant-1",
-        tenant: { sessionIdleTimeoutMinutes: null },
-      });
-      mockPrismaSession.delete.mockResolvedValue({});
-
-      const adapter = createCustomAdapter();
-      const result = await adapter.updateSession!({ sessionToken: "tok-dur" });
-
-      expect(result).toBeNull();
-      expect(mockPrismaSession.delete).toHaveBeenCalledWith({
-        where: { sessionToken: "tok-dur" },
-      });
-      expect(mockPrismaSession.update).not.toHaveBeenCalled();
-      expect(mockLogAudit).toHaveBeenCalledWith(
-        expect.objectContaining({
-          action: "SESSION_REVOKE",
-          metadata: expect.objectContaining({
-            reason: "team_session_duration_exceeded",
-          }),
-        }),
-      );
-    });
-
-    it("does NOT delete session when within team session duration limit", async () => {
-      const now = new Date("2025-03-15T12:00:00Z");
-      vi.setSystemTime(now);
-
-      // Session created 1 hour ago; team limit is 120 minutes
-      mockGetStrictestSessionDuration.mockResolvedValue(120);
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
-        createdAt: new Date("2025-03-15T11:00:00Z"),
-        lastActiveAt: new Date("2025-03-15T11:55:00Z"),
-        tenantId: "tenant-1",
-        tenant: { sessionIdleTimeoutMinutes: null },
-      });
-      mockPrismaSession.update.mockResolvedValue({
-        sessionToken: "tok-dur2",
-        userId: "u-1",
-        expires,
-      });
-
-      const adapter = createCustomAdapter();
-      const result = await adapter.updateSession!({ sessionToken: "tok-dur2" });
-
-      expect(mockPrismaSession.delete).not.toHaveBeenCalled();
-      expect(mockPrismaSession.update).toHaveBeenCalled();
-      expect(result).not.toBeNull();
-    });
-
-    it("does not enforce duration when getStrictestSessionDuration returns null", async () => {
-      const now = new Date("2025-03-15T12:00:00Z");
-      vi.setSystemTime(now);
-
-      // Explicitly null — no team duration limit
-      mockGetStrictestSessionDuration.mockResolvedValue(null);
-      mockPrismaSession.findUnique.mockResolvedValue({
-        userId: "u-1",
-        createdAt: new Date("2025-01-01T00:00:00Z"), // very old
-        lastActiveAt: new Date("2025-03-15T11:59:00Z"),
-        tenantId: "tenant-1",
-        tenant: { sessionIdleTimeoutMinutes: null },
-      });
-      mockPrismaSession.update.mockResolvedValue({
-        sessionToken: "tok-no-limit",
-        userId: "u-1",
-        expires,
-      });
-
-      const adapter = createCustomAdapter();
-      await adapter.updateSession!({ sessionToken: "tok-no-limit" });
-
-      // Should not delete — no duration limit
-      expect(mockPrismaSession.delete).not.toHaveBeenCalled();
-      expect(mockPrismaSession.update).toHaveBeenCalled();
     });
   });
 
