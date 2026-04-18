@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.43](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.42...passwd-sso-v0.4.43) (2026-04-18)
+
+
+### Features
+
+* **session-timeout:** unify tenant/team/extension session lifetime policy ([#384](https://github.com/ngc-shj/passwd-sso/issues/384)) ([9d3f743](https://github.com/ngc-shj/passwd-sso/commit/9d3f7434db114bef6ccacf76d471141c14b3a66c))
+
+
+### Bug Fixes
+
+* **security:** bump hono to 4.12.14 and remove process-wide TLS bypass ([#382](https://github.com/ngc-shj/passwd-sso/issues/382)) ([949eb14](https://github.com/ngc-shj/passwd-sso/commit/949eb14999bc5d4e8bd253f4d4010426e682a38e))
+
+
+### Code Refactoring
+
+* 10 /simplify passes — extract helpers, dedup, O(n²)→O(1), meta-patterns, adoption coverage ([#380](https://github.com/ngc-shj/passwd-sso/issues/380)) ([dd65b09](https://github.com/ngc-shj/passwd-sso/commit/dd65b09a8f6b7b53bb87534d5658dc795fd457a9))
+
 ## [0.4.42](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.41...passwd-sso-v0.4.42) (2026-04-16)
 
 
