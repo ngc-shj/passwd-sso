@@ -31,7 +31,7 @@ Symptoms:
 | [OWASP ASVS 5.0 V7.3.1](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) | Inactivity timeout required (L2) | `sessionIdleTimeoutMinutes` non-null |
 | [OWASP ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) | Absolute maximum session lifetime required (L2) | `sessionAbsoluteTimeoutMinutes` non-null |
 | [NIST SP 800-63B-4 §2.3.3 (AAL3 Reauthentication)](https://pages.nist.gov/800-63-4/sp800-63b.html) | 12h absolute OR 15min inactivity | WebAuthn/Passkey sessions clamp to AAL3 limits automatically |
-| [NIST SP 800-207 §2.1 tenet #6](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf) | All resource authentication and authorization are dynamic and strictly enforced before access is allowed | Team-level override (strictest wins) |
+| [NIST SP 800-207 §2.1 tenet 6](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf) | All resource authentication and authorization are dynamic and strictly enforced before access is allowed | Team-level override (strictest wins) |
 | [OWASP Session Management Cheat Sheet § Session Expiration](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-expiration) | "It is mandatory to set expiration timeouts for every session" | Nullability removed |
 | [RFC 9700 §2.2.2 (Refresh Tokens)](https://www.rfc-editor.org/rfc/rfc9700#name-refresh-tokens) | Refresh tokens for public clients MUST be sender-constrained or use refresh token rotation | Extension reuses the rotation/revocation machinery already built for MCP |
 
