@@ -20,6 +20,7 @@ const GROUP_LABEL_MAP: Record<string, string> = {
   [AUDIT_ACTION_GROUP.SERVICE_ACCOUNT]: "groupServiceAccount",
   [AUDIT_ACTION_GROUP.MCP_CLIENT]: "groupMcpClient",
   [AUDIT_ACTION_GROUP.DELEGATION]: "groupDelegation",
+  [AUDIT_ACTION_GROUP.SHARE]: "groupShare",
 };
 
 export function TenantWebhookCard() {
