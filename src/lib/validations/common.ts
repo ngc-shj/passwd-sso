@@ -154,15 +154,20 @@ export const POLICY_SESSION_DURATION_MAX = 43200;
 // ─── Session Policy ─────────────────────────────────────────
 export const MAX_CONCURRENT_SESSIONS_MIN = 1;
 export const MAX_CONCURRENT_SESSIONS_MAX = 100;
-export const SESSION_IDLE_TIMEOUT_MIN = 1;
+// Minimum for all idle/absolute timeouts is 5 minutes.
+// Reason: Chrome Manifest V3 service workers sleep within ~30 s and alarm
+// granularity is 30 s in production — values < 5 min result in missed
+// refreshes / premature sign-outs. Validated empirically (see the
+// unify-session-timeout-policy deviation log).
+export const SESSION_IDLE_TIMEOUT_MIN = 5;
 export const SESSION_IDLE_TIMEOUT_MAX = 1440;          // 24 hours in minutes
 // Absolute session lifetime (createdAt-based, non-rolling)
-export const SESSION_ABSOLUTE_TIMEOUT_MIN = 1;
+export const SESSION_ABSOLUTE_TIMEOUT_MIN = 5;
 export const SESSION_ABSOLUTE_TIMEOUT_MAX = 43200;     // 30 days in minutes
 // Browser extension token lifetime (idle = rolling, absolute = family lifetime)
-export const EXTENSION_TOKEN_IDLE_TIMEOUT_MIN = 1;
+export const EXTENSION_TOKEN_IDLE_TIMEOUT_MIN = 5;
 export const EXTENSION_TOKEN_IDLE_TIMEOUT_MAX = 43200; // 30 days in minutes
-export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN = 1;
+export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN = 5;
 export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX = 43200;
 // NIST SP 800-63B AAL3 ceilings applied when session.provider === "webauthn"
 export const AAL3_IDLE_TIMEOUT_MAX_MINUTES = 15;
@@ -172,7 +177,10 @@ export const SESSION_IDLE_TIMEOUT_DEFAULT = 480;        // 8 hours
 export const SESSION_ABSOLUTE_TIMEOUT_DEFAULT = 43200;  // 30 days
 export const EXTENSION_TOKEN_IDLE_TIMEOUT_DEFAULT = 10080;     // 7 days
 export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT = 43200; // 30 days
-export const VAULT_AUTO_LOCK_MIN = 1;
+// Vault auto-lock: same 5-min floor for consistency with the session floors.
+// Cross-field invariant enforced server-side:
+//   vaultAutoLockMinutes <= min(sessionIdleTimeoutMinutes, extensionTokenIdleTimeoutMinutes)
+export const VAULT_AUTO_LOCK_MIN = 5;
 export const VAULT_AUTO_LOCK_MAX = 1440;
 
 // ─── Lockout Policy ──────────────────────────────────────────

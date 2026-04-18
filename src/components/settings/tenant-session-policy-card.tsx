@@ -212,7 +212,7 @@ export function TenantSessionPolicyCard() {
       <CardContent className="space-y-4">
         {/* Concurrent session limit */}
         <div className="flex items-center justify-between">
-          <Label htmlFor="unlimited-toggle">{t("unlimited")}</Label>
+          <Label htmlFor="unlimited-toggle" className="flex-1 pr-4">{t("concurrentSessionsUnlimited")}</Label>
           <Switch
             id="unlimited-toggle"
             checked={unlimited}

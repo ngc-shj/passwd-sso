@@ -103,7 +103,7 @@ export type ExtensionResponse =
   | { type: typeof EXT_MSG.SET_TOKEN; ok: true }
   | { type: typeof EXT_MSG.GET_TOKEN; token: string | null }
   | { type: typeof EXT_MSG.CLEAR_TOKEN; ok: true }
-  | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean }
+  | { type: typeof EXT_MSG.GET_STATUS; hasToken: boolean; expiresAt: number | null; vaultUnlocked: boolean; tenantAutoLockMinutes?: number | null }
   | { type: typeof EXT_MSG.UNLOCK_VAULT; ok: boolean; error?: string }
   | { type: typeof EXT_MSG.LOCK_VAULT; ok: true }
   | { type: typeof EXT_MSG.FETCH_PASSWORDS; entries: DecryptedEntry[] | null; error?: string }

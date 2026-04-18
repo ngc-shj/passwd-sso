@@ -62,6 +62,7 @@
     "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
     "autoLock": "自動ロック",
     "autoLockTenantNote": "テナント管理者がポリシーを設定している場合はそちらが優先されます。",
+    "autoLockTenantOverride": "テナントポリシーで {n} 分に固定されています。ローカル設定は無効です。",
     "never": "しない",
     "clipboardClear": "クリップボードのクリア",
     "clipboardClearHint": "コピーしたパスワードをクリップボードから自動的にクリアします。",
@@ -143,7 +144,7 @@
     "autofillFailed": "自動入力に失敗しました。",
     "invalidUrl": "URL が正しくありません。",
     "httpsRequired": "HTTPS 必須（localhost は HTTP 可）",
-    "autoLockInvalid": "自動ロックは 0 以上にしてください",
+    "autoLockInvalid": "自動ロックは 5 分以上にしてください",
     "noTotpConfigured": "この項目に TOTP が設定されていません",
     "invalidTotp": "この項目の TOTP 設定が不正です",
     "networkError": "サーバーに接続できません。自己署名証明書を使用している場合は、ブラウザでサーバーURLを開いて証明書を受け入れてください。"

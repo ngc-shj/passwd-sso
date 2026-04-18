@@ -91,6 +91,10 @@ export function App() {
 
   const [serverUrl, setServerUrl] = useState("");
   const [autoLockMinutes, setAutoLockMinutes] = useState(15);
+  // Tenant policy override. When set (number), the local select is disabled
+  // and the effective value is shown. Null means "no tenant override — local
+  // setting applies."
+  const [tenantAutoLockMinutes, setTenantAutoLockMinutes] = useState<number | null>(null);
   const [showBadgeCount, setShowBadgeCount] = useState(true);
   const [enableInlineSuggestions, setEnableInlineSuggestions] = useState(true);
   const [enableContextMenu, setEnableContextMenu] = useState(true);
@@ -129,6 +133,21 @@ export function App() {
 
     chrome.commands.getAll().then(setCommands);
     setVersion(chrome.runtime.getManifest().version);
+
+    // Fetch tenant-policy auto-lock override from the background SW. Falls
+    // back to null when the vault has not been unlocked yet (we can't know
+    // the tenant value without auth'ing first).
+    try {
+      chrome.runtime.sendMessage({ type: "GET_STATUS" }, (res) => {
+        if (chrome.runtime.lastError) return;
+        if (res && typeof res === "object" && "tenantAutoLockMinutes" in res) {
+          const v = (res as { tenantAutoLockMinutes?: number | null }).tenantAutoLockMinutes;
+          setTenantAutoLockMinutes(typeof v === "number" && v > 0 ? v : null);
+        }
+      });
+    } catch {
+      // Offscreen/SW boot order; best-effort.
+    }
   }, []);
 
   // Set initial snapshot after first render with loaded settings
@@ -148,7 +167,11 @@ export function App() {
       return;
     }
 
-    if (autoLockMinutes < 0 || !Number.isFinite(autoLockMinutes)) {
+    // Vault auto-lock must match the server-side minimum (VAULT_AUTO_LOCK_MIN = 5).
+    // "Never" is no longer allowed — a permanently-unlocked vault outlives the
+    // extension token and session, creating an inconsistent "logged out but
+    // locally decryptable" state.
+    if (autoLockMinutes < 5 || !Number.isFinite(autoLockMinutes)) {
       setError("AUTO_LOCK_INVALID");
       return;
     }
@@ -245,19 +268,37 @@ export function App() {
       case "security":
         return (
           <>
-            <SettingRow label={t("options.autoLock")} description={t("options.autoLockTenantNote")} htmlFor="auto-lock">
+            <SettingRow
+              label={t("options.autoLock")}
+              description={
+                tenantAutoLockMinutes != null
+                  ? t("options.autoLockTenantOverride", { n: String(tenantAutoLockMinutes) })
+                  : t("options.autoLockTenantNote")
+              }
+              htmlFor="auto-lock"
+            >
               <select
                 id="auto-lock"
-                value={autoLockMinutes}
+                value={tenantAutoLockMinutes ?? autoLockMinutes}
                 onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
                 className={selectClass}
+                disabled={tenantAutoLockMinutes != null}
+                aria-describedby={tenantAutoLockMinutes != null ? "auto-lock-tenant-hint" : undefined}
               >
-                <option value={0}>{t("options.never")}</option>
-                <option value={1}>{t("options.minutes", { n: "1" })}</option>
+                {/*
+                  No "never" option: local vault must auto-lock within the
+                  same window as extension token / session idle timeout to
+                  avoid "logged out but locally decryptable" states.
+                  Minimum 5 minutes (same as server-side VAULT_AUTO_LOCK_MIN).
+                */}
                 <option value={5}>{t("options.minutes", { n: "5" })}</option>
                 <option value={15}>{t("options.minutes", { n: "15" })}</option>
                 <option value={30}>{t("options.minutes", { n: "30" })}</option>
                 <option value={60}>{t("options.minutes", { n: "60" })}</option>
+                {/* If tenant override is outside the fixed options, render it so the select has a valid value */}
+                {tenantAutoLockMinutes != null && ![5, 15, 30, 60].includes(tenantAutoLockMinutes) && (
+                  <option value={tenantAutoLockMinutes}>{t("options.minutes", { n: String(tenantAutoLockMinutes) })}</option>
+                )}
               </select>
             </SettingRow>
             <SettingRow label={t("options.clipboardClear")} description={t("options.clipboardClearHint")} htmlFor="clipboard-clear">

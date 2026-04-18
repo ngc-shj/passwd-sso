@@ -557,6 +557,10 @@ async function handlePATCH(req: NextRequest) {
     jitTokenMaxTtlSec !== undefined ||
     delegationDefaultTtlSec !== undefined ||
     delegationMaxTtlSec !== undefined ||
+    // vault-auto-lock <= min(session_idle, extension_token_idle) invariant
+    vaultAutoLockMinutes !== undefined ||
+    sessionIdleTimeoutMinutes !== undefined ||
+    extensionTokenIdleTimeoutMinutes !== undefined ||
     ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
 
   const currentTenant = needsCurrentState
@@ -580,6 +584,9 @@ async function handlePATCH(req: NextRequest) {
             jitTokenMaxTtlSec: true,
             delegationDefaultTtlSec: true,
             delegationMaxTtlSec: true,
+            vaultAutoLockMinutes: true,
+            sessionIdleTimeoutMinutes: true,
+            extensionTokenIdleTimeoutMinutes: true,
           },
         }),
       BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
@@ -617,6 +624,40 @@ async function handlePATCH(req: NextRequest) {
   // Lockout durations must always be strictly ascending
   if (d1 >= d2 || d2 >= d3) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" });
+  }
+
+  // Cross-field: vault_auto_lock must not exceed idle timeouts.
+  // When vault auto-lock is longer than the session/extension token idle
+  // timeout, the vault stays decrypted after the token/session dies —
+  // the "logged out but locally readable" state is confusing UX and
+  // extends the effective credential-material lifetime unnecessarily.
+  const mergedVaultAutoLock = vaultAutoLockMinutes !== undefined
+    ? vaultAutoLockMinutes
+    : currentTenant?.vaultAutoLockMinutes ?? null;
+  const mergedSessionIdle = sessionIdleTimeoutMinutes !== undefined
+    ? sessionIdleTimeoutMinutes
+    : currentTenant?.sessionIdleTimeoutMinutes ?? null;
+  const mergedExtIdle = extensionTokenIdleTimeoutMinutes !== undefined
+    ? extensionTokenIdleTimeoutMinutes
+    : currentTenant?.extensionTokenIdleTimeoutMinutes ?? null;
+
+  if (
+    typeof mergedVaultAutoLock === "number" &&
+    typeof mergedSessionIdle === "number" &&
+    mergedVaultAutoLock > mergedSessionIdle
+  ) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      message: `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= sessionIdleTimeoutMinutes (${mergedSessionIdle})`,
+    });
+  }
+  if (
+    typeof mergedVaultAutoLock === "number" &&
+    typeof mergedExtIdle === "number" &&
+    mergedVaultAutoLock > mergedExtIdle
+  ) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      message: `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= extensionTokenIdleTimeoutMinutes (${mergedExtIdle})`,
+    });
   }
 
   // Password expiry warning must be less than max age when both are set

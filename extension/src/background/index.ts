@@ -1693,6 +1693,10 @@ async function handleMessage(
         hasToken: currentToken !== null,
         expiresAt: tokenExpiresAt,
         vaultUnlocked: encryptionKey !== null,
+        // Tenant-policy override for auto-lock. Null when the tenant has
+        // not set a value (or the vault has never been unlocked yet, so
+        // we don't know). UI uses this to disable the local setting.
+        tenantAutoLockMinutes,
       });
       return;
     }

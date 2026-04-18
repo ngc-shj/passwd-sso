@@ -62,6 +62,7 @@
     "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
     "autoLock": "Auto-lock",
     "autoLockTenantNote": "Tenant admin may override this setting.",
+    "autoLockTenantOverride": "Locked by tenant policy: {n} min. This setting is disabled.",
     "never": "Never",
     "clipboardClear": "Clear clipboard after",
     "clipboardClearHint": "Automatically clear copied passwords from the clipboard.",
@@ -143,7 +144,7 @@
     "autofillFailed": "Autofill failed.",
     "invalidUrl": "Invalid URL",
     "httpsRequired": "HTTPS required (HTTP allowed for localhost).",
-    "autoLockInvalid": "Auto-lock minutes must be 0 or more",
+    "autoLockInvalid": "Auto-lock must be at least 5 minutes",
     "noTotpConfigured": "No TOTP configured for this entry",
     "invalidTotp": "TOTP configuration is invalid for this entry",
     "networkError": "Cannot connect to server. If using a self-signed certificate, open the server URL in a browser tab and accept the certificate first."
