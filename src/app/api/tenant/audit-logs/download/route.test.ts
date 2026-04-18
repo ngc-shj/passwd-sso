@@ -45,6 +45,13 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "127.0.0.1",
+    userAgent: "test",
+  }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({

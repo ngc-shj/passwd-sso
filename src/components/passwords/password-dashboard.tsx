@@ -230,10 +230,10 @@ export function PasswordDashboard({ view, tagId, folderId, entryType }: Password
     ["?", ts("help")],
   ];
 
-  const handleDataChange = () => {
+  const handleDataChange = useCallback(() => {
     setRefreshKey((k) => k + 1);
     notifyVaultDataChanged();
-  };
+  }, []);
 
   return (
     <div className="flex-1 p-4 md:p-6">

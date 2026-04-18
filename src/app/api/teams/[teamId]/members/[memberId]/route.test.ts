@@ -61,6 +61,7 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 
 import { PUT, DELETE } from "./route";

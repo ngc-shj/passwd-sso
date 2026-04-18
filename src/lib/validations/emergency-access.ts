@@ -7,6 +7,14 @@ import {
   EMERGENCY_WAIT_DAYS,
 } from "./common";
 
+// Shape: { ciphertext, iv, authTag } for an ECDH-wrapped private key
+// (smaller ciphertext cap than the entry blob schema).
+const encryptedPrivateKeySchema = z.object({
+  ciphertext: z.string().min(1).max(1024),
+  iv: z.string().length(HEX_IV_LENGTH),
+  authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
+});
+
 // ─── Emergency Access Schemas ─────────────────────────────
 
 export const createEmergencyGrantSchema = z.object({
@@ -19,11 +27,7 @@ export const createEmergencyGrantSchema = z.object({
 export const acceptEmergencyGrantSchema = z.object({
   token: z.string().min(1).max(128),
   granteePublicKey: z.string().min(1).max(512),
-  encryptedPrivateKey: z.object({
-    ciphertext: z.string().min(1).max(1024),
-    iv: z.string().length(HEX_IV_LENGTH),
-    authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
-  }),
+  encryptedPrivateKey: encryptedPrivateKeySchema,
 });
 
 export const rejectEmergencyGrantSchema = z.object({
@@ -45,11 +49,7 @@ export const confirmEmergencyGrantSchema = z.object({
 
 export const acceptEmergencyGrantByIdSchema = z.object({
   granteePublicKey: z.string().min(1).max(512),
-  encryptedPrivateKey: z.object({
-    ciphertext: z.string().min(1).max(1024),
-    iv: z.string().length(HEX_IV_LENGTH),
-    authTag: z.string().length(HEX_AUTH_TAG_LENGTH),
-  }),
+  encryptedPrivateKey: encryptedPrivateKeySchema,
 });
 
 export const revokeEmergencyGrantSchema = z.object({

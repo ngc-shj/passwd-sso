@@ -3,12 +3,12 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { rejectEmergencyGrantSchema } from "@/lib/validations";
 import { hashToken } from "@/lib/crypto-server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { parseBody } from "@/lib/parse-body";
@@ -52,13 +52,11 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.EMERGENCY_GRANT_REJECT,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: grant.id,
     metadata: { ownerId: grant.ownerId, rejectedBy: session.user.id },
-    ...extractRequestMeta(req),
   });
 
   const owner = await withBypassRls(prisma, async () =>

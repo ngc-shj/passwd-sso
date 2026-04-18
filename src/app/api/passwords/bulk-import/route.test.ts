@@ -43,7 +43,11 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+    for (const e of entries) await mockLogAudit(e);
+  }),
   extractRequestMeta: () => ({}),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/logger", () => {
   const noop = vi.fn();
@@ -86,14 +90,6 @@ describe("POST /api/passwords/bulk-import", () => {
     mockAuth.mockResolvedValue(null);
     const res = await POST(createRequest("POST", URL, {
       body: { entries: [makeEntry("id-1")] },
-    }));
-    expect(res.status).toBe(401);
-  });
-
-  it("returns 401 when actor user record is not found", async () => {
-    mockPrismaUser.findUnique.mockResolvedValue(null);
-    const res = await POST(createRequest("POST", URL, {
-      body: { entries: [makeEntry("550e8400-e29b-41d4-a716-000000000001")] },
     }));
     expect(res.status).toBe(401);
   });

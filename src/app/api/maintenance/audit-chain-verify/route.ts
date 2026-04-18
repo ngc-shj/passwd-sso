@@ -12,20 +12,23 @@ import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { TENANT_ROLE } from "@/lib/constants/tenant-role";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
+import { parseQuery } from "@/lib/parse-body";
 import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
 } from "@/lib/audit-chain";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });
 
-const FIVE_YEARS_MS = 5 * 365 * 24 * 60 * 60 * 1000;
+const FIVE_YEARS_MS = 5 * 365 * MS_PER_DAY;
 const MAX_ROWS_PER_REQUEST = 10_000;
 
 function buildQuerySchema() {
@@ -96,20 +99,9 @@ async function handleGET(req: NextRequest) {
   }
 
   const querySchema = buildQuerySchema();
-  const params = querySchema.safeParse({
-    tenantId: req.nextUrl.searchParams.get("tenantId"),
-    operatorId: req.nextUrl.searchParams.get("operatorId"),
-    from: req.nextUrl.searchParams.get("from") ?? undefined,
-    to: req.nextUrl.searchParams.get("to") ?? undefined,
-  });
-  if (!params.success) {
-    return NextResponse.json(
-      { error: params.error.issues[0]?.message ?? "Invalid query parameters" },
-      { status: 400 },
-    );
-  }
-
-  const { tenantId, operatorId, from, to } = params.data;
+  const result = parseQuery(req, querySchema);
+  if (!result.ok) return result.response;
+  const { tenantId, operatorId, from, to } = result.data;
 
   const membership = await withBypassRls(
     prisma,
@@ -118,7 +110,7 @@ async function handleGET(req: NextRequest) {
         where: {
           userId: operatorId,
           tenantId,
-          role: { in: ["OWNER", "ADMIN"] },
+          role: { in: [TENANT_ROLE.OWNER, TENANT_ROLE.ADMIN] },
           deactivatedAt: null,
         },
         select: { tenantId: true },
@@ -301,25 +293,25 @@ async function handleGET(req: NextRequest) {
   const ok = integrityOk && !truncated;
 
   // Machine-readable failure reason
-  const reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined =
-    !ok
-      ? truncated && integrityOk
-        ? "TRUNCATED"
-        : firstTamperedSeq !== null
-          ? "TAMPER_DETECTED"
-          : firstGapAfterSeq !== null
-            ? "GAP_DETECTED"
-            : firstTimestampViolationSeq !== null
-              ? "TIMESTAMP_VIOLATION"
-              : undefined
-      : undefined;
+  let reason: "TRUNCATED" | "TAMPER_DETECTED" | "GAP_DETECTED" | "TIMESTAMP_VIOLATION" | undefined;
+  if (!ok) {
+    if (truncated && integrityOk) {
+      reason = "TRUNCATED";
+    } else if (firstTamperedSeq !== null) {
+      reason = "TAMPER_DETECTED";
+    } else if (firstGapAfterSeq !== null) {
+      reason = "GAP_DETECTED";
+    } else if (firstTimestampViolationSeq !== null) {
+      reason = "TIMESTAMP_VIOLATION";
+    }
+  }
 
   const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
     scope: AUDIT_SCOPE.TENANT,
     action: AUDIT_ACTION.AUDIT_CHAIN_VERIFY,
     userId: SYSTEM_ACTOR_ID,
-    actorType: "SYSTEM",
+    actorType: ACTOR_TYPE.SYSTEM,
     tenantId: membership.tenantId,
     metadata: {
       operatorId,

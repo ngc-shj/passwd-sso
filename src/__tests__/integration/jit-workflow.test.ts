@@ -51,6 +51,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -86,6 +87,7 @@ vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   resolveActorType: () => "HUMAN",
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
@@ -105,6 +107,7 @@ import { POST as approveAccessRequest } from "@/app/api/tenant/access-requests/[
 import { parseSaTokenScopes } from "@/lib/service-account-token";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { z } from "zod";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "a0000000-0000-4000-8000-000000000001", role: "ADMIN" };
 const SA_ID = "00000000-0000-4000-a000-000000000001";
@@ -130,7 +133,7 @@ describe("Scenario 1: Full JIT workflow", () => {
       requestedScope: "passwords:read,passwords:list",
       justification: "Automated incident response",
       status: "PENDING",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       createdAt: new Date(),
     };
     mockAccessRequestCreate.mockResolvedValue(createdRequest);

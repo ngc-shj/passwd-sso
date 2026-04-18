@@ -10,10 +10,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { unauthorized, forbidden, notFound, errorResponse } from "@/lib/api-response";
+import { unauthorized, notFound, errorResponse, handleAuthError } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { isValidCursorId } from "@/lib/audit-query";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -25,14 +27,11 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  const member = await withUserTenantRls(session.user.id, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) {
-    return forbidden();
+  let member;
+  try {
+    member = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SCIM_MANAGE);
+  } catch (e) {
+    return handleAuthError(e);
   }
   const tenantId = member.tenantId;
 

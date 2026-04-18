@@ -3,6 +3,21 @@ import { z, type ZodError } from "zod";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { mapPrismaError } from "@/lib/prisma-error";
 
+// Avoid importing TeamAuthError/TenantAuthError directly to prevent circular
+// dependencies — both classes share the same { message: ApiErrorCode, status: number }
+// shape, so duck-typing is sufficient here.
+interface AuthErrorShape {
+  message: ApiErrorCode;
+  status: number;
+}
+
+function isAuthError(e: unknown): e is AuthErrorShape {
+  if (!(e instanceof Error)) return false;
+  const name = (e as Error).name;
+  if (name !== "TeamAuthError" && name !== "TenantAuthError") return false;
+  return typeof (e as unknown as Record<string, unknown>).status === "number";
+}
+
 /**
  * Create a standardized error response.
  *
@@ -57,4 +72,20 @@ export function prismaErrorResponse(error: unknown): NextResponse | null {
   const mapped = mapPrismaError(error);
   if (!mapped) return null;
   return errorResponse(mapped.code, mapped.status);
+}
+
+/**
+ * Handle TeamAuthError or TenantAuthError in route catch blocks.
+ * Returns an error response if the error is an auth error, otherwise re-throws.
+ *
+ * Usage:
+ *   } catch (e) {
+ *     return handleAuthError(e);
+ *   }
+ */
+export function handleAuthError(e: unknown): NextResponse {
+  if (isAuthError(e)) {
+    return errorResponse(e.message, e.status);
+  }
+  throw e;
 }

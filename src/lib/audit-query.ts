@@ -16,6 +16,22 @@ export function parseActorType(searchParams: URLSearchParams): (typeof VALID_ACT
   return VALID_ACTOR_TYPES.find((t) => t === raw);
 }
 
+/**
+ * Parse a comma-separated `actions` query parameter into an AuditAction array.
+ * Returns `{ invalid: [...] }` if any action is not in validActions.
+ * Returns `{ actions: null }` when the param is empty (no filter).
+ */
+export function parseActionsCsvParam(
+  actionsParam: string | null,
+  validActions: Set<string> = VALID_ACTIONS,
+): { actions: AuditAction[] } | { invalid: string[] } {
+  if (!actionsParam) return { actions: [] };
+  const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
+  const invalid = requested.filter((a) => !validActions.has(a));
+  if (invalid.length > 0) return { invalid };
+  return { actions: requested as AuditAction[] };
+}
+
 export interface AuditLogParams {
   action: string | null;
   actions: string | null;

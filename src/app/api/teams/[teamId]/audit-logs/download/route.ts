@@ -1,11 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { assertPolicyAllowsExport } from "@/lib/team-policy";
-import { PolicyViolationError } from "@/lib/team-policy";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team-policy";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   TEAM_PERMISSION,
@@ -15,11 +14,11 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { VALID_ACTIONS, parseActorType } from "@/lib/audit-query";
-import { formatCsvRow } from "@/lib/audit-csv";
-import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { parseActionsCsvParam, parseActorType } from "@/lib/audit-query";
+import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit-log-stream";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -27,8 +26,6 @@ const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 2,
 });
-
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
 
 // GET /api/teams/[teamId]/audit-logs/download — Download team audit logs (ADMIN/OWNER)
 async function handleGET(req: NextRequest, { params }: Params) {
@@ -42,10 +39,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   // Check team policy allows export
@@ -73,10 +67,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   // Require at least one date boundary
   if (!from && !to) {
-    return NextResponse.json(
-      { error: API_ERROR.VALIDATION_ERROR, details: { date: "At least 'from' or 'to' is required for download" } },
-      { status: 400 },
-    );
+    return validationError({ date: "At least 'from' or 'to' is required for download" });
   }
 
   // Validate date range
@@ -84,26 +75,17 @@ async function handleGET(req: NextRequest, { params }: Params) {
     const fromDate = from ? new Date(from) : undefined;
     const toDate = to ? new Date(to) : undefined;
     if ((fromDate && Number.isNaN(fromDate.getTime())) || (toDate && Number.isNaN(toDate.getTime()))) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { date: "Invalid date format" } },
-        { status: 400 },
-      );
+      return validationError({ date: "Invalid date format" });
     }
     const now = new Date();
-    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
     const resolvedTo = toDate ?? now;
     const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
     if (diffMs < 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { date: "'from' must be before 'to'" } },
-        { status: 400 },
-      );
+      return validationError({ date: "'from' must be before 'to'" });
     }
-    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` } },
-        { status: 400 },
-      );
+    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
+      return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
     }
   }
 
@@ -113,16 +95,12 @@ async function handleGET(req: NextRequest, { params }: Params) {
     ...(validActorType ? { actorType: validActorType } : {}),
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a));
-    if (invalid.length > 0) {
-      return NextResponse.json(
-        { error: API_ERROR.VALIDATION_ERROR, details: { actions: invalid } },
-        { status: 400 },
-      );
-    }
-    where.action = { in: requested as AuditAction[] };
+  const parsedActions = parseActionsCsvParam(actionsParam);
+  if ("invalid" in parsedActions) {
+    return validationError({ actions: parsedActions.invalid });
+  }
+  if (parsedActions.actions.length > 0) {
+    where.action = { in: parsedActions.actions };
   }
 
   if (from || to) {
@@ -134,112 +112,25 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   // Record the download itself
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    userId: session.user.id,
-    teamId,
     metadata: { format },
-    ...extractRequestMeta(req),
   });
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      try {
-        if (format === "csv") {
-          controller.enqueue(encoder.encode(CSV_HEADERS.join(",") + "\n"));
-        }
-
-        let cursor: string | undefined;
-        let hasMore = true;
-        let totalRows = 0;
-
-        while (hasMore && totalRows < AUDIT_LOG_MAX_ROWS) {
-          const remaining = AUDIT_LOG_MAX_ROWS - totalRows;
-          const batchSize = Math.min(AUDIT_LOG_BATCH_SIZE, remaining);
-
-          const batch = await withTeamTenantRls(teamId, async () =>
-            prisma.auditLog.findMany({
-              where,
-              orderBy: { createdAt: "asc" },
-              take: batchSize,
-              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-            }),
-          );
-
-          // Batch-lookup user display info for this page
-          const teamDlUserMap = await fetchAuditUserMap(batch.map((l) => l.userId));
-
-          for (const log of batch) {
-            const userInfo = log.userId ? (teamDlUserMap.get(log.userId) ?? undefined) : undefined;
-            if (format === "csv") {
-              controller.enqueue(
-                encoder.encode(
-                  formatCsvRow([
-                    log.id,
-                    log.action,
-                    log.targetType ?? "",
-                    log.targetId ?? "",
-                    log.ip ?? "",
-                    log.userAgent ?? "",
-                    log.createdAt.toISOString(),
-                    log.userId ?? "",
-                    log.actorType ?? "",
-                    userInfo?.name ?? "",
-                    userInfo?.email ?? "",
-                    JSON.stringify(log.metadata ?? {}),
-                  ]) + "\n",
-                ),
-              );
-            } else {
-              controller.enqueue(
-                encoder.encode(
-                  JSON.stringify({
-                    id: log.id,
-                    action: log.action,
-                    targetType: log.targetType,
-                    targetId: log.targetId,
-                    metadata: log.metadata,
-                    ip: log.ip,
-                    userAgent: log.userAgent,
-                    createdAt: log.createdAt,
-                    userId: log.userId,
-                    actorType: log.actorType,
-                    user: userInfo
-                      ? { id: userInfo.id, name: userInfo.name, email: userInfo.email }
-                      : null,
-                  }) + "\n",
-                ),
-              );
-            }
-          }
-
-          totalRows += batch.length;
-
-          if (batch.length < batchSize || totalRows >= AUDIT_LOG_MAX_ROWS) {
-            hasMore = false;
-          } else {
-            cursor = batch[batch.length - 1].id;
-          }
-        }
-      } catch (err) {
-        controller.error(err);
-        return;
-      }
-      controller.close();
-    },
+  const stream = buildAuditLogStream({
+    format,
+    fetchBatch: ({ take, cursorId }) =>
+      withTeamTenantRls(teamId, async () =>
+        prisma.auditLog.findMany({
+          where,
+          orderBy: { createdAt: "asc" },
+          take,
+          ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+        }),
+      ),
   });
 
-  const contentType = format === "csv" ? "text/csv" : "application/x-ndjson";
-  const ext = format === "csv" ? "csv" : "jsonl";
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": `${contentType}; charset=utf-8`,
-      "Content-Disposition": `attachment; filename="team-audit-logs.${ext}"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  return buildAuditLogDownloadResponse(stream, format, "team-audit-logs");
 }
 
 export const GET = withRequestLog(handleGET);

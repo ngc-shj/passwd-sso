@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
@@ -10,8 +10,10 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -25,7 +27,7 @@ const changePassphraseSchema = z.object({
 });
 
 const changeLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000, // 15 minutes
+  windowMs: 15 * MS_PER_MINUTE,
   max: 3,
 });
 
@@ -38,7 +40,7 @@ const changeLimiter = createRateLimiter({
  * Server does not perform decryption verification — the rewrapped data
  * is stored as-is. Correctness is verified at next unlock.
  */
-async function handlePOST(request: Request) {
+async function handlePOST(request: NextRequest) {
   const originError = assertOrigin(request);
   if (originError) return originError;
 
@@ -53,19 +55,9 @@ async function handlePOST(request: Request) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = changePassphraseSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const data = parsed.data;
+  const result = await parseBody(request, changePassphraseSchema);
+  if (!result.ok) return result.response;
+  const data = result.data;
 
   const user = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({

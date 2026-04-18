@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
-import { buildTagPath } from "@/lib/tag-tree";
+import { buildTagPathMap } from "@/lib/tag-tree";
 import { fetchApi } from "@/lib/url-helpers";
 import { TAG_NAME_MAX_LENGTH } from "@/lib/validations";
 
@@ -68,6 +68,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
   }, []);
 
   const selectedIds = new Set(selectedTags.map((t) => t.id));
+  const tagPaths = useMemo(() => buildTagPathMap(allTags), [allTags]);
 
   const filteredTags = allTags.filter(
     (tag) =>
@@ -150,7 +151,7 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
                   colorClass
                 )}
               >
-                {buildTagPath(tag.id, allTags) ?? tag.name}
+                {tagPaths.get(tag.id) ?? tag.name}
                 <button
                   type="button"
                   onClick={() => removeTag(tag.id)}

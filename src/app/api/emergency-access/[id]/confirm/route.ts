@@ -4,9 +4,9 @@ import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto-emergency";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -80,13 +80,11 @@ async function handlePOST(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.EMERGENCY_GRANT_CONFIRM,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.EMERGENCY_ACCESS_GRANT,
     targetId: id,
     metadata: { ownerId: grant.ownerId, granteeId: grant.granteeId, wrapVersion, keyVersion: serverKeyVersion },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ status: EA_STATUS.IDLE, keyVersion: serverKeyVersion });

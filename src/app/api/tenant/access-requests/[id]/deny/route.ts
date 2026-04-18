@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, notFound, rateLimited } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 
 type Params = { params: Promise<{ id: string }> };
@@ -31,10 +31,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const rl = await denyLimiter.check(`rl:access_request_deny:${actor.tenantId}`);
@@ -70,14 +67,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.ACCESS_REQUEST_DENY,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.ACCESS_REQUEST,
     targetId: requestId,
     metadata: { serviceAccountId: request.serviceAccountId },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

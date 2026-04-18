@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants";
+import { TENANT_ROLE, isTenantAdminRole } from "@/lib/constants/tenant-role";
 import type { TenantRole } from "@prisma/client";
 
 interface UseTenantRoleResult {
@@ -26,8 +27,8 @@ export function useTenantRole(): UseTenantRoleResult {
 
   return {
     role,
-    isOwner: role === "OWNER",
-    isAdmin: role === "OWNER" || role === "ADMIN",
+    isOwner: role === TENANT_ROLE.OWNER,
+    isAdmin: isTenantAdminRole(role),
     loading,
   };
 }

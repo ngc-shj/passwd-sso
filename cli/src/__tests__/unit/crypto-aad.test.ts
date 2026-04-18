@@ -59,6 +59,12 @@ describe("crypto-aad", () => {
     });
   });
 
+  // IMPORTANT: Keep the byte snapshot below BYTE-IDENTICAL to the matching
+  // `known vectors` block in src/lib/crypto-aad.test.ts. If either side
+  // diverges, the CLI cannot decrypt server-encrypted entries (or vice versa).
+  // Any change to the AAD wire format (AAD_VERSION bump, field order, etc.)
+  // MUST be applied to src/lib/crypto-aad.ts, cli/src/lib/crypto-aad.ts,
+  // and BOTH snapshot blocks in the same PR.
   describe("known vectors (interop with web client)", () => {
     it("PV AAD matches hand-computed bytes", () => {
       const aad = buildPersonalEntryAAD("u1", "e1");

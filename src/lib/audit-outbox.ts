@@ -57,3 +57,36 @@ export async function enqueueAudit(
     await enqueueAuditInTx(tx, tenantId, payload);
   });
 }
+
+/**
+ * Enqueue many audit outbox rows in a single transaction.
+ * Used by bulk operations to avoid N sequential round-trips.
+ * All payloads must belong to the same tenant.
+ */
+export async function enqueueAuditBulk(
+  tenantId: string,
+  payloads: AuditOutboxPayload[],
+): Promise<void> {
+  if (payloads.length === 0) return;
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT set_config('app.bypass_rls', 'on', true)`;
+    await tx.$executeRaw`SELECT set_config('app.bypass_purpose', ${BYPASS_PURPOSE.AUDIT_WRITE}, true)`;
+    await tx.$executeRaw`SELECT set_config('app.tenant_id', ${NIL_UUID}, true)`;
+    const [ctx] = await tx.$queryRaw<{ bypass_rls: string }[]>`
+      SELECT current_setting('app.bypass_rls', true) AS bypass_rls`;
+    if (ctx.bypass_rls !== "on") {
+      throw new Error("enqueueAuditBulk: bypass_rls context not active");
+    }
+    const [tenantExists] = await tx.$queryRaw<{ ok: boolean }[]>`
+      SELECT EXISTS (SELECT 1 FROM tenants WHERE id = ${tenantId}::uuid) AS ok`;
+    if (!tenantExists?.ok) {
+      throw new Error(`enqueueAuditBulk: tenantId ${tenantId} does not exist`);
+    }
+    await tx.auditOutbox.createMany({
+      data: payloads.map((payload) => ({
+        tenantId,
+        payload: payload as unknown as Prisma.InputJsonValue,
+      })),
+    });
+  });
+}

@@ -28,6 +28,7 @@ interface TenantAccessPolicy {
 }
 
 const POLICY_CACHE_TTL_MS = 60_000;
+const POLICY_CACHE_MAX_SIZE = 1_000;
 
 interface PolicyCacheEntry {
   policy: TenantAccessPolicy;
@@ -44,6 +45,12 @@ async function getTenantAccessPolicy(
     return cached.policy;
   }
   if (cached) policyCache.delete(tenantId);
+
+  // Evict oldest entry when cache is full (Map iterates in insertion order)
+  if (policyCache.size >= POLICY_CACHE_MAX_SIZE) {
+    const oldest = policyCache.keys().next().value;
+    if (oldest !== undefined) policyCache.delete(oldest);
+  }
 
   const tenant = await withBypassRls(prisma, async () =>
     prisma.tenant.findUnique({

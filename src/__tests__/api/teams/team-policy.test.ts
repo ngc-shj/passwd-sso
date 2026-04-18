@@ -24,7 +24,7 @@ const {
   mockUpsert: vi.fn(),
   mockLogAudit: vi.fn(),
   mockWithTeamTenantRls: vi.fn(
-    async (_teamId: string, fn: () => unknown) => fn(),
+    async (_teamId: string, fn: (tenantId: string) => unknown) => fn("tenant-1"),
   ),
 }));
 
@@ -63,6 +63,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
@@ -242,18 +243,4 @@ describe("PUT /api/teams/[teamId]/policy", () => {
     );
   });
 
-  it("returns 404 when team not found during upsert", async () => {
-    mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockRequireTeamPermission.mockResolvedValue({ role: "ADMIN" });
-    mockTeamFindUnique.mockResolvedValue(null);
-
-    const req = createRequest("PUT", `http://localhost/api/teams/${TEAM_ID}/policy`, {
-      body: { minPasswordLength: 8 },
-    });
-    const res = await PUT(req, params);
-    const { status, json } = await parseResponse(res);
-
-    expect(status).toBe(404);
-    expect(json.error).toBe("TEAM_NOT_FOUND");
-  });
 });

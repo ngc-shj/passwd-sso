@@ -15,11 +15,12 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { notifyAdminsOfLockout } from "@/lib/lockout-admin-notify";
 import type { NextRequest } from "next/server";
 
 /** Observation window: reset counter if last failure was this long ago */
-const OBSERVATION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
+const OBSERVATION_WINDOW_MS = MS_PER_DAY;
 
 /**
  * Default lockout thresholds — ordered descending by attempts.
@@ -36,6 +37,7 @@ type LockoutThreshold = { attempts: number; lockMinutes: number };
 
 const lockoutThresholdCache = new Map<string, { thresholds: LockoutThreshold[]; expiresAt: number }>();
 const LOCKOUT_THRESHOLD_CACHE_TTL_MS = 60_000;
+const LOCKOUT_THRESHOLD_CACHE_MAX_SIZE = 1_000;
 
 /**
  * Return per-tenant lockout thresholds, falling back to defaults if tenant
@@ -47,6 +49,12 @@ async function getLockoutThresholds(tenantId: string): Promise<LockoutThreshold[
     return cached.thresholds;
   }
   if (cached) lockoutThresholdCache.delete(tenantId);
+
+  // Evict oldest entry when cache is full (Map iterates in insertion order)
+  if (lockoutThresholdCache.size >= LOCKOUT_THRESHOLD_CACHE_MAX_SIZE) {
+    const oldest = lockoutThresholdCache.keys().next().value;
+    if (oldest !== undefined) lockoutThresholdCache.delete(oldest);
+  }
 
   try {
     const tenant = await withBypassRls(
@@ -220,7 +228,7 @@ export async function recordFailure(
         if (newAttempts >= threshold.attempts) {
           lockMinutes = threshold.lockMinutes;
           newLockedUntil = new Date(
-            now.getTime() + threshold.lockMinutes * 60 * 1000,
+            now.getTime() + threshold.lockMinutes * MS_PER_MINUTE,
           );
           break;
         }

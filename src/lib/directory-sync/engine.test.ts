@@ -83,6 +83,7 @@ vi.mock("./okta", () => ({
 }));
 
 import { runDirectorySync } from "./engine";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 // ─── Fixtures ────────────────────────────────────────────────
 
@@ -387,7 +388,7 @@ describe("runDirectorySync", () => {
 
   describe("stale lock reset", () => {
     it("resets a stale RUNNING lock and logs a DIRECTORY_SYNC_STALE_RESET audit event", async () => {
-      const staleDate = new Date(Date.now() - 60 * 60 * 1000); // 1 hour ago
+      const staleDate = new Date(Date.now() - MS_PER_HOUR); // 1 hour ago
       mockDirSyncConfig.findFirst.mockResolvedValue({
         status: "RUNNING",
         lastSyncAt: staleDate,
@@ -678,7 +679,7 @@ describe("runDirectorySync", () => {
   // T3.3: actorUserId ?? SYSTEM_ACTOR_ID fallback in logAuditAsync calls
   describe("sentinel fallback: actorUserId ?? SYSTEM_ACTOR_ID", () => {
     it("uses SYSTEM_ACTOR_ID with SYSTEM actorType when userId is omitted from options", async () => {
-      const staleDate = new Date(Date.now() - 60 * 60 * 1000);
+      const staleDate = new Date(Date.now() - MS_PER_HOUR);
       mockDirSyncConfig.findFirst.mockResolvedValue({
         status: "RUNNING",
         lastSyncAt: staleDate,
@@ -703,7 +704,7 @@ describe("runDirectorySync", () => {
     });
 
     it("uses provided userId with HUMAN actorType when userId is present", async () => {
-      const staleDate = new Date(Date.now() - 60 * 60 * 1000);
+      const staleDate = new Date(Date.now() - MS_PER_HOUR);
       mockDirSyncConfig.findFirst.mockResolvedValue({
         status: "RUNNING",
         lastSyncAt: staleDate,

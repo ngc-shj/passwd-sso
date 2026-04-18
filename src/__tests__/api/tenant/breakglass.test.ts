@@ -38,6 +38,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -63,6 +64,9 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test",
+  }),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
@@ -95,6 +99,7 @@ import { POST, GET } from "@/app/api/tenant/breakglass/route";
 import { DELETE } from "@/app/api/tenant/breakglass/[id]/route";
 import { TenantAuthError } from "@/lib/tenant-auth";
 import { GRANT_STATUS } from "@/lib/constants/breakglass";
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant1", role: "ADMIN" };
 const TARGET_USER_ID = "00000000-0000-4000-a000-000000000001";
@@ -107,7 +112,7 @@ const makeGrant = (overrides: Record<string, unknown> = {}) => ({
   targetUserId: TARGET_USER_ID,
   reason: "Investigating incident ABC-123 per security policy",
   incidentRef: null,
-  expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+  expiresAt: new Date(Date.now() + MS_PER_DAY),
   revokedAt: null,
   createdAt: new Date(),
   ...overrides,
@@ -281,7 +286,7 @@ describe("GET /api/tenant/breakglass", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     const activeGrant = makeGrant({
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       revokedAt: null,
     });
     mockPersonalLogAccessGrantFindMany.mockResolvedValue([
@@ -297,7 +302,7 @@ describe("GET /api/tenant/breakglass", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     const expiredGrant = makeGrant({
-      expiresAt: new Date(Date.now() - 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() - MS_PER_HOUR),
       revokedAt: null,
     });
     mockPersonalLogAccessGrantFindMany.mockResolvedValue([
@@ -313,7 +318,7 @@ describe("GET /api/tenant/breakglass", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);
     const revokedGrant = makeGrant({
-      revokedAt: new Date(Date.now() - 30 * 60 * 1000),
+      revokedAt: new Date(Date.now() - 30 * MS_PER_MINUTE),
     });
     mockPersonalLogAccessGrantFindMany.mockResolvedValue([
       { ...revokedGrant, requester: null, targetUser: null },

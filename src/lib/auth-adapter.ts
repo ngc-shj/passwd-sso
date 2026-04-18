@@ -11,6 +11,7 @@ import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
 import { getStrictestSessionDuration } from "@/lib/team-policy";
 
@@ -448,7 +449,7 @@ export function createCustomAdapter(): Adapter {
           const timeout = current.tenant?.sessionIdleTimeoutMinutes;
           if (timeout != null && timeout > 0) {
             const idleSince = Date.now() - current.lastActiveAt.getTime();
-            if (idleSince > timeout * 60_000) {
+            if (idleSince > timeout * MS_PER_MINUTE) {
               // Session exceeded idle timeout — delete and return null (forces sign-out)
               await withBypassRls(prisma, async () =>
                 prisma.session.delete({
@@ -465,7 +466,7 @@ export function createCustomAdapter(): Adapter {
           const maxDuration = await getStrictestSessionDuration(current.userId);
           if (maxDuration !== null && current.createdAt) {
             const sessionAgeMs = Date.now() - current.createdAt.getTime();
-            if (sessionAgeMs > maxDuration * 60_000) {
+            if (sessionAgeMs > maxDuration * MS_PER_MINUTE) {
               await withBypassRls(
                 prisma,
                 () => prisma.session.delete({ where: { sessionToken: session.sessionToken } }),

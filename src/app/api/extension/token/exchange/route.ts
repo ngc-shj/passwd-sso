@@ -34,16 +34,17 @@ import {
 } from "@/lib/api-response";
 import { issueExtensionToken } from "@/lib/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { extractClientIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAuditAsync } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const exchangeLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 10,
 });
 
@@ -74,7 +75,7 @@ async function handlePOST(req: NextRequest) {
   // Rate limit BEFORE DB lookup (keyed by client IP, no session available).
   // Compensating control: 256-bit code entropy makes brute force infeasible.
   const ip = extractClientIp(req) ?? "unknown";
-  const rl = await exchangeLimiter.check(`rl:ext_exchange:${ip}`);
+  const rl = await exchangeLimiter.check(`rl:ext_exchange:${rateLimitKeyFromIp(ip)}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }

@@ -3,15 +3,15 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, validationError, rateLimited } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import {
   encryptedFieldSchema,
@@ -21,8 +21,9 @@ import {
   TEAM_ROTATE_MEMBER_KEYS_MIN,
   TEAM_ROTATE_MEMBER_KEYS_MAX,
 } from "@/lib/validations/common";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const teamRotateKeyLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 1 });
+const teamRotateKeyLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 1 });
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -78,10 +79,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const rl = await teamRotateKeyLimiter.check(`rl:team_rotate_key:${teamId}`);
@@ -244,10 +242,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.TEAM_KEY_ROTATION,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: teamId,
     metadata: {
@@ -256,7 +252,6 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       entriesRotated: entries.length,
       membersUpdated: memberKeys.length,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({

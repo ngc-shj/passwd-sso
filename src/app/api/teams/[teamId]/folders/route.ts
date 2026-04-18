@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { createFolderSchema } from "@/lib/validations";
 import {
   requireTeamMember,
@@ -11,11 +11,11 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -39,10 +39,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const folders = await withTeamTenantRls(teamId, async () =>
@@ -86,10 +83,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, createFolderSchema);
@@ -152,36 +146,23 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     }
   }
 
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!team) {
-    return notFound();
-  }
-
-  const folder = await withTeamTenantRls(teamId, async () =>
+  const folder = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.teamFolder.create({
       data: {
         name,
         parentId: parentId ?? null,
         teamId: teamId,
-        tenantId: team.tenantId,
+        tenantId,
         sortOrder: sortOrder ?? 0,
       },
     }),
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.FOLDER_CREATE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_FOLDER,
     targetId: folder.id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

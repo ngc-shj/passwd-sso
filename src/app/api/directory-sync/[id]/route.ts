@@ -12,14 +12,17 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 import {
   SYNC_INTERVAL_MIN,
   SYNC_INTERVAL_MAX,
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { handleAuthError } from "@/lib/api-response";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -38,13 +41,7 @@ async function resolveAdminAndConfig(
   userId: string,
   configId: string,
 ) {
-  const member = await withUserTenantRls(userId, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) return null;
+  const member = await requireTenantPermission(userId, TENANT_PERMISSION.SCIM_MANAGE);
 
   const config = await withUserTenantRls(userId, () =>
     prisma.directorySyncConfig.findFirst({
@@ -68,17 +65,11 @@ async function handleGET(req: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  const member = await withUserTenantRls(session.user.id, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
-    );
+  let member;
+  try {
+    member = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SCIM_MANAGE);
+  } catch (e) {
+    return handleAuthError(e);
   }
 
   const config = await withUserTenantRls(session.user.id, () =>
@@ -124,21 +115,13 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  const resolved = await resolveAdminAndConfig(session.user.id, id);
+  let resolved;
+  try {
+    resolved = await resolveAdminAndConfig(session.user.id, id);
+  } catch (e) {
+    return handleAuthError(e);
+  }
   if (!resolved) {
-    // Could be FORBIDDEN or NOT_FOUND — check admin first
-    const member = await withUserTenantRls(session.user.id, () =>
-      prisma.tenantMember.findFirst({
-        where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-        select: { tenantId: true },
-      }),
-    );
-    if (!member) {
-      return NextResponse.json(
-        { error: API_ERROR.FORBIDDEN },
-        { status: 403 },
-      );
-    }
     return NextResponse.json(
       { error: API_ERROR.NOT_FOUND },
       { status: 404 },
@@ -190,10 +173,8 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_UPDATE,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: {
@@ -201,7 +182,6 @@ async function handlePUT(req: NextRequest, ctx: RouteContext) {
       displayName: displayName ?? config.displayName,
       credentialsRotated: !!credentials,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(updated);
@@ -220,20 +200,13 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  const resolved = await resolveAdminAndConfig(session.user.id, id);
+  let resolved;
+  try {
+    resolved = await resolveAdminAndConfig(session.user.id, id);
+  } catch (e) {
+    return handleAuthError(e);
+  }
   if (!resolved) {
-    const member = await withUserTenantRls(session.user.id, () =>
-      prisma.tenantMember.findFirst({
-        where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-        select: { tenantId: true },
-      }),
-    );
-    if (!member) {
-      return NextResponse.json(
-        { error: API_ERROR.FORBIDDEN },
-        { status: 403 },
-      );
-    }
     return NextResponse.json(
       { error: API_ERROR.NOT_FOUND },
       { status: 404 },
@@ -249,17 +222,14 @@ async function handleDELETE(req: NextRequest, ctx: RouteContext) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_DELETE,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: {
       provider: config.provider,
       displayName: config.displayName,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

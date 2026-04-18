@@ -173,9 +173,10 @@ export function CreateDelegationDialog({
       }> = [];
 
       const failedIds: string[] = [];
+      const entryById = new Map(entries.map((e) => [e.id, e]));
       for (const entryId of selectedEntryIds) {
-        // Find from already-loaded overview data to avoid extra decryption round-trips
-        const entry = entries.find((e) => e.id === entryId);
+        // Look up from already-loaded overview data to avoid extra decryption round-trips
+        const entry = entryById.get(entryId);
         if (entry) {
           delegationEntries.push({
             id: entryId,

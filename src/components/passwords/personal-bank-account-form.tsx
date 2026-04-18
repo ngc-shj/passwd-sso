@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 interface BankAccountFormProps {
   mode: "create" | "edit";
@@ -104,49 +105,24 @@ export function BankAccountForm({
   const [notes, setNotes] = useState(initialData?.notes ?? "");
   const [travelSafe, setTravelSafe] = useState(initialData?.travelSafe ?? true);
 
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: initialData?.title ?? "",
-        bankName: initialData?.bankName ?? "",
-        accountType: initialData?.accountType ?? "",
-        accountHolderName: initialData?.accountHolderName ?? "",
-        accountNumber: initialData?.accountNumber ?? "",
-        routingNumber: initialData?.routingNumber ?? "",
-        swiftBic: initialData?.swiftBic ?? "",
-        iban: initialData?.iban ?? "",
-        branchName: initialData?.branchName ?? "",
-        notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        folderId: initialData?.folderId ?? defaultFolderId ?? null,
-        requireReprompt: initialData?.requireReprompt ?? false,
-        travelSafe: initialData?.travelSafe ?? true,
-        expiresAt: initialData?.expiresAt ?? null,
-      }),
-    [initialData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        bankName,
-        accountType,
-        accountHolderName,
-        accountNumber,
-        routingNumber,
-        swiftBic,
-        iban,
-        branchName,
-        notes,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        folderId: base.folderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      bankName,
+      accountType,
+      accountHolderName,
+      accountNumber,
+      routingNumber,
+      swiftBic,
+      iban,
+      branchName,
+      notes,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      folderId: base.folderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       bankName,
@@ -165,8 +141,6 @@ export function BankAccountForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS

@@ -35,6 +35,7 @@ vi.mock("@/lib/csrf", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,

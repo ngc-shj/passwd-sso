@@ -47,12 +47,8 @@ export class ScimGroupNotFoundError extends Error {
   }
 }
 
-export class ScimOwnerProtectedError extends Error {
-  constructor() {
-    super("SCIM_OWNER_PROTECTED");
-    this.name = "ScimOwnerProtectedError";
-  }
-}
+import { ScimOwnerProtectedError } from "@/lib/scim/errors";
+export { ScimOwnerProtectedError };
 
 export class ScimNoSuchMemberError extends Error {
   readonly userId: string;
@@ -73,6 +69,19 @@ export class ScimDisplayNameMismatchError extends Error {
 }
 
 // ── Internal helpers ──────────────────────────────────────────
+
+/** Re-throw SCIM-specific sentinel errors as typed error classes. */
+function rethrowScimGroupErrors(e: unknown): never {
+  if (e instanceof Error) {
+    if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
+      throw new ScimNoSuchMemberError(e.message.slice("SCIM_NO_SUCH_MEMBER:".length));
+    }
+    if (e.message === "SCIM_OWNER_PROTECTED") {
+      throw new ScimOwnerProtectedError();
+    }
+  }
+  throw e;
+}
 
 function toDisplayName(teamSlug: string | null | undefined, role: TeamRole): string {
   return teamSlug ? `${teamSlug}:${role}` : role;
@@ -319,16 +328,7 @@ export async function replaceScimGroup(
     addedCount = counts.added;
     removedCount = counts.removed;
   } catch (e) {
-    if (e instanceof Error) {
-      if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        const userId = e.message.slice("SCIM_NO_SUCH_MEMBER:".length);
-        throw new ScimNoSuchMemberError(userId);
-      }
-      if (e.message === "SCIM_OWNER_PROTECTED") {
-        throw new ScimOwnerProtectedError();
-      }
-    }
-    throw e;
+    rethrowScimGroupErrors(e);
   }
 
   const members = await loadGroupMembers(mapping.teamId, mapping.role);
@@ -408,16 +408,7 @@ export async function patchScimGroup(
       }
     });
   } catch (e) {
-    if (e instanceof Error) {
-      if (e.message.startsWith("SCIM_NO_SUCH_MEMBER:")) {
-        const userId = e.message.slice("SCIM_NO_SUCH_MEMBER:".length);
-        throw new ScimNoSuchMemberError(userId);
-      }
-      if (e.message === "SCIM_OWNER_PROTECTED") {
-        throw new ScimOwnerProtectedError();
-      }
-    }
-    throw e;
+    rethrowScimGroupErrors(e);
   }
 
   const members = await loadGroupMembers(mapping.teamId, mapping.role);

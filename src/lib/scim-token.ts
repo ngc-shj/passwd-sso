@@ -5,9 +5,11 @@ import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 import { resolveAuditUserId } from "@/lib/constants/app";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /** Minimum interval (ms) between lastUsedAt updates to reduce DB writes. */
-const LAST_USED_AT_THROTTLE_MS = 5 * 60 * 1000; // 5 minutes
+const LAST_USED_AT_THROTTLE_MS = 5 * MS_PER_MINUTE;
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -18,7 +20,7 @@ export interface ValidatedScimToken {
   /** Always non-null: createdById if present, otherwise SYSTEM_ACTOR_ID sentinel. */
   auditUserId: string;
   /** HUMAN when token was created by a real user; SYSTEM when createdById is null. */
-  actorType: "HUMAN" | "SYSTEM";
+  actorType: typeof ACTOR_TYPE.HUMAN | typeof ACTOR_TYPE.SYSTEM;
 }
 
 export type ScimTokenValidationError =
@@ -115,7 +117,7 @@ export async function validateScimToken(
       tenantId: token.tenantId,
       createdById: token.createdById,
       auditUserId: resolveAuditUserId(token.createdById, "system"),
-      actorType: token.createdById ? ("HUMAN" as const) : ("SYSTEM" as const),
+      actorType: token.createdById ? ACTOR_TYPE.HUMAN : ACTOR_TYPE.SYSTEM,
     },
   };
 }

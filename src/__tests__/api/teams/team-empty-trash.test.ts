@@ -26,6 +26,7 @@ vi.mock("@/lib/team-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -41,7 +42,11 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+    for (const e of entries) await mockLogAudit(e);
+  }),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,

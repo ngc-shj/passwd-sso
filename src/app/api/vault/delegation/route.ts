@@ -17,8 +17,10 @@ import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, rateLimited, zodValidationError } from "@/lib/api-response";
+import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { extractClientIp } from "@/lib/ip-access";
 import {
   DELEGATION_DEFAULT_TTL_SEC,
@@ -34,7 +36,7 @@ import type { DelegationMetadata } from "@/lib/delegation";
 export const runtime = "nodejs";
 
 const delegationRateLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 10,
 });
 
@@ -77,19 +79,11 @@ async function handlePOST(request: NextRequest) {
     return rateLimited(rateLimitResult.retryAfterMs);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-  const parsed = createDelegationSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
+  const result = await parseBody(request, createDelegationSchema);
+  if (!result.ok) return result.response;
 
   // Extract metadata entries — no secrets in request body
-  const { mcpTokenId, ttlSeconds, note, entries } = parsed.data;
+  const { mcpTokenId, ttlSeconds, note, entries } = result.data;
   const metadataEntries: DelegationMetadata[] = entries;
 
   // Verify MCP token belongs to this user's tenant, not expired/revoked, has decrypt scope
@@ -216,8 +210,10 @@ async function handlePOST(request: NextRequest) {
     ip: extractClientIp(request),
     userAgent: request.headers.get("user-agent"),
   };
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  await Promise.all([
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+  ]);
 
   return NextResponse.json({
     delegationSessionId: delegationSession.id,

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 
@@ -23,10 +23,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const existing = await withTeamTenantRls(teamId, async () =>
@@ -52,13 +49,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.ENTRY_RESTORE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
 } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import {
@@ -21,31 +20,18 @@ import { assertOrigin } from "@/lib/csrf";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url-validation";
 
 type Params = { params: Promise<{ teamId: string }> };
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
-    (u) => {
-      try {
-        const parsed = new URL(u);
-        if (parsed.protocol !== "https:") return false;
-        const host = parsed.hostname.toLowerCase();
-        if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
-        if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-        // Block all IP address literals (IPv4 and IPv6) — only allow FQDNs
-        // URL.hostname strips brackets from IPv6 (e.g. "[::1]" → "::1"), so check for colons
-        if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "URL must use HTTPS and must not point to private/internal addresses" },
+    isSsrfSafeWebhookUrl,
+    { message: SSRF_URL_VALIDATION_MESSAGE },
   ),
-  events: z.array(z.enum(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]])).min(1).max(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
+  events: z.array(z.enum([...TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS] as [string, ...string[]])).min(1).max(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks
@@ -60,10 +46,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const webhooks = await withTeamTenantRls(teamId, async () =>
@@ -102,10 +85,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TEAM_UPDATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, createWebhookSchema);
@@ -129,19 +109,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   const masterKey = getMasterKeyByVersion(version);
   const encrypted = encryptServerData(plainSecret, masterKey);
 
-  // Resolve tenantId from team
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUniqueOrThrow({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
-
-  const webhook = await withTeamTenantRls(teamId, async () =>
+  const webhook = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.teamWebhook.create({
       data: {
         teamId,
-        tenantId: team.tenantId,
+        tenantId,
         url: data.url,
         secretEncrypted: encrypted.ciphertext,
         secretIv: encrypted.iv,
@@ -153,12 +125,9 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.WEBHOOK_CREATE,
-    userId: session.user.id,
-    teamId,
     metadata: { webhookId: webhook.id, url: data.url },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

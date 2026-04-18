@@ -5,9 +5,9 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
@@ -122,18 +122,14 @@ async function handlePOST(req: NextRequest) {
   // Audit log
   if (evictedCount > 0) {
     await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
+      ...personalAuditBase(req, user.id),
       action: AUDIT_ACTION.SESSION_REVOKE_ALL,
-      userId: user.id,
       metadata: { trigger: "passkey_signin", evictedCount },
-      ...meta,
     });
   }
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, user.id),
     action: AUDIT_ACTION.AUTH_LOGIN,
-    userId: user.id,
-    ...meta,
   });
 
   // Set session cookie

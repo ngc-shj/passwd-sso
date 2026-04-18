@@ -250,8 +250,10 @@ export async function revokeAllDelegationSessions(
       tenantId,
       metadata: { revokedCount: result.count, reason: reason ?? "manual" },
     };
-    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+    await Promise.all([
+      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
+      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+    ]);
   }
 
   return result.count;
@@ -285,8 +287,10 @@ export async function revokeDelegationSession(
       targetId: sessionId,
       metadata: { reason: "manual" },
     };
-    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-    await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+    await Promise.all([
+      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
+      logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+    ]);
   }
 
   return result.count > 0;

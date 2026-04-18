@@ -19,7 +19,7 @@ import {
   TagTreeError,
 } from "@/lib/tag-tree";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -35,10 +35,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const tags = await withTeamTenantRls(teamId, async () =>
@@ -70,6 +67,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   if (wantTree) {
     const tree = buildTagTree(flat);
     const ordered = flattenTagTree(tree);
+    const countMap = new Map(flat.map((f) => [f.id, f.count]));
     return NextResponse.json(
       ordered.map((n) => ({
         id: n.id,
@@ -77,7 +75,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
         color: n.color,
         parentId: n.parentId,
         depth: n.depth,
-        count: flat.find((f) => f.id === n.id)?.count ?? 0,
+        count: countMap.get(n.id) ?? 0,
       })),
     );
   }
@@ -97,26 +95,13 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.TAG_MANAGE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, createTeamTagSchema);
   if (!result.ok) return result.response;
 
   const { name, color, parentId } = result.data;
-  const team = await withTeamTenantRls(teamId, async () =>
-    prisma.team.findUnique({
-      where: { id: teamId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!team) {
-    return notFound();
-  }
-
   // Validate parent chain if parentId is provided
   if (parentId) {
     const allTags = await withTeamTenantRls(teamId, async () =>
@@ -152,14 +137,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
   }
 
-  const tag = await withTeamTenantRls(teamId, async () =>
+  const tag = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.teamTag.create({
       data: {
         name,
         color: color || null,
         parentId: parentId ?? null,
         teamId: teamId,
-        tenantId: team.tenantId,
+        tenantId,
       },
     }),
   );

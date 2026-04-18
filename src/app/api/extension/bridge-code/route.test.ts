@@ -64,6 +64,12 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
+  personalAuditBase: (_req: unknown, userId: string) => ({
+    scope: "PERSONAL",
+    userId,
+    ip: "1.2.3.4",
+    userAgent: "test",
+  }),
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: mockExtractClientIp,

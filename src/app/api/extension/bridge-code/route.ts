@@ -17,20 +17,20 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import {
   AUDIT_ACTION,
-  AUDIT_SCOPE,
   EXTENSION_TOKEN_DEFAULT_SCOPES,
   BRIDGE_CODE_TTL_MS,
   BRIDGE_CODE_MAX_ACTIVE,
 } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const bridgeCodeLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 10,
 });
 
@@ -103,12 +103,9 @@ async function handlePOST(req: NextRequest) {
 
   // Audit (success path uses logAudit; userId/tenantId both resolved)
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.EXTENSION_BRIDGE_CODE_ISSUE,
-    userId,
     tenantId: userRecord.tenantId,
-    ip: meta.ip,
-    userAgent: meta.userAgent,
   });
 
   // Response — only the plaintext code and expiry are returned

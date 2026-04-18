@@ -1,4 +1,5 @@
 import { TEAM_ROLE, INVITATION_STATUS } from "@/lib/constants";
+import { MS_PER_DAY } from "@/lib/constants/time";
 /**
  * Test data factories for creating mock database records.
  */
@@ -91,31 +92,6 @@ export function makeTeamMember(overrides: Record<string, unknown> = {}) {
   };
 }
 
-export function makeTeamPasswordEntry(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "team-pwd-1",
-    encryptedBlob: "team-blob-cipher",
-    blobIv: "a".repeat(24),
-    blobAuthTag: "b".repeat(32),
-    encryptedOverview: "team-overview-cipher",
-    overviewIv: "c".repeat(24),
-    overviewAuthTag: "d".repeat(32),
-    isFavorite: false,
-    isArchived: false,
-    deletedAt: null as Date | null,
-    teamId: "team-1",
-    createdById: "test-user-id",
-    updatedById: "test-user-id",
-    createdAt: new Date("2025-01-01"),
-    updatedAt: new Date("2025-01-01"),
-    tags: [] as { id: string; name: string; color: string | null }[],
-    createdBy: { id: "test-user-id", name: "Test User" },
-    updatedBy: { id: "test-user-id", name: "Test User" },
-    favorites: [] as { userId: string }[],
-    ...overrides,
-  };
-}
-
 export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
   return {
     id: "inv-1",
@@ -124,7 +100,7 @@ export function makeTeamInvitation(overrides: Record<string, unknown> = {}) {
     role: TEAM_ROLE.MEMBER,
     status: INVITATION_STATUS.PENDING,
     token: "token-abc-123",
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    expiresAt: new Date(Date.now() + 7 * MS_PER_DAY),
     invitedById: "test-user-id",
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -138,7 +114,7 @@ export function makeSession(overrides: Record<string, unknown> = {}) {
     sessionToken: "token-abc",
     userId: "test-user-id",
     tenantId: "tenant-1",
-    expires: new Date(Date.now() + 24 * 60 * 60 * 1000),
+    expires: new Date(Date.now() + MS_PER_DAY),
     ...overrides,
   };
 }
@@ -150,20 +126,7 @@ export function makeExtensionToken(overrides: Record<string, unknown> = {}) {
     tenantId: "tenant-1",
     tokenHash: "a".repeat(64),
     revokedAt: null as Date | null,
-    expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-    createdAt: new Date(),
-    ...overrides,
-  };
-}
-
-export function makeApiKey(overrides: Record<string, unknown> = {}) {
-  return {
-    id: "api-key-1",
-    userId: "test-user-id",
-    tenantId: "tenant-1",
-    name: "Test API Key",
-    tokenHash: "b".repeat(64),
-    revokedAt: null as Date | null,
+    expiresAt: new Date(Date.now() + 7 * MS_PER_DAY),
     createdAt: new Date(),
     ...overrides,
   };

@@ -51,6 +51,7 @@ async function handleGET(req: NextRequest) {
   if (wantTree) {
     const tree = buildTagTree(flat);
     const ordered = flattenTagTree(tree);
+    const countMap = new Map(flat.map((f) => [f.id, f.passwordCount]));
     return NextResponse.json(
       ordered.map((n) => ({
         id: n.id,
@@ -58,7 +59,7 @@ async function handleGET(req: NextRequest) {
         color: n.color,
         parentId: n.parentId,
         depth: n.depth,
-        passwordCount: flat.find((f) => f.id === n.id)?.passwordCount ?? 0,
+        passwordCount: countMap.get(n.id) ?? 0,
       })),
     );
   }
@@ -77,16 +78,6 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
 
   const { name, color, parentId } = result.data;
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
   // Validate parent chain if parentId is provided
   if (parentId) {
     const allTags = await withUserTenantRls(session.user.id, async () =>
@@ -122,14 +113,14 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR.TAG_ALREADY_EXISTS, 409);
   }
 
-  const tag = await withUserTenantRls(session.user.id, async () =>
+  const tag = await withUserTenantRls(session.user.id, async (tenantId) =>
     prisma.tag.create({
       data: {
         name,
         color: color || null,
         parentId: parentId ?? null,
         userId: session.user.id,
-        tenantId: actor.tenantId,
+        tenantId,
       },
     }),
   );

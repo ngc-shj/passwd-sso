@@ -66,6 +66,7 @@ function restoreEnv() {
 
 import { POST } from "./route";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 function createRequest(
   body: unknown,
@@ -181,7 +182,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
     // First deleteMany call is for tenant-1; check the cutoff date
     const cutoff = mockDeleteMany.mock.calls[0][0].where.createdAt.lt as Date;
-    const expectedMs = 365 * 24 * 60 * 60 * 1000;
+    const expectedMs = 365 * MS_PER_DAY;
     const expectedDate = new Date(Date.now() - expectedMs);
     expect(Math.abs(cutoff.getTime() - expectedDate.getTime())).toBeLessThan(5000);
   });
@@ -200,7 +201,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
 
     // First deleteMany for tenant-1: cutoff should be 730 days ago
     const tenantCutoff = mockDeleteMany.mock.calls[0][0].where.createdAt.lt as Date;
-    const expected730 = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
+    const expected730 = new Date(Date.now() - 730 * MS_PER_DAY);
     expect(Math.abs(tenantCutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
 
   });
@@ -218,7 +219,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     await POST(req);
 
     const tenantCutoff = mockDeleteMany.mock.calls[0][0].where.createdAt.lt as Date;
-    const expected730 = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
+    const expected730 = new Date(Date.now() - 730 * MS_PER_DAY);
     expect(Math.abs(tenantCutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
   });
 
@@ -263,7 +264,7 @@ describe("POST /api/maintenance/purge-audit-logs", () => {
     // Count for tenant-1 should use 730-day cutoff (tenant floor wins)
     const tenantCountCall = mockCount.mock.calls[0];
     const tenantCutoff = tenantCountCall[0].where.createdAt.lt as Date;
-    const expected730 = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000);
+    const expected730 = new Date(Date.now() - 730 * MS_PER_DAY);
     expect(Math.abs(tenantCutoff.getTime() - expected730.getTime())).toBeLessThan(5000);
   });
 

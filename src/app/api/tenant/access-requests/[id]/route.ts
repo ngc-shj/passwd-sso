@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -27,10 +27,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const { id } = await params;

@@ -224,7 +224,7 @@ export function PasswordList({
   }, [fetchPasswords, refreshKey]);
 
   // Bulk selection — uses allEntries (pre-search) so selections persist across search queries
-  const entryIds = allEntries.map((e) => e.id);
+  const entryIds = useMemo(() => allEntries.map((e) => e.id), [allEntries]);
   const { selectedIds, atLimit, toggleSelectOne, clearSelection } = useBulkSelection({
     entryIds,
     selectionMode,

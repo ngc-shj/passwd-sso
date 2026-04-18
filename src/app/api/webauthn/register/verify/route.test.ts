@@ -52,6 +52,7 @@ vi.mock("@/lib/webauthn-server", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null, acceptLanguage: null }),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 
 vi.mock("@/lib/constants", () => ({

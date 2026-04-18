@@ -3,10 +3,11 @@ import { auth } from "@/auth";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const WATCHTOWER_SCAN_COOLDOWN_MS = 5 * 60 * 1000;
+const WATCHTOWER_SCAN_COOLDOWN_MS = 5 * MS_PER_MINUTE;
 const scanLimiter = createRateLimiter({
   windowMs: WATCHTOWER_SCAN_COOLDOWN_MS,
   max: 1,

@@ -63,7 +63,11 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+    for (const e of entries) await mockLogAudit(e);
+  }),
   extractRequestMeta: () => ({}),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/services/team-password-service", () => ({
   createTeamPassword: mockCreateTeamPassword,

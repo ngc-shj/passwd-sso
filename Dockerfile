@@ -1,7 +1,9 @@
 # Stage 1: Install dependencies
 # Pin base image to digest for reproducible builds (update with: docker pull node:20-alpine)
 FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS deps
-RUN apk add --no-cache libc6-compat && apk upgrade --no-cache zlib libcrypto3 libssl3 musl musl-utils
+# deps/builder are intermediate — only the runner stage ships. Patching here
+# would be discarded. apk upgrade only happens in the runner stage.
+RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
@@ -9,7 +11,6 @@ RUN npm ci --ignore-scripts
 # Stage 2: Build the application
 FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS builder
 WORKDIR /app
-RUN apk upgrade --no-cache zlib libcrypto3 libssl3 musl musl-utils
 ARG DATABASE_URL
 ENV DATABASE_URL=$DATABASE_URL
 COPY --from=deps /app/node_modules ./node_modules

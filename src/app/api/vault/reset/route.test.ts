@@ -48,6 +48,13 @@ vi.mock("@/lib/csrf", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  personalAuditBase: (_req: unknown, userId: string) => ({
+    scope: "PERSONAL",
+    userId,
+    ip: "127.0.0.1",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
 }));
 vi.mock("@/lib/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,

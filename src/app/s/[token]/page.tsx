@@ -8,6 +8,7 @@ import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
@@ -19,12 +20,10 @@ type Props = {
 export default async function SharePage({ params }: Props) {
   const { token } = await params;
 
-  // Rate limit by IP
+  // Rate limit by IP (rightmost-untrusted, IPv6 /64 normalization)
   const headersList = await headers();
-  const forwarded = headersList.get("x-forwarded-for");
-  const rateLimitIp = forwarded
-    ? forwarded.split(",")[0].trim()
-    : headersList.get("x-real-ip") ?? "unknown";
+  const clientIp = extractClientIpFromHeaders(headersList) ?? "unknown";
+  const rateLimitIp = clientIp === "unknown" ? "unknown" : rateLimitKeyFromIp(clientIp);
   if (!(await sharePageLimiter.check(`rl:share_page:${rateLimitIp}`)).allowed) {
     return <ShareError reason="rateLimited" />;
   }
@@ -105,7 +104,7 @@ export default async function SharePage({ params }: Props) {
     }
 
     // Record access log (must await inside withBypassRls transaction)
-    const ip = rateLimitIp === "unknown" ? null : rateLimitIp;
+    const ip = clientIp === "unknown" ? null : clientIp;
     const ua = headersList.get("user-agent");
     await prisma.shareAccessLog
       .create({

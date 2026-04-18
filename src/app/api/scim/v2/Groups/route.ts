@@ -1,7 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { TeamRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { validateScimToken } from "@/lib/scim-token";
 import {
   scimResponse,
   scimError,
@@ -10,13 +9,10 @@ import {
 } from "@/lib/scim/response";
 import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/serializers";
 import { scimGroupSchema } from "@/lib/scim/validations";
-import { checkScimRateLimit } from "@/lib/scim/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withRequestLog } from "@/lib/with-request-log";
-import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
+import { authorizeScim } from "@/lib/scim/with-scim-auth";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [
   TEAM_ROLE.ADMIN,
@@ -74,18 +70,9 @@ async function loadGroupMembers(teamId: string, role: TeamRole): Promise<ScimGro
 
 // GET /api/scim/v2/Groups — List all tenant mappings
 async function handleGET(req: NextRequest) {
-  const result = await validateScimToken(req);
-  if (!result.ok) {
-    return scimError(401, API_ERROR[result.error]);
-  }
-  const { tenantId } = result.data;
-
-  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
-  if (denied) return denied;
-
-  if (!(await checkScimRateLimit(tenantId))) {
-    return scimError(429, "Too many requests");
-  }
+  const auth = await authorizeScim(req);
+  if (!auth.ok) return auth.response;
+  const { tenantId } = auth.data;
 
   return withTenantRls(prisma, tenantId, async () => {
     const baseUrl = getScimBaseUrl();
@@ -101,16 +88,29 @@ async function handleGET(req: NextRequest) {
       orderBy: [{ createdAt: "asc" }],
     });
 
-    const groups = await Promise.all(
-      mappings.map(async (mapping) => {
-        const members = await loadGroupMembers(mapping.teamId, mapping.role);
-        return buildGroupResource(
-          mapping.externalGroupId,
-          toDisplayName(mapping.team.slug, mapping.role),
-          members,
-          baseUrl,
-        );
-      }),
+    // Batch-load team members for all mappings in one query, then group in-memory
+    const teamIds = Array.from(new Set(mappings.map((m) => m.teamId)));
+    const roles = Array.from(new Set(mappings.map((m) => m.role)));
+    const allMembers = teamIds.length === 0 ? [] : await prisma.teamMember.findMany({
+      where: { teamId: { in: teamIds }, role: { in: roles }, deactivatedAt: null },
+      include: { user: { select: { id: true, email: true } } },
+    });
+    const membersByTeamRole = new Map<string, ScimGroupMemberInput[]>();
+    for (const m of allMembers) {
+      if (m.user.email == null) continue;
+      const key = `${m.teamId}:${m.role}`;
+      const list = membersByTeamRole.get(key) ?? [];
+      list.push({ userId: m.userId, email: m.user.email });
+      membersByTeamRole.set(key, list);
+    }
+
+    const groups = mappings.map((mapping) =>
+      buildGroupResource(
+        mapping.externalGroupId,
+        toDisplayName(mapping.team.slug, mapping.role),
+        membersByTeamRole.get(`${mapping.teamId}:${mapping.role}`) ?? [],
+        baseUrl,
+      ),
     );
 
     const filterParam = req.nextUrl.searchParams.get("filter");
@@ -134,18 +134,9 @@ async function handleGET(req: NextRequest) {
 
 // POST /api/scim/v2/Groups — Register tenant group mapping
 async function handlePOST(req: NextRequest) {
-  const result = await validateScimToken(req);
-  if (!result.ok) {
-    return scimError(401, API_ERROR[result.error]);
-  }
-  const { tenantId } = result.data;
-
-  const denied = await enforceAccessRestriction(req, SYSTEM_ACTOR_ID, tenantId);
-  if (denied) return denied;
-
-  if (!(await checkScimRateLimit(tenantId))) {
-    return scimError(429, "Too many requests");
-  }
+  const auth = await authorizeScim(req);
+  if (!auth.ok) return auth.response;
+  const { tenantId } = auth.data;
 
   let body: unknown;
   try {

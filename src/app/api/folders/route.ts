@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -69,16 +69,6 @@ async function handlePOST(req: NextRequest) {
   if (!result.ok) return result.response;
 
   const { name, parentId, sortOrder } = result.data;
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
   // Parent ownership + existence check
   if (parentId) {
     try {
@@ -125,25 +115,23 @@ async function handlePOST(req: NextRequest) {
     }
   }
 
-  const folder = await withUserTenantRls(session.user.id, async () =>
+  const folder = await withUserTenantRls(session.user.id, async (tenantId) =>
     prisma.folder.create({
       data: {
         name,
         parentId: parentId ?? null,
         userId: session.user.id,
-        tenantId: actor.tenantId,
+        tenantId,
         sortOrder: sortOrder ?? 0,
       },
     }),
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.FOLDER_CREATE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.FOLDER,
     targetId: folder.id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

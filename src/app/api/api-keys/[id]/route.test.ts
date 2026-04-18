@@ -37,6 +37,7 @@ vi.mock("@/lib/logger", () => {
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({}),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 
 import { DELETE } from "./route";

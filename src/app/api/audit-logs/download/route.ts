@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import {
   AUDIT_ACTION,
@@ -11,17 +11,15 @@ import {
 import type { AuditAction, Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { VALID_ACTIONS } from "@/lib/audit-query";
-import { formatCsvRow } from "@/lib/audit-csv";
-import { AUDIT_LOG_MAX_RANGE_DAYS, AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { parseActionsCsvParam } from "@/lib/audit-query";
+import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
+import { MS_PER_DAY } from "@/lib/constants/time";
+import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit-log-stream";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,
   max: 2,
 });
-
-const CSV_HEADERS = ["id", "action", "targetType", "targetId", "ip", "userAgent", "createdAt", "userId", "actorType", "userName", "userEmail", "metadata"];
 
 // GET /api/audit-logs/download — Download personal audit logs (JSONL or CSV)
 async function handleGET(req: NextRequest) {
@@ -50,13 +48,13 @@ async function handleGET(req: NextRequest) {
       return validationError({ date: "Invalid date format" });
     }
     const now = new Date();
-    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000);
+    const resolvedFrom = fromDate ?? new Date(now.getTime() - AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY);
     const resolvedTo = toDate ?? now;
     const diffMs = resolvedTo.getTime() - resolvedFrom.getTime();
     if (diffMs < 0) {
       return validationError({ date: "'from' must be before 'to'" });
     }
-    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * 24 * 60 * 60 * 1000) {
+    if (diffMs > AUDIT_LOG_MAX_RANGE_DAYS * MS_PER_DAY) {
       return validationError({ range: `Maximum range is ${AUDIT_LOG_MAX_RANGE_DAYS} days` });
     }
   }
@@ -66,13 +64,12 @@ async function handleGET(req: NextRequest) {
     userId: session.user.id,
   };
 
-  if (actionsParam) {
-    const requested = actionsParam.split(",").map((a) => a.trim()).filter(Boolean);
-    const invalid = requested.filter((a) => !VALID_ACTIONS.has(a));
-    if (invalid.length > 0) {
-      return validationError({ actions: invalid });
-    }
-    where.action = { in: requested as AuditAction[] };
+  const parsedActions = parseActionsCsvParam(actionsParam);
+  if ("invalid" in parsedActions) {
+    return validationError({ actions: parsedActions.invalid });
+  }
+  if (parsedActions.actions.length > 0) {
+    where.action = { in: parsedActions.actions };
   }
 
   if (from || to) {
@@ -84,109 +81,27 @@ async function handleGET(req: NextRequest) {
 
   // Record the download itself
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.AUDIT_LOG_DOWNLOAD,
-    userId: session.user.id,
     metadata: { format },
-    ...extractRequestMeta(req),
   });
 
   const userId = session.user.id;
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      try {
-        if (format === "csv") {
-          controller.enqueue(encoder.encode(CSV_HEADERS.join(",") + "\n"));
-        }
-
-        let cursor: string | undefined;
-        let hasMore = true;
-        let totalRows = 0;
-
-        while (hasMore) {
-          const batch = await withUserTenantRls(userId, async () =>
-            prisma.auditLog.findMany({
-              where,
-              orderBy: { createdAt: "asc" },
-              take: AUDIT_LOG_BATCH_SIZE,
-              ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
-            }),
-          );
-
-          // Batch-lookup user display info for this page
-          const batchUserMap = await fetchAuditUserMap(batch.map((l) => l.userId));
-
-          for (const log of batch) {
-            const userInfo = log.userId ? (batchUserMap.get(log.userId) ?? undefined) : undefined;
-            if (format === "csv") {
-              controller.enqueue(
-                encoder.encode(
-                  formatCsvRow([
-                    log.id,
-                    log.action,
-                    log.targetType ?? "",
-                    log.targetId ?? "",
-                    log.ip ?? "",
-                    log.userAgent ?? "",
-                    log.createdAt.toISOString(),
-                    log.userId ?? "",
-                    log.actorType ?? "",
-                    userInfo?.name ?? "",
-                    userInfo?.email ?? "",
-                    JSON.stringify(log.metadata ?? {}),
-                  ]) + "\n",
-                ),
-              );
-            } else {
-              controller.enqueue(
-                encoder.encode(
-                  JSON.stringify({
-                    id: log.id,
-                    action: log.action,
-                    targetType: log.targetType,
-                    targetId: log.targetId,
-                    metadata: log.metadata,
-                    ip: log.ip,
-                    userAgent: log.userAgent,
-                    createdAt: log.createdAt,
-                    userId: log.userId,
-                    actorType: log.actorType,
-                    user: userInfo
-                      ? { id: userInfo.id, name: userInfo.name, email: userInfo.email }
-                      : null,
-                  }) + "\n",
-                ),
-              );
-            }
-          }
-
-          totalRows += batch.length;
-          if (batch.length < AUDIT_LOG_BATCH_SIZE || totalRows >= AUDIT_LOG_MAX_ROWS) {
-            hasMore = false;
-          } else {
-            cursor = batch[batch.length - 1].id;
-          }
-        }
-      } catch (err) {
-        controller.error(err);
-        return;
-      }
-      controller.close();
-    },
+  const stream = buildAuditLogStream({
+    format,
+    fetchBatch: ({ take, cursorId }) =>
+      withUserTenantRls(userId, async () =>
+        prisma.auditLog.findMany({
+          where,
+          orderBy: { createdAt: "asc" },
+          take,
+          ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+        }),
+      ),
   });
 
-  const contentType = format === "csv" ? "text/csv" : "application/x-ndjson";
-  const ext = format === "csv" ? "csv" : "jsonl";
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": `${contentType}; charset=utf-8`,
-      "Content-Disposition": `attachment; filename="audit-logs.${ext}"`,
-      "Cache-Control": "no-store",
-    },
-  });
+  return buildAuditLogDownloadResponse(stream, format, "audit-logs");
 }
 
 export const GET = withRequestLog(handleGET);

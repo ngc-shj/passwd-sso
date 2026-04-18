@@ -60,15 +60,9 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Match all paths except static assets and Next.js internals
+    // Match all paths except static assets and Next.js internals.
+    // API routes are covered by this pattern — no need to enumerate them.
     "/((?!_next|_vercel|.*\\..*).*)",
-    // API auth-protected routes (explicit for clarity, already covered by catch-all above)
-    "/api/passwords/:path*",
-    "/api/tags/:path*",
-    "/api/watchtower/:path*",
-    "/api/teams/:path*",
-    "/api/audit-logs/:path*",
-    "/api/share-links/:path*",
   ],
 };
 

@@ -5,12 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { checkAuth } from "@/lib/check-auth";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, forbidden } from "@/lib/api-response";
+import { errorResponse, forbidden, handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -83,10 +83,7 @@ async function handlePOST(req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.TEAM_CREATE);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
   const tenantId = actor.tenantId;
 

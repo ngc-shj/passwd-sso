@@ -69,6 +69,7 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/notification", () => ({ createNotification: mockCreateNotification }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
@@ -97,6 +98,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST, GET } from "./route";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const TENANT_ID = "tenant-1";
 const TARGET_USER_ID = "user-target";
@@ -336,8 +338,8 @@ describe("POST /api/tenant/members/[userId]/reset-vault", () => {
 });
 
 describe("GET /api/tenant/members/[userId]/reset-vault", () => {
-  const PAST_DATE = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000); // 2 days ago
-  const FUTURE_DATE = new Date(Date.now() + 24 * 60 * 60 * 1000); // 1 day from now
+  const PAST_DATE = new Date(Date.now() - 2 * MS_PER_DAY); // 2 days ago
+  const FUTURE_DATE = new Date(Date.now() + MS_PER_DAY); // 1 day from now
 
   const BASE_RESET = {
     id: "reset-1",

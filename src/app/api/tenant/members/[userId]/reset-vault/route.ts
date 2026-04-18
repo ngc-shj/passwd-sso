@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { adminVaultResetEmail } from "@/lib/email/templates/admin-vault-reset";
@@ -18,23 +18,24 @@ import {
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, rateLimited, unauthorized } from "@/lib/api-response";
+import { errorResponse, forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const RESET_TOKEN_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const RESET_TOKEN_TTL_MS = MS_PER_DAY;
 
 const adminResetLimiter = createRateLimiter({
-  windowMs: 24 * 60 * 60 * 1000,
+  windowMs: MS_PER_DAY,
   max: 3,
 });
 
 const targetResetLimiter = createRateLimiter({
-  windowMs: 24 * 60 * 60 * 1000,
+  windowMs: MS_PER_DAY,
   max: 1,
 });
 
@@ -62,10 +63,7 @@ async function handlePOST(
       TENANT_PERMISSION.MEMBER_VAULT_RESET,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   // Cannot reset own vault
@@ -144,14 +142,11 @@ async function handlePOST(
 
   // Audit log
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_INITIATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: "User",
     targetId: targetUserId,
     metadata: { resetId: resetRecord.id },
-    ...extractRequestMeta(req),
   });
 
   // In-app notification to target user
@@ -201,10 +196,7 @@ async function handleGET(
       TENANT_PERMISSION.MEMBER_VAULT_RESET,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const resets = await withTenantRls(prisma, actor.tenantId, async () =>

@@ -24,6 +24,7 @@ vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,7 @@ import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 import { parseSshPrivateKey } from "@/lib/ssh-key";
 
 interface SshKeyFormProps {
@@ -130,41 +131,20 @@ export function SshKeyForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const baselineSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: initialData?.title ?? "",
-        privateKey: initialData?.privateKey ?? "",
-        publicKey: initialData?.publicKey ?? "",
-        passphrase: initialData?.passphrase ?? "",
-        comment: initialData?.comment ?? "",
-        notes: initialData?.notes ?? "",
-        selectedTagIds: (initialData?.tags ?? defaultTags ?? [])
-          .map((tag) => tag.id)
-          .sort(),
-        folderId: initialData?.folderId ?? defaultFolderId ?? null,
-        requireReprompt: initialData?.requireReprompt ?? false,
-        travelSafe: initialData?.travelSafe ?? true,
-        expiresAt: initialData?.expiresAt ?? null,
-      }),
-    [initialData, defaultFolderId, defaultTags],
-  );
-
-  const currentSnapshot = useMemo(
-    () =>
-      JSON.stringify({
-        title: base.title,
-        privateKey,
-        publicKey,
-        passphrase,
-        comment,
-        notes,
-        selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
-        folderId: base.folderId,
-        requireReprompt: base.requireReprompt,
-        travelSafe,
-        expiresAt: base.expiresAt,
-      }),
+  const hasChanges = useEntryHasChanges(
+    () => ({
+      title: base.title,
+      privateKey,
+      publicKey,
+      passphrase,
+      comment,
+      notes,
+      selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
+      folderId: base.folderId,
+      requireReprompt: base.requireReprompt,
+      travelSafe,
+      expiresAt: base.expiresAt,
+    }),
     [
       base.title,
       privateKey,
@@ -179,8 +159,6 @@ export function SshKeyForm({
       base.expiresAt,
     ],
   );
-
-  const hasChanges = currentSnapshot !== baselineSnapshot;
   useBeforeUnloadGuard(!base.isDialogVariant && hasChanges);
   const primaryCardClass = base.isDialogVariant
     ? ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS

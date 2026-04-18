@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { MS_PER_MINUTE, MS_PER_HOUR } from "../../lib/time.js";
 
 // Mocks must be declared before dynamic imports
 
@@ -269,7 +270,7 @@ describe("loginCommand", () => {
         accessToken: "mcp_old_access",
         refreshToken: "mcpr_old_refresh",
         clientId: "mcpc_oldclient",
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
       });
       mockRunOAuthFlow.mockResolvedValueOnce({
         accessToken: "mcp_new_access",
@@ -309,7 +310,7 @@ describe("loginCommand", () => {
         accessToken: "manual_token",
         refreshToken: "",
         clientId: "",
-        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        expiresAt: new Date(Date.now() + 15 * MS_PER_MINUTE).toISOString(),
       });
       promptAnswer = "mynewtoken";
 
@@ -323,7 +324,7 @@ describe("loginCommand", () => {
         accessToken: "mcp_old_access",
         refreshToken: "mcpr_old_refresh",
         clientId: "mcpc_oldclient",
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        expiresAt: new Date(Date.now() + MS_PER_HOUR).toISOString(),
       });
       mockRevokeTokenRequest.mockRejectedValueOnce(new Error("Network error"));
       mockRunOAuthFlow.mockResolvedValueOnce({

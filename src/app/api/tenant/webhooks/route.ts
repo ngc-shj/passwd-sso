@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { parseBody } from "@/lib/parse-body";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -20,29 +19,18 @@ import {
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url-validation";
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(
-    (u) => {
-      try {
-        const parsed = new URL(u);
-        if (parsed.protocol !== "https:") return false;
-        const host = parsed.hostname.toLowerCase();
-        if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
-        if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-        if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "URL must use HTTPS and must not point to private/internal addresses" },
+    isSsrfSafeWebhookUrl,
+    { message: SSRF_URL_VALIDATION_MESSAGE },
   ),
   events: z.array(
-    z.enum(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]]),
+    z.enum([...TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS] as [string, ...string[]]),
   ).min(1).max(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
 });
 
@@ -57,10 +45,7 @@ async function handleGET(_req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.WEBHOOK_MANAGE);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const webhooks = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -98,10 +83,7 @@ async function handlePOST(req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.WEBHOOK_MANAGE);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, createWebhookSchema);
@@ -140,12 +122,9 @@ async function handlePOST(req: NextRequest) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.TENANT_WEBHOOK_CREATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     metadata: { webhookId: webhook.id, url: data.url },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

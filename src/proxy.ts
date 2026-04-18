@@ -4,6 +4,8 @@ import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
+import { AUDIT_ACTION } from "./lib/constants/audit";
+import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import { PERMISSIONS_POLICY } from "./lib/security-headers";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";
 import { isHttps } from "./lib/url-helpers";
@@ -41,12 +43,12 @@ function isPasskeyGracePeriodExpired(
   if (passkeyGracePeriodDays == null || passkeyGracePeriodDays <= 0) return true;
 
   const enabledAt = new Date(requirePasskeyEnabledAt).getTime();
-  const gracePeriodMs = passkeyGracePeriodDays * 24 * 60 * 60 * 1000;
+  const gracePeriodMs = passkeyGracePeriodDays * MS_PER_DAY;
   return Date.now() > enabledAt + gracePeriodMs;
 }
 
 // Deduplicate passkey audit emit — track userId+timestamp, skip if emitted within 5 min
-const PASSKEY_AUDIT_DEDUP_MS = 5 * 60 * 1000;
+const PASSKEY_AUDIT_DEDUP_MS = 5 * MS_PER_MINUTE;
 const PASSKEY_AUDIT_MAP_MAX = 1000;
 const passkeyAuditEmitted = new Map<string, number>();
 
@@ -155,7 +157,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
               cookie: request.headers.get("cookie") ?? "",
             },
             body: JSON.stringify({
-              action: "PASSKEY_ENFORCEMENT_BLOCKED",
+              action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
               metadata: { blockedPath: pathWithoutLocale },
             }),
           }).catch(() => {});

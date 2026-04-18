@@ -10,11 +10,12 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TokenIssueResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const refreshLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 20,
 });
 

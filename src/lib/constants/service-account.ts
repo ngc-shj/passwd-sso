@@ -1,3 +1,5 @@
+import { MS_PER_MINUTE } from "./time";
+
 export const SA_TOKEN_PREFIX = "sa_";
 
 export const SA_TOKEN_SCOPE = {
@@ -36,4 +38,4 @@ export const MAX_SA_TOKEN_EXPIRY_DAYS = 365;
 export const DEFAULT_SA_TOKEN_EXPIRY_DAYS = 90;
 
 /** Throttle interval for lastUsedAt updates (ms) */
-export const SA_TOKEN_LAST_USED_THROTTLE_MS = 5 * 60 * 1000;
+export const SA_TOKEN_LAST_USED_THROTTLE_MS = 5 * MS_PER_MINUTE;

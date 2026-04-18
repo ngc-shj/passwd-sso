@@ -7,16 +7,19 @@ import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import {
   hexIv,
   hexAuthTag,
   hexSalt,
   hexHash,
+  verificationArtifactSchema,
 } from "@/lib/validations/common";
 import {
   KDF_PBKDF2_ITERATIONS_MIN,
@@ -28,10 +31,11 @@ import {
   KDF_ARGON2_PARALLELISM_MIN,
   KDF_ARGON2_PARALLELISM_MAX,
 } from "@/lib/validations/common.server";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const setupLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 5 });
+const setupLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 5 });
 
 const kdfParamsSchema = z.discriminatedUnion("kdfType", [
   z.object({
@@ -53,11 +57,7 @@ const setupSchema = z.object({
   accountSalt: hexSalt,
   authHash: hexHash,
   verifierHash: hexHash,
-  verificationArtifact: z.object({
-    ciphertext: z.string().min(1),
-    iv: hexIv,
-    authTag: hexAuthTag,
-  }),
+  verificationArtifact: verificationArtifactSchema,
   // ECDH key pair for team E2E encryption
   ecdhPublicKey: z.string().min(1),
   encryptedEcdhPrivateKey: z.string().min(1),
@@ -97,19 +97,9 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.VAULT_ALREADY_SETUP, 409);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = setupSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
-
-  const data = parsed.data;
+  const result = await parseBody(request, setupSchema);
+  if (!result.ok) return result.response;
+  const data = result.data;
 
   // Apply KDF defaults if client omits kdfParams
   const kdfType = data.kdfParams?.kdfType ?? 0;
@@ -163,14 +153,10 @@ async function handlePOST(request: NextRequest) {
     ]),
   );
 
-  const { ip, userAgent } = extractRequestMeta(request);
   await logAuditAsync({
-    scope: "PERSONAL",
-    action: "VAULT_SETUP",
-    userId: session.user.id,
+    ...personalAuditBase(request, session.user.id),
+    action: AUDIT_ACTION.VAULT_SETUP,
     metadata: { kdfType, kdfIterations, ...(kdfMemory != null ? { kdfMemory, kdfParallelism } : {}) },
-    ip,
-    userAgent,
   });
 
   getLogger().info(

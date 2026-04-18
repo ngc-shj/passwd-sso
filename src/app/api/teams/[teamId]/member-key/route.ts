@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkAuth } from "@/lib/check-auth";
-import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamMember } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse } from "@/lib/api-response";
+import { errorResponse, handleAuthError } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -22,10 +22,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(userId, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   // Check if key has been distributed to this member

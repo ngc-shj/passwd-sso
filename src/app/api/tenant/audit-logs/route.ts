@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, validationError } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM, AUDIT_SCOPE, mergeActionGroups } from "@/lib/constants";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
@@ -19,6 +19,8 @@ import {
 } from "@/lib/audit-query";
 import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
 
+const MERGED_ACTION_GROUPS = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+
 // GET /api/tenant/audit-logs — Tenant-scoped audit logs (TENANT + TEAM scope, ADMIN/OWNER only)
 async function handleGET(req: NextRequest) {
   const session = await auth();
@@ -30,10 +32,7 @@ async function handleGET(req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.AUDIT_LOG_VIEW);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const { searchParams } = new URL(req.url);
@@ -79,7 +78,7 @@ async function handleGET(req: NextRequest) {
       ? AUDIT_ACTION_GROUPS_TEAM
       : scopeParam === AUDIT_SCOPE.TENANT
         ? AUDIT_ACTION_GROUPS_TENANT
-        : mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
+        : MERGED_ACTION_GROUPS;
 
   try {
     const actionFilter = buildAuditLogActionFilter(

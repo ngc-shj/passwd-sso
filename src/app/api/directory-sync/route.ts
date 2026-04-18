@@ -11,8 +11,8 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 import {
   DIRECTORY_SYNC_PROVIDERS,
@@ -21,6 +21,9 @@ import {
   SYNC_INTERVAL_DEFAULT,
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { handleAuthError } from "@/lib/api-response";
 
 // ─── Validation ──────────────────────────────────────────────
 
@@ -43,17 +46,11 @@ async function handleGET(_req: NextRequest) {
     );
   }
 
-  const member = await withUserTenantRls(session.user.id, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
-    );
+  let member;
+  try {
+    member = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SCIM_MANAGE);
+  } catch (e) {
+    return handleAuthError(e);
   }
   const tenantId = member.tenantId;
 
@@ -92,17 +89,11 @@ async function handlePOST(req: NextRequest) {
     );
   }
 
-  const member = await withUserTenantRls(session.user.id, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
-    );
+  let member;
+  try {
+    member = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SCIM_MANAGE);
+  } catch (e) {
+    return handleAuthError(e);
   }
   const tenantId = member.tenantId;
 
@@ -175,14 +166,11 @@ async function handlePOST(req: NextRequest) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_CONFIG_CREATE,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: { provider, displayName },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(config, { status: 201 });

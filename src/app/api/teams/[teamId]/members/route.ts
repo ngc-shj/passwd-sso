@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { addMemberSchema } from "@/lib/validations";
 import { requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -26,10 +26,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const members = await withTeamTenantRls(teamId, async () =>
@@ -82,10 +79,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, addMemberSchema);
@@ -108,18 +102,10 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let member: MemberResult;
 
   try {
-    member = await withTeamTenantRls(teamId, async () => {
-      const team = await prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      });
-      if (!team) {
-        throw new TeamAuthError(API_ERROR.NOT_FOUND, 404);
-      }
-
+    member = await withTeamTenantRls(teamId, async (tenantId) => {
       // Verify target user is an active tenant member (single query replaces user + tenantMember lookups)
       const tenantMembership = await prisma.tenantMember.findFirst({
-        where: { tenantId: team.tenantId, userId, deactivatedAt: null },
+        where: { tenantId, userId, deactivatedAt: null },
         select: { id: true },
       });
       if (!tenantMembership) {
@@ -160,7 +146,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         data: {
           teamId,
           userId,
-          tenantId: team.tenantId,
+          tenantId,
           role,
           keyDistributed: false,
         },
@@ -174,25 +160,19 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     if (e instanceof ScimManagedError) {
       return errorResponse(API_ERROR.SCIM_MANAGED_MEMBER, 409);
     }
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
     // Prisma unique constraint violation (race condition)
     if (isPrismaUniqueConstraintError(e)) {
       return errorResponse(API_ERROR.ALREADY_A_MEMBER, 409);
     }
-    throw e;
+    return handleAuthError(e);
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.TEAM_MEMBER_ADD,
-    userId: session.user.id,
-    teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: member.id,
     metadata: { userId, role, reactivated: member.reactivated },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(member, { status: 201 });

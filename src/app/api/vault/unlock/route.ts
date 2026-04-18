@@ -12,8 +12,10 @@ import { getLogger } from "@/lib/logger";
 import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { hexHash } from "@/lib/validations/common";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
@@ -23,7 +25,7 @@ const unlockSchema = z.object({
 });
 
 const unlockLimiter = createRateLimiter({
-  windowMs: 5 * 60 * 1000,
+  windowMs: 5 * MS_PER_MINUTE,
   max: 5,
 });
 
@@ -58,17 +60,8 @@ async function handlePOST(request: NextRequest) {
     return rateLimited(rl.retryAfterMs);
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = unlockSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
+  const result = await parseBody(request, unlockSchema);
+  if (!result.ok) return result.response;
 
   const user = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
@@ -92,7 +85,7 @@ async function handlePOST(request: NextRequest) {
 
   // Verify: SHA-256(authHash + serverSalt) === stored serverHash
   const computedHash = createHash("sha256")
-    .update(parsed.data.authHash + user.masterPasswordServerSalt)
+    .update(result.data.authHash + user.masterPasswordServerSalt)
     .digest("hex");
 
   const hashA = Buffer.from(computedHash, "hex");
@@ -128,7 +121,7 @@ async function handlePOST(request: NextRequest) {
   await unlockLimiter.clear(rateKey);
 
   // Backfill passphrase verifier for existing users (transparent migration)
-  const verifierHash = parsed.data.verifierHash;
+  const verifierHash = result.data.verifierHash;
   if (verifierHash) {
     await withUserTenantRls(session.user.id, async () =>
       prisma.user.updateMany({

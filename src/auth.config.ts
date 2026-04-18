@@ -7,11 +7,12 @@ import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
 
 // Rate limiters for magic link email (per-email address)
 const magicLinkEmailLimiter = createRateLimiter({
-  windowMs: 10 * 60_000,
+  windowMs: 10 * MS_PER_MINUTE,
   max: 3,
 });
 

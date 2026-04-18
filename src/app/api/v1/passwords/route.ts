@@ -1,15 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { validateV1Auth } from "@/lib/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
-import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import type { EntryType } from "@prisma/client";
@@ -17,7 +18,6 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 
-const apiKeyLimiter = createRateLimiter({ windowMs: 60_000, max: 100 });
 
 // GET /api/v1/passwords — List passwords (API key or SA token)
 async function handleGET(req: NextRequest) {
@@ -44,7 +44,7 @@ async function handleGET(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
+  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -136,7 +136,7 @@ async function handlePOST(req: NextRequest) {
   const denied = await enforceAccessRestriction(req, userId, tenantId);
   if (denied) return denied;
 
-  const rl = await apiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
+  const rl = await v1ApiKeyLimiter.check(`rl:api_key:${rateLimitKey}`);
   if (!rl.allowed) {
     return rateLimited(rl.retryAfterMs);
   }
@@ -160,12 +160,8 @@ async function handlePOST(req: NextRequest) {
     const entry = await prisma.passwordEntry.create({
       data: {
         ...(clientId ? { id: clientId } : {}),
-        encryptedBlob: encryptedBlob.ciphertext,
-        blobIv: encryptedBlob.iv,
-        blobAuthTag: encryptedBlob.authTag,
-        encryptedOverview: encryptedOverview.ciphertext,
-        overviewIv: encryptedOverview.iv,
-        overviewAuthTag: encryptedOverview.authTag,
+        ...toBlobColumns(encryptedBlob),
+        ...toOverviewColumns(encryptedOverview),
         keyVersion,
         aadVersion,
         entryType,
@@ -196,12 +192,10 @@ async function handlePOST(req: NextRequest) {
   const { entry } = createResult;
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.ENTRY_CREATE,
-    userId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: entry.id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

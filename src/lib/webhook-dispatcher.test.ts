@@ -667,7 +667,7 @@ describe("dispatchTenantWebhook", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("strips PII keys from payload data via WEBHOOK_METADATA_BLOCKLIST", async () => {
+  it("strips PII keys from payload data via EXTERNAL_DELIVERY_METADATA_BLOCKLIST", async () => {
     const eventWithPii = {
       ...TENANT_EVENT,
       data: {

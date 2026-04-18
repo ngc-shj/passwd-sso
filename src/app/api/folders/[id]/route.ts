@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { updateFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound, forbidden } from "@/lib/api-response";
@@ -13,7 +13,7 @@ import {
   checkCircularReference,
   type ParentNode,
 } from "@/lib/folder-utils";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -156,12 +156,10 @@ async function handlePUT(
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.FOLDER_UPDATE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.FOLDER,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({
@@ -221,7 +219,7 @@ async function handleDELETE(
       // Build rename map for children that would collide
       usedNames.add(existing.name);
 
-      const renames: Array<{ childId: string; newName: string }> = [];
+      const renames = new Map<string, string>();
       for (const child of children) {
         if (usedNames.has(child.name)) {
           let suffix = 2;
@@ -230,7 +228,7 @@ async function handleDELETE(
             suffix++;
             newName = `${child.name} (${suffix})`;
           }
-          renames.push({ childId: child.id, newName });
+          renames.set(child.id, newName);
           usedNames.add(newName);
         } else {
           usedNames.add(child.name);
@@ -239,12 +237,12 @@ async function handleDELETE(
 
       // Promote children individually, renaming conflicts in the same update
       for (const child of children) {
-        const rename = renames.find((r) => r.childId === child.id);
+        const newName = renames.get(child.id);
         await tx.folder.update({
           where: { id: child.id },
           data: {
             parentId: existing.parentId,
-            ...(rename ? { name: rename.newName } : {}),
+            ...(newName ? { name: newName } : {}),
           },
         });
       }
@@ -259,12 +257,10 @@ async function handleDELETE(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.FOLDER_DELETE,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.FOLDER,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

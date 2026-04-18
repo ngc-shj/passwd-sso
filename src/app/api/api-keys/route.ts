@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { checkAuth } from "@/lib/check-auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
@@ -16,9 +16,10 @@ import {
   MAX_API_KEYS_PER_USER,
 } from "@/lib/constants/api-key";
 import { API_KEY_TOKEN_LENGTH, API_KEY_PREFIX_LENGTH } from "@/lib/validations/common";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
-const apiKeyCreateLimiter = createRateLimiter({ windowMs: 60 * 60_000, max: 5 });
+const apiKeyCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 });
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
@@ -107,21 +108,11 @@ async function handlePOST(req: NextRequest) {
   const tokenHash = hashToken(plaintext);
   const prefix = plaintext.slice(0, API_KEY_PREFIX_LENGTH); // "api_XXXX"
 
-  const actor = await withUserTenantRls(userId, async () =>
-    prisma.user.findUnique({
-      where: { id: userId },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
-  const key = await withUserTenantRls(userId, async () =>
+  const key = await withUserTenantRls(userId, async (tenantId) =>
     prisma.apiKey.create({
       data: {
         userId: userId,
-        tenantId: actor.tenantId,
+        tenantId,
         tokenHash,
         prefix,
         name,
@@ -132,13 +123,11 @@ async function handlePOST(req: NextRequest) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, userId),
     action: AUDIT_ACTION.API_KEY_CREATE,
-    userId: userId,
     targetType: AUDIT_TARGET_TYPE.API_KEY,
     targetId: key.id,
     metadata: { name, scopes },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

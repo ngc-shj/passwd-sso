@@ -35,6 +35,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -60,6 +61,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
@@ -85,6 +87,7 @@ vi.mock("@/lib/api-response", () => ({
 
 import { GET, POST } from "@/app/api/tenant/scim-tokens/route";
 import { DELETE } from "@/app/api/tenant/scim-tokens/[tokenId]/route";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant-abc", role: "ADMIN" };
 const TOKEN_ID = "scim-token-id-001";
@@ -95,7 +98,7 @@ const makeToken = (overrides: Record<string, unknown> = {}) => ({
   description: "CI token",
   createdAt: new Date("2025-01-01"),
   lastUsedAt: null,
-  expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+  expiresAt: new Date(Date.now() + 365 * MS_PER_DAY),
   revokedAt: null,
   tokenHash: "hash:plain-scim-token-value",
   createdById: DEFAULT_SESSION.user.id,

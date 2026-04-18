@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { withRequestLog } from "@/lib/with-request-log";
-import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { bulkIdsSchema } from "@/lib/validations";
 
@@ -25,10 +25,7 @@ async function handlePOST(
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, bulkIdsSchema);
@@ -59,13 +56,11 @@ async function handlePOST(
     }),
   );
 
-  const requestMeta = extractRequestMeta(req);
+  const requestMeta = teamAuditBase(req, session.user.id, teamId);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...requestMeta,
     action: AUDIT_ACTION.ENTRY_BULK_RESTORE,
-    userId: session.user.id,
-    teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     // targetId omitted for bulk operations
     metadata: {
@@ -75,25 +70,20 @@ async function handlePOST(
       restoredCount: updateResult.count,
       entryIds,
     },
-    ...requestMeta,
   });
 
-  const auditEntries = entryIds.map((entryId) => ({
-    scope: AUDIT_SCOPE.TEAM,
-    action: AUDIT_ACTION.ENTRY_RESTORE,
-    userId: session.user.id,
-    teamId,
-    targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
-    targetId: entryId,
-    metadata: {
-      source: "bulk-restore",
-      parentAction: AUDIT_ACTION.ENTRY_BULK_RESTORE,
-    },
-    ...requestMeta,
-  }));
-  for (const entry of auditEntries) {
-    await logAuditAsync(entry);
-  }
+  await logAuditBulkAsync(
+    entryIds.map((entryId) => ({
+      ...requestMeta,
+      action: AUDIT_ACTION.ENTRY_RESTORE,
+      targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
+      targetId: entryId,
+      metadata: {
+        source: "bulk-restore",
+        parentAction: AUDIT_ACTION.ENTRY_BULK_RESTORE,
+      },
+    })),
+  );
 
   return NextResponse.json({ success: true, restoredCount: updateResult.count });
 }

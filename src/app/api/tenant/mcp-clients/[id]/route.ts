@@ -3,14 +3,15 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
-import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound, zodValidationError } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -43,10 +44,7 @@ async function handleGET(
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const client = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -82,10 +80,7 @@ async function handlePUT(
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const existing = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -93,17 +88,9 @@ async function handlePUT(
   );
   if (!existing) return notFound();
 
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = updateSchema.safeParse(body);
-  if (!parsed.success) return zodValidationError(parsed.error);
-
-  const data = parsed.data;
+  const result = await parseBody(req, updateSchema);
+  if (!result.ok) return result.response;
+  const data = result.data;
   const updateData: Record<string, unknown> = {};
   if (data.name !== undefined) updateData.name = data.name;
   if (data.redirectUris !== undefined) updateData.redirectUris = data.redirectUris;
@@ -130,10 +117,8 @@ async function handlePUT(
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.MCP_CLIENT_UPDATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: id,
     metadata: data as Record<string, unknown>,
@@ -143,7 +128,7 @@ async function handlePUT(
 }
 
 async function handleDELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -154,10 +139,7 @@ async function handleDELETE(
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE);
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const existing = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -170,10 +152,8 @@ async function handleDELETE(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.MCP_CLIENT_DELETE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: id,
     metadata: { name: existing.name },

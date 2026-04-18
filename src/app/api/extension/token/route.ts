@@ -10,6 +10,7 @@ import { EXTENSION_TOKEN_DEFAULT_SCOPES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TokenIssueResponseSchema, TokenRevokeResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 function internalError() {
   return errorResponse(API_ERROR.INTERNAL_ERROR, 500);
@@ -18,7 +19,7 @@ function internalError() {
 export const runtime = "nodejs";
 
 const tokenLimiter = createRateLimiter({
-  windowMs: 15 * 60 * 1000,
+  windowMs: 15 * MS_PER_MINUTE,
   max: 10,
 });
 
@@ -38,16 +39,6 @@ async function handlePOST() {
     return rateLimited(rl.retryAfterMs);
   }
 
-  const actor = await withUserTenantRls(session.user.id, async () =>
-    prisma.user.findUnique({
-      where: { id: session.user.id },
-      select: { tenantId: true },
-    }),
-  );
-  if (!actor) {
-    return unauthorized();
-  }
-
   // Migration metric (Step 11): emit a counter so we can track when the legacy
   // direct-issuance endpoint stops being called and the bridge code flow has
   // fully replaced it.
@@ -59,11 +50,13 @@ async function handlePOST() {
     "legacy direct extension token issuance — track for migration completion",
   );
 
-  const issued = await issueExtensionToken({
-    userId: session.user.id,
-    tenantId: actor.tenantId,
-    scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
-  });
+  const issued = await withUserTenantRls(session.user.id, async (tenantId) =>
+    issueExtensionToken({
+      userId: session.user.id,
+      tenantId,
+      scope: EXTENSION_TOKEN_DEFAULT_SCOPES.join(","),
+    }),
+  );
 
   const body = {
     token: issued.token,

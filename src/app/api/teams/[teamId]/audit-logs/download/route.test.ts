@@ -53,6 +53,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: mockExtractRequestMeta,
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/team-policy", () => ({
   assertPolicyAllowsExport: mockAssertPolicyAllowsExport,

@@ -3,9 +3,10 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
-const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes when tab hidden
+const DEFAULT_INACTIVITY_TIMEOUT_MS = 15 * MS_PER_MINUTE;
+const DEFAULT_HIDDEN_TIMEOUT_MS = 5 * MS_PER_MINUTE;
 const ACTIVITY_CHECK_INTERVAL_MS = 30_000; // check every 30 seconds
 
 interface AutoLockProviderProps {
@@ -29,8 +30,8 @@ export function AutoLockProvider({
   // Update timeout values when prop changes
   useEffect(() => {
     if (autoLockMinutes != null && autoLockMinutes > 0) {
-      autoLockMsRef.current = autoLockMinutes * 60_000;
-      hiddenLockMsRef.current = Math.min(autoLockMinutes * 60_000, DEFAULT_HIDDEN_TIMEOUT_MS);
+      autoLockMsRef.current = autoLockMinutes * MS_PER_MINUTE;
+      hiddenLockMsRef.current = Math.min(autoLockMinutes * MS_PER_MINUTE, DEFAULT_HIDDEN_TIMEOUT_MS);
     }
   }, [autoLockMinutes]);
 

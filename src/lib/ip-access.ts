@@ -7,6 +7,7 @@
  */
 
 import type { NextRequest } from "next/server";
+import { getLogger } from "@/lib/logger";
 
 // ─── Trusted proxy configuration ─────────────────────────────
 
@@ -24,7 +25,7 @@ function getTrustedProxies(): ParsedCidr[] {
     if (parsed) {
       trustedProxyCidrs.push(parsed);
     } else {
-      console.warn(`[ip-access] Invalid TRUSTED_PROXIES entry ignored: "${entry}"`);
+      getLogger().warn({ entry }, "ip-access.trusted_proxies.invalid_entry_ignored");
     }
   }
   return trustedProxyCidrs;
@@ -232,6 +233,23 @@ function matchesPrefix(
 }
 
 /**
+ * Check if an IP matches a pre-parsed CIDR (avoids parse→format→re-parse round-trip).
+ */
+function isIpInParsedCidr(ip: string, parsed: ParsedCidr): boolean {
+  const normalizedIp = normalizeIp(ip);
+  let ipBytes: number[] | null;
+  if (parsed.version === 4) {
+    ipBytes = parseIpv4(normalizedIp);
+  } else {
+    ipBytes = parseIpv6(ip);
+  }
+  if (!ipBytes) return false;
+  if (parsed.version === 4 && ipBytes.length !== 4) return false;
+  if (parsed.version === 6 && ipBytes.length !== 16) return false;
+  return matchesPrefix(ipBytes, parsed.ip, parsed.prefixLen);
+}
+
+/**
  * Check if an IP address is allowed by any of the given CIDRs.
  */
 export function isIpAllowed(ip: string, cidrs: string[]): boolean {
@@ -261,9 +279,20 @@ export function extractClientIp(request: NextRequest): string | null {
   const socketIp = (request as unknown as Record<string, unknown>).ip as
     | string
     | undefined;
+  return extractClientIpFromHeaders(request.headers, socketIp);
+}
 
-  const xff = request.headers.get("x-forwarded-for");
-  const xRealIp = request.headers.get("x-real-ip");
+/**
+ * Header-only variant of extractClientIp for Server Components and contexts
+ * without a NextRequest (e.g., `next/headers` in RSC, Request in generic handlers).
+ * Same rightmost-untrusted algorithm as extractClientIp; socketIp is optional.
+ */
+export function extractClientIpFromHeaders(
+  headers: Headers,
+  socketIp?: string,
+): string | null {
+  const xff = headers.get("x-forwarded-for");
+  const xRealIp = headers.get("x-real-ip");
 
   // If no forwarded headers, use socket IP or x-real-ip
   if (!xff) {
@@ -277,9 +306,9 @@ export function extractClientIp(request: NextRequest): string | null {
   if (socketIp) {
     const normalizedSocket = normalizeIp(socketIp);
     const trusted = getTrustedProxies();
-    const socketTrusted = trusted.some((cidr) => {
-      return isIpInCidr(normalizedSocket, formatCidr(cidr));
-    });
+    const socketTrusted = trusted.some((cidr) =>
+      isIpInParsedCidr(normalizedSocket, cidr),
+    );
     if (!socketTrusted) {
       return normalizedSocket;
     }
@@ -293,10 +322,9 @@ export function extractClientIp(request: NextRequest): string | null {
     const ip = ips[i];
     if (!ip) continue;
 
-    const isTrusted = trusted.some((cidr) => {
-      const cidrStr = formatCidr(cidr);
-      return isIpInCidr(ip, cidrStr);
-    });
+    const isTrusted = trusted.some((cidr) =>
+      isIpInParsedCidr(ip, cidr),
+    );
 
     if (!isTrusted) {
       return ip;

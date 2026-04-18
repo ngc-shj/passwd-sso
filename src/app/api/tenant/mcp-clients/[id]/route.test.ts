@@ -26,6 +26,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -49,6 +50,14 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "127.0.0.1",
+    userAgent: "test",
+    acceptLanguage: null,
+  }),
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/mcp-clients/[id]/route";

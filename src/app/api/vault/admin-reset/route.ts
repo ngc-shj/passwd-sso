@@ -13,11 +13,13 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
-const vaultAdminResetLimiter = createRateLimiter({ windowMs: 15 * 60_000, max: 3 });
+const vaultAdminResetLimiter = createRateLimiter({ windowMs: 15 * MS_PER_MINUTE, max: 3 });
 
 const CONFIRMATION_TOKEN = "DELETE MY VAULT";
 
@@ -52,20 +54,9 @@ async function handlePOST(req: NextRequest) {
   const rl = await vaultAdminResetLimiter.check(`rl:vault_admin_reset:${userId}`);
   if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
-  // Inline parsing: security-sensitive endpoint — do not expose schema details
-  let body: unknown;
-  try {
-    body = await req.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_BODY, 400);
-  }
-
-  const parsed = adminResetSchema.safeParse(body);
-  if (!parsed.success) {
-    return errorResponse(API_ERROR.INVALID_BODY, 400);
-  }
-
-  const { token, confirmation } = parsed.data;
+  const result = await parseBody(req, adminResetSchema);
+  if (!result.ok) return result.response;
+  const { token, confirmation } = result.data;
 
   // Confirmation must be exact English string
   if (confirmation !== CONFIRMATION_TOKEN) {

@@ -10,8 +10,9 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { parseBody } from "@/lib/parse-body";
 import { invitationAcceptSchema } from "@/lib/validations";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 
-const acceptLimiter = createRateLimiter({ windowMs: 5 * 60_000, max: 10 });
+const acceptLimiter = createRateLimiter({ windowMs: 5 * MS_PER_MINUTE, max: 10 });
 
 // POST /api/teams/invitations/accept — Accept an invitation by token
 async function handlePOST(req: NextRequest) {

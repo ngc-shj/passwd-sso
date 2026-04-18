@@ -15,6 +15,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { logAuditAsync } from "@/lib/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import { decryptCredentials } from "./credentials";
@@ -164,7 +165,7 @@ export async function runDirectorySync(
   let acquired: boolean;
   try {
     const staleThreshold = new Date(
-      Date.now() - STALE_LOCK_MINUTES * 60 * 1000,
+      Date.now() - STALE_LOCK_MINUTES * MS_PER_MINUTE,
     );
 
     // Check for stale RUNNING state before CAS to detect stale-reset
@@ -448,7 +449,7 @@ export async function runDirectorySync(
                 data: {
                   tenantId,
                   userId: user.id,
-                  role: "MEMBER",
+                  role: TENANT_ROLE.MEMBER,
                   deactivatedAt: pu.active ? null : new Date(),
                   scimManaged: true,
                   provisioningSource: "SCIM",
@@ -566,7 +567,7 @@ export async function runDirectorySync(
 
     // 9. Update config status
     const nextSyncAt = new Date(
-      completedAt.getTime() + (config.syncIntervalMinutes ?? 60) * 60 * 1000,
+      completedAt.getTime() + (config.syncIntervalMinutes ?? 60) * MS_PER_MINUTE,
     );
 
     await withTenantRls(prisma, tenantId, () =>

@@ -28,6 +28,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -62,6 +63,7 @@ vi.mock("@/lib/constants/tenant-permission", () => ({
 }));
 
 import { GET } from "@/app/api/tenant/breakglass/[id]/logs/route";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const GRANT_ID = "grant-abc123";
 const TARGET_USER_ID = "cmmtargetuserid00001";
@@ -73,7 +75,7 @@ function makeActiveGrant(overrides: Record<string, unknown> = {}) {
     requesterId: DEFAULT_SESSION.user.id,
     targetUserId: TARGET_USER_ID,
     revokedAt: null,
-    expiresAt: new Date(Date.now() + 60 * 60 * 1000), // 1 hour from now
+    expiresAt: new Date(Date.now() + MS_PER_HOUR), // 1 hour from now
     targetUser: {
       id: TARGET_USER_ID,
       name: "Target User",

@@ -1,14 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { parseBody } from "@/lib/parse-body";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import {
@@ -20,28 +19,14 @@ import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
   WEBHOOK_URL_MAX_LENGTH,
 } from "@/lib/validations/common";
 
-const ssrfSafeUrl = (url: string) => {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "https:") return false;
-    const host = parsed.hostname.toLowerCase();
-    if (host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]") return false;
-    if (host === "0.0.0.0" || host.endsWith(".local") || host.endsWith(".internal")) return false;
-    if (/^[\d.]+$/.test(host) || host.includes(":")) return false;
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const ssrfMessage = "URL must use HTTPS and must not point to private/internal addresses";
+import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url-validation";
 
 const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({
@@ -74,10 +59,7 @@ async function handleGET(_req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const targets = await withTenantRls(prisma, actor.tenantId, async () =>
@@ -113,10 +95,7 @@ async function handlePOST(req: NextRequest) {
   try {
     actor = await requireTenantPermission(session.user.id, TENANT_PERMISSION.AUDIT_DELIVERY_MANAGE);
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const result = await parseBody(req, createDeliveryTargetSchema);
@@ -168,12 +147,9 @@ async function handlePOST(req: NextRequest) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.AUDIT_DELIVERY_TARGET_CREATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     metadata: { targetId: target.id, kind: data.kind },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(

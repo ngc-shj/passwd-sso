@@ -2,14 +2,15 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { verifyPassphraseVerifier } from "@/lib/crypto-server";
 import { checkLockout, recordFailure } from "@/lib/account-lockout";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, unauthorized, zodValidationError } from "@/lib/api-response";
+import { errorResponse, unauthorized } from "@/lib/api-response";
+import { parseBody } from "@/lib/parse-body";
 
 export const runtime = "nodejs";
 
@@ -37,17 +38,8 @@ async function handlePOST(request: NextRequest) {
     );
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(API_ERROR.INVALID_JSON, 400);
-  }
-
-  const parsed = disableSchema.safeParse(body);
-  if (!parsed.success) {
-    return zodValidationError(parsed.error);
-  }
+  const result = await parseBody(request, disableSchema);
+  if (!result.ok) return result.response;
 
   const user = await withUserTenantRls(session.user.id, async () =>
     prisma.user.findUnique({
@@ -76,7 +68,7 @@ async function handlePOST(request: NextRequest) {
   }
 
   const valid = verifyPassphraseVerifier(
-    parsed.data.verifierHash,
+    result.data.verifierHash,
     user.passphraseVerifierHmac,
   );
 
@@ -84,10 +76,8 @@ async function handlePOST(request: NextRequest) {
     await recordFailure(session.user.id, request);
 
     await logAuditAsync({
+      ...personalAuditBase(request, session.user.id),
       action: AUDIT_ACTION.TRAVEL_MODE_DISABLE_FAILED,
-      scope: AUDIT_SCOPE.PERSONAL,
-      userId: session.user.id,
-      ...extractRequestMeta(request),
     });
 
     return errorResponse(API_ERROR.INVALID_PASSPHRASE, 401);
@@ -104,10 +94,8 @@ async function handlePOST(request: NextRequest) {
   );
 
   await logAuditAsync({
+    ...personalAuditBase(request, session.user.id),
     action: AUDIT_ACTION.TRAVEL_MODE_DISABLE,
-    scope: AUDIT_SCOPE.PERSONAL,
-    userId: session.user.id,
-    ...extractRequestMeta(request),
   });
 
   return NextResponse.json({ active: false });

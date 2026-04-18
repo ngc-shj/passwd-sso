@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamMember } from "@/lib/team-auth";
 import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
@@ -17,13 +17,14 @@ import { notificationTitle, notificationBody } from "@/lib/notification-messages
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { BREACH_COUNT_MAX } from "@/lib/validations/common.server";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
 
 const alertLimiter = createRateLimiter({
-  windowMs: 60 * 60 * 1000, // 1 hour
+  windowMs: MS_PER_HOUR,
   max: 1,
 });
 
@@ -62,10 +63,7 @@ async function handlePOST(req: NextRequest) {
     try {
       await requireTeamMember(session.user.id, teamId);
     } catch (e) {
-      if (e instanceof TeamAuthError) {
-        return errorResponse(e.message, e.status);
-      }
-      throw e;
+      return handleAuthError(e);
     }
   }
 

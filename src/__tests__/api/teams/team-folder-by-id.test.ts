@@ -28,6 +28,7 @@ vi.mock("@/lib/team-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TeamAuthError";
       this.status = status;
     }
   }
@@ -47,6 +48,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
+  teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
 vi.mock("@/lib/folder-utils", () => ({
   validateParentFolder: vi.fn(),

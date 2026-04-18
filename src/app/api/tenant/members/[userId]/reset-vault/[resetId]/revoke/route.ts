@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { adminVaultResetRevokedEmail } from "@/lib/email/templates/admin-vault-reset-revoked";
@@ -15,10 +15,10 @@ import {
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -49,10 +49,7 @@ async function handlePOST(
       TENANT_PERMISSION.MEMBER_VAULT_RESET,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   // Atomic revoke with TOCTOU prevention: only revoke if still pending
@@ -82,14 +79,11 @@ async function handlePOST(
 
   // Audit log
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.ADMIN_VAULT_RESET_REVOKE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: "User",
     targetId: targetUserId,
     metadata: { revokedById: session.user.id, resetId },
-    ...extractRequestMeta(req),
   });
 
   // Fetch target user for notification + email

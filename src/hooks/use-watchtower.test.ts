@@ -95,6 +95,7 @@ import {
   EXPIRING_THRESHOLD_DAYS,
   WATCHTOWER_COOLDOWN_MS,
 } from "./use-watchtower";
+import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 
 // ─── Helpers ─────────────────────────────────────────────────
 
@@ -226,7 +227,7 @@ describe("useWatchtower", () => {
   });
 
   it("exports WATCHTOWER_COOLDOWN_MS = 5 minutes", () => {
-    expect(WATCHTOWER_COOLDOWN_MS).toBe(5 * 60 * 1000);
+    expect(WATCHTOWER_COOLDOWN_MS).toBe(5 * MS_PER_MINUTE);
   });
 
   // ─── Initial state ──────────────────────────────────────
@@ -394,7 +395,7 @@ describe("useWatchtower", () => {
   // ─── Old password detection ──────────────────────────────
 
   it("detects old passwords (>90 days) with low severity", async () => {
-    const oldDate = new Date(Date.now() - 100 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(Date.now() - 100 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ updatedAt: oldDate });
     fetchSpy
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -414,7 +415,7 @@ describe("useWatchtower", () => {
   });
 
   it("assigns medium severity to passwords older than 180 days", async () => {
-    const veryOldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const veryOldDate = new Date(Date.now() - 200 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ updatedAt: veryOldDate });
     fetchSpy
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -433,7 +434,7 @@ describe("useWatchtower", () => {
   });
 
   it("does not flag recent passwords as old", async () => {
-    const recentDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const recentDate = new Date(Date.now() - 10 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ updatedAt: recentDate });
     fetchSpy
       .mockResolvedValueOnce(jsonResponse({ ok: true }))
@@ -831,7 +832,7 @@ describe("useWatchtower", () => {
 
   it("calculates weighted score: all issues → low score", async () => {
     // 2 entries, both breached, both weak, both reused, both old, both unsecured, both duplicate
-    const oldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(Date.now() - 200 * MS_PER_DAY).toISOString();
     const samePass = "weak";
     const raw1 = makeRawEntry({ id: "e1", password: samePass, url: "http://bad.com", updatedAt: oldDate, username: "victim" });
     const raw2 = makeRawEntry({ id: "e2", password: samePass, url: "http://bad.com", updatedAt: oldDate, username: "victim" });
@@ -960,7 +961,7 @@ describe("useWatchtower", () => {
   // ─── Multiple issue types in one analysis ────────────────
 
   it("detects multiple issue types simultaneously", async () => {
-    const oldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(Date.now() - 200 * MS_PER_DAY).toISOString();
     const raw1 = makeRawEntry({ id: "e1", password: "weak1", url: "http://bad.com", updatedAt: oldDate });
     const raw2 = makeRawEntry({ id: "e2", password: "weak1", url: "https://good.com" });
     const raw3 = makeRawEntry({ id: "e3", password: "Strong!99#xyz", url: "https://safe.com" });
@@ -1184,7 +1185,7 @@ describe("useWatchtower", () => {
   });
 
   it("detects expired entries (past expiresAt) with medium severity", async () => {
-    const expiredDate = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000).toISOString();
+    const expiredDate = new Date(Date.now() - 10 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ id: "exp-1", expiresAt: expiredDate });
 
     fetchSpy
@@ -1205,7 +1206,7 @@ describe("useWatchtower", () => {
   });
 
   it("detects entries expiring within 30 days with low severity", async () => {
-    const soonDate = new Date(Date.now() + 15 * 24 * 60 * 60 * 1000).toISOString();
+    const soonDate = new Date(Date.now() + 15 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ id: "exp-2", expiresAt: soonDate });
 
     fetchSpy
@@ -1298,7 +1299,7 @@ describe("useWatchtower", () => {
 
   it("does not include expiring entries in score calculation", async () => {
     // 1 entry with expiration but no other issues → score should be 100
-    const soonDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+    const soonDate = new Date(Date.now() + 5 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ id: "exp-6", expiresAt: soonDate });
 
     fetchSpy
@@ -1385,7 +1386,7 @@ describe("useWatchtower", () => {
       encryptedBlob: "cipher",
       blobIv: "iv",
       blobAuthTag: "tag",
-      updatedAt: new Date(Date.now() - (OLD_THRESHOLD_DAYS + 5) * 24 * 60 * 60 * 1000).toISOString(),
+      updatedAt: new Date(Date.now() - (OLD_THRESHOLD_DAYS + 5) * MS_PER_DAY).toISOString(),
       expiresAt: null,
     };
 
@@ -1448,7 +1449,7 @@ describe("useWatchtower", () => {
 
   it("flags entry older than passwordMaxAgeDays as policy-expired (medium)", async () => {
     // Entry updated 95 days ago; max age is 90 days
-    const oldDate = new Date(Date.now() - 95 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(Date.now() - 95 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ id: "age-1", updatedAt: oldDate });
 
     fetchSpy
@@ -1475,7 +1476,7 @@ describe("useWatchtower", () => {
   it("flags entry within warning window as policy-expiring (low)", async () => {
     // Entry updated 80 days ago; max age is 90 days, warning is 14 days
     // Warning window starts at 90-14=76 days, so 80 days > 76 days → expiring
-    const warningDate = new Date(Date.now() - 80 * 24 * 60 * 60 * 1000).toISOString();
+    const warningDate = new Date(Date.now() - 80 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ id: "age-2", updatedAt: warningDate });
 
     fetchSpy
@@ -1501,7 +1502,7 @@ describe("useWatchtower", () => {
 
   it("passwordMaxAgeDays=null has no effect on expiring list", async () => {
     // Entry updated 200 days ago, but no max age policy
-    const veryOldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const veryOldDate = new Date(Date.now() - 200 * MS_PER_DAY).toISOString();
     const raw = makeRawEntry({ id: "age-3", updatedAt: veryOldDate });
 
     fetchSpy
@@ -1534,7 +1535,7 @@ describe("useWatchtower", () => {
     });
 
     // Entry updated 95 days ago; max age is 90 days
-    const oldDate = new Date(Date.now() - 95 * 24 * 60 * 60 * 1000).toISOString();
+    const oldDate = new Date(Date.now() - 95 * MS_PER_DAY).toISOString();
     const teamEntry = {
       id: "team-age-1",
       entryType: "LOGIN",
@@ -1580,7 +1581,7 @@ describe("useWatchtower", () => {
 
     // Entry updated 80 days ago; max age is 90 days, warning is 14 days
     // Warning window starts at 90-14=76 days, so 80 days > 76 days → expiring
-    const warningDate = new Date(Date.now() - 80 * 24 * 60 * 60 * 1000).toISOString();
+    const warningDate = new Date(Date.now() - 80 * MS_PER_DAY).toISOString();
     const teamEntry = {
       id: "team-age-2",
       entryType: "LOGIN",
@@ -1625,7 +1626,7 @@ describe("useWatchtower", () => {
     });
 
     // Entry updated 200 days ago, but no max age policy
-    const veryOldDate = new Date(Date.now() - 200 * 24 * 60 * 60 * 1000).toISOString();
+    const veryOldDate = new Date(Date.now() - 200 * MS_PER_DAY).toISOString();
     const teamEntry = {
       id: "team-age-3",
       entryType: "LOGIN",

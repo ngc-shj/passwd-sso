@@ -40,6 +40,9 @@ vi.mock("@/lib/audit", async (importOriginal) => {
   return {
     ...actual,
     logAuditAsync: mockLogAudit,
+    logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+      for (const e of entries) await mockLogAudit(e);
+    }),
   };
 });
 

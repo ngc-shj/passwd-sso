@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -46,12 +46,11 @@ async function handlePOST(req: NextRequest) {
         return [entryIds, result] as const;
       }),
   );
-  const requestMeta = extractRequestMeta(req);
+  const requestMeta = personalAuditBase(req, session.user.id);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...requestMeta,
     action: AUDIT_ACTION.ENTRY_BULK_TRASH,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     // targetId omitted for bulk operations
     metadata: {
@@ -60,24 +59,20 @@ async function handlePOST(req: NextRequest) {
       movedCount: updateResult.count,
       entryIds,
     },
-    ...requestMeta,
   });
 
-  const auditEntries = entryIds.map((entryId) => ({
-    scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.ENTRY_TRASH,
-    userId: session.user.id,
-    targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
-    targetId: entryId,
-    metadata: {
-      source: "bulk-trash",
-      parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
-    },
-    ...requestMeta,
-  }));
-  for (const entry of auditEntries) {
-    await logAuditAsync(entry);
-  }
+  await logAuditBulkAsync(
+    entryIds.map((entryId) => ({
+      ...requestMeta,
+      action: AUDIT_ACTION.ENTRY_TRASH,
+      targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
+      targetId: entryId,
+      metadata: {
+        source: "bulk-trash",
+        parentAction: AUDIT_ACTION.ENTRY_BULK_TRASH,
+      },
+    })),
+  );
 
   return NextResponse.json({ success: true, movedCount: updateResult.count });
 }

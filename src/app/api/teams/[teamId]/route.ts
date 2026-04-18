@@ -138,26 +138,17 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
     throw e;
   }
 
-  let team;
   try {
-    team = await withTeamTenantRls(teamId, async () =>
-      prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      }),
+    await withTeamTenantRls(teamId, async (tenantId) =>
+      withTenantRls(prisma, tenantId, async () =>
+        prisma.team.delete({ where: { id: teamId } }),
+      ),
     );
   } catch (e) {
     const err = handleTeamTenantError(e);
     if (err) return err;
     throw e;
   }
-  if (!team) {
-    return notFound();
-  }
-
-  await withTenantRls(prisma, team.tenantId, async () =>
-    prisma.team.delete({ where: { id: teamId } }),
-  );
 
   return NextResponse.json({ success: true });
 }

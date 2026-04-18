@@ -70,6 +70,7 @@ vi.mock("@/lib/with-request-log", () => ({
 }));
 
 import { GET } from "./route";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 const TENANT_ID = "tenant-1";
 const ACTOR_USER_ID = "test-user-id";
@@ -83,8 +84,8 @@ const ACTOR = {
 };
 
 const NOW = new Date();
-const FUTURE = new Date(NOW.getTime() + 24 * 60 * 60 * 1000);
-const PAST = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
+const FUTURE = new Date(NOW.getTime() + MS_PER_DAY);
+const PAST = new Date(NOW.getTime() - MS_PER_DAY);
 
 // Each test that reaches the VIEW audit path needs a unique grantId to bypass
 // the in-memory per-process dedup cache (viewAuditCache) in the route module.

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_TARGET_TYPE, AUDIT_SCOPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };
 
@@ -23,10 +23,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_UPDATE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const entry = await withTeamTenantRls(teamId, async () =>
@@ -114,17 +111,14 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.ENTRY_HISTORY_RESTORE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
     metadata: {
       [AUDIT_METADATA_KEY.HISTORY_ID]: historyId,
       [AUDIT_METADATA_KEY.RESTORED_FROM_CHANGED_AT]: history.changedAt.toISOString(),
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

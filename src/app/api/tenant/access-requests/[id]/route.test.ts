@@ -24,6 +24,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -48,6 +49,7 @@ vi.mock("@/lib/with-request-log", () => ({
 
 import { GET } from "@/app/api/tenant/access-requests/[id]/route";
 import { TenantAuthError } from "@/lib/tenant-auth";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const REQUEST_ID = "req-00000001";
@@ -64,7 +66,7 @@ const makeAccessRequest = (overrides: Record<string, unknown> = {}) => ({
   approvedAt: null,
   grantedTokenId: null,
   grantedTokenTtlSec: null,
-  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  expiresAt: new Date(Date.now() + MS_PER_HOUR),
   createdAt: new Date(),
   serviceAccount: { id: SA_ID, name: "ci-bot", description: null, isActive: true },
   approvedBy: null,

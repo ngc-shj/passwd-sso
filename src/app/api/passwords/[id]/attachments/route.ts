@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -13,7 +13,7 @@ import {
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { AAD_VERSION } from "@/lib/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
@@ -219,13 +219,11 @@ async function handlePOST(
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...personalAuditBase(req, session.user.id),
     action: AUDIT_ACTION.ATTACHMENT_UPLOAD,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.ATTACHMENT,
     targetId: attachment.id,
     metadata: { filename: sanitizedFilename, sizeBytes: originalSize, entryId: id },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(attachment, { status: 201 });

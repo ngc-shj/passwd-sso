@@ -11,11 +11,13 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { rateLimited, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, zodValidationError, handleAuthError } from "@/lib/api-response";
+import { requireTenantPermission } from "@/lib/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -37,17 +39,11 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
 
   const { id } = await ctx.params;
 
-  const member = await withUserTenantRls(session.user.id, () =>
-    prisma.tenantMember.findFirst({
-      where: { userId: session.user.id, role: { in: ["ADMIN", "OWNER"] } },
-      select: { tenantId: true },
-    }),
-  );
-  if (!member) {
-    return NextResponse.json(
-      { error: API_ERROR.FORBIDDEN },
-      { status: 403 },
-    );
+  let member;
+  try {
+    member = await requireTenantPermission(session.user.id, TENANT_PERMISSION.SCIM_MANAGE);
+  } catch (e) {
+    return handleAuthError(e);
   }
   const tenantId = member.tenantId;
 
@@ -68,25 +64,18 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
     );
   }
 
-  // Parse body (optional — empty body defaults to {})
-  let body: unknown = {};
+  // Empty body is allowed: defaults are used.
+  const rawText = await req.text();
+  let body: unknown;
   try {
-    const text = await req.text();
-    if (text.trim()) {
-      body = JSON.parse(text);
-    }
+    body = rawText ? JSON.parse(rawText) : {};
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_JSON },
-      { status: 400 },
-    );
+    return errorResponse(API_ERROR.INVALID_JSON, 400);
   }
-
   const parsed = runSchema.safeParse(body);
   if (!parsed.success) {
     return zodValidationError(parsed.error);
   }
-
   const { dryRun, force } = parsed.data;
 
   // Run sync
@@ -99,10 +88,8 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
   });
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, tenantId),
     action: AUDIT_ACTION.DIRECTORY_SYNC_RUN,
-    userId: session.user.id,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.DIRECTORY_SYNC_CONFIG,
     targetId: config.id,
     metadata: {
@@ -115,7 +102,6 @@ async function handlePOST(req: NextRequest, ctx: RouteContext) {
       usersDeactivated: result.usersDeactivated,
       abortedSafety: result.abortedSafety,
     },
-    ...extractRequestMeta(req),
   });
 
   if (!result.success) {

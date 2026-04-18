@@ -116,6 +116,7 @@ export async function assertPolicySharePassword(
 
 const sessionDurationCache = new Map<string, { value: number | null; expiresAt: number }>();
 const SESSION_DURATION_CACHE_TTL_MS = 60_000;
+const SESSION_DURATION_CACHE_MAX_SIZE = 10_000;
 
 /**
  * Return the strictest (minimum) maxSessionDurationMinutes across all teams
@@ -127,6 +128,11 @@ export async function getStrictestSessionDuration(userId: string): Promise<numbe
     return cached.value;
   }
   if (cached) sessionDurationCache.delete(userId);
+
+  if (sessionDurationCache.size >= SESSION_DURATION_CACHE_MAX_SIZE) {
+    const oldest = sessionDurationCache.keys().next().value;
+    if (oldest !== undefined) sessionDurationCache.delete(oldest);
+  }
 
   const memberships = await withBypassRls(
     prisma,

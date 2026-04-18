@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { checkAuth } from "@/lib/check-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
@@ -11,10 +11,10 @@ import {
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
+import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 
@@ -31,10 +31,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(userId, teamId, TEAM_PERMISSION.PASSWORD_READ, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const entry = await withTeamTenantRls(teamId, () =>
@@ -88,10 +85,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   try {
     membership = await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const existingEntry = await withTeamTenantRls(teamId, () =>
@@ -145,13 +139,10 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.ENTRY_UPDATE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({
@@ -174,10 +165,7 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.PASSWORD_DELETE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const existing = await withTeamTenantRls(teamId, () =>
@@ -196,14 +184,11 @@ async function handleDELETE(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.ENTRY_DELETE,
-    userId: session.user.id,
-    teamId: teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
     metadata: { permanent },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

@@ -7,6 +7,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto-aad";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
+import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { getCooldownState } from "@/lib/watchtower/state";
 import {
   shouldAutoCheck,
@@ -27,7 +28,7 @@ import { fetchApi } from "@/lib/url-helpers";
 
 export const OLD_THRESHOLD_DAYS = 90;
 export const EXPIRING_THRESHOLD_DAYS = 30;
-export const WATCHTOWER_COOLDOWN_MS = 5 * 60 * 1000;
+export const WATCHTOWER_COOLDOWN_MS = 5 * MS_PER_MINUTE;
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -375,7 +376,7 @@ export function useWatchtower(
       const old: PasswordIssue[] = [];
       for (const entry of entries) {
         const updatedAt = new Date(entry.updatedAt).getTime();
-        const days = Math.floor((now - updatedAt) / (24 * 60 * 60 * 1000));
+        const days = Math.floor((now - updatedAt) / MS_PER_DAY);
         if (days > OLD_THRESHOLD_DAYS) {
           old.push({
             ...toWatchtowerEntryRef(entry),
@@ -422,7 +423,7 @@ export function useWatchtower(
       // Expiration detection (date-only comparison to avoid timezone issues)
       const todayDate = new Date(now);
       const todayStr = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, "0")}-${String(todayDate.getDate()).padStart(2, "0")}`;
-      const thresholdDate = new Date(now + EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+      const thresholdDate = new Date(now + EXPIRING_THRESHOLD_DAYS * MS_PER_DAY);
       const thresholdStr = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, "0")}-${String(thresholdDate.getDate()).padStart(2, "0")}`;
       const expiring: PasswordIssue[] = [];
       for (const entry of entries) {
@@ -432,7 +433,7 @@ export function useWatchtower(
         const isExpired = expiresDate < todayStr;
         const expiresAtMs = new Date(expiresDate).getTime();
         const todayMs = new Date(todayStr).getTime();
-        const daysDiff = Math.round(Math.abs(expiresAtMs - todayMs) / (24 * 60 * 60 * 1000));
+        const daysDiff = Math.round(Math.abs(expiresAtMs - todayMs) / MS_PER_DAY);
         expiring.push({
           ...toWatchtowerEntryRef(entry),
           severity: isExpired ? "medium" : "low",
@@ -444,9 +445,9 @@ export function useWatchtower(
 
       // Policy-driven password age check (when tenant has set a max age)
       if (passwordMaxAgeDays) {
-        const maxAgeMs = passwordMaxAgeDays * 24 * 60 * 60 * 1000;
+        const maxAgeMs = passwordMaxAgeDays * MS_PER_DAY;
         const warningDays = Math.min(passwordExpiryWarningDays, passwordMaxAgeDays - 1);
-        const warningMs = (passwordMaxAgeDays - warningDays) * 24 * 60 * 60 * 1000;
+        const warningMs = (passwordMaxAgeDays - warningDays) * MS_PER_DAY;
         for (const entry of entries) {
           const ageMs = now - new Date(entry.updatedAt).getTime();
           // Skip if already flagged by the explicit expiresAt check
@@ -456,13 +457,13 @@ export function useWatchtower(
             expiring.push({
               ...toWatchtowerEntryRef(entry),
               severity: "medium",
-              details: `policyExpired:${Math.floor(ageMs / (24 * 60 * 60 * 1000))}`,
+              details: `policyExpired:${Math.floor(ageMs / MS_PER_DAY)}`,
             });
           } else if (ageMs > warningMs) {
             expiring.push({
               ...toWatchtowerEntryRef(entry),
               severity: "low",
-              details: `policyExpiring:${Math.floor(ageMs / (24 * 60 * 60 * 1000))}`,
+              details: `policyExpiring:${Math.floor(ageMs / MS_PER_DAY)}`,
             });
           }
         }

@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, INVITATION_STATUS } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { SEARCH_QUERY_MAX_LENGTH } from "@/lib/validations/common";
 import { TEAM_MEMBER_SEARCH_LIMIT } from "@/lib/validations/common.server";
 
@@ -27,10 +27,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamPermission(session.user.id, teamId, TEAM_PERMISSION.MEMBER_INVITE, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const q = req.nextUrl.searchParams.get("q") ?? "";
@@ -47,35 +44,29 @@ async function handleGET(req: NextRequest, { params }: Params) {
 
   let results: { id: string; name: string | null; email: string | null; image: string | null }[];
   try {
-    results = await withTeamTenantRls(teamId, async () => {
-      const team = await prisma.team.findUnique({
-        where: { id: teamId },
-        select: { tenantId: true },
-      });
-      if (!team) return [];
-
-      // Get active team member userIds to exclude
-      const activeMembers = await prisma.teamMember.findMany({
-        where: { teamId, deactivatedAt: null },
-        select: { userId: true },
-      });
+    results = await withTeamTenantRls(teamId, async (tenantId) => {
+      // Fetch active team members + non-expired pending invitations in parallel
+      const [activeMembers, pendingInvitations] = await Promise.all([
+        prisma.teamMember.findMany({
+          where: { teamId, deactivatedAt: null },
+          select: { userId: true },
+        }),
+        prisma.teamInvitation.findMany({
+          where: {
+            teamId,
+            status: INVITATION_STATUS.PENDING,
+            expiresAt: { gt: new Date() },
+          },
+          select: { email: true },
+        }),
+      ]);
       const activeMemberIds = new Set(activeMembers.map((m) => m.userId));
-
-      // Get non-expired pending invitation emails, then resolve to userIds
-      const pendingInvitations = await prisma.teamInvitation.findMany({
-        where: {
-          teamId,
-          status: INVITATION_STATUS.PENDING,
-          expiresAt: { gt: new Date() },
-        },
-        select: { email: true },
-      });
       const pendingEmails = pendingInvitations.map((inv) => inv.email);
 
       let pendingUserIds = new Set<string>();
       if (pendingEmails.length > 0) {
         const pendingUsers = await prisma.user.findMany({
-          where: { email: { in: pendingEmails }, tenantId: team.tenantId },
+          where: { email: { in: pendingEmails }, tenantId },
           select: { id: true },
         });
         pendingUserIds = new Set(pendingUsers.map((u) => u.id));
@@ -87,10 +78,10 @@ async function handleGET(req: NextRequest, { params }: Params) {
       // Search tenant members
       return prisma.user.findMany({
         where: {
-          tenantId: team.tenantId,
+          tenantId,
           ...(excludeIds.length > 0 && { id: { notIn: excludeIds } }),
           tenantMemberships: {
-            some: { tenantId: team.tenantId, deactivatedAt: null },
+            some: { tenantId, deactivatedAt: null },
           },
           OR: [
             { name: { contains: query, mode: "insensitive" } },

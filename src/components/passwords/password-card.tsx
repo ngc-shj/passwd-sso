@@ -57,6 +57,7 @@ import { decryptData, type EncryptedData } from "@/lib/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
+import { MS_PER_DAY } from "@/lib/constants/time";
 import { EXPIRING_THRESHOLD_DAYS } from "@/hooks/use-watchtower";
 import type {
   EntryCustomField,
@@ -275,48 +276,33 @@ export function PasswordCard({
   };
 
   const fetchIdentityField = async (field: "idNumber"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchBankField = async (field: "accountNumber" | "routingNumber"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchLicenseField = async (field: "licenseKey"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchSshField = async (field: "fingerprint" | "publicKey"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const fetchCardField = async (field: "cardNumber" | "cvv"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   // Clear cached detail and loading state when collapsed
@@ -478,12 +464,9 @@ export function PasswordCard({
   };
 
   const fetchPasskeyField = async (field: "credentialId" | "username"): Promise<string> => {
-    if (getDetailProp) {
-      const detail = await getDetailProp();
-      return (detail as unknown as Record<string, unknown>)[field] as string ?? "";
-    }
+    if (getDetailProp) return (await getDetailProp())[field] ?? "";
     const { entry } = await fetchDecryptedEntry();
-    return (entry as unknown as Record<string, unknown>)[field] as string ?? "";
+    return entry[field] ?? "";
   };
 
   const handleCopyCredentialId = async () => {
@@ -626,7 +609,7 @@ export function PasswordCard({
                 if (!expiresAt) return null;
                 const nowDate = new Date();
                 const todayStr = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, "0")}-${String(nowDate.getDate()).padStart(2, "0")}`;
-                const thresholdDate = new Date(Date.now() + EXPIRING_THRESHOLD_DAYS * 24 * 60 * 60 * 1000);
+                const thresholdDate = new Date(Date.now() + EXPIRING_THRESHOLD_DAYS * MS_PER_DAY);
                 const thresholdStr = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, "0")}-${String(thresholdDate.getDate()).padStart(2, "0")}`;
                 const expiresDate = expiresAt.split("T")[0];
                 if (expiresDate > thresholdStr) return null;

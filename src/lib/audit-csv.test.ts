@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { escapeCsvValue, formatCsvRow } from "./audit-csv";
+import { escapeCsvValue, formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "./audit-csv";
+
+describe("AUDIT_LOG_CSV_HEADERS", () => {
+  it("includes actorType at the expected position", () => {
+    expect(AUDIT_LOG_CSV_HEADERS).toContain("actorType");
+    expect(AUDIT_LOG_CSV_HEADERS.indexOf("actorType")).toBe(8);
+  });
+
+  it("starts with id and ends with metadata", () => {
+    expect(AUDIT_LOG_CSV_HEADERS[0]).toBe("id");
+    expect(AUDIT_LOG_CSV_HEADERS[AUDIT_LOG_CSV_HEADERS.length - 1]).toBe("metadata");
+  });
+});
 
 describe("escapeCsvValue", () => {
   it("prefixes formula-triggering '=' with a single quote inside quotes", () => {

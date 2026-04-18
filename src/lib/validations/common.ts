@@ -263,3 +263,14 @@ export const encryptedFieldSchema = z.object({
   iv: hexIv,
   authTag: hexAuthTag,
 });
+
+/**
+ * Verification artifact — a small AES-GCM encrypted constant used at vault
+ * unlock to confirm passphrase correctness. Same shape as `encryptedFieldSchema`
+ * but without the large-blob ciphertext cap (the artifact is always short).
+ */
+export const verificationArtifactSchema = z.object({
+  ciphertext: z.string().min(1),
+  iv: hexIv,
+  authTag: hexAuthTag,
+});

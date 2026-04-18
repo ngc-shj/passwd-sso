@@ -4,10 +4,11 @@ import { useEffect, type ReactNode } from "react";
 import { VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_PATH, apiPath } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { fetchApi } from "@/lib/url-helpers";
 import { createKeyEscrow } from "./crypto-emergency";
 
-const EA_CONFIRM_INTERVAL_MS = 2 * 60 * 1000; // check pending EA grants every 2 minutes
+const EA_CONFIRM_INTERVAL_MS = 2 * MS_PER_MINUTE;
 
 export async function confirmPendingEmergencyGrants(secretKey: Uint8Array, ownerId: string, keyVersion: number): Promise<void> {
   const res = await fetchApi(API_PATH.EMERGENCY_PENDING_CONFIRMATIONS);

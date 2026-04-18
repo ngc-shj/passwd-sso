@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { unauthorized } from "@/lib/api-response";
 
@@ -30,12 +30,11 @@ async function handlePOST(req: NextRequest) {
     return { entryIds: entries.map((e) => e.id), deletedCount: result.count };
   });
 
-  const requestMeta = extractRequestMeta(req);
+  const requestMeta = personalAuditBase(req, session.user.id);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
+    ...requestMeta,
     action: AUDIT_ACTION.ENTRY_EMPTY_TRASH,
-    userId: session.user.id,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     targetId: "trash",
     metadata: {
@@ -43,23 +42,20 @@ async function handlePOST(req: NextRequest) {
       deletedCount: deletedCount,
       entryIds,
     },
-    ...requestMeta,
   });
 
-  for (const entryId of entryIds) {
-    await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
+  await logAuditBulkAsync(
+    entryIds.map((entryId) => ({
+      ...requestMeta,
       action: AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
-      userId: session.user.id,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
       targetId: entryId,
       metadata: {
         source: "empty-trash",
         parentAction: AUDIT_ACTION.ENTRY_EMPTY_TRASH,
       },
-      ...requestMeta,
-    });
-  }
+    })),
+  );
 
   return NextResponse.json({ success: true, deletedCount: deletedCount });
 }

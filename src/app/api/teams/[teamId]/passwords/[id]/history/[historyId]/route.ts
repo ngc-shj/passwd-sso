@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamMember, TeamAuthError } from "@/lib/team-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { requireTeamMember } from "@/lib/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { teamHistoryReencryptSchema } from "@/lib/validations";
 
@@ -29,10 +29,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const [entry, history] = await withTeamTenantRls(teamId, () =>
@@ -89,10 +86,7 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
   try {
     await requireTeamMember(session.user.id, teamId, req);
   } catch (e) {
-    if (e instanceof TeamAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   const parsed = await parseBody(req, teamHistoryReencryptSchema);
@@ -173,12 +167,9 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
     );
   }
 
-  const meta = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TEAM,
+    ...teamAuditBase(req, session.user.id, teamId),
     action: AUDIT_ACTION.ENTRY_HISTORY_REENCRYPT,
-    userId: session.user.id,
-    teamId,
     targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
     targetId: id,
     metadata: {
@@ -188,8 +179,6 @@ async function handlePATCH(req: NextRequest, { params }: Params) {
       oldItemKeyVersion: oldItemKV,
       newItemKeyVersion: newItemKV,
     },
-    ip: meta.ip,
-    userAgent: meta.userAgent,
   });
 
   return NextResponse.json({ success: true });

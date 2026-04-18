@@ -37,22 +37,38 @@ export async function resolveTeamTenantId(teamId: string): Promise<string | null
 
 export async function withUserTenantRls<T>(
   userId: string,
+  fn: (tenantId: string) => Promise<T>,
+): Promise<T>;
+export async function withUserTenantRls<T>(
+  userId: string,
   fn: () => Promise<T>,
+): Promise<T>;
+export async function withUserTenantRls<T>(
+  userId: string,
+  fn: ((tenantId: string) => Promise<T>) | (() => Promise<T>),
 ): Promise<T> {
   const tenantId = await resolveUserTenantId(userId);
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
-  return withTenantRls(prisma, tenantId, fn);
+  return withTenantRls(prisma, tenantId, () => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }
 
 export async function withTeamTenantRls<T>(
   teamId: string,
+  fn: (tenantId: string) => Promise<T>,
+): Promise<T>;
+export async function withTeamTenantRls<T>(
+  teamId: string,
   fn: () => Promise<T>,
+): Promise<T>;
+export async function withTeamTenantRls<T>(
+  teamId: string,
+  fn: ((tenantId: string) => Promise<T>) | (() => Promise<T>),
 ): Promise<T> {
   const tenantId = await resolveTeamTenantId(teamId);
   if (!tenantId) {
     throw new Error("TENANT_NOT_RESOLVED");
   }
-  return withTenantRls(prisma, tenantId, fn);
+  return withTenantRls(prisma, tenantId, () => (fn as (tenantId: string) => Promise<T>)(tenantId));
 }

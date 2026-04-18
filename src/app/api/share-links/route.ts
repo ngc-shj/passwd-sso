@@ -9,12 +9,12 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto-server";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
 import { logAuditInTx, extractRequestMeta } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {
   TEAM_PERMISSION,
@@ -27,14 +27,15 @@ import type { EntryTypeValue } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
+import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 
 const EXPIRY_MAP: Record<string, number> = {
-  "1h": 60 * 60 * 1000,
-  "1d": 24 * 60 * 60 * 1000,
-  "7d": 7 * 24 * 60 * 60 * 1000,
-  "30d": 30 * 24 * 60 * 60 * 1000,
+  "1h": MS_PER_HOUR,
+  "1d": MS_PER_DAY,
+  "7d": 7 * MS_PER_DAY,
+  "30d": 30 * MS_PER_DAY,
 };
 
 // POST /api/share-links — Create a share link
@@ -113,10 +114,7 @@ async function handlePOST(req: NextRequest) {
           TEAM_PERMISSION.PASSWORD_READ
         );
     } catch (e) {
-      if (e instanceof TeamAuthError) {
-        return errorResponse(e.message, e.status);
-      }
-      throw e;
+      return handleAuthError(e);
     }
 
     // Enforce team policy: sharing

@@ -17,7 +17,7 @@ import {
   type DelegationMetadata,
 } from "@/lib/delegation";
 import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 
 // ─── Tool definitions ─────────────────────────────────────────
@@ -108,7 +108,7 @@ async function auditDelegationAccess(
   const auditBase = {
     action: AUDIT_ACTION.DELEGATION_READ,
     userId: token.userId!,
-    actorType: "MCP_AGENT" as const,
+    actorType: ACTOR_TYPE.MCP_AGENT,
     tenantId: token.tenantId,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_ENTRY,
     metadata: {
@@ -120,8 +120,10 @@ async function auditDelegationAccess(
     },
     ip: ip ?? undefined,
   };
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  await Promise.all([
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+  ]);
 }
 
 // ─── Tool handlers ────────────────────────────────────────────

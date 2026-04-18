@@ -49,6 +49,7 @@ vi.mock("@/lib/logger", () => {
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({}),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
 vi.mock("@/lib/constants/api-key", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/constants/api-key")>();
@@ -249,25 +250,6 @@ describe("POST /api/api-keys", () => {
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe("API_KEY_LIMIT_EXCEEDED");
-  });
-
-  it("returns 401 when user not found after auth", async () => {
-    mockCheckAuth.mockResolvedValue({
-      ok: true,
-      auth: { type: "session", userId: "u1" },
-    });
-    mockPrismaApiKey.count.mockResolvedValue(0);
-    mockPrismaUser.findUnique.mockResolvedValue(null);
-
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 30);
-
-    const res = await POST(
-      createRequest("POST", "http://localhost:3000/api/api-keys", {
-        body: { name: "Test", scope: ["passwords:read"], expiresAt: expiresAt.toISOString() },
-      }),
-    );
-    expect(res.status).toBe(401);
   });
 
   it("returns 429 when rate limited", async () => {

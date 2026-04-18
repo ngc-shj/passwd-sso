@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { updateTenantMemberRoleSchema } from "@/lib/validations";
 import {
   requireTenantPermission,
@@ -9,10 +9,10 @@ import {
 } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -35,10 +35,7 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.MEMBER_MANAGE,
     );
   } catch (e) {
-    if (e instanceof TenantAuthError) {
-      return errorResponse(e.message, e.status);
-    }
-    throw e;
+    return handleAuthError(e);
   }
 
   // Only OWNER can change roles
@@ -119,14 +116,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     }
 
     await logAuditAsync({
-      scope: AUDIT_SCOPE.TENANT,
+      ...tenantAuditBase(req, session.user.id, actor.tenantId),
       action: AUDIT_ACTION.TENANT_ROLE_UPDATE,
-      userId: session.user.id,
-      tenantId: actor.tenantId,
       targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
       targetId: target.id,
       metadata: { newRole: TENANT_ROLE.OWNER, previousRole: target.role, transfer: true },
-      ...extractRequestMeta(req),
     });
 
     return NextResponse.json({
@@ -159,14 +153,11 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.TENANT_ROLE_UPDATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.TENANT_MEMBER,
     targetId: target.id,
     metadata: { newRole: result.data.role, previousRole: target.role },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({

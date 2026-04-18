@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 
@@ -26,46 +26,41 @@ async function handleGET(req: NextRequest) {
       TENANT_PERMISSION.MEMBER_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
-  const members = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.tenantMember.findMany({
-      where: { tenantId: actor.tenantId },
-      select: {
-        id: true,
-        userId: true,
-        role: true,
-        deactivatedAt: true,
-        scimManaged: true,
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            image: true,
+  const [members, pendingCounts] = await withTenantRls(prisma, actor.tenantId, async () =>
+    Promise.all([
+      prisma.tenantMember.findMany({
+        where: { tenantId: actor.tenantId },
+        select: {
+          id: true,
+          userId: true,
+          role: true,
+          deactivatedAt: true,
+          scimManaged: true,
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              image: true,
+            },
           },
         },
-      },
-      orderBy: { createdAt: "asc" },
-    }),
-  );
-
-  // Count pending resets per member
-  const pendingCounts = await withTenantRls(prisma, actor.tenantId, async () =>
-    prisma.adminVaultReset.groupBy({
-      by: ["targetUserId"],
-      where: {
-        tenantId: actor.tenantId,
-        executedAt: null,
-        revokedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      _count: true,
-    }),
+        orderBy: { createdAt: "asc" },
+      }),
+      prisma.adminVaultReset.groupBy({
+        by: ["targetUserId"],
+        where: {
+          tenantId: actor.tenantId,
+          executedAt: null,
+          revokedAt: null,
+          expiresAt: { gt: new Date() },
+        },
+        _count: true,
+      }),
+    ]),
   );
 
   const pendingMap = new Map(

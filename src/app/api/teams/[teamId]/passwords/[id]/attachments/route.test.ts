@@ -29,6 +29,7 @@ const {
     status: number;
     constructor(message: string, status = 403) {
       super(message);
+      this.name = "TeamAuthError";
       this.status = status;
     }
   },

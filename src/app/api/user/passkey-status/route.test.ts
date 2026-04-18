@@ -40,6 +40,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { GET } from "./route";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 function authOk(userId = "user-1") {
   return { ok: true, auth: { type: "session", userId } };
@@ -125,7 +126,7 @@ describe("GET /api/user/passkey-status", () => {
   });
 
   it("returns correct gracePeriodRemaining within grace period", async () => {
-    const enabledAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000); // 2 days ago
+    const enabledAt = new Date(Date.now() - 2 * MS_PER_DAY); // 2 days ago
     mockWebAuthnCredentialCount.mockResolvedValue(0);
     mockUserFindUnique.mockResolvedValue(
       tenantWith({
@@ -145,7 +146,7 @@ describe("GET /api/user/passkey-status", () => {
   });
 
   it("returns gracePeriodRemaining: 0 when grace period has expired", async () => {
-    const enabledAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000); // 10 days ago
+    const enabledAt = new Date(Date.now() - 10 * MS_PER_DAY); // 10 days ago
     mockWebAuthnCredentialCount.mockResolvedValue(0);
     mockUserFindUnique.mockResolvedValue(
       tenantWith({
@@ -163,7 +164,7 @@ describe("GET /api/user/passkey-status", () => {
   });
 
   it("returns gracePeriodRemaining: null when hasPasskey is true", async () => {
-    const enabledAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000); // 1 day ago
+    const enabledAt = new Date(Date.now() - 1 * MS_PER_DAY); // 1 day ago
     mockWebAuthnCredentialCount.mockResolvedValue(1); // has passkey
     mockUserFindUnique.mockResolvedValue(
       tenantWith({
@@ -181,7 +182,7 @@ describe("GET /api/user/passkey-status", () => {
   });
 
   it("returns gracePeriodRemaining: null when required is false", async () => {
-    const enabledAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+    const enabledAt = new Date(Date.now() - 1 * MS_PER_DAY);
     mockWebAuthnCredentialCount.mockResolvedValue(0);
     mockUserFindUnique.mockResolvedValue(
       tenantWith({

@@ -3,20 +3,21 @@ import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { requireTenantPermission, TenantAuthError } from "@/lib/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { requireTenantPermission } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import {
   SA_TOKEN_PREFIX,
   MAX_SA_TOKENS_PER_ACCOUNT,
 } from "@/lib/constants/service-account";
 import { saTokenCreateSchema } from "@/lib/validations/service-account";
+import { MS_PER_DAY } from "@/lib/constants/time";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -38,10 +39,7 @@ async function handleGET(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const { id } = await params;
@@ -91,10 +89,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
       TENANT_PERMISSION.SERVICE_ACCOUNT_MANAGE,
     );
   } catch (err) {
-    if (err instanceof TenantAuthError) {
-      return errorResponse(err.message, err.status);
-    }
-    throw err;
+    return handleAuthError(err);
   }
 
   const { id } = await params;
@@ -129,7 +124,7 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   let expiresAt = new Date(result.data.expiresAt);
   const maxExpiryDays = sa.tenant?.saTokenMaxExpiryDays;
   if (maxExpiryDays != null) {
-    const maxExpiresAt = new Date(Date.now() + maxExpiryDays * 24 * 60 * 60 * 1000);
+    const maxExpiresAt = new Date(Date.now() + maxExpiryDays * MS_PER_DAY);
     if (expiresAt > maxExpiresAt) {
       expiresAt = maxExpiresAt;
     }
@@ -169,14 +164,11 @@ async function handlePOST(req: NextRequest, { params }: Params) {
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.SERVICE_ACCOUNT_TOKEN_CREATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.SERVICE_ACCOUNT_TOKEN,
     targetId: token.id,
     metadata: { serviceAccountId: id, name: result.data.name, scope },
-    ...extractRequestMeta(req),
   });
 
   // Return plaintext token only once — no-store prevents caching of sensitive token

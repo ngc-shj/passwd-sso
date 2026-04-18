@@ -1,7 +1,9 @@
 // Auto-monitor logic for dark-web continuous monitoring.
 // Pure functions — no side effects, no React dependencies.
 
-const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours
+import { MS_PER_DAY } from "@/lib/constants/time";
+
+const CHECK_INTERVAL_MS = MS_PER_DAY;
 
 // ── localStorage keys ──
 

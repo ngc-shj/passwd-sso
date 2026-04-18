@@ -34,6 +34,7 @@ vi.mock("@/lib/tenant-auth", () => {
     status: number;
     constructor(message: string, status: number) {
       super(message);
+      this.name = "TenantAuthError";
       this.status = status;
     }
   }
@@ -77,6 +78,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 
 import { GET, POST } from "@/app/api/tenant/access-requests/route";
 import { TenantAuthError } from "@/lib/tenant-auth";
+import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const SA_ID = "00000000-0000-4000-a000-000000000001";
@@ -91,7 +93,7 @@ const makeAccessRequest = (overrides: Record<string, unknown> = {}) => ({
   approvedAt: null,
   grantedTokenId: null,
   grantedTokenTtlSec: null,
-  expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+  expiresAt: new Date(Date.now() + MS_PER_HOUR),
   createdAt: new Date(),
   serviceAccount: { id: SA_ID, name: "ci-bot", description: null, isActive: true },
   approvedBy: null,
@@ -188,7 +190,7 @@ describe("POST /api/tenant/access-requests", () => {
       requestedScope: "passwords:read",
       justification: "Incident response",
       status: "PENDING",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       createdAt: new Date(),
     };
     mockAccessRequestCreate.mockResolvedValue(created);
@@ -322,7 +324,7 @@ describe("POST /api/tenant/access-requests", () => {
       requestedScope: "passwords:read",
       justification: "Automated request",
       status: "PENDING",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       createdAt: new Date(),
     };
     mockAccessRequestCreate.mockResolvedValue(created);
@@ -379,7 +381,7 @@ describe("POST /api/tenant/access-requests", () => {
       requestedScope: "passwords:read",
       justification: null,
       status: "PENDING",
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + MS_PER_HOUR),
       createdAt: new Date(),
     };
     mockAccessRequestCreate.mockResolvedValue(created);

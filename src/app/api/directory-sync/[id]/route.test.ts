@@ -6,7 +6,7 @@ import { createRequest, createParams, parseResponse } from "@/__tests__/helpers/
 
 const {
   mockAuth,
-  mockTenantMemberFindFirst,
+  mockRequireTenantPermission,
   mockConfigFindFirst,
   mockConfigUpdate,
   mockConfigDelete,
@@ -15,7 +15,7 @@ const {
   mockEncryptCredentials,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
-  mockTenantMemberFindFirst: vi.fn(),
+  mockRequireTenantPermission: vi.fn(),
   mockConfigFindFirst: vi.fn(),
   mockConfigUpdate: vi.fn(),
   mockConfigDelete: vi.fn(),
@@ -27,13 +27,15 @@ const {
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    tenantMember: { findFirst: mockTenantMemberFindFirst },
     directorySyncConfig: {
       findFirst: mockConfigFindFirst,
       update: mockConfigUpdate,
       delete: mockConfigDelete,
     },
   },
+}));
+vi.mock("@/lib/tenant-auth", () => ({
+  requireTenantPermission: mockRequireTenantPermission,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
@@ -44,6 +46,14 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
+  personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
+    scope: "TENANT",
+    userId,
+    tenantId,
+    ip: "127.0.0.1",
+    userAgent: "test",
+  }),
 }));
 vi.mock("@/lib/directory-sync/credentials", () => ({
   encryptCredentials: mockEncryptCredentials,
@@ -80,7 +90,7 @@ describe("GET /api/directory-sync/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(BASE_CONFIG);
   });
 
@@ -95,7 +105,8 @@ describe("GET /api/directory-sync/[id]", () => {
   });
 
   it("returns 403 when user is not ADMIN/OWNER", async () => {
-    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const err = Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 });
+    mockRequireTenantPermission.mockRejectedValue(err);
 
     const req = createRequest("GET", ROUTE_URL);
     const { status, json } = await parseResponse(await GET(req, CTX));
@@ -144,8 +155,7 @@ describe("PUT /api/directory-sync/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    // resolveAdminAndConfig calls tenantMember + configFindFirst
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(BASE_CONFIG);
     mockConfigUpdate.mockResolvedValue(BASE_CONFIG);
   });
@@ -161,8 +171,8 @@ describe("PUT /api/directory-sync/[id]", () => {
   });
 
   it("returns 403 when user is not ADMIN/OWNER", async () => {
-    // resolveAdminAndConfig returns null → second tenantMember check also returns null
-    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const err = Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 });
+    mockRequireTenantPermission.mockRejectedValue(err);
 
     const req = createRequest("PUT", ROUTE_URL, { body: { displayName: "Updated" } });
     const { status, json } = await parseResponse(await PUT(req, CTX));
@@ -172,11 +182,6 @@ describe("PUT /api/directory-sync/[id]", () => {
   });
 
   it("returns 404 when config does not belong to tenant", async () => {
-    // First call (resolveAdminAndConfig member check) succeeds, config check fails
-    // Second call (explicit member check in error path) succeeds
-    mockTenantMemberFindFirst
-      .mockResolvedValueOnce(MEMBER)   // resolveAdminAndConfig – member
-      .mockResolvedValueOnce(MEMBER);  // NOT_FOUND fallback check
     mockConfigFindFirst.mockResolvedValue(null);
 
     const req = createRequest("PUT", ROUTE_URL, { body: { displayName: "Updated" } });
@@ -268,7 +273,7 @@ describe("DELETE /api/directory-sync/[id]", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    mockTenantMemberFindFirst.mockResolvedValue(MEMBER);
+    mockRequireTenantPermission.mockResolvedValue(MEMBER);
     mockConfigFindFirst.mockResolvedValue(BASE_CONFIG);
     mockConfigDelete.mockResolvedValue(BASE_CONFIG);
   });
@@ -284,7 +289,8 @@ describe("DELETE /api/directory-sync/[id]", () => {
   });
 
   it("returns 403 when user is not ADMIN/OWNER", async () => {
-    mockTenantMemberFindFirst.mockResolvedValue(null);
+    const err = Object.assign(new Error("FORBIDDEN"), { name: "TenantAuthError", status: 403 });
+    mockRequireTenantPermission.mockRejectedValue(err);
 
     const req = createRequest("DELETE", ROUTE_URL);
     const { status, json } = await parseResponse(await DELETE(req, CTX));
@@ -294,9 +300,6 @@ describe("DELETE /api/directory-sync/[id]", () => {
   });
 
   it("returns 404 when config does not belong to tenant", async () => {
-    mockTenantMemberFindFirst
-      .mockResolvedValueOnce(MEMBER)  // resolveAdminAndConfig – member
-      .mockResolvedValueOnce(MEMBER); // NOT_FOUND fallback check
     mockConfigFindFirst.mockResolvedValue(null);
 
     const req = createRequest("DELETE", ROUTE_URL);
