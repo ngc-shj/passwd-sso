@@ -170,6 +170,13 @@ export function TenantSessionPolicyCard() {
       const num = Number(vaultAutoLockMinutes);
       if (!Number.isInteger(num) || num < VAULT_AUTO_LOCK_MIN) return t("vaultAutoLockValidationMin");
       if (num > VAULT_AUTO_LOCK_MAX) return t("vaultAutoLockValidationMax");
+      // Cross-field: vault_auto_lock must not exceed the idle timeouts.
+      // Catch it client-side so the user sees the exact rule rather than
+      // a generic "failed to update" after a round-trip.
+      const resolvedIdleCap = Math.min(idleNum, extIdleNum);
+      if (num > resolvedIdleCap) {
+        return t("vaultAutoLockExceedsIdleCap", { n: String(resolvedIdleCap) });
+      }
     }
     return null;
   };
@@ -200,7 +207,20 @@ export function TenantSessionPolicyCard() {
         toast.success(t("sessionPolicySaved"));
         setInitialPolicy({ ...currentPolicy });
       } else {
-        toast.error(t("sessionPolicySaveFailed"));
+        // Surface the server-side validation message so cross-field
+        // errors (e.g. "vaultAutoLockMinutes (60) must be <= ...") are
+        // visible instead of a generic "failed to update".
+        let detail: string | null = null;
+        try {
+          const data = await res.json();
+          if (typeof data?.message === "string") {
+            detail = data.message;
+          }
+        } catch {
+          // Response was not JSON; fall back to the generic message.
+        }
+        setError(detail ?? t("sessionPolicySaveFailed"));
+        toast.error(detail ?? t("sessionPolicySaveFailed"));
       }
     } catch {
       toast.error(t("sessionPolicySaveFailed"));
