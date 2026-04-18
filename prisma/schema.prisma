@@ -41,6 +41,9 @@ model Session {
   lastActiveAt DateTime @default(now()) @map("last_active_at") @db.Timestamptz(3)
   ipAddress    String?  @map("ip_address") @db.VarChar(45)
   userAgent    String?  @map("user_agent") @db.VarChar(512)
+  /// Authentication method used to establish the session. "webauthn" triggers AAL3 clamp.
+  /// Null for sessions created before the provenance migration.
+  provider     String?  @db.VarChar(64)
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -182,6 +185,12 @@ model ExtensionToken {
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
   lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(3)
+  /// Refresh-token family identifier. Rows with the same familyId share an absolute lifetime.
+  /// Nullable during Batch A rollout; Batch D migration flips to NOT NULL after all callers are updated.
+  familyId   String?   @map("family_id") @db.Uuid
+  /// Timestamp when the family was first issued. Used to enforce the absolute cap across refreshes.
+  /// Nullable during Batch A rollout; Batch D migration flips to NOT NULL.
+  familyCreatedAt DateTime? @map("family_created_at") @db.Timestamptz(3)
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -189,6 +198,7 @@ model ExtensionToken {
   @@index([userId, revokedAt])
   @@index([tenantId])
   @@index([expiresAt])
+  @@index([familyId, revokedAt])
   @@map("extension_tokens")
 }
 
@@ -410,7 +420,10 @@ model Tenant {
   slug                      String   @unique
   description               String?  @db.Text
   maxConcurrentSessions     Int?     @map("max_concurrent_sessions")
-  sessionIdleTimeoutMinutes Int?     @map("session_idle_timeout_minutes")
+  sessionIdleTimeoutMinutes Int      @default(480) @map("session_idle_timeout_minutes")
+  sessionAbsoluteTimeoutMinutes Int  @default(43200) @map("session_absolute_timeout_minutes")
+  extensionTokenIdleTimeoutMinutes Int @default(10080) @map("extension_token_idle_timeout_minutes")
+  extensionTokenAbsoluteTimeoutMinutes Int @default(43200) @map("extension_token_absolute_timeout_minutes")
   vaultAutoLockMinutes      Int?     @map("vault_auto_lock_minutes")
   allowedCidrs              String[] @default([]) @map("allowed_cidrs")
   tailscaleEnabled          Boolean  @default(false) @map("tailscale_enabled")
@@ -1339,7 +1352,12 @@ model TeamPolicy {
   requireLowercase          Boolean @default(false) @map("require_lowercase")
   requireNumbers            Boolean @default(false) @map("require_numbers")
   requireSymbols            Boolean @default(false) @map("require_symbols")
+  /// @deprecated — use sessionAbsoluteTimeoutMinutes; retained for one release, dropped in post-release cleanup migration
   maxSessionDurationMinutes Int?    @map("max_session_duration_minutes")
+  /// Team override: session idle timeout in minutes. null = inherit tenant. Must be <= tenant value.
+  sessionIdleTimeoutMinutes     Int? @map("session_idle_timeout_minutes")
+  /// Team override: session absolute timeout in minutes. null = inherit tenant. Must be <= tenant value.
+  sessionAbsoluteTimeoutMinutes Int? @map("session_absolute_timeout_minutes")
   requireRepromptForAll     Boolean @default(false) @map("require_reprompt_for_all")
   allowExport               Boolean @default(true) @map("allow_export")
   allowSharing              Boolean @default(true) @map("allow_sharing")
