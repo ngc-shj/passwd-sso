@@ -4,8 +4,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { requireTenantPermission } from "@/lib/tenant-auth";
-import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { MCP_SCOPES } from "@/lib/constants/mcp";
@@ -117,10 +117,8 @@ async function handlePUT(
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.MCP_CLIENT_UPDATE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: id,
     metadata: data as Record<string, unknown>,
@@ -130,7 +128,7 @@ async function handlePUT(
 }
 
 async function handleDELETE(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -154,10 +152,8 @@ async function handleDELETE(
   );
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, actor.tenantId),
     action: AUDIT_ACTION.MCP_CLIENT_DELETE,
-    userId: session.user.id,
-    tenantId: actor.tenantId,
     targetType: AUDIT_TARGET_TYPE.MCP_CLIENT,
     targetId: id,
     metadata: { name: existing.name },

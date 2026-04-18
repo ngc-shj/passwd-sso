@@ -10,7 +10,8 @@ import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
@@ -123,14 +124,10 @@ async function handlePOST(request: NextRequest) {
 
   // Audit log
   const isRegeneration = !!user.recoveryKeySetAt;
-  const { ip, userAgent } = extractRequestMeta(request);
   await logAuditAsync({
-    scope: "PERSONAL",
-    action: isRegeneration ? "RECOVERY_KEY_REGENERATED" : "RECOVERY_KEY_CREATED",
-    userId: session.user.id,
+    ...personalAuditBase(request, session.user.id),
+    action: isRegeneration ? AUDIT_ACTION.RECOVERY_KEY_REGENERATED : AUDIT_ACTION.RECOVERY_KEY_CREATED,
     metadata: { keyVersion: user.keyVersion },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({ success: true });

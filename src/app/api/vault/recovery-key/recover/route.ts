@@ -9,7 +9,8 @@ import { assertOrigin } from "@/lib/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
@@ -183,18 +184,14 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     }),
   );
 
-  const { ip, userAgent } = extractRequestMeta(request);
   await logAuditAsync({
-    scope: "PERSONAL",
-    action: "RECOVERY_PASSPHRASE_RESET",
-    userId,
+    ...personalAuditBase(request, userId),
+    action: AUDIT_ACTION.RECOVERY_PASSPHRASE_RESET,
     metadata: {
       keyVersion: user.keyVersion,
       recoveryKeyRegenerated: true,
       lockoutReset: true,
     },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({ success: true });

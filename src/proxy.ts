@@ -4,6 +4,7 @@ import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
+import { AUDIT_ACTION } from "./lib/constants/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import { PERMISSIONS_POLICY } from "./lib/security-headers";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";
@@ -156,7 +157,7 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
               cookie: request.headers.get("cookie") ?? "",
             },
             body: JSON.stringify({
-              action: "PASSKEY_ENFORCEMENT_BLOCKED",
+              action: AUDIT_ACTION.PASSKEY_ENFORCEMENT_BLOCKED,
               metadata: { blockedPath: pathWithoutLocale },
             }),
           }).catch(() => {});

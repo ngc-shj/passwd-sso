@@ -8,7 +8,8 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { z } from "zod/v4";
 
@@ -62,17 +63,13 @@ async function handlePOST(request: NextRequest) {
   const { deletedEntries, deletedAttachments } =
     await executeVaultReset(userId);
 
-  const { ip, userAgent } = extractRequestMeta(request);
   await logAuditAsync({
-    scope: "PERSONAL",
-    action: "VAULT_RESET_EXECUTED",
-    userId,
+    ...personalAuditBase(request, userId),
+    action: AUDIT_ACTION.VAULT_RESET_EXECUTED,
     metadata: {
       deletedEntries,
       deletedAttachments,
     },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({ success: true });

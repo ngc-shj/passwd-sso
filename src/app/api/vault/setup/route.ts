@@ -7,7 +7,8 @@ import { hmacVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -152,14 +153,10 @@ async function handlePOST(request: NextRequest) {
     ]),
   );
 
-  const { ip, userAgent } = extractRequestMeta(request);
   await logAuditAsync({
-    scope: "PERSONAL",
-    action: "VAULT_SETUP",
-    userId: session.user.id,
+    ...personalAuditBase(request, session.user.id),
+    action: AUDIT_ACTION.VAULT_SETUP,
     metadata: { kdfType, kdfIterations, ...(kdfMemory != null ? { kdfMemory, kdfParallelism } : {}) },
-    ip,
-    userAgent,
   });
 
   getLogger().info(
