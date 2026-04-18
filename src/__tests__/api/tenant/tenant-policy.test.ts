@@ -317,6 +317,53 @@ describe("PATCH /api/tenant/policy", () => {
     expect((await parseResponse(res)).status).toBe(400);
   });
 
+  // ── Cross-field invariant ───────────────────────────────────
+  //   vaultAutoLockMinutes must be <= min(sessionIdleTimeoutMinutes,
+  //   extensionTokenIdleTimeoutMinutes). Rationale: a vault that stays
+  //   decrypted longer than the session/token that grants access to it
+  //   leaves cached data readable post-logout. See design doc.
+
+  it("returns 400 when vaultAutoLockMinutes exceeds sessionIdleTimeoutMinutes", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 10,
+      extensionTokenIdleTimeoutMinutes: 10080,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: 60 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.message ?? "")).toMatch(/vaultAutoLockMinutes/);
+    expect(String(json.message ?? "")).toMatch(/sessionIdleTimeoutMinutes/);
+  });
+
+  it("returns 400 when vaultAutoLockMinutes exceeds extensionTokenIdleTimeoutMinutes", async () => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
+    mockTenantFindUnique.mockResolvedValue({
+      allowedCidrs: [],
+      tailscaleEnabled: false,
+      tailscaleTailnet: null,
+      sessionIdleTimeoutMinutes: 480,
+      extensionTokenIdleTimeoutMinutes: 10,
+      vaultAutoLockMinutes: null,
+    });
+    const req = createRequest("PATCH", "http://localhost/api/tenant/policy", {
+      body: { vaultAutoLockMinutes: 60 },
+    });
+    const res = await PATCH(req);
+    const { status, json } = await parseResponse(res);
+    expect(status).toBe(400);
+    expect(String(json.message ?? "")).toMatch(/extensionTokenIdleTimeoutMinutes/);
+  });
+
   it("successfully updates all policy fields including access restriction", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue({ tenantId: "tenant1" });
