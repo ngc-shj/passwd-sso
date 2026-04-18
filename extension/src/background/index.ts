@@ -369,6 +369,9 @@ async function hydrateFromSession(): Promise<void> {
   tokenExpiresAt = state.expiresAt;
   currentUserId = state.userId ?? null;
   currentVaultSecretKeyHex = state.vaultSecretKey ?? null;
+  // Restore tenant-policy auto-lock so the options UI sees the override
+  // even if the vault hasn't been re-unlocked in this SW lifetime.
+  tenantAutoLockMinutes = state.tenantAutoLockMinutes ?? null;
 
   if (currentVaultSecretKeyHex) {
     try {

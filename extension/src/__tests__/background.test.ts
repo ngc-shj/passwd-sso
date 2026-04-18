@@ -1096,6 +1096,33 @@ describe("session hydration", () => {
     );
   });
 
+  it("restores tenantAutoLockMinutes from session storage so options UI disables the local setting", async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    chromeMock = installChromeMock();
+
+    const expiresAt = Date.now() + 600_000;
+    sessionStorageMocks.loadSession.mockResolvedValueOnce({
+      token: "hydrated-tok",
+      expiresAt,
+      userId: "u-1",
+      vaultSecretKey: "010203",
+      tenantAutoLockMinutes: 30,
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, json: async () => ({}) }))
+    );
+
+    await loadBackground();
+
+    const status = await sendMessage({ type: "GET_STATUS" });
+    expect(status).toEqual(
+      expect.objectContaining({ tenantAutoLockMinutes: 30 })
+    );
+  });
+
   it("clears expired state during hydration", async () => {
     vi.resetModules();
     vi.clearAllMocks();
