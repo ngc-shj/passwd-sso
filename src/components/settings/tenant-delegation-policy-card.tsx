@@ -22,6 +22,7 @@ import {
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+import { bindRangeInput } from "@/lib/input-range";
 
 export function TenantDelegationPolicyCard() {
   const t = useTranslations("TenantAdmin");
@@ -176,20 +177,11 @@ export function TenantDelegationPolicyCard() {
               min={DELEGATION_TTL_MIN}
               max={DELEGATION_TTL_MAX}
               value={delegationDefaultTtlSec}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setDelegationDefaultTtlSec(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setDelegationDefaultTtlSec(""); } else {
-                    setDelegationDefaultTtlSec(String(Math.min(n, DELEGATION_TTL_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              onBlur={() => {
-                const n = parseInt(delegationDefaultTtlSec, 10);
-                if (!Number.isNaN(n) && n < DELEGATION_TTL_MIN) setDelegationDefaultTtlSec(String(DELEGATION_TTL_MIN));
-              }}
+              {...bindRangeInput(setDelegationDefaultTtlSec, {
+                min: DELEGATION_TTL_MIN,
+                max: DELEGATION_TTL_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="3600"
             />
             <p className="text-xs text-muted-foreground">{t("delegationDefaultTtlSecHelp")}</p>
@@ -220,20 +212,11 @@ export function TenantDelegationPolicyCard() {
               min={DELEGATION_TTL_MIN}
               max={DELEGATION_TTL_MAX}
               value={delegationMaxTtlSec}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setDelegationMaxTtlSec(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setDelegationMaxTtlSec(""); } else {
-                    setDelegationMaxTtlSec(String(Math.min(n, DELEGATION_TTL_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              onBlur={() => {
-                const n = parseInt(delegationMaxTtlSec, 10);
-                if (!Number.isNaN(n) && n < DELEGATION_TTL_MIN) setDelegationMaxTtlSec(String(DELEGATION_TTL_MIN));
-              }}
+              {...bindRangeInput(setDelegationMaxTtlSec, {
+                min: DELEGATION_TTL_MIN,
+                max: DELEGATION_TTL_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="3600"
             />
             <p className="text-xs text-muted-foreground">{t("delegationMaxTtlSecHelp")}</p>

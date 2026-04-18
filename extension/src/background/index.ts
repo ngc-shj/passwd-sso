@@ -350,6 +350,7 @@ function persistState(): void {
       userId: currentUserId ?? undefined,
       vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
       ecdhEncrypted: ecdhEncryptedData ?? undefined,
+      tenantAutoLockMinutes,
     }).catch(() => {});
   }
 }

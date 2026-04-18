@@ -27,21 +27,7 @@ import {
   SESSION_ABSOLUTE_TIMEOUT_MAX,
 } from "@/lib/validations";
 
-// Parse a raw input string during typing: accept empty (→ null, "inherit
-// tenant"), or any non-negative integer ≤ max. Values below min are preserved
-// so the user can type multi-digit numbers (typing "15" should not be
-// rejected at the "1" keystroke); min is clamped on blur instead.
-function parseTeamTimeoutOnChange(raw: string, max: number): number | null {
-  if (!raw) return null;
-  const n = parseInt(raw, 10);
-  if (Number.isNaN(n) || n < 0) return null;
-  return Math.min(n, max);
-}
-
-function clampTeamTimeoutOnBlur(v: number | null, min: number): number | null {
-  if (v === null) return null;
-  return v < min ? min : v;
-}
+import { bindRangeNullableInput } from "@/lib/input-range";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -320,29 +306,26 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               min={SESSION_IDLE_TIMEOUT_MIN}
               max={SESSION_IDLE_TIMEOUT_MAX}
               value={policy.sessionIdleTimeoutMinutes ?? ""}
-              onChange={(e) => {
-                const v = parseTeamTimeoutOnChange(e.target.value, SESSION_IDLE_TIMEOUT_MAX);
-                setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: v }));
-                setFieldErrors((prev) => {
-                  const { sessionIdleTimeoutMinutes: _, ...rest } = prev;
-                  return rest;
-                });
-              }}
-              onBlur={() =>
-                setPolicy((p) => ({
-                  ...p,
-                  sessionIdleTimeoutMinutes: clampTeamTimeoutOnBlur(
-                    p.sessionIdleTimeoutMinutes,
-                    SESSION_IDLE_TIMEOUT_MIN,
-                  ),
-                }))
-              }
-              placeholder={t("sessionIdleTimeoutHelp")}
+              {...bindRangeNullableInput(
+                (v) => setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: v })),
+                {
+                  min: SESSION_IDLE_TIMEOUT_MIN,
+                  max: SESSION_IDLE_TIMEOUT_MAX,
+                  onEdit: () =>
+                    setFieldErrors((prev) => {
+                      const { sessionIdleTimeoutMinutes: _, ...rest } = prev;
+                      return rest;
+                    }),
+                },
+              )}
+              placeholder={t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
               className="max-w-[200px]"
             />
-            <p className="text-xs text-muted-foreground">{t("sessionIdleTimeoutHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionIdleTimeoutMinutes && (
-              <p className="text-sm text-destructive">{fieldErrors.sessionIdleTimeoutMinutes}</p>
+              <p className="text-sm text-destructive">
+                {t(fieldErrors.sessionIdleTimeoutMinutes, { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
+              </p>
             )}
           </div>
 
@@ -353,29 +336,26 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
               min={SESSION_ABSOLUTE_TIMEOUT_MIN}
               max={SESSION_ABSOLUTE_TIMEOUT_MAX}
               value={policy.sessionAbsoluteTimeoutMinutes ?? ""}
-              onChange={(e) => {
-                const v = parseTeamTimeoutOnChange(e.target.value, SESSION_ABSOLUTE_TIMEOUT_MAX);
-                setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: v }));
-                setFieldErrors((prev) => {
-                  const { sessionAbsoluteTimeoutMinutes: _, ...rest } = prev;
-                  return rest;
-                });
-              }}
-              onBlur={() =>
-                setPolicy((p) => ({
-                  ...p,
-                  sessionAbsoluteTimeoutMinutes: clampTeamTimeoutOnBlur(
-                    p.sessionAbsoluteTimeoutMinutes,
-                    SESSION_ABSOLUTE_TIMEOUT_MIN,
-                  ),
-                }))
-              }
-              placeholder={t("sessionAbsoluteTimeoutHelp")}
+              {...bindRangeNullableInput(
+                (v) => setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: v })),
+                {
+                  min: SESSION_ABSOLUTE_TIMEOUT_MIN,
+                  max: SESSION_ABSOLUTE_TIMEOUT_MAX,
+                  onEdit: () =>
+                    setFieldErrors((prev) => {
+                      const { sessionAbsoluteTimeoutMinutes: _, ...rest } = prev;
+                      return rest;
+                    }),
+                },
+              )}
+              placeholder={t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
               className="max-w-[200px]"
             />
-            <p className="text-xs text-muted-foreground">{t("sessionAbsoluteTimeoutHelp")}</p>
+            <p className="text-xs text-muted-foreground">{t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}</p>
             {fieldErrors.sessionAbsoluteTimeoutMinutes && (
-              <p className="text-sm text-destructive">{fieldErrors.sessionAbsoluteTimeoutMinutes}</p>
+              <p className="text-sm text-destructive">
+                {t(fieldErrors.sessionAbsoluteTimeoutMinutes, { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
+              </p>
             )}
           </div>
           <SwitchField

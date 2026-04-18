@@ -22,6 +22,7 @@ import {
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+import { bindRangeInput } from "@/lib/input-range";
 
 export function TenantRetentionPolicyCard() {
   const t = useTranslations("TenantAdmin");
@@ -150,20 +151,11 @@ export function TenantRetentionPolicyCard() {
               min={AUDIT_LOG_RETENTION_MIN}
               max={AUDIT_LOG_RETENTION_MAX}
               value={auditLogRetentionDays}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setAuditLogRetentionDays(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setAuditLogRetentionDays(""); } else {
-                    setAuditLogRetentionDays(String(Math.min(n, AUDIT_LOG_RETENTION_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              onBlur={() => {
-                const n = parseInt(auditLogRetentionDays, 10);
-                if (!Number.isNaN(n) && n < AUDIT_LOG_RETENTION_MIN) setAuditLogRetentionDays(String(AUDIT_LOG_RETENTION_MIN));
-              }}
+              {...bindRangeInput(setAuditLogRetentionDays, {
+                min: AUDIT_LOG_RETENTION_MIN,
+                max: AUDIT_LOG_RETENTION_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="365"
             />
             <p className="text-xs text-muted-foreground">{t("auditLogRetentionDaysHelp")}</p>
