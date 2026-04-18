@@ -26,6 +26,15 @@ DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config \
   scripts/manual-tests/<script-name>.ts
 ```
 
+For scripts that target the dev HTTPS endpoint at `https://localhost:3001`
+(self-signed cert), prepend `NODE_TLS_REJECT_UNAUTHORIZED=0`:
+
+```bash
+NODE_TLS_REJECT_UNAUTHORIZED=0 \
+  DOTENV_CONFIG_PATH=.env.local npx tsx -r dotenv/config \
+  scripts/manual-tests/share-access-audit.ts
+```
+
 ## Scripts
 
 | Script | Verifies |

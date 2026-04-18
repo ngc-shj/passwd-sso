@@ -67,8 +67,9 @@ async function main() {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
   console.log(`Created test share id=${share.id} (tenant=${entry.tenantId})`);
 
+  // Local dev uses a self-signed cert. Set NODE_TLS_REJECT_UNAUTHORIZED=0 in
+  // the shell when invoking this script (see scripts/manual-tests/README.md).
   const baseUrl = "https://localhost:3001/passwd-sso/api/share-links/verify-access";
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
   const r1 = await fetch(baseUrl, {
     method: "POST",
