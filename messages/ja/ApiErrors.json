@@ -62,6 +62,7 @@
   "extensionTokenExpired": "拡張機能トークンの有効期限が切れています。",
   "extensionTokenRevoked": "拡張機能トークンは取り消されています。",
   "extensionTokenInvalid": "無効な拡張機能トークンです。",
+  "extensionTokenFamilyExpired": "拡張機能トークンの有効寿命を超過しました。拡張を再認可してください。",
   "extensionTokenScopeInsufficient": "拡張機能トークンに必要なスコープがありません。",
   "invalidRecoveryKey": "無効な回復キーです。",
   "recoveryKeyNotSet": "回復キーが設定されていません。",

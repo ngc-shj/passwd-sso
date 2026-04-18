@@ -24,6 +24,13 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
+const { mockTenantFindUnique } = vi.hoisted(() => ({
+  mockTenantFindUnique: vi.fn().mockResolvedValue({ extensionTokenIdleTimeoutMinutes: 15 }),
+}));
+const { mockLogAuditAsync } = vi.hoisted(() => ({
+  mockLogAuditAsync: vi.fn(),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     extensionToken: {
@@ -33,8 +40,12 @@ vi.mock("@/lib/prisma", () => ({
       update: mockUpdate,
       updateMany: mockUpdateMany,
     },
+    tenant: { findUnique: mockTenantFindUnique },
     $transaction: mockTransaction,
   },
+}));
+vi.mock("@/lib/audit", () => ({
+  logAuditAsync: mockLogAuditAsync,
 }));
 
 vi.mock("@/lib/crypto-server", () => ({

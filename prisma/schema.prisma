@@ -186,11 +186,9 @@ model ExtensionToken {
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
   lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(3)
   /// Refresh-token family identifier. Rows with the same familyId share an absolute lifetime.
-  /// Nullable during Batch A rollout; Batch D migration flips to NOT NULL after all callers are updated.
-  familyId   String?   @map("family_id") @db.Uuid
+  familyId   String    @map("family_id") @db.Uuid
   /// Timestamp when the family was first issued. Used to enforce the absolute cap across refreshes.
-  /// Nullable during Batch A rollout; Batch D migration flips to NOT NULL.
-  familyCreatedAt DateTime? @map("family_created_at") @db.Timestamptz(3)
+  familyCreatedAt DateTime @default(now()) @map("family_created_at") @db.Timestamptz(3)
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
@@ -919,6 +917,7 @@ enum AuditAction {
   EXTENSION_BRIDGE_CODE_ISSUE
   EXTENSION_TOKEN_EXCHANGE_SUCCESS
   EXTENSION_TOKEN_EXCHANGE_FAILURE
+  EXTENSION_TOKEN_FAMILY_REVOKED
   AUDIT_OUTBOX_REAPED
   AUDIT_OUTBOX_DEAD_LETTER
   AUDIT_OUTBOX_RETENTION_PURGED

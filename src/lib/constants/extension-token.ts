@@ -1,5 +1,3 @@
-import { MS_PER_MINUTE } from "./time";
-
 export const EXTENSION_TOKEN_SCOPE = {
   PASSWORDS_READ: "passwords:read",
   PASSWORDS_WRITE: "passwords:write",
@@ -21,8 +19,9 @@ export const EXTENSION_TOKEN_DEFAULT_SCOPES = [
   EXTENSION_TOKEN_SCOPE.VAULT_UNLOCK_DATA,
 ] as const satisfies readonly ExtensionTokenScope[];
 
-/** Token TTL in milliseconds (15 minutes) */
-export const EXTENSION_TOKEN_TTL_MS = 15 * MS_PER_MINUTE;
-
-/** Maximum active (non-revoked, non-expired) tokens per user */
+/**
+ * Maximum active (non-revoked, non-expired) tokens per user.
+ * Independent throttle against token-issuance abuse; complements the
+ * per-family absolute lifetime (tenant.extensionTokenAbsoluteTimeoutMinutes).
+ */
 export const EXTENSION_TOKEN_MAX_ACTIVE = 3;

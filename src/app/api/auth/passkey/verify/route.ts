@@ -12,6 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
 import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
+import { revokeAllExtensionTokensForUser } from "@/lib/extension-token";
 
 export const runtime = "nodejs";
 
@@ -121,6 +122,14 @@ async function handlePOST(req: NextRequest) {
     });
     return result;
   }, BYPASS_PURPOSE.AUTH_FLOW);
+
+  // Passkey re-auth invalidates all prior bearer credentials (extension tokens).
+  // Maintains the "credential freshness" invariant for AAL3 auth events.
+  await revokeAllExtensionTokensForUser({
+    userId: user.id,
+    tenantId: existingUser.tenantId,
+    reason: "passkey_reauth",
+  });
 
   // Audit log
   if (evictedCount > 0) {

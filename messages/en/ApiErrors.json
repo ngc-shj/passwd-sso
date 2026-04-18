@@ -62,6 +62,7 @@
   "extensionTokenExpired": "Extension token has expired.",
   "extensionTokenRevoked": "Extension token has been revoked.",
   "extensionTokenInvalid": "Invalid extension token.",
+  "extensionTokenFamilyExpired": "Extension token lifetime exceeded. Please re-authorize the extension.",
   "extensionTokenScopeInsufficient": "Extension token does not have the required scope.",
   "invalidRecoveryKey": "Invalid Recovery Key.",
   "recoveryKeyNotSet": "No Recovery Key has been set up.",

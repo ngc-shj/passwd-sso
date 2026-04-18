@@ -116,6 +116,7 @@
   "groupDirectorySync": "Directory Sync",
   "POLICY_UPDATE": "Updated security policy",
   "TEAM_POLICY_CLAMPED_BY_TENANT": "Team session timeout clamped by tenant policy change",
+  "EXTENSION_TOKEN_FAMILY_REVOKED": "Browser extension token family revoked",
   "AUDIT_LOG_DOWNLOAD": "Downloaded audit log",
   "WEBHOOK_CREATE": "Created webhook",
   "WEBHOOK_DELETE": "Deleted webhook",
