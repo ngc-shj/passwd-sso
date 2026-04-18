@@ -6,6 +6,8 @@ const {
   mockAuth, mockRequireTenantPermission, mockUserFindUnique, mockTenantUpdate,
   mockTenantFindUnique, mockWithBypassRls, mockLogAudit, mockRateLimiterCheck,
   mockInvalidateCache, mockWouldIpBeAllowed, mockExtractClientIp,
+  mockTeamPolicyFindMany, mockTeamPolicyUpdateMany, mockTransaction,
+  mockInvalidateSessionTimeoutCache,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockRequireTenantPermission: vi.fn(),
@@ -18,6 +20,10 @@ const {
   mockInvalidateCache: vi.fn(),
   mockWouldIpBeAllowed: vi.fn().mockReturnValue(true),
   mockExtractClientIp: vi.fn().mockReturnValue("192.168.1.100"),
+  mockTeamPolicyFindMany: vi.fn().mockResolvedValue([]),
+  mockTeamPolicyUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
+  mockTransaction: vi.fn(),
+  mockInvalidateSessionTimeoutCache: vi.fn(),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -39,6 +45,8 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockUserFindUnique },
     tenant: { update: mockTenantUpdate, findUnique: mockTenantFindUnique },
+    teamPolicy: { findMany: mockTeamPolicyFindMany, updateMany: mockTeamPolicyUpdateMany },
+    $transaction: mockTransaction,
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -66,13 +74,22 @@ vi.mock("@/lib/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));
+vi.mock("@/lib/session-timeout", () => ({
+  invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
+}));
+vi.mock("@/lib/account-lockout", () => ({
+  invalidateLockoutThresholdCache: vi.fn(),
+}));
 
 import { GET, PATCH } from "@/app/api/tenant/policy/route";
 import { TenantAuthError } from "@/lib/tenant-auth";
 
 const FULL_POLICY_RESPONSE = {
   maxConcurrentSessions: null,
-  sessionIdleTimeoutMinutes: null,
+  sessionIdleTimeoutMinutes: 480,
+  sessionAbsoluteTimeoutMinutes: 43200,
+  extensionTokenIdleTimeoutMinutes: 10080,
+  extensionTokenAbsoluteTimeoutMinutes: 43200,
   vaultAutoLockMinutes: null,
   allowedCidrs: [],
   tailscaleEnabled: false,
@@ -141,7 +158,24 @@ describe("GET /api/tenant/policy", () => {
 });
 
 describe("PATCH /api/tenant/policy", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The route wraps the tenant.update in a prisma.$transaction with cascade-clamp logic.
+    // The transaction handler passes a `tx` object with the same shape as prisma.
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        teamPolicy: {
+          findMany: mockTeamPolicyFindMany,
+          updateMany: mockTeamPolicyUpdateMany,
+        },
+        tenant: { update: mockTenantUpdate },
+      }),
+    );
+    mockTeamPolicyFindMany.mockResolvedValue([]);
+    mockTeamPolicyUpdateMany.mockResolvedValue({ count: 0 });
+    mockRateLimiterCheck.mockResolvedValue({ allowed: true });
+    mockWouldIpBeAllowed.mockReturnValue(true);
+  });
 
   function mockUpdateReturn(overrides: Record<string, unknown> = {}) {
     mockTenantUpdate.mockResolvedValue({ ...FULL_POLICY_RESPONSE, ...overrides });

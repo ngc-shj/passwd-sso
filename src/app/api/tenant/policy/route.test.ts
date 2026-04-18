@@ -47,6 +47,14 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockPolicyLimiterCheck }),
 }));
 
+const { mockTransaction, mockTeamPolicyFindMany, mockTeamPolicyUpdateMany, mockInvalidateSessionTimeoutCache, mockInvalidateLockoutThresholdCache } = vi.hoisted(() => ({
+  mockTransaction: vi.fn(),
+  mockTeamPolicyFindMany: vi.fn().mockResolvedValue([]),
+  mockTeamPolicyUpdateMany: vi.fn().mockResolvedValue({ count: 0 }),
+  mockInvalidateSessionTimeoutCache: vi.fn(),
+  mockInvalidateLockoutThresholdCache: vi.fn(),
+}));
+
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     user: { findUnique: mockPrismaUserFindUnique },
@@ -54,7 +62,17 @@ vi.mock("@/lib/prisma", () => ({
       update: mockPrismaTenantUpdate,
       findUnique: mockPrismaTenantFindUnique,
     },
+    teamPolicy: { findMany: mockTeamPolicyFindMany, updateMany: mockTeamPolicyUpdateMany },
+    $transaction: mockTransaction,
   },
+}));
+
+vi.mock("@/lib/session-timeout", () => ({
+  invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
+}));
+
+vi.mock("@/lib/account-lockout", () => ({
+  invalidateLockoutThresholdCache: mockInvalidateLockoutThresholdCache,
 }));
 
 vi.mock("@/lib/tenant-auth", () => ({
@@ -214,6 +232,15 @@ describe("PATCH /api/tenant/policy", () => {
       tailscaleTailnet: null,
     });
     mockWithBypassRls.mockImplementation((_p: unknown, fn: () => unknown) => fn());
+    // Serializable transaction wrapping cascade-clamp + tenant.update
+    mockTransaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        teamPolicy: { findMany: mockTeamPolicyFindMany, updateMany: mockTeamPolicyUpdateMany },
+        tenant: { update: mockPrismaTenantUpdate },
+      }),
+    );
+    mockTeamPolicyFindMany.mockResolvedValue([]);
+    mockTeamPolicyUpdateMany.mockResolvedValue({ count: 0 });
   });
 
   it("returns 401 when not authenticated", async () => {

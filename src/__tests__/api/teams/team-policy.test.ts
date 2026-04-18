@@ -60,6 +60,12 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+}));
+vi.mock("@/lib/session-timeout", () => ({
+  invalidateSessionTimeoutCacheForTenant: vi.fn(),
+}));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
@@ -197,7 +203,10 @@ describe("PUT /api/teams/[teamId]/policy", () => {
   it("upserts policy successfully and logs audit", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamPermission.mockResolvedValue({ role: "OWNER" });
-    mockTeamFindUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockTeamFindUnique.mockResolvedValue({
+      tenantId: "tenant-1",
+      tenant: { sessionIdleTimeoutMinutes: 1440, sessionAbsoluteTimeoutMinutes: 43200 },
+    });
 
     const policyData = {
       minPasswordLength: 12,

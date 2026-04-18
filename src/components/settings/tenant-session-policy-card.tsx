@@ -21,6 +21,12 @@ import {
   MAX_CONCURRENT_SESSIONS_MAX,
   SESSION_IDLE_TIMEOUT_MIN,
   SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_MIN,
+  SESSION_ABSOLUTE_TIMEOUT_MAX,
+  EXTENSION_TOKEN_IDLE_TIMEOUT_MIN,
+  EXTENSION_TOKEN_IDLE_TIMEOUT_MAX,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
 } from "@/lib/validations";
@@ -28,28 +34,48 @@ import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
+function parseIntInRange(raw: string, min: number, max: number): string {
+  if (!raw) return "";
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n) || n < min) return "";
+  return String(Math.min(n, max));
+}
+
 export function TenantSessionPolicyCard() {
   const t = useTranslations("TenantAdmin");
   const tCommon = useTranslations("Common");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Concurrent session limit (existing behavior preserved)
   const [unlimited, setUnlimited] = useState(true);
   const [maxSessions, setMaxSessions] = useState<string>("");
-  const [idleTimeoutEnabled, setIdleTimeoutEnabled] = useState(false);
+
+  // Web session timeouts (required, non-null per ASVS V7.3.1/V7.3.3)
   const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState<string>("");
+  const [absoluteTimeoutMinutes, setAbsoluteTimeoutMinutes] = useState<string>("");
+
+  // Browser extension token timeouts (required)
+  const [extensionIdleMinutes, setExtensionIdleMinutes] = useState<string>("");
+  const [extensionAbsoluteMinutes, setExtensionAbsoluteMinutes] = useState<string>("");
+
+  // Vault auto-lock (existing)
   const [vaultAutoLockEnabled, setVaultAutoLockEnabled] = useState(false);
   const [vaultAutoLockMinutes, setVaultAutoLockMinutes] = useState<string>("");
+
   const [error, setError] = useState<string | null>(null);
   const [initialPolicy, setInitialPolicy] = useState<Record<string, unknown> | null>(null);
 
   const currentPolicy = useMemo(() => ({
     unlimited,
     maxSessions,
-    idleTimeoutEnabled,
     idleTimeoutMinutes,
+    absoluteTimeoutMinutes,
+    extensionIdleMinutes,
+    extensionAbsoluteMinutes,
     vaultAutoLockEnabled,
     vaultAutoLockMinutes,
-  }), [unlimited, maxSessions, idleTimeoutEnabled, idleTimeoutMinutes, vaultAutoLockEnabled, vaultAutoLockMinutes]);
+  }), [unlimited, maxSessions, idleTimeoutMinutes, absoluteTimeoutMinutes, extensionIdleMinutes, extensionAbsoluteMinutes, vaultAutoLockEnabled, vaultAutoLockMinutes]);
 
   const hasChanges = useFormDirty(currentPolicy, initialPolicy);
   useBeforeUnloadGuard(hasChanges);
@@ -59,50 +85,35 @@ export function TenantSessionPolicyCard() {
       const res = await fetchApi(API_PATH.TENANT_POLICY);
       if (res.ok) {
         const data = await res.json();
+
         const maxVal = data.maxConcurrentSessions;
-        let unlimitedVal: boolean;
-        let maxSessionsVal: string;
-        if (maxVal === null || maxVal === undefined) {
-          unlimitedVal = true;
-          maxSessionsVal = "";
-        } else {
-          unlimitedVal = false;
-          maxSessionsVal = String(maxVal);
-        }
+        const unlimitedVal = maxVal === null || maxVal === undefined;
+        const maxSessionsVal = unlimitedVal ? "" : String(maxVal);
         setUnlimited(unlimitedVal);
         setMaxSessions(maxSessionsVal);
 
-        const idleVal = data.sessionIdleTimeoutMinutes;
-        let idleEnabledVal: boolean;
-        let idleMinutesVal: string;
-        if (idleVal === null || idleVal === undefined) {
-          idleEnabledVal = false;
-          idleMinutesVal = "";
-        } else {
-          idleEnabledVal = true;
-          idleMinutesVal = String(idleVal);
-        }
-        setIdleTimeoutEnabled(idleEnabledVal);
-        setIdleTimeoutMinutes(idleMinutesVal);
+        const idleVal = String(data.sessionIdleTimeoutMinutes ?? 480);
+        const absVal = String(data.sessionAbsoluteTimeoutMinutes ?? 43200);
+        const extIdleVal = String(data.extensionTokenIdleTimeoutMinutes ?? 10080);
+        const extAbsVal = String(data.extensionTokenAbsoluteTimeoutMinutes ?? 43200);
+        setIdleTimeoutMinutes(idleVal);
+        setAbsoluteTimeoutMinutes(absVal);
+        setExtensionIdleMinutes(extIdleVal);
+        setExtensionAbsoluteMinutes(extAbsVal);
 
         const autoLockVal = data.vaultAutoLockMinutes;
-        let autoLockEnabledVal: boolean;
-        let autoLockMinutesVal: string;
-        if (autoLockVal === null || autoLockVal === undefined) {
-          autoLockEnabledVal = false;
-          autoLockMinutesVal = "";
-        } else {
-          autoLockEnabledVal = true;
-          autoLockMinutesVal = String(autoLockVal);
-        }
+        const autoLockEnabledVal = !(autoLockVal === null || autoLockVal === undefined);
+        const autoLockMinutesVal = autoLockEnabledVal ? String(autoLockVal) : "";
         setVaultAutoLockEnabled(autoLockEnabledVal);
         setVaultAutoLockMinutes(autoLockMinutesVal);
 
         setInitialPolicy({
           unlimited: unlimitedVal,
           maxSessions: maxSessionsVal,
-          idleTimeoutEnabled: idleEnabledVal,
-          idleTimeoutMinutes: idleMinutesVal,
+          idleTimeoutMinutes: idleVal,
+          absoluteTimeoutMinutes: absVal,
+          extensionIdleMinutes: extIdleVal,
+          extensionAbsoluteMinutes: extAbsVal,
           vaultAutoLockEnabled: autoLockEnabledVal,
           vaultAutoLockMinutes: autoLockMinutesVal,
         });
@@ -126,11 +137,22 @@ export function TenantSessionPolicyCard() {
       if (!Number.isInteger(num) || num < MAX_CONCURRENT_SESSIONS_MIN) return t("sessionPolicyValidationMin");
       if (num > MAX_CONCURRENT_SESSIONS_MAX) return t("sessionPolicyValidationMax");
     }
-    if (idleTimeoutEnabled) {
-      const num = Number(idleTimeoutMinutes);
-      if (!Number.isInteger(num) || num < SESSION_IDLE_TIMEOUT_MIN) return t("idleTimeoutValidationMin");
-      if (num > SESSION_IDLE_TIMEOUT_MAX) return t("idleTimeoutValidationMax");
-    }
+    const idleNum = Number(idleTimeoutMinutes);
+    if (!Number.isInteger(idleNum) || idleNum < SESSION_IDLE_TIMEOUT_MIN) return t("idleTimeoutValidationMin");
+    if (idleNum > SESSION_IDLE_TIMEOUT_MAX) return t("idleTimeoutValidationMax");
+
+    const absNum = Number(absoluteTimeoutMinutes);
+    if (!Number.isInteger(absNum) || absNum < SESSION_ABSOLUTE_TIMEOUT_MIN) return t("absoluteTimeoutValidationMin");
+    if (absNum > SESSION_ABSOLUTE_TIMEOUT_MAX) return t("absoluteTimeoutValidationMax");
+
+    const extIdleNum = Number(extensionIdleMinutes);
+    if (!Number.isInteger(extIdleNum) || extIdleNum < EXTENSION_TOKEN_IDLE_TIMEOUT_MIN) return t("extensionIdleValidationMin");
+    if (extIdleNum > EXTENSION_TOKEN_IDLE_TIMEOUT_MAX) return t("extensionIdleValidationMax");
+
+    const extAbsNum = Number(extensionAbsoluteMinutes);
+    if (!Number.isInteger(extAbsNum) || extAbsNum < EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN) return t("extensionAbsoluteValidationMin");
+    if (extAbsNum > EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX) return t("extensionAbsoluteValidationMax");
+
     if (vaultAutoLockEnabled) {
       const num = Number(vaultAutoLockMinutes);
       if (!Number.isInteger(num) || num < VAULT_AUTO_LOCK_MIN) return t("vaultAutoLockValidationMin");
@@ -150,7 +172,10 @@ export function TenantSessionPolicyCard() {
     try {
       const body = {
         maxConcurrentSessions: unlimited ? null : Number(maxSessions),
-        sessionIdleTimeoutMinutes: idleTimeoutEnabled ? Number(idleTimeoutMinutes) : null,
+        sessionIdleTimeoutMinutes: Number(idleTimeoutMinutes),
+        sessionAbsoluteTimeoutMinutes: Number(absoluteTimeoutMinutes),
+        extensionTokenIdleTimeoutMinutes: Number(extensionIdleMinutes),
+        extensionTokenAbsoluteTimeoutMinutes: Number(extensionAbsoluteMinutes),
         vaultAutoLockMinutes: vaultAutoLockEnabled ? Number(vaultAutoLockMinutes) : null,
       };
       const res = await fetchApi(API_PATH.TENANT_POLICY, {
@@ -209,13 +234,7 @@ export function TenantSessionPolicyCard() {
               max={MAX_CONCURRENT_SESSIONS_MAX}
               value={maxSessions}
               onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setMaxSessions(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < MAX_CONCURRENT_SESSIONS_MIN) { setMaxSessions(""); } else {
-                    setMaxSessions(String(Math.min(n, MAX_CONCURRENT_SESSIONS_MAX)));
-                  }
-                }
+                setMaxSessions(parseIntInRange(e.target.value, MAX_CONCURRENT_SESSIONS_MIN, MAX_CONCURRENT_SESSIONS_MAX));
                 setError(null);
               }}
               placeholder="3"
@@ -228,50 +247,91 @@ export function TenantSessionPolicyCard() {
 
         <Separator />
 
-        {/* Idle timeout */}
-        <div className="flex items-center justify-between">
-          <Label htmlFor="idle-timeout-toggle">{t("idleTimeoutEnabled")}</Label>
-          <Switch
-            id="idle-timeout-toggle"
-            checked={idleTimeoutEnabled}
-            onCheckedChange={(checked) => {
-              setIdleTimeoutEnabled(checked);
+        {/* Web session idle timeout */}
+        <div className="space-y-2">
+          <Label htmlFor="idle-timeout">{t("idleTimeoutMinutes")}</Label>
+          <Input
+            id="idle-timeout"
+            type="number"
+            min={SESSION_IDLE_TIMEOUT_MIN}
+            max={SESSION_IDLE_TIMEOUT_MAX}
+            value={idleTimeoutMinutes}
+            onChange={(e) => {
+              setIdleTimeoutMinutes(parseIntInRange(e.target.value, SESSION_IDLE_TIMEOUT_MIN, SESSION_IDLE_TIMEOUT_MAX));
               setError(null);
-              if (!checked) setIdleTimeoutMinutes("");
             }}
+            placeholder="480"
           />
+          <p className="text-xs text-muted-foreground">
+            {t("idleTimeoutHelp")}
+          </p>
         </div>
 
-        {idleTimeoutEnabled && (
-          <div className="space-y-2">
-            <Label htmlFor="idle-timeout">{t("idleTimeoutMinutes")}</Label>
-            <Input
-              id="idle-timeout"
-              type="number"
-              min={SESSION_IDLE_TIMEOUT_MIN}
-              max={SESSION_IDLE_TIMEOUT_MAX}
-              value={idleTimeoutMinutes}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setIdleTimeoutMinutes(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < SESSION_IDLE_TIMEOUT_MIN) { setIdleTimeoutMinutes(""); } else {
-                    setIdleTimeoutMinutes(String(Math.min(n, SESSION_IDLE_TIMEOUT_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              placeholder="30"
-            />
-            <p className="text-xs text-muted-foreground">
-              {t("idleTimeoutHelp")}
-            </p>
-          </div>
-        )}
+        {/* Web session absolute timeout */}
+        <div className="space-y-2">
+          <Label htmlFor="absolute-timeout">{t("absoluteTimeoutMinutes")}</Label>
+          <Input
+            id="absolute-timeout"
+            type="number"
+            min={SESSION_ABSOLUTE_TIMEOUT_MIN}
+            max={SESSION_ABSOLUTE_TIMEOUT_MAX}
+            value={absoluteTimeoutMinutes}
+            onChange={(e) => {
+              setAbsoluteTimeoutMinutes(parseIntInRange(e.target.value, SESSION_ABSOLUTE_TIMEOUT_MIN, SESSION_ABSOLUTE_TIMEOUT_MAX));
+              setError(null);
+            }}
+            placeholder="43200"
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("absoluteTimeoutHelp")}
+          </p>
+        </div>
 
         <Separator />
 
-        {/* Vault auto-lock timeout */}
+        {/* Browser extension idle */}
+        <div className="space-y-2">
+          <Label htmlFor="extension-idle">{t("extensionIdleMinutes")}</Label>
+          <Input
+            id="extension-idle"
+            type="number"
+            min={EXTENSION_TOKEN_IDLE_TIMEOUT_MIN}
+            max={EXTENSION_TOKEN_IDLE_TIMEOUT_MAX}
+            value={extensionIdleMinutes}
+            onChange={(e) => {
+              setExtensionIdleMinutes(parseIntInRange(e.target.value, EXTENSION_TOKEN_IDLE_TIMEOUT_MIN, EXTENSION_TOKEN_IDLE_TIMEOUT_MAX));
+              setError(null);
+            }}
+            placeholder="10080"
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("extensionIdleHelp")}
+          </p>
+        </div>
+
+        {/* Browser extension absolute */}
+        <div className="space-y-2">
+          <Label htmlFor="extension-absolute">{t("extensionAbsoluteMinutes")}</Label>
+          <Input
+            id="extension-absolute"
+            type="number"
+            min={EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN}
+            max={EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX}
+            value={extensionAbsoluteMinutes}
+            onChange={(e) => {
+              setExtensionAbsoluteMinutes(parseIntInRange(e.target.value, EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN, EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX));
+              setError(null);
+            }}
+            placeholder="43200"
+          />
+          <p className="text-xs text-muted-foreground">
+            {t("extensionAbsoluteHelp")}
+          </p>
+        </div>
+
+        <Separator />
+
+        {/* Vault auto-lock timeout (existing) */}
         <div className="flex items-center justify-between">
           <Label htmlFor="vault-auto-lock-toggle">{t("vaultAutoLockEnabled")}</Label>
           <Switch
@@ -295,13 +355,7 @@ export function TenantSessionPolicyCard() {
               max={VAULT_AUTO_LOCK_MAX}
               value={vaultAutoLockMinutes}
               onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setVaultAutoLockMinutes(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < VAULT_AUTO_LOCK_MIN) { setVaultAutoLockMinutes(""); } else {
-                    setVaultAutoLockMinutes(String(Math.min(n, VAULT_AUTO_LOCK_MAX)));
-                  }
-                }
+                setVaultAutoLockMinutes(parseIntInRange(e.target.value, VAULT_AUTO_LOCK_MIN, VAULT_AUTO_LOCK_MAX));
                 setError(null);
               }}
               placeholder="15"

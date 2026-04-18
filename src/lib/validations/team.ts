@@ -15,6 +15,10 @@ import {
   POLICY_MIN_PW_LENGTH_MAX,
   POLICY_SESSION_DURATION_MIN,
   POLICY_SESSION_DURATION_MAX,
+  SESSION_IDLE_TIMEOUT_MIN,
+  SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_MIN,
+  SESSION_ABSOLUTE_TIMEOUT_MAX,
   TAG_NAME_MAX_LENGTH,
   HEX_COLOR_REGEX,
   ENCRYPTED_TEAM_KEY_MAX,
@@ -127,7 +131,11 @@ export const upsertTeamPolicySchema = z.object({
   requireLowercase: z.boolean().default(false),
   requireNumbers: z.boolean().default(false),
   requireSymbols: z.boolean().default(false),
+  /** @deprecated use sessionAbsoluteTimeoutMinutes */
   maxSessionDurationMinutes: z.number().int().min(POLICY_SESSION_DURATION_MIN).max(POLICY_SESSION_DURATION_MAX).nullable().default(null),
+  // New unified fields (nullable = inherit tenant). Server additionally enforces ≤ tenant value in the PATCH handler.
+  sessionIdleTimeoutMinutes: z.number().int().min(SESSION_IDLE_TIMEOUT_MIN).max(SESSION_IDLE_TIMEOUT_MAX).nullable().default(null),
+  sessionAbsoluteTimeoutMinutes: z.number().int().min(SESSION_ABSOLUTE_TIMEOUT_MIN).max(SESSION_ABSOLUTE_TIMEOUT_MAX).nullable().default(null),
   requireRepromptForAll: z.boolean().default(false),
   allowExport: z.boolean().default(true),
   allowSharing: z.boolean().default(true),

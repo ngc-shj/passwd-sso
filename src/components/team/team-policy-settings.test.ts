@@ -3,14 +3,13 @@ import { validatePolicy } from "./team-policy-settings";
 import {
   POLICY_MIN_PW_LENGTH_MIN,
   POLICY_MIN_PW_LENGTH_MAX,
-  POLICY_SESSION_DURATION_MIN,
-  POLICY_SESSION_DURATION_MAX,
   PASSWORD_HISTORY_COUNT_MAX,
 } from "@/lib/validations";
 
 const VALID_BASE = {
   minPasswordLength: 8,
-  maxSessionDurationMinutes: 60 as number | null,
+  sessionIdleTimeoutMinutes: 60 as number | null,
+  sessionAbsoluteTimeoutMinutes: 1440 as number | null,
   passwordHistoryCount: 0,
   teamAllowedCidrs: [] as string[],
 };
@@ -21,47 +20,57 @@ describe("validatePolicy", () => {
   });
 
   it("returns no errors for boundary values", () => {
-    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MIN })).toEqual({});
-    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MAX, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MAX })).toEqual({});
+    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, sessionIdleTimeoutMinutes: 1, sessionAbsoluteTimeoutMinutes: 1 })).toEqual({});
+    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MAX, sessionIdleTimeoutMinutes: 1440, sessionAbsoluteTimeoutMinutes: 43200 })).toEqual({});
   });
 
-  it("returns no errors when maxSessionDurationMinutes is null", () => {
-    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: 0, maxSessionDurationMinutes: null })).toEqual({});
+  it("returns no errors when both session timeouts are null (inherit tenant)", () => {
+    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: 0, sessionIdleTimeoutMinutes: null, sessionAbsoluteTimeoutMinutes: null })).toEqual({});
   });
 
   it("rejects negative minPasswordLength", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: -1, maxSessionDurationMinutes: null });
+    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: -1 });
     expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
   });
 
   it("rejects minPasswordLength over max", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MAX + 1, maxSessionDurationMinutes: null });
+    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MAX + 1 });
     expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
   });
 
-  it("rejects maxSessionDurationMinutes below min", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MIN - 1 });
-    expect(errs.maxSessionDurationMinutes).toBe("maxSessionDurationRange");
+  it("rejects sessionIdleTimeoutMinutes below 1", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionIdleTimeoutMinutes: 0 });
+    expect(errs.sessionIdleTimeoutMinutes).toBe("sessionIdleTimeoutRange");
   });
 
-  it("rejects maxSessionDurationMinutes over max", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, maxSessionDurationMinutes: POLICY_SESSION_DURATION_MAX + 1 });
-    expect(errs.maxSessionDurationMinutes).toBe("maxSessionDurationRange");
+  it("rejects sessionIdleTimeoutMinutes over 1440", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionIdleTimeoutMinutes: 1441 });
+    expect(errs.sessionIdleTimeoutMinutes).toBe("sessionIdleTimeoutRange");
+  });
+
+  it("rejects sessionAbsoluteTimeoutMinutes below 1", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionAbsoluteTimeoutMinutes: 0 });
+    expect(errs.sessionAbsoluteTimeoutMinutes).toBe("sessionAbsoluteTimeoutRange");
+  });
+
+  it("rejects sessionAbsoluteTimeoutMinutes over 43200", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionAbsoluteTimeoutMinutes: 43201 });
+    expect(errs.sessionAbsoluteTimeoutMinutes).toBe("sessionAbsoluteTimeoutRange");
   });
 
   it("returns multiple errors at once", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: -1, maxSessionDurationMinutes: 1 });
-    expect(Object.keys(errs).length).toBeGreaterThanOrEqual(2);
+    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: -1, sessionIdleTimeoutMinutes: 0, sessionAbsoluteTimeoutMinutes: -1 });
+    expect(Object.keys(errs).length).toBeGreaterThanOrEqual(3);
   });
 
   it("rejects NaN minPasswordLength", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: NaN, maxSessionDurationMinutes: null });
+    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: NaN });
     expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
   });
 
-  it("rejects NaN maxSessionDurationMinutes", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: 0, maxSessionDurationMinutes: NaN as unknown as number });
-    expect(errs.maxSessionDurationMinutes).toBe("maxSessionDurationRange");
+  it("rejects NaN sessionIdleTimeoutMinutes", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionIdleTimeoutMinutes: NaN as unknown as number });
+    expect(errs.sessionIdleTimeoutMinutes).toBe("sessionIdleTimeoutRange");
   });
 
   it("rejects passwordHistoryCount over max", () => {

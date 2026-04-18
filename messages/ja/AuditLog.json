@@ -115,6 +115,7 @@
   "groupWebauthn": "パスキー",
   "groupDirectorySync": "ディレクトリ同期",
   "POLICY_UPDATE": "セキュリティポリシーを更新",
+  "TEAM_POLICY_CLAMPED_BY_TENANT": "テナント設定によりチームのセッションタイムアウトをクランプ",
   "AUDIT_LOG_DOWNLOAD": "監査ログをダウンロード",
   "WEBHOOK_CREATE": "Webhookを作成",
   "WEBHOOK_DELETE": "Webhookを削除",
