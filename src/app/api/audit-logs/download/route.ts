@@ -8,7 +8,7 @@ import {
   AUDIT_ACTION,
   AUDIT_SCOPE,
 } from "@/lib/constants";
-import type { AuditAction, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { parseActionsCsvParam } from "@/lib/audit-query";

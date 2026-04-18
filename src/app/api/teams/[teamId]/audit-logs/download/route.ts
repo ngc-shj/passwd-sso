@@ -11,7 +11,7 @@ import {
   AUDIT_ACTION,
   AUDIT_SCOPE,
 } from "@/lib/constants";
-import type { AuditAction, Prisma } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";

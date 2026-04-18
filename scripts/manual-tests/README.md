@@ -42,6 +42,7 @@ NODE_TLS_REJECT_UNAUTHORIZED=0 \
 | `share-access-audit.ts` | Anonymous share-link access writes `audit_logs` directly (userId=NULL, actor_type=SYSTEM) and does **not** enter the outbox |
 | `test-delivery-targets.sh` | Audit delivery target CRUD — grabs an active session token from the DB and exercises the `/api/tenant/audit-delivery-targets` endpoints |
 | `test-codebase-review-fixes.sh` | Codebase review fixes (#379) — team download date boundary, CSV actorType column, chain-verify truncation, admin audit SYSTEM_ACTOR_ID |
+| `run-pr-379-test-plan.sh` | PR #379 Test plan executor — runs the 4 requested checks end-to-end, including temporary fixture setup/cleanup for SCIM null-creator and >10k chain-verify scenarios |
 
 ### `test-delivery-targets.sh` — additional prerequisites
 
