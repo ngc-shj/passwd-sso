@@ -24,6 +24,7 @@ import {
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+import { bindRangeInput } from "@/lib/input-range";
 
 export function TenantLockoutPolicyCard() {
   const t = useTranslations("TenantAdmin");
@@ -180,16 +181,11 @@ export function TenantLockoutPolicyCard() {
                   min={LOCKOUT_THRESHOLD_MIN}
                   max={LOCKOUT_THRESHOLD_MAX}
                   value={threshold}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    if (!raw) { setThreshold(""); } else {
-                      const n = parseInt(raw, 10);
-                      if (Number.isNaN(n) || n < LOCKOUT_THRESHOLD_MIN) { setThreshold(""); } else {
-                        setThreshold(String(Math.min(n, LOCKOUT_THRESHOLD_MAX)));
-                      }
-                    }
-                    setError(null);
-                  }}
+                  {...bindRangeInput(setThreshold, {
+                    min: LOCKOUT_THRESHOLD_MIN,
+                    max: LOCKOUT_THRESHOLD_MAX,
+                    onEdit: () => setError(null),
+                  })}
                   placeholder="5"
                 />
                 <p className="text-xs text-muted-foreground">{t("lockoutThresholdHelp")}</p>
@@ -202,16 +198,11 @@ export function TenantLockoutPolicyCard() {
                   min={LOCKOUT_DURATION_MIN}
                   max={LOCKOUT_DURATION_MAX}
                   value={duration}
-                  onChange={(e) => {
-                    const raw = e.target.value;
-                    if (!raw) { setDuration(""); } else {
-                      const n = parseInt(raw, 10);
-                      if (Number.isNaN(n) || n < LOCKOUT_DURATION_MIN) { setDuration(""); } else {
-                        setDuration(String(Math.min(n, LOCKOUT_DURATION_MAX)));
-                      }
-                    }
-                    setError(null);
-                  }}
+                  {...bindRangeInput(setDuration, {
+                    min: LOCKOUT_DURATION_MIN,
+                    max: LOCKOUT_DURATION_MAX,
+                    onEdit: () => setError(null),
+                  })}
                   placeholder="15"
                 />
                 <p className="text-xs text-muted-foreground">{t("lockoutDurationHelp")}</p>

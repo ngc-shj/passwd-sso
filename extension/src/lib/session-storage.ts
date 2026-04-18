@@ -21,6 +21,14 @@ interface StoredSessionState {
   userId?: string;
   encryptedVaultSecretKey?: EncryptedField;
   ecdhEncrypted?: { ciphertext: string; iv: string; authTag: string };
+  /**
+   * Tenant-policy auto-lock value learned from the server at vault-unlock
+   * time. Persisted so the SW can restore it on restart (otherwise the
+   * options UI would see null and keep the local auto-lock select enabled
+   * until the user unlocks the vault again).
+   * Plain number; not sensitive.
+   */
+  tenantAutoLockMinutes?: number | null;
 }
 
 /** Shape returned to callers after decryption. */
@@ -31,6 +39,7 @@ export interface SessionState {
   vaultSecretKey?: string;
   /** Encrypted ECDH private key (hex) for team key derivation — re-unwrapped on SW restart */
   ecdhEncrypted?: { ciphertext: string; iv: string; authTag: string };
+  tenantAutoLockMinutes?: number | null;
 }
 
 function isEncryptedField(v: unknown): v is EncryptedField {
@@ -56,6 +65,7 @@ export async function persistSession(state: SessionState): Promise<void> {
     userId: state.userId,
     encryptedVaultSecretKey: encryptedVaultSecretKey ?? undefined,
     ecdhEncrypted: state.ecdhEncrypted,
+    tenantAutoLockMinutes: state.tenantAutoLockMinutes ?? undefined,
   };
   await chrome.storage.session.set({ [SESSION_KEY]: stored });
 }
@@ -94,12 +104,23 @@ export async function loadSession(): Promise<SessionState | null> {
     if (!isEncryptedField(raw.ecdhEncrypted)) return null;
   }
 
+  // tenantAutoLockMinutes validation
+  let tenantAutoLockMinutes: number | null | undefined;
+  if (raw.tenantAutoLockMinutes === undefined || raw.tenantAutoLockMinutes === null) {
+    tenantAutoLockMinutes = null;
+  } else if (typeof raw.tenantAutoLockMinutes === "number" && Number.isFinite(raw.tenantAutoLockMinutes)) {
+    tenantAutoLockMinutes = raw.tenantAutoLockMinutes;
+  } else {
+    tenantAutoLockMinutes = null;
+  }
+
   return {
     token,
     expiresAt: raw.expiresAt,
     userId: raw.userId,
     vaultSecretKey,
     ecdhEncrypted: raw.ecdhEncrypted,
+    tenantAutoLockMinutes,
   };
 }
 

@@ -15,7 +15,10 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | Field | Enforcement | Layer | Location | Notes |
 |-------|------------|-------|----------|-------|
 | `maxConcurrentSessions` | Blocking | Server | `auth-adapter.ts` `createSession()` | Oldest sessions evicted atomically in Serializable tx |
-| `sessionIdleTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` | Session deleted on every refresh if idle > timeout |
+| `sessionIdleTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted when `now - lastActiveAt > value`. See [session-timeout-design.md](session-timeout-design.md) |
+| `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted + `SESSION_REVOKE` audit when `now - createdAt > value`, independent of activity (ASVS V7.3.3) |
+| `extensionTokenIdleTimeoutMinutes` | Blocking | Server | `extension-token.ts` `issueExtensionToken()` + `token/refresh/route.ts` | Access token `expiresAt = now + value` at issuance and on every refresh |
+| `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
 | `vaultAutoLockMinutes` | Timer | Client | `auto-lock-context.tsx` | Browser inactivity timer; server cannot know vault lock state |
 | `allowedCidrs` | Blocking | Server | `proxy.ts` + `access-restriction.ts` | Middleware (Edge) + route handler (Node.js); 60s cache |
 | `tailscaleEnabled` / `tailscaleTailnet` | Blocking | Server | `access-restriction.ts` | Two-stage: Edge (CGNAT heuristic) + Node.js (WhoIs verify) |
@@ -48,7 +51,9 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `requireLowercase` | Blocking | Client | `use-team-login-form-state.ts` | Same |
 | `requireNumbers` | Blocking | Client | `use-team-login-form-state.ts` | Same |
 | `requireSymbols` | Blocking | Client | `use-team-login-form-state.ts` | Same |
-| `maxSessionDurationMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` | `getStrictestSessionDuration(userId)` — minimum across all teams; 60s cache |
+| `maxSessionDurationMinutes` | — | — | — | **Deprecated.** Kept in schema for one release; semantics migrated to `sessionAbsoluteTimeoutMinutes`. Removal tracked in the post-release cleanup migration |
+| `sessionIdleTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Nullable (inherit tenant). Enforced via `min(tenant, ...teams.filter(non-null))`. Write constrained to `<= tenant` |
+| `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Nullable (inherit tenant). Enforced via `min(tenant, ...teams.filter(non-null))`. Write constrained to `<= tenant`. Cascade-clamped when tenant lowers — emits `TEAM_POLICY_CLAMPED_BY_TENANT` audit |
 | `requireRepromptForAll` | Blocking | Client | `use-team-base-form-model.ts` | Forces `requireReprompt=true` on entries; reprompt gate is client-side |
 | `allowExport` | Blocking | Server | `audit-logs/download/route.ts`, `audit-logs/export/route.ts` | `assertPolicyAllowsExport(teamId)` → 403 |
 | `allowSharing` | Blocking | Server | `share-links/route.ts` | `assertPolicyAllowsSharing(teamId)` → 403 |
@@ -72,5 +77,5 @@ Password content (plaintext) is encrypted client-side before reaching the server
 |-------|-----|---------------|----------|
 | Tenant access policy | 60s | `invalidateTenantPolicyCache(tenantId)` | `access-restriction.ts` |
 | Lockout thresholds | 60s | `invalidateLockoutThresholdCache(tenantId)` | `account-lockout.ts` |
-| Session duration (team) | 60s | TTL expiry only | `team-policy.ts` |
+| Session timeouts (per user) | 60s | `invalidateSessionTimeoutCache(userId)` / `invalidateSessionTimeoutCacheForTenant(tenantId)` | `session-timeout.ts` |
 | Session info (proxy) | 30s | TTL expiry only | `proxy.ts` |

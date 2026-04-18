@@ -19,11 +19,15 @@ import { fetchApi } from "@/lib/url-helpers";
 import {
   POLICY_MIN_PW_LENGTH_MIN,
   POLICY_MIN_PW_LENGTH_MAX,
-  POLICY_SESSION_DURATION_MIN,
-  POLICY_SESSION_DURATION_MAX,
   PASSWORD_HISTORY_COUNT_MAX,
   MAX_CIDRS,
+  SESSION_IDLE_TIMEOUT_MIN,
+  SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_MIN,
+  SESSION_ABSOLUTE_TIMEOUT_MAX,
 } from "@/lib/validations";
+
+import { bindRangeNullableInput } from "@/lib/input-range";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -31,7 +35,10 @@ interface PolicyData {
   requireLowercase: boolean;
   requireNumbers: boolean;
   requireSymbols: boolean;
+  /** @deprecated use sessionAbsoluteTimeoutMinutes */
   maxSessionDurationMinutes: number | null;
+  sessionIdleTimeoutMinutes: number | null;
+  sessionAbsoluteTimeoutMinutes: number | null;
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
@@ -48,6 +55,8 @@ const DEFAULT_POLICY: PolicyData = {
   requireNumbers: false,
   requireSymbols: false,
   maxSessionDurationMinutes: null,
+  sessionIdleTimeoutMinutes: null,
+  sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
@@ -59,16 +68,27 @@ const DEFAULT_POLICY: PolicyData = {
 
 /** Validate policy fields. Returns a map of field name → error key (i18n). */
 export function validatePolicy(
-  policy: Pick<PolicyData, "minPasswordLength" | "maxSessionDurationMinutes" | "passwordHistoryCount" | "teamAllowedCidrs">,
+  policy: Pick<
+    PolicyData,
+    | "minPasswordLength"
+    | "sessionIdleTimeoutMinutes"
+    | "sessionAbsoluteTimeoutMinutes"
+    | "passwordHistoryCount"
+    | "teamAllowedCidrs"
+  >,
 ): Record<string, string> {
   const errs: Record<string, string> = {};
   const pwLen = policy.minPasswordLength;
   if (Number.isNaN(pwLen) || pwLen < POLICY_MIN_PW_LENGTH_MIN || pwLen > POLICY_MIN_PW_LENGTH_MAX) {
     errs.minPasswordLength = "minPasswordLengthRange";
   }
-  const dur = policy.maxSessionDurationMinutes;
-  if (dur !== null && (Number.isNaN(dur) || dur < POLICY_SESSION_DURATION_MIN || dur > POLICY_SESSION_DURATION_MAX)) {
-    errs.maxSessionDurationMinutes = "maxSessionDurationRange";
+  const idle = policy.sessionIdleTimeoutMinutes;
+  if (idle !== null && (Number.isNaN(idle) || idle < SESSION_IDLE_TIMEOUT_MIN || idle > SESSION_IDLE_TIMEOUT_MAX)) {
+    errs.sessionIdleTimeoutMinutes = "sessionIdleTimeoutRange";
+  }
+  const abs = policy.sessionAbsoluteTimeoutMinutes;
+  if (abs !== null && (Number.isNaN(abs) || abs < SESSION_ABSOLUTE_TIMEOUT_MIN || abs > SESSION_ABSOLUTE_TIMEOUT_MAX)) {
+    errs.sessionAbsoluteTimeoutMinutes = "sessionAbsoluteTimeoutRange";
   }
   const histCount = policy.passwordHistoryCount;
   if (Number.isNaN(histCount) || histCount < 0 || histCount > PASSWORD_HISTORY_COUNT_MAX) {
@@ -280,34 +300,62 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
         <div className="space-y-3">
           <h3 className="text-sm font-medium text-muted-foreground">{t("advanced")}</h3>
           <div className="space-y-2">
-            <Label>{t("maxSessionDurationMinutes")}</Label>
+            <Label>{t("sessionIdleTimeoutMinutes")}</Label>
             <Input
               type="number"
-              min={POLICY_SESSION_DURATION_MIN}
-              max={POLICY_SESSION_DURATION_MAX}
-              value={policy.maxSessionDurationMinutes ?? ""}
-              onChange={(e) => {
-                if (!e.target.value) {
-                  setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
-                } else {
-                  const parsed = parseInt(e.target.value, 10);
-                  if (Number.isNaN(parsed) || parsed < POLICY_SESSION_DURATION_MIN) {
-                    setPolicy((p) => ({ ...p, maxSessionDurationMinutes: null }));
-                  } else {
-                    const value = Math.min(POLICY_SESSION_DURATION_MAX, parsed);
-                    setPolicy((p) => ({ ...p, maxSessionDurationMinutes: value }));
-                  }
-                }
-                setFieldErrors((prev) => {
-                  const { maxSessionDurationMinutes: _, ...rest } = prev;
-                  return rest;
-                });
-              }}
-              placeholder={t("maxSessionDurationHelp")}
+              min={SESSION_IDLE_TIMEOUT_MIN}
+              max={SESSION_IDLE_TIMEOUT_MAX}
+              value={policy.sessionIdleTimeoutMinutes ?? ""}
+              {...bindRangeNullableInput(
+                (v) => setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: v })),
+                {
+                  min: SESSION_IDLE_TIMEOUT_MIN,
+                  max: SESSION_IDLE_TIMEOUT_MAX,
+                  onEdit: () =>
+                    setFieldErrors((prev) => {
+                      const { sessionIdleTimeoutMinutes: _, ...rest } = prev;
+                      return rest;
+                    }),
+                },
+              )}
+              placeholder={t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
               className="max-w-[200px]"
             />
-            {fieldErrors.maxSessionDurationMinutes && (
-              <p className="text-sm text-destructive">{fieldErrors.maxSessionDurationMinutes}</p>
+            <p className="text-xs text-muted-foreground">{t("sessionIdleTimeoutHelp", { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}</p>
+            {fieldErrors.sessionIdleTimeoutMinutes && (
+              <p className="text-sm text-destructive">
+                {t(fieldErrors.sessionIdleTimeoutMinutes, { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX })}
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label>{t("sessionAbsoluteTimeoutMinutes")}</Label>
+            <Input
+              type="number"
+              min={SESSION_ABSOLUTE_TIMEOUT_MIN}
+              max={SESSION_ABSOLUTE_TIMEOUT_MAX}
+              value={policy.sessionAbsoluteTimeoutMinutes ?? ""}
+              {...bindRangeNullableInput(
+                (v) => setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: v })),
+                {
+                  min: SESSION_ABSOLUTE_TIMEOUT_MIN,
+                  max: SESSION_ABSOLUTE_TIMEOUT_MAX,
+                  onEdit: () =>
+                    setFieldErrors((prev) => {
+                      const { sessionAbsoluteTimeoutMinutes: _, ...rest } = prev;
+                      return rest;
+                    }),
+                },
+              )}
+              placeholder={t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
+              className="max-w-[200px]"
+            />
+            <p className="text-xs text-muted-foreground">{t("sessionAbsoluteTimeoutHelp", { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}</p>
+            {fieldErrors.sessionAbsoluteTimeoutMinutes && (
+              <p className="text-sm text-destructive">
+                {t(fieldErrors.sessionAbsoluteTimeoutMinutes, { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX })}
+              </p>
             )}
           </div>
           <SwitchField

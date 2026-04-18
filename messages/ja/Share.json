@@ -120,7 +120,7 @@
   "previewTitle": "共有されるフィールド",
   "previewHidden": "非表示",
   "customFields": "カスタムフィールド",
-  "requirePassword": "パスワードを要求",
+  "requirePassword": "パスワードを要求する",
   "requirePasswordDesc": "強力なパスワードが自動生成されます。受信者に別途共有してください。",
   "requirePasswordPolicy": "チームポリシーにより必須です。強力なパスワードが自動生成されます。",
   "accessPasswordLabel": "アクセスパスワード",

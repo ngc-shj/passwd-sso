@@ -24,6 +24,7 @@ import {
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+import { bindRangeInput } from "@/lib/input-range";
 
 export function TenantPasskeyPolicyCard() {
   const t = useTranslations("TenantAdmin");
@@ -164,16 +165,11 @@ export function TenantPasskeyPolicyCard() {
               min={PASSKEY_GRACE_PERIOD_MIN}
               max={PASSKEY_GRACE_PERIOD_MAX}
               value={gracePeriodDays}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setGracePeriodDays(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < PASSKEY_GRACE_PERIOD_MIN) { setGracePeriodDays(""); } else {
-                    setGracePeriodDays(String(Math.min(n, PASSKEY_GRACE_PERIOD_MAX)));
-                  }
-                }
-                setError(null);
-              }}
+              {...bindRangeInput(setGracePeriodDays, {
+                min: PASSKEY_GRACE_PERIOD_MIN,
+                max: PASSKEY_GRACE_PERIOD_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="30"
             />
             <p className="text-xs text-muted-foreground">{t("passkeyGracePeriodHelp")}</p>
@@ -189,20 +185,11 @@ export function TenantPasskeyPolicyCard() {
             min={PIN_LENGTH_MIN}
             max={PIN_LENGTH_MAX}
             value={requireMinPinLength}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (!raw) { setRequireMinPinLength(""); } else {
-                const n = parseInt(raw, 10);
-                if (Number.isNaN(n) || n < PIN_LENGTH_MIN) { setRequireMinPinLength(""); } else {
-                  setRequireMinPinLength(String(Math.min(n, PIN_LENGTH_MAX)));
-                }
-              }
-              setError(null);
-            }}
-            onBlur={() => {
-              const n = parseInt(requireMinPinLength, 10);
-              if (!Number.isNaN(n) && n < PIN_LENGTH_MIN) setRequireMinPinLength(String(PIN_LENGTH_MIN));
-            }}
+            {...bindRangeInput(setRequireMinPinLength, {
+              min: PIN_LENGTH_MIN,
+              max: PIN_LENGTH_MAX,
+              onEdit: () => setError(null),
+            })}
             placeholder="6"
           />
           <p className="text-xs text-muted-foreground">{t("requireMinPinLengthHelp")}</p>

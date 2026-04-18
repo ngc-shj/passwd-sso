@@ -48,6 +48,12 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+}));
+vi.mock("@/lib/session-timeout", () => ({
+  invalidateSessionTimeoutCacheForTenant: vi.fn(),
+}));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
@@ -76,6 +82,8 @@ const DEFAULT_RESPONSE = {
   requireNumbers: false,
   requireSymbols: false,
   maxSessionDurationMinutes: null,
+  sessionIdleTimeoutMinutes: null,
+  sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
@@ -142,7 +150,13 @@ describe("PUT /api/teams/[teamId]/policy", () => {
     vi.clearAllMocks();
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRequireTeamPermission.mockResolvedValue({ role: "ADMIN" });
-    mockPrismaTeam.findUnique.mockResolvedValue({ tenantId: "tenant-1" });
+    mockPrismaTeam.findUnique.mockResolvedValue({
+      tenantId: "tenant-1",
+      tenant: {
+        sessionIdleTimeoutMinutes: 1440,
+        sessionAbsoluteTimeoutMinutes: 43200,
+      },
+    });
   });
 
   it("returns 401 when unauthenticated", async () => {

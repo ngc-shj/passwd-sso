@@ -27,6 +27,7 @@ import {
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+import { bindRangeInput } from "@/lib/input-range";
 
 export function TenantPasswordPolicyCard() {
   const t = useTranslations("TenantAdmin");
@@ -187,16 +188,11 @@ export function TenantPasswordPolicyCard() {
             min={POLICY_MIN_PW_LENGTH_MIN}
             max={POLICY_MIN_PW_LENGTH_MAX}
             value={minPasswordLength}
-            onChange={(e) => {
-              const raw = e.target.value;
-              if (!raw) { setMinPasswordLength(""); } else {
-                const n = parseInt(raw, 10);
-                if (Number.isNaN(n) || n < POLICY_MIN_PW_LENGTH_MIN) { setMinPasswordLength(""); } else {
-                  setMinPasswordLength(String(Math.min(n, POLICY_MIN_PW_LENGTH_MAX)));
-                }
-              }
-              setError(null);
-            }}
+            {...bindRangeInput(setMinPasswordLength, {
+              min: POLICY_MIN_PW_LENGTH_MIN,
+              max: POLICY_MIN_PW_LENGTH_MAX,
+              onEdit: () => setError(null),
+            })}
             placeholder="0"
           />
           <p className="text-xs text-muted-foreground">{t("tenantMinPasswordLengthHelp")}</p>
@@ -269,16 +265,11 @@ export function TenantPasswordPolicyCard() {
                 min={PASSWORD_MAX_AGE_MIN}
                 max={PASSWORD_MAX_AGE_MAX}
                 value={passwordMaxAgeDays}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) { setPasswordMaxAgeDays(""); } else {
-                    const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < PASSWORD_MAX_AGE_MIN) { setPasswordMaxAgeDays(""); } else {
-                      setPasswordMaxAgeDays(String(Math.min(n, PASSWORD_MAX_AGE_MAX)));
-                    }
-                  }
-                  setError(null);
-                }}
+                {...bindRangeInput(setPasswordMaxAgeDays, {
+                  min: PASSWORD_MAX_AGE_MIN,
+                  max: PASSWORD_MAX_AGE_MAX,
+                  onEdit: () => setError(null),
+                })}
                 placeholder="90"
               />
               <p className="text-xs text-muted-foreground">{t("passwordMaxAgeDaysHelp")}</p>
@@ -292,16 +283,11 @@ export function TenantPasswordPolicyCard() {
                 min={PASSWORD_EXPIRY_WARNING_MIN}
                 max={PASSWORD_EXPIRY_WARNING_MAX}
                 value={passwordExpiryWarningDays}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (!raw) { setPasswordExpiryWarningDays(""); } else {
-                    const n = parseInt(raw, 10);
-                    if (Number.isNaN(n) || n < PASSWORD_EXPIRY_WARNING_MIN) { setPasswordExpiryWarningDays(""); } else {
-                      setPasswordExpiryWarningDays(String(Math.min(n, PASSWORD_EXPIRY_WARNING_MAX)));
-                    }
-                  }
-                  setError(null);
-                }}
+                {...bindRangeInput(setPasswordExpiryWarningDays, {
+                  min: PASSWORD_EXPIRY_WARNING_MIN,
+                  max: PASSWORD_EXPIRY_WARNING_MAX,
+                  onEdit: () => setError(null),
+                })}
                 placeholder="14"
               />
               <p className="text-xs text-muted-foreground">{t("passwordExpiryWarningDaysHelp")}</p>

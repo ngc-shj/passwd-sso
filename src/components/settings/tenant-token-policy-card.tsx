@@ -23,6 +23,7 @@ import {
 } from "@/lib/validations";
 import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { bindRangeInput } from "@/lib/input-range";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 export function TenantTokenPolicyCard() {
@@ -198,20 +199,11 @@ export function TenantTokenPolicyCard() {
               min={SA_TOKEN_MAX_EXPIRY_MIN}
               max={SA_TOKEN_MAX_EXPIRY_MAX}
               value={saTokenMaxExpiryDays}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setSaTokenMaxExpiryDays(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setSaTokenMaxExpiryDays(""); } else {
-                    setSaTokenMaxExpiryDays(String(Math.min(n, SA_TOKEN_MAX_EXPIRY_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              onBlur={() => {
-                const n = parseInt(saTokenMaxExpiryDays, 10);
-                if (!Number.isNaN(n) && n < SA_TOKEN_MAX_EXPIRY_MIN) setSaTokenMaxExpiryDays(String(SA_TOKEN_MAX_EXPIRY_MIN));
-              }}
+              {...bindRangeInput(setSaTokenMaxExpiryDays, {
+                min: SA_TOKEN_MAX_EXPIRY_MIN,
+                max: SA_TOKEN_MAX_EXPIRY_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="365"
             />
             <p className="text-xs text-muted-foreground">{t("saTokenMaxExpiryDaysHelp")}</p>
@@ -244,20 +236,11 @@ export function TenantTokenPolicyCard() {
               min={JIT_TOKEN_TTL_MIN}
               max={JIT_TOKEN_TTL_MAX}
               value={jitTokenDefaultTtlSec}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setJitTokenDefaultTtlSec(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setJitTokenDefaultTtlSec(""); } else {
-                    setJitTokenDefaultTtlSec(String(Math.min(n, JIT_TOKEN_TTL_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              onBlur={() => {
-                const n = parseInt(jitTokenDefaultTtlSec, 10);
-                if (!Number.isNaN(n) && n < JIT_TOKEN_TTL_MIN) setJitTokenDefaultTtlSec(String(JIT_TOKEN_TTL_MIN));
-              }}
+              {...bindRangeInput(setJitTokenDefaultTtlSec, {
+                min: JIT_TOKEN_TTL_MIN,
+                max: JIT_TOKEN_TTL_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="3600"
             />
             <p className="text-xs text-muted-foreground">{t("jitTokenDefaultTtlSecHelp")}</p>
@@ -288,20 +271,11 @@ export function TenantTokenPolicyCard() {
               min={JIT_TOKEN_TTL_MIN}
               max={JIT_TOKEN_TTL_MAX}
               value={jitTokenMaxTtlSec}
-              onChange={(e) => {
-                const raw = e.target.value;
-                if (!raw) { setJitTokenMaxTtlSec(""); } else {
-                  const n = parseInt(raw, 10);
-                  if (Number.isNaN(n) || n < 1) { setJitTokenMaxTtlSec(""); } else {
-                    setJitTokenMaxTtlSec(String(Math.min(n, JIT_TOKEN_TTL_MAX)));
-                  }
-                }
-                setError(null);
-              }}
-              onBlur={() => {
-                const n = parseInt(jitTokenMaxTtlSec, 10);
-                if (!Number.isNaN(n) && n < JIT_TOKEN_TTL_MIN) setJitTokenMaxTtlSec(String(JIT_TOKEN_TTL_MIN));
-              }}
+              {...bindRangeInput(setJitTokenMaxTtlSec, {
+                min: JIT_TOKEN_TTL_MIN,
+                max: JIT_TOKEN_TTL_MAX,
+                onEdit: () => setError(null),
+              })}
               placeholder="3600"
             />
             <p className="text-xs text-muted-foreground">{t("jitTokenMaxTtlSecHelp")}</p>

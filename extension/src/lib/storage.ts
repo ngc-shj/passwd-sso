@@ -58,6 +58,19 @@ function ensureFiniteNonNeg(v: unknown, fallback: number): number {
   return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
 }
 
+/**
+ * Clamp a stored auto-lock value to the new 5-minute minimum.
+ * Legacy extensions may have persisted 0 ("never") or 1-4 minutes; those
+ * values are no longer valid (vault must auto-lock within the token/session
+ * idle window). Clamps upward instead of silently falling back to the default.
+ */
+function ensureAutoLockAtLeastMin(v: unknown, fallback: number): number {
+  const MIN = 5;
+  if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
+  if (v < MIN) return MIN;
+  return v;
+}
+
 /** Validate all settings with defense-in-depth — never trust raw storage values */
 export function validateSettings(raw: StorageSchema): StorageSchema {
   return {
@@ -65,7 +78,7 @@ export function validateSettings(raw: StorageSchema): StorageSchema {
       typeof raw.serverUrl === "string" && raw.serverUrl.length > 0
         ? raw.serverUrl
         : DEFAULTS.serverUrl,
-    autoLockMinutes: ensureFiniteNonNeg(
+    autoLockMinutes: ensureAutoLockAtLeastMin(
       raw.autoLockMinutes,
       DEFAULTS.autoLockMinutes,
     ),

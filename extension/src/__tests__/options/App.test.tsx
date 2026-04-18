@@ -58,6 +58,10 @@ vi.stubGlobal("chrome", {
   runtime: {
     openOptionsPage: vi.fn(),
     getManifest: vi.fn().mockReturnValue({ version: "0.5.0" }),
+    sendMessage: vi.fn((_msg: unknown, cb?: (res: unknown) => void) => {
+      cb?.({ type: "GET_STATUS", hasToken: false, expiresAt: null, vaultUnlocked: false, tenantAutoLockMinutes: null });
+    }),
+    lastError: undefined,
   },
   commands: {
     getAll: vi.fn().mockResolvedValue([

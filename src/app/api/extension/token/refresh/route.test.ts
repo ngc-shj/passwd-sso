@@ -5,35 +5,50 @@ import { createRequest, parseResponse } from "@/__tests__/helpers/request-builde
 
 const {
   mockValidateExtensionToken,
+  mockRevokeExtensionTokenFamily,
   mockCheck,
   mockSessionFindFirst,
+  mockTenantFindUnique,
   mockExtTokenUpdateMany,
   mockExtTokenCreate,
   mockTransaction,
   mockWithUserTenantRls,
+  mockWithBypassRls,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
+  mockRevokeExtensionTokenFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockSessionFindFirst: vi.fn(),
+  mockTenantFindUnique: vi.fn().mockResolvedValue({
+    extensionTokenIdleTimeoutMinutes: 10080,
+    extensionTokenAbsoluteTimeoutMinutes: 43200,
+  }),
   mockExtTokenUpdateMany: vi.fn(),
   mockExtTokenCreate: vi.fn(),
   mockTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
 }));
 
 vi.mock("@/lib/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
+  revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
 }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     session: { findFirst: mockSessionFindFirst },
+    tenant: { findUnique: mockTenantFindUnique },
     extensionToken: {
       updateMany: mockExtTokenUpdateMany,
       create: mockExtTokenCreate,
     },
     $transaction: mockTransaction,
   },
+}));
+
+vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
+  withBypassRls: mockWithBypassRls,
 }));
 
 vi.mock("@/lib/crypto-server", () => ({
@@ -65,6 +80,8 @@ function validTokenResult(overrides?: Record<string, unknown>) {
       userId: "user-1",
       scopes: ["passwords:read", "vault:unlock-data"],
       expiresAt: new Date("2030-01-01"),
+      familyId: "fam-1",
+      familyCreatedAt: new Date(),
       ...overrides,
     },
   };

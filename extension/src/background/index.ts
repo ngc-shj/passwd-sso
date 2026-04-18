@@ -350,6 +350,7 @@ function persistState(): void {
       userId: currentUserId ?? undefined,
       vaultSecretKey: currentVaultSecretKeyHex ?? undefined,
       ecdhEncrypted: ecdhEncryptedData ?? undefined,
+      tenantAutoLockMinutes,
     }).catch(() => {});
   }
 }
@@ -368,6 +369,9 @@ async function hydrateFromSession(): Promise<void> {
   tokenExpiresAt = state.expiresAt;
   currentUserId = state.userId ?? null;
   currentVaultSecretKeyHex = state.vaultSecretKey ?? null;
+  // Restore tenant-policy auto-lock so the options UI sees the override
+  // even if the vault hasn't been re-unlocked in this SW lifetime.
+  tenantAutoLockMinutes = state.tenantAutoLockMinutes ?? null;
 
   if (currentVaultSecretKeyHex) {
     try {
@@ -416,13 +420,21 @@ async function hydrateFromSession(): Promise<void> {
 }
 
 function scheduleRefreshAlarm(expiresAt: number): void {
-  const refreshAt = expiresAt - REFRESH_BUFFER_MS;
-  if (refreshAt <= Date.now()) {
-    // Already within the refresh window — attempt immediately
-    attemptTokenRefresh().catch(() => {});
-  } else {
-    chrome.alarms.create(ALARM_TOKEN_REFRESH, { when: refreshAt });
-  }
+  const now = Date.now();
+  // Adaptive buffer: normally refresh 2 min before expiry, but if the
+  // total TTL is shorter than 2 × the buffer, refresh at the half-life
+  // instead. Prevents a refresh loop when tenant policy sets a short TTL
+  // (e.g., 1 min): without this clamp, every newly-issued token would
+  // immediately fall inside the 2-min window and trigger another refresh.
+  const ttl = Math.max(0, expiresAt - now);
+  const buffer = Math.min(REFRESH_BUFFER_MS, Math.floor(ttl / 2));
+  const refreshAt = expiresAt - buffer;
+  // Floor the refresh time to at least a few seconds in the future so
+  // we never schedule an alarm in the past (Chrome coerces that to "now"
+  // and we'd loop anyway).
+  const MIN_DELAY_MS = 5_000;
+  const effectiveRefreshAt = Math.max(refreshAt, now + MIN_DELAY_MS);
+  chrome.alarms.create(ALARM_TOKEN_REFRESH, { when: effectiveRefreshAt });
 }
 
 async function attemptTokenRefresh(): Promise<void> {
@@ -1685,6 +1697,10 @@ async function handleMessage(
         hasToken: currentToken !== null,
         expiresAt: tokenExpiresAt,
         vaultUnlocked: encryptionKey !== null,
+        // Tenant-policy override for auto-lock. Null when the tenant has
+        // not set a value (or the vault has never been unlocked yet, so
+        // we don't know). UI uses this to disable the local setting.
+        tenantAutoLockMinutes,
       });
       return;
     }

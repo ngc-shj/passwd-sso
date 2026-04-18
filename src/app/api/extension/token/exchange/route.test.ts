@@ -44,6 +44,9 @@ vi.mock("@/lib/prisma", () => ({
       findMany: mockExtensionTokenFindMany,
       updateMany: mockExtensionTokenUpdateMany,
     },
+    tenant: {
+      findUnique: vi.fn().mockResolvedValue({ extensionTokenIdleTimeoutMinutes: 15 }),
+    },
     $transaction: mockTransaction,
   },
 }));

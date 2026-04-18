@@ -3,12 +3,15 @@ import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { randomUUID } from "node:crypto";
 import {
   EXTENSION_TOKEN_SCOPE,
-  EXTENSION_TOKEN_TTL_MS,
   EXTENSION_TOKEN_MAX_ACTIVE,
   type ExtensionTokenScope,
 } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { logAuditAsync } from "@/lib/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // ─── Types ───────────────────────────────────────────────────
 
@@ -17,6 +20,8 @@ export interface ValidatedExtensionToken {
   userId: string;
   scopes: ExtensionTokenScope[];
   expiresAt: Date;
+  familyId: string;
+  familyCreatedAt: Date;
 }
 
 export type TokenValidationError =
@@ -86,6 +91,8 @@ export async function validateExtensionToken(
         scope: true,
         expiresAt: true,
         revokedAt: true,
+        familyId: true,
+        familyCreatedAt: true,
       },
     }),
   BYPASS_PURPOSE.TOKEN_LIFECYCLE);
@@ -115,6 +122,8 @@ export async function validateExtensionToken(
       userId: token.userId,
       scopes: parseScopes(token.scope),
       expiresAt: token.expiresAt,
+      familyId: token.familyId,
+      familyCreatedAt: token.familyCreatedAt,
     },
   };
 }
@@ -144,9 +153,21 @@ export async function issueExtensionToken(params: {
 }): Promise<{ token: string; expiresAt: Date; scopeCsv: string }> {
   const { userId, tenantId, scope } = params;
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + EXTENSION_TOKEN_TTL_MS);
+
+  // Read tenant extension-token idle TTL. Fall back to the policy ceiling if
+  // the tenant row is missing (defensive — should not happen in practice).
+  const tenant = await withBypassRls(prisma, async () =>
+    prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { extensionTokenIdleTimeoutMinutes: true },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 10080;
+  const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
+
   const plaintext = generateShareToken();
   const tokenHash = hashToken(plaintext);
+  const familyId = randomUUID();
 
   const created = await withUserTenantRls(userId, async () =>
     prisma.$transaction(async (tx) => {
@@ -168,7 +189,17 @@ export async function issueExtensionToken(params: {
       }
 
       return tx.extensionToken.create({
-        data: { userId, tenantId, tokenHash, scope, expiresAt },
+        data: {
+          userId,
+          tenantId,
+          tokenHash,
+          scope,
+          expiresAt,
+          // New token = new family. Refresh flow carries the existing familyId
+          // forward (see /api/extension/token/refresh).
+          familyId,
+          familyCreatedAt: now,
+        },
         select: { expiresAt: true, scope: true },
       });
     }),
@@ -178,5 +209,91 @@ export async function issueExtensionToken(params: {
     token: plaintext,
     expiresAt: created.expiresAt,
     scopeCsv: created.scope,
+  };
+}
+
+// ─── Family revocation ───────────────────────────────────────
+
+export type ExtensionTokenFamilyRevokeReason =
+  | "family_expired"
+  | "replay_detected"
+  | "sign_out_everywhere"
+  | "passkey_reauth"
+  | "user_delete";
+
+/**
+ * Revoke every token row in the family and emit an audit event.
+ * Safe to call when no rows are affected (no-op).
+ */
+export async function revokeExtensionTokenFamily(params: {
+  familyId: string;
+  userId: string;
+  tenantId: string;
+  reason: ExtensionTokenFamilyRevokeReason;
+}): Promise<{ rowsRevoked: number }> {
+  const { familyId, userId, tenantId, reason } = params;
+  const now = new Date();
+
+  const result = await withBypassRls(prisma, async () =>
+    prisma.extensionToken.updateMany({
+      where: { familyId, revokedAt: null },
+      data: { revokedAt: now },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+
+  if (result.count > 0) {
+    await logAuditAsync({
+      scope: AUDIT_SCOPE.PERSONAL,
+      action: AUDIT_ACTION.EXTENSION_TOKEN_FAMILY_REVOKED,
+      userId,
+      tenantId,
+      targetType: AUDIT_TARGET_TYPE.EXTENSION_TOKEN,
+      targetId: familyId,
+      metadata: {
+        reason,
+        familyId,
+        rowsRevoked: result.count,
+      },
+    });
+  }
+
+  return { rowsRevoked: result.count };
+}
+
+/**
+ * Revoke every active extension token for a user, regardless of family.
+ * Used by: "sign out everywhere" (sessions DELETE), passkey re-auth.
+ * Emits one audit event per affected family.
+ */
+export async function revokeAllExtensionTokensForUser(params: {
+  userId: string;
+  tenantId: string;
+  reason: ExtensionTokenFamilyRevokeReason;
+}): Promise<{ rowsRevoked: number; familiesRevoked: number }> {
+  const { userId, tenantId, reason } = params;
+
+  // familyId is NOT NULL post-Batch-D migration — no legacy-null branch needed.
+  const activeFamilies = await withBypassRls(prisma, async () =>
+    prisma.extensionToken.findMany({
+      where: { userId, revokedAt: null },
+      select: { familyId: true },
+      distinct: ["familyId"],
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+
+  let totalRows = 0;
+  for (const row of activeFamilies) {
+    const { rowsRevoked } = await revokeExtensionTokenFamily({
+      familyId: row.familyId,
+      userId,
+      tenantId,
+      reason,
+    });
+    totalRows += rowsRevoked;
+  }
+
+  return {
+    rowsRevoked: totalRows,
+    familiesRevoked: activeFamilies.length,
   };
 }

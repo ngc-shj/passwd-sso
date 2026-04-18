@@ -31,6 +31,10 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+  resolveUserTenantId: vi.fn().mockResolvedValue("tenant-1"),
+}));
+vi.mock("@/lib/extension-token", () => ({
+  revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },

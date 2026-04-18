@@ -12,7 +12,7 @@
   "displayNamePlaceholder": "例: 本番 Azure AD",
   "provider": "プロバイダー",
   "selectProvider": "プロバイダーを選択",
-  "enabled": "有効",
+  "enabled": "このディレクトリ同期設定を有効にする",
   "syncInterval": "同期間隔（分）",
   "credentials": "認証情報",
   "credentialsHint": "プロバイダー固有の認証情報を入力してください。",

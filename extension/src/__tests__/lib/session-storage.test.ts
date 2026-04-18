@@ -113,6 +113,9 @@ describe("session-storage", () => {
         userId: "u-1",
         vaultSecretKey: undefined,
         ecdhEncrypted: undefined,
+        // Field added when tenant auto-lock persistence landed; absent from
+        // stored rows becomes `null` per the validator.
+        tenantAutoLockMinutes: null,
       });
     });
 

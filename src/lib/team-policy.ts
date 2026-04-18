@@ -14,7 +14,10 @@ export interface TeamPolicyData {
   requireLowercase: boolean;
   requireNumbers: boolean;
   requireSymbols: boolean;
+  /** @deprecated use sessionAbsoluteTimeoutMinutes */
   maxSessionDurationMinutes: number | null;
+  sessionIdleTimeoutMinutes: number | null;
+  sessionAbsoluteTimeoutMinutes: number | null;
   requireRepromptForAll: boolean;
   allowExport: boolean;
   allowSharing: boolean;
@@ -31,6 +34,8 @@ const DEFAULT_POLICY: TeamPolicyData = {
   requireNumbers: false,
   requireSymbols: false,
   maxSessionDurationMinutes: null,
+  sessionIdleTimeoutMinutes: null,
+  sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
@@ -64,6 +69,8 @@ export async function getTeamPolicy(teamId: string): Promise<TeamPolicyData> {
     requireNumbers: policy.requireNumbers,
     requireSymbols: policy.requireSymbols,
     maxSessionDurationMinutes: policy.maxSessionDurationMinutes,
+    sessionIdleTimeoutMinutes: policy.sessionIdleTimeoutMinutes,
+    sessionAbsoluteTimeoutMinutes: policy.sessionAbsoluteTimeoutMinutes,
     requireRepromptForAll: policy.requireRepromptForAll,
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,
@@ -110,56 +117,6 @@ export async function assertPolicySharePassword(
       "Share password is required by team policy",
     );
   }
-}
-
-// ─── Session duration enforcement ────────────────────────────
-
-const sessionDurationCache = new Map<string, { value: number | null; expiresAt: number }>();
-const SESSION_DURATION_CACHE_TTL_MS = 60_000;
-const SESSION_DURATION_CACHE_MAX_SIZE = 10_000;
-
-/**
- * Return the strictest (minimum) maxSessionDurationMinutes across all teams
- * the user belongs to. Returns null if no team sets a session duration limit.
- */
-export async function getStrictestSessionDuration(userId: string): Promise<number | null> {
-  const cached = sessionDurationCache.get(userId);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-  if (cached) sessionDurationCache.delete(userId);
-
-  if (sessionDurationCache.size >= SESSION_DURATION_CACHE_MAX_SIZE) {
-    const oldest = sessionDurationCache.keys().next().value;
-    if (oldest !== undefined) sessionDurationCache.delete(oldest);
-  }
-
-  const memberships = await withBypassRls(
-    prisma,
-    async () =>
-      prisma.teamMember.findMany({
-        where: { userId },
-        select: {
-          team: {
-            select: {
-              policy: { select: { maxSessionDurationMinutes: true } },
-            },
-          },
-        },
-      }),
-    BYPASS_PURPOSE.AUTH_FLOW,
-  );
-
-  let minimum: number | null = null;
-  for (const m of memberships) {
-    const duration = m.team.policy?.maxSessionDurationMinutes ?? null;
-    if (duration !== null) {
-      minimum = minimum === null ? duration : Math.min(minimum, duration);
-    }
-  }
-
-  sessionDurationCache.set(userId, { value: minimum, expiresAt: Date.now() + SESSION_DURATION_CACHE_TTL_MS });
-  return minimum;
 }
 
 // ─── Team IP restriction ──────────────────────────────────────

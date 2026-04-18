@@ -106,9 +106,23 @@ describe("validateSettings", () => {
     expect(result.showBadgeCount).toBe(true);
   });
 
-  it("falls back negative autoLockMinutes to default", () => {
+  it("clamps negative autoLockMinutes to minimum (5)", () => {
+    // After the 5-min floor was introduced, negative values are clamped up
+    // to the minimum rather than silently falling back to the 15-min default.
+    // Rationale: never silently ignore a user's configured intent; enforce
+    // the security invariant explicitly.
     const result = validateSettings({ ...DEFAULTS, autoLockMinutes: -5 });
-    expect(result.autoLockMinutes).toBe(15);
+    expect(result.autoLockMinutes).toBe(5);
+  });
+
+  it("clamps legacy 0 ('never') autoLockMinutes to minimum (5)", () => {
+    const result = validateSettings({ ...DEFAULTS, autoLockMinutes: 0 });
+    expect(result.autoLockMinutes).toBe(5);
+  });
+
+  it("clamps legacy 1-4 minute autoLockMinutes to minimum (5)", () => {
+    const result = validateSettings({ ...DEFAULTS, autoLockMinutes: 3 });
+    expect(result.autoLockMinutes).toBe(5);
   });
 
   it("falls back NaN autoLockMinutes to default", () => {

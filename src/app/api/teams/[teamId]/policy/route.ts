@@ -13,6 +13,9 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { invalidateSessionTimeoutCacheForTenant } from "@/lib/session-timeout";
+import { API_ERROR } from "@/lib/api-error-codes";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 
 type Params = { params: Promise<{ teamId: string }> };
 
@@ -53,7 +56,10 @@ async function handleGET(req: NextRequest, { params }: Params) {
     requireLowercase: policy?.requireLowercase ?? false,
     requireNumbers: policy?.requireNumbers ?? false,
     requireSymbols: policy?.requireSymbols ?? false,
+    /** @deprecated use sessionAbsoluteTimeoutMinutes */
     maxSessionDurationMinutes: policy?.maxSessionDurationMinutes ?? null,
+    sessionIdleTimeoutMinutes: policy?.sessionIdleTimeoutMinutes ?? null,
+    sessionAbsoluteTimeoutMinutes: policy?.sessionAbsoluteTimeoutMinutes ?? null,
     requireRepromptForAll: policy?.requireRepromptForAll ?? false,
     allowExport: policy?.allowExport ?? true,
     allowSharing: policy?.allowSharing ?? true,
@@ -81,6 +87,41 @@ async function handlePUT(req: NextRequest, { params }: Params) {
   const result = await parseBody(req, upsertTeamPolicySchema);
   if (!result.ok) return result.response;
 
+  // Enforce `team value <= tenant value` for session timeouts.
+  const teamTenant = await withBypassRls(prisma, async () =>
+    prisma.team.findUnique({
+      where: { id: teamId },
+      select: {
+        tenantId: true,
+        tenant: {
+          select: {
+            sessionIdleTimeoutMinutes: true,
+            sessionAbsoluteTimeoutMinutes: true,
+          },
+        },
+      },
+    }),
+  BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
+
+  if (!teamTenant) return notFound();
+
+  if (
+    result.data.sessionIdleTimeoutMinutes != null &&
+    result.data.sessionIdleTimeoutMinutes > teamTenant.tenant.sessionIdleTimeoutMinutes
+  ) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      message: `sessionIdleTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionIdleTimeoutMinutes} minutes`,
+    });
+  }
+  if (
+    result.data.sessionAbsoluteTimeoutMinutes != null &&
+    result.data.sessionAbsoluteTimeoutMinutes > teamTenant.tenant.sessionAbsoluteTimeoutMinutes
+  ) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      message: `sessionAbsoluteTimeoutMinutes exceeds tenant cap of ${teamTenant.tenant.sessionAbsoluteTimeoutMinutes} minutes`,
+    });
+  }
+
   const policy = await withTeamTenantRls(teamId, async (tenantId) =>
     prisma.teamPolicy.upsert({
       where: { teamId },
@@ -92,6 +133,9 @@ async function handlePUT(req: NextRequest, { params }: Params) {
       update: result.data,
     }),
   );
+
+  // Bust the resolver cache so session-expiry enforcement picks up the change.
+  invalidateSessionTimeoutCacheForTenant(teamTenant.tenantId);
 
   await logAuditAsync({
     ...teamAuditBase(req, session.user.id, teamId),
@@ -107,7 +151,10 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     requireLowercase: policy.requireLowercase,
     requireNumbers: policy.requireNumbers,
     requireSymbols: policy.requireSymbols,
+    /** @deprecated use sessionAbsoluteTimeoutMinutes */
     maxSessionDurationMinutes: policy.maxSessionDurationMinutes,
+    sessionIdleTimeoutMinutes: policy.sessionIdleTimeoutMinutes,
+    sessionAbsoluteTimeoutMinutes: policy.sessionAbsoluteTimeoutMinutes,
     requireRepromptForAll: policy.requireRepromptForAll,
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,

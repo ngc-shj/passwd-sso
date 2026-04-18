@@ -20,6 +20,7 @@ export const AUDIT_TARGET_TYPE = {
   SERVICE_ACCOUNT_TOKEN: "ServiceAccountToken",
   ACCESS_REQUEST: "AccessRequest",
   MCP_CLIENT: "McpClient",
+  EXTENSION_TOKEN: "ExtensionToken",
 } as const;
 
 export type AuditTargetType =

@@ -4,9 +4,9 @@ import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { validateExtensionToken } from "@/lib/extension-token";
-import { EXTENSION_TOKEN_TTL_MS } from "@/lib/constants";
+import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/extension-token";
 import { withUserTenantRls } from "@/lib/tenant-context";
+import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TokenIssueResponseSchema } from "@/lib/validations/extension-token";
 import logger from "@/lib/logger";
@@ -32,7 +32,7 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR[result.error], 401);
   }
 
-  const { tokenId, userId, scopes } = result.data;
+  const { tokenId, userId, scopes, familyId, familyCreatedAt } = result.data;
 
   const rl = await refreshLimiter.check(`rl:ext_refresh:${userId}`);
   if (!rl.allowed) {
@@ -54,9 +54,40 @@ async function handlePOST(req: NextRequest) {
     return unauthorized();
   }
 
-  // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded
+  // Read tenant extension-token TTL policy
+  const tenant = await withBypassRls(prisma, async () =>
+    prisma.tenant.findUnique({
+      where: { id: activeSession.tenantId },
+      select: {
+        extensionTokenIdleTimeoutMinutes: true,
+        extensionTokenAbsoluteTimeoutMinutes: true,
+      },
+    }),
+  BYPASS_PURPOSE.TOKEN_LIFECYCLE);
+  const idleMinutes = tenant?.extensionTokenIdleTimeoutMinutes ?? 10080;
+  const absoluteMinutes = tenant?.extensionTokenAbsoluteTimeoutMinutes ?? 43200;
+
   const now = new Date();
-  const expiresAt = new Date(now.getTime() + EXTENSION_TOKEN_TTL_MS);
+
+  // Family absolute timeout enforcement. Pre-migration tokens have null familyId;
+  // we refuse to refresh them so every live token eventually converges to a family.
+  if (!familyId || !familyCreatedAt) {
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_FAMILY_EXPIRED, 401);
+  }
+  const familyAgeMs = now.getTime() - familyCreatedAt.getTime();
+  if (familyAgeMs > absoluteMinutes * MS_PER_MINUTE) {
+    // Revoke the entire family and audit. Do NOT issue a new token.
+    await revokeExtensionTokenFamily({
+      familyId,
+      userId,
+      tenantId: activeSession.tenantId,
+      reason: "family_expired",
+    });
+    return errorResponse(API_ERROR.EXTENSION_TOKEN_FAMILY_EXPIRED, 401);
+  }
+
+  // Interactive transaction: revoke old (optimistic lock), then create new only if revoke succeeded
+  const expiresAt = new Date(now.getTime() + idleMinutes * MS_PER_MINUTE);
   const plaintext = generateShareToken();
   const newTokenHash = hashToken(plaintext);
   const scopeCsv = scopes.join(",");
@@ -79,6 +110,9 @@ async function handlePOST(req: NextRequest) {
           tokenHash: newTokenHash,
           scope: scopeCsv,
           expiresAt,
+          // Carry the family forward so the absolute cap persists across rotations
+          familyId,
+          familyCreatedAt,
         },
         select: { expiresAt: true, scope: true },
       });

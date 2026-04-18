@@ -7,8 +7,9 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "./helpers";
-import { withUserTenantRls } from "@/lib/tenant-context";
+import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
 import { rateLimited } from "@/lib/api-response";
+import { revokeAllExtensionTokensForUser } from "@/lib/extension-token";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 
@@ -103,6 +104,17 @@ async function handleDELETE(request: NextRequest) {
       },
     }),
   );
+
+  // "Sign out everywhere" must also revoke all extension tokens since they
+  // are bearer credentials distinct from Auth.js sessions.
+  const tenantId = await resolveUserTenantId(session.user.id);
+  if (tenantId) {
+    await revokeAllExtensionTokensForUser({
+      userId: session.user.id,
+      tenantId,
+      reason: "sign_out_everywhere",
+    });
+  }
 
   await logAuditAsync({
     ...personalAuditBase(request, session.user.id),

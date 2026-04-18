@@ -13,7 +13,7 @@ import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
-import { getStrictestSessionDuration } from "@/lib/team-policy";
+import { resolveEffectiveSessionTimeouts } from "@/lib/session-timeout";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
@@ -282,14 +282,27 @@ export function createCustomAdapter(): Adapter {
             }
           }
 
+          // Override Auth.js's default expires with the per-user resolved idle
+          // window. At createSession time `createdAt === now`, so the absolute
+          // bound does not further constrain the first expires; subsequent
+          // updateSession calls enforce `min(now + idle, createdAt + absolute)`.
+          const resolved = await resolveEffectiveSessionTimeouts(
+            session.userId,
+            meta?.provider ?? null,
+          );
+          const resolvedExpires = new Date(
+            Date.now() + resolved.idleMinutes * MS_PER_MINUTE,
+          );
+
           return tx.session.create({
             data: {
               sessionToken: session.sessionToken,
               userId: session.userId,
               tenantId,
-              expires: session.expires,
+              expires: resolvedExpires,
               ipAddress: meta?.ip ?? null,
               userAgent: meta?.userAgent?.slice(0, USER_AGENT_MAX_LENGTH) ?? null,
+              provider: meta?.provider ?? null,
             },
             select: {
               sessionToken: true,
@@ -428,7 +441,7 @@ export function createCustomAdapter(): Adapter {
       session: Partial<AdapterSession> & Pick<AdapterSession, "sessionToken">,
     ): Promise<AdapterSession | null | undefined> {
       try {
-        // Read current session + tenant in a single query
+        // Read current session (provider included for AAL3 clamping)
         const current = await withBypassRls(prisma, async () =>
           prisma.session.findUnique({
             where: { sessionToken: session.sessionToken },
@@ -437,61 +450,64 @@ export function createCustomAdapter(): Adapter {
               createdAt: true,
               lastActiveAt: true,
               tenantId: true,
-              tenant: { select: { sessionIdleTimeoutMinutes: true } },
+              provider: true,
             },
           }),
         BYPASS_PURPOSE.AUTH_FLOW);
 
         if (!current) return null;
 
-        // Check idle timeout before refreshing the session
-        if (current.lastActiveAt && current.tenantId) {
-          const timeout = current.tenant?.sessionIdleTimeoutMinutes;
-          if (timeout != null && timeout > 0) {
-            const idleSince = Date.now() - current.lastActiveAt.getTime();
-            if (idleSince > timeout * MS_PER_MINUTE) {
-              // Session exceeded idle timeout — delete and return null (forces sign-out)
-              await withBypassRls(prisma, async () =>
-                prisma.session.delete({
-                  where: { sessionToken: session.sessionToken },
-                }),
-              BYPASS_PURPOSE.AUTH_FLOW);
-              return null;
-            }
-          }
+        // Resolve per-user idle + absolute in a single call.
+        // AAL3 clamp applied when provider === "webauthn".
+        const resolved = await resolveEffectiveSessionTimeouts(
+          current.userId,
+          current.provider ?? null,
+        );
+        const now = Date.now();
+        const idleDeadlineMs = current.lastActiveAt.getTime() + resolved.idleMinutes * MS_PER_MINUTE;
+        const absoluteDeadlineMs = current.createdAt.getTime() + resolved.absoluteMinutes * MS_PER_MINUTE;
+
+        // Idle timeout: rolling; measured from lastActiveAt.
+        if (now > idleDeadlineMs) {
+          await withBypassRls(prisma, async () =>
+            prisma.session.delete({
+              where: { sessionToken: session.sessionToken },
+            }),
+          BYPASS_PURPOSE.AUTH_FLOW);
+          return null;
         }
 
-        // Team session duration enforcement
-        if (current.userId) {
-          const maxDuration = await getStrictestSessionDuration(current.userId);
-          if (maxDuration !== null && current.createdAt) {
-            const sessionAgeMs = Date.now() - current.createdAt.getTime();
-            if (sessionAgeMs > maxDuration * MS_PER_MINUTE) {
-              await withBypassRls(
-                prisma,
-                () => prisma.session.delete({ where: { sessionToken: session.sessionToken } }),
-                BYPASS_PURPOSE.AUTH_FLOW,
-              );
-              await logAuditAsync({
-                scope: AUDIT_SCOPE.PERSONAL,
-                action: AUDIT_ACTION.SESSION_REVOKE,
-                userId: current.userId,
-                metadata: {
-                  reason: "team_session_duration_exceeded",
-                  maxDurationMinutes: maxDuration,
-                },
-              });
-              return null;
-            }
-          }
+        // Absolute cap: non-rolling; measured from createdAt. Enforced
+        // independently of activity per OWASP ASVS V7.3.3.
+        if (now > absoluteDeadlineMs) {
+          await withBypassRls(prisma, async () =>
+            prisma.session.delete({
+              where: { sessionToken: session.sessionToken },
+            }),
+          BYPASS_PURPOSE.AUTH_FLOW);
+          await logAuditAsync({
+            scope: AUDIT_SCOPE.PERSONAL,
+            action: AUDIT_ACTION.SESSION_REVOKE,
+            userId: current.userId,
+            metadata: {
+              reason: "tenant_absolute_session_duration_exceeded",
+              absoluteMinutes: resolved.absoluteMinutes,
+            },
+          });
+          return null;
         }
 
-        // Session is still valid — update lastActiveAt
+        // Session is still valid. Compute effective expires as the nearer of
+        // rolling-idle and non-rolling-absolute deadlines.
+        const effectiveExpires = new Date(
+          Math.min(now + resolved.idleMinutes * MS_PER_MINUTE, absoluteDeadlineMs),
+        );
+
         const updated = await withBypassRls(prisma, async () =>
           prisma.session.update({
             where: { sessionToken: session.sessionToken },
             data: {
-              ...(session.expires ? { expires: session.expires } : {}),
+              expires: effectiveExpires,
               lastActiveAt: new Date(),
             },
             select: {

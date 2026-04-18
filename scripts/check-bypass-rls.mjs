@@ -28,7 +28,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit-user-lookup.ts", ["user"]],
   ["src/lib/scim-token.ts", ["scimToken"]],
-  ["src/lib/extension-token.ts", ["extensionToken"]],
+  ["src/lib/extension-token.ts", ["extensionToken", "tenant"]],
   ["src/lib/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
@@ -53,9 +53,15 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
   ["src/lib/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
-  ["src/app/api/tenant/policy/route.ts", ["user", "tenant"]],
+  ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/access-restriction.ts", ["tenant"]],
   ["src/lib/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
+  // Session timeout resolver: cross-team policy read for session lifetime enforcement
+  ["src/lib/session-timeout.ts", ["user"]],
+  // Extension token refresh: cross-tenant token lookup + family-absolute check
+  ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
+  // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
+  ["src/app/api/teams/[teamId]/policy/route.ts", ["team"]],
   ["src/app/api/maintenance/purge-audit-logs/route.ts", ["tenant", "auditLog"]],
   ["src/app/api/maintenance/audit-outbox-metrics/route.ts", []],
   ["src/app/api/maintenance/audit-outbox-purge-failed/route.ts", []],

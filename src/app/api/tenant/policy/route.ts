@@ -14,6 +14,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isValidCidr, extractClientIp } from "@/lib/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
 import { invalidateLockoutThresholdCache } from "@/lib/account-lockout";
+import { invalidateSessionTimeoutCacheForTenant } from "@/lib/session-timeout";
 import {
   pinLengthSchema,
   MAX_CIDRS,
@@ -35,6 +36,12 @@ import {
   MAX_CONCURRENT_SESSIONS_MAX,
   SESSION_IDLE_TIMEOUT_MIN,
   SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_MIN,
+  SESSION_ABSOLUTE_TIMEOUT_MAX,
+  EXTENSION_TOKEN_IDLE_TIMEOUT_MIN,
+  EXTENSION_TOKEN_IDLE_TIMEOUT_MAX,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN,
+  EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
   SA_TOKEN_MAX_EXPIRY_MIN,
@@ -69,6 +76,9 @@ async function handleGET(_req: NextRequest) {
       select: { tenant: { select: {
         maxConcurrentSessions: true,
         sessionIdleTimeoutMinutes: true,
+        sessionAbsoluteTimeoutMinutes: true,
+        extensionTokenIdleTimeoutMinutes: true,
+        extensionTokenAbsoluteTimeoutMinutes: true,
         vaultAutoLockMinutes: true,
         allowedCidrs: true,
         tailscaleEnabled: true,
@@ -102,7 +112,10 @@ async function handleGET(_req: NextRequest) {
 
   return NextResponse.json({
     maxConcurrentSessions: user?.tenant?.maxConcurrentSessions ?? null,
-    sessionIdleTimeoutMinutes: user?.tenant?.sessionIdleTimeoutMinutes ?? null,
+    sessionIdleTimeoutMinutes: user?.tenant?.sessionIdleTimeoutMinutes ?? 480,
+    sessionAbsoluteTimeoutMinutes: user?.tenant?.sessionAbsoluteTimeoutMinutes ?? 43200,
+    extensionTokenIdleTimeoutMinutes: user?.tenant?.extensionTokenIdleTimeoutMinutes ?? 10080,
+    extensionTokenAbsoluteTimeoutMinutes: user?.tenant?.extensionTokenAbsoluteTimeoutMinutes ?? 43200,
     vaultAutoLockMinutes: user?.tenant?.vaultAutoLockMinutes ?? null,
     allowedCidrs: user?.tenant?.allowedCidrs ?? [],
     tailscaleEnabled: user?.tenant?.tailscaleEnabled ?? false,
@@ -161,6 +174,9 @@ async function handlePATCH(req: NextRequest) {
   const {
     maxConcurrentSessions,
     sessionIdleTimeoutMinutes,
+    sessionAbsoluteTimeoutMinutes,
+    extensionTokenIdleTimeoutMinutes,
+    extensionTokenAbsoluteTimeoutMinutes,
     vaultAutoLockMinutes,
     allowedCidrs,
     tailscaleEnabled,
@@ -214,13 +230,53 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate sessionIdleTimeoutMinutes: null (disabled) or positive integer up to 24h
-  if (sessionIdleTimeoutMinutes !== null && sessionIdleTimeoutMinutes !== undefined) {
+  // Validate sessionIdleTimeoutMinutes: now non-nullable per design. null is rejected.
+  if (sessionIdleTimeoutMinutes !== undefined) {
     if (
+      sessionIdleTimeoutMinutes === null ||
       typeof sessionIdleTimeoutMinutes !== "number" ||
       !Number.isInteger(sessionIdleTimeoutMinutes) ||
       sessionIdleTimeoutMinutes < SESSION_IDLE_TIMEOUT_MIN ||
       sessionIdleTimeoutMinutes > SESSION_IDLE_TIMEOUT_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate sessionAbsoluteTimeoutMinutes (non-nullable; ASVS V7.3.3)
+  if (sessionAbsoluteTimeoutMinutes !== undefined) {
+    if (
+      sessionAbsoluteTimeoutMinutes === null ||
+      typeof sessionAbsoluteTimeoutMinutes !== "number" ||
+      !Number.isInteger(sessionAbsoluteTimeoutMinutes) ||
+      sessionAbsoluteTimeoutMinutes < SESSION_ABSOLUTE_TIMEOUT_MIN ||
+      sessionAbsoluteTimeoutMinutes > SESSION_ABSOLUTE_TIMEOUT_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate extensionTokenIdleTimeoutMinutes (non-nullable)
+  if (extensionTokenIdleTimeoutMinutes !== undefined) {
+    if (
+      extensionTokenIdleTimeoutMinutes === null ||
+      typeof extensionTokenIdleTimeoutMinutes !== "number" ||
+      !Number.isInteger(extensionTokenIdleTimeoutMinutes) ||
+      extensionTokenIdleTimeoutMinutes < EXTENSION_TOKEN_IDLE_TIMEOUT_MIN ||
+      extensionTokenIdleTimeoutMinutes > EXTENSION_TOKEN_IDLE_TIMEOUT_MAX
+    ) {
+      return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
+    }
+  }
+
+  // Validate extensionTokenAbsoluteTimeoutMinutes (non-nullable)
+  if (extensionTokenAbsoluteTimeoutMinutes !== undefined) {
+    if (
+      extensionTokenAbsoluteTimeoutMinutes === null ||
+      typeof extensionTokenAbsoluteTimeoutMinutes !== "number" ||
+      !Number.isInteger(extensionTokenAbsoluteTimeoutMinutes) ||
+      extensionTokenAbsoluteTimeoutMinutes < EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN ||
+      extensionTokenAbsoluteTimeoutMinutes > EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX
     ) {
       return errorResponse(API_ERROR.VALIDATION_ERROR, 400);
     }
@@ -501,6 +557,10 @@ async function handlePATCH(req: NextRequest) {
     jitTokenMaxTtlSec !== undefined ||
     delegationDefaultTtlSec !== undefined ||
     delegationMaxTtlSec !== undefined ||
+    // vault-auto-lock <= min(session_idle, extension_token_idle) invariant
+    vaultAutoLockMinutes !== undefined ||
+    sessionIdleTimeoutMinutes !== undefined ||
+    extensionTokenIdleTimeoutMinutes !== undefined ||
     ((allowedCidrs !== undefined || tailscaleEnabled !== undefined) && !confirmLockout);
 
   const currentTenant = needsCurrentState
@@ -524,6 +584,9 @@ async function handlePATCH(req: NextRequest) {
             jitTokenMaxTtlSec: true,
             delegationDefaultTtlSec: true,
             delegationMaxTtlSec: true,
+            vaultAutoLockMinutes: true,
+            sessionIdleTimeoutMinutes: true,
+            extensionTokenIdleTimeoutMinutes: true,
           },
         }),
       BYPASS_PURPOSE.CROSS_TENANT_LOOKUP)
@@ -561,6 +624,40 @@ async function handlePATCH(req: NextRequest) {
   // Lockout durations must always be strictly ascending
   if (d1 >= d2 || d2 >= d3) {
     return errorResponse(API_ERROR.VALIDATION_ERROR, 400, { message: "Lockout durations must be strictly ascending: duration1 < duration2 < duration3" });
+  }
+
+  // Cross-field: vault_auto_lock must not exceed idle timeouts.
+  // When vault auto-lock is longer than the session/extension token idle
+  // timeout, the vault stays decrypted after the token/session dies —
+  // the "logged out but locally readable" state is confusing UX and
+  // extends the effective credential-material lifetime unnecessarily.
+  const mergedVaultAutoLock = vaultAutoLockMinutes !== undefined
+    ? vaultAutoLockMinutes
+    : currentTenant?.vaultAutoLockMinutes ?? null;
+  const mergedSessionIdle = sessionIdleTimeoutMinutes !== undefined
+    ? sessionIdleTimeoutMinutes
+    : currentTenant?.sessionIdleTimeoutMinutes ?? null;
+  const mergedExtIdle = extensionTokenIdleTimeoutMinutes !== undefined
+    ? extensionTokenIdleTimeoutMinutes
+    : currentTenant?.extensionTokenIdleTimeoutMinutes ?? null;
+
+  if (
+    typeof mergedVaultAutoLock === "number" &&
+    typeof mergedSessionIdle === "number" &&
+    mergedVaultAutoLock > mergedSessionIdle
+  ) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      message: `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= sessionIdleTimeoutMinutes (${mergedSessionIdle})`,
+    });
+  }
+  if (
+    typeof mergedVaultAutoLock === "number" &&
+    typeof mergedExtIdle === "number" &&
+    mergedVaultAutoLock > mergedExtIdle
+  ) {
+    return errorResponse(API_ERROR.VALIDATION_ERROR, 400, {
+      message: `vaultAutoLockMinutes (${mergedVaultAutoLock}) must be <= extensionTokenIdleTimeoutMinutes (${mergedExtIdle})`,
+    });
   }
 
   // Password expiry warning must be less than max age when both are set
@@ -619,7 +716,16 @@ async function handlePATCH(req: NextRequest) {
     updateData.maxConcurrentSessions = maxConcurrentSessions ?? null;
   }
   if (sessionIdleTimeoutMinutes !== undefined) {
-    updateData.sessionIdleTimeoutMinutes = sessionIdleTimeoutMinutes ?? null;
+    updateData.sessionIdleTimeoutMinutes = sessionIdleTimeoutMinutes;
+  }
+  if (sessionAbsoluteTimeoutMinutes !== undefined) {
+    updateData.sessionAbsoluteTimeoutMinutes = sessionAbsoluteTimeoutMinutes;
+  }
+  if (extensionTokenIdleTimeoutMinutes !== undefined) {
+    updateData.extensionTokenIdleTimeoutMinutes = extensionTokenIdleTimeoutMinutes;
+  }
+  if (extensionTokenAbsoluteTimeoutMinutes !== undefined) {
+    updateData.extensionTokenAbsoluteTimeoutMinutes = extensionTokenAbsoluteTimeoutMinutes;
   }
   if (vaultAutoLockMinutes !== undefined) {
     updateData.vaultAutoLockMinutes = vaultAutoLockMinutes ?? null;
@@ -711,47 +817,120 @@ async function handlePATCH(req: NextRequest) {
     updateData.delegationMaxTtlSec = delegationMaxTtlSec ?? null;
   }
 
+  // Cascade clamp: when tenant lowers session idle/absolute, clamp team
+   // overrides that exceed the new value in the same transaction. Use
+   // Serializable to prevent TOCTOU with concurrent team policy PATCHes.
+  const clampIdleTo = typeof sessionIdleTimeoutMinutes === "number" ? sessionIdleTimeoutMinutes : null;
+  const clampAbsoluteTo = typeof sessionAbsoluteTimeoutMinutes === "number" ? sessionAbsoluteTimeoutMinutes : null;
+  const clampedTeams: Array<{ teamId: string; field: string; previousValue: number; newValue: number }> = [];
+
   const updated = await withBypassRls(prisma, async () =>
-    prisma.tenant.update({
-      where: { id: membership.tenantId },
-      data: updateData,
-      select: {
-        maxConcurrentSessions: true,
-        sessionIdleTimeoutMinutes: true,
-        vaultAutoLockMinutes: true,
-        allowedCidrs: true,
-        tailscaleEnabled: true,
-        tailscaleTailnet: true,
-        requireMinPinLength: true,
-        requirePasskey: true,
-        requirePasskeyEnabledAt: true,
-        passkeyGracePeriodDays: true,
-        lockoutThreshold1: true,
-        lockoutDuration1Minutes: true,
-        lockoutThreshold2: true,
-        lockoutDuration2Minutes: true,
-        lockoutThreshold3: true,
-        lockoutDuration3Minutes: true,
-        passwordMaxAgeDays: true,
-        passwordExpiryWarningDays: true,
-        auditLogRetentionDays: true,
-        tenantMinPasswordLength: true,
-        tenantRequireUppercase: true,
-        tenantRequireLowercase: true,
-        tenantRequireNumbers: true,
-        tenantRequireSymbols: true,
-        saTokenMaxExpiryDays: true,
-        jitTokenDefaultTtlSec: true,
-        jitTokenMaxTtlSec: true,
-        delegationDefaultTtlSec: true,
-        delegationMaxTtlSec: true,
-      },
-    }),
+    prisma.$transaction(async (tx) => {
+      if (clampIdleTo !== null) {
+        const affected = await tx.teamPolicy.findMany({
+          where: {
+            team: { tenantId: membership.tenantId },
+            sessionIdleTimeoutMinutes: { gt: clampIdleTo },
+          },
+          select: { teamId: true, sessionIdleTimeoutMinutes: true },
+        });
+        for (const row of affected) {
+          clampedTeams.push({
+            teamId: row.teamId,
+            field: "sessionIdleTimeoutMinutes",
+            previousValue: row.sessionIdleTimeoutMinutes!,
+            newValue: clampIdleTo,
+          });
+        }
+        if (affected.length > 0) {
+          await tx.teamPolicy.updateMany({
+            where: { teamId: { in: affected.map((a) => a.teamId) } },
+            data: { sessionIdleTimeoutMinutes: clampIdleTo },
+          });
+        }
+      }
+      if (clampAbsoluteTo !== null) {
+        const affected = await tx.teamPolicy.findMany({
+          where: {
+            team: { tenantId: membership.tenantId },
+            sessionAbsoluteTimeoutMinutes: { gt: clampAbsoluteTo },
+          },
+          select: { teamId: true, sessionAbsoluteTimeoutMinutes: true },
+        });
+        for (const row of affected) {
+          clampedTeams.push({
+            teamId: row.teamId,
+            field: "sessionAbsoluteTimeoutMinutes",
+            previousValue: row.sessionAbsoluteTimeoutMinutes!,
+            newValue: clampAbsoluteTo,
+          });
+        }
+        if (affected.length > 0) {
+          await tx.teamPolicy.updateMany({
+            where: { teamId: { in: affected.map((a) => a.teamId) } },
+            data: { sessionAbsoluteTimeoutMinutes: clampAbsoluteTo },
+          });
+        }
+      }
+      return tx.tenant.update({
+        where: { id: membership.tenantId },
+        data: updateData,
+        select: {
+          maxConcurrentSessions: true,
+          sessionIdleTimeoutMinutes: true,
+          sessionAbsoluteTimeoutMinutes: true,
+          extensionTokenIdleTimeoutMinutes: true,
+          extensionTokenAbsoluteTimeoutMinutes: true,
+          vaultAutoLockMinutes: true,
+          allowedCidrs: true,
+          tailscaleEnabled: true,
+          tailscaleTailnet: true,
+          requireMinPinLength: true,
+          requirePasskey: true,
+          requirePasskeyEnabledAt: true,
+          passkeyGracePeriodDays: true,
+          lockoutThreshold1: true,
+          lockoutDuration1Minutes: true,
+          lockoutThreshold2: true,
+          lockoutDuration2Minutes: true,
+          lockoutThreshold3: true,
+          lockoutDuration3Minutes: true,
+          passwordMaxAgeDays: true,
+          passwordExpiryWarningDays: true,
+          auditLogRetentionDays: true,
+          tenantMinPasswordLength: true,
+          tenantRequireUppercase: true,
+          tenantRequireLowercase: true,
+          tenantRequireNumbers: true,
+          tenantRequireSymbols: true,
+          saTokenMaxExpiryDays: true,
+          jitTokenDefaultTtlSec: true,
+          jitTokenMaxTtlSec: true,
+          delegationDefaultTtlSec: true,
+          delegationMaxTtlSec: true,
+        },
+      });
+    }, { isolationLevel: "Serializable" }),
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   // Bust the tenant policy cache so access restriction picks up new values immediately
   invalidateTenantPolicyCache(membership.tenantId);
   invalidateLockoutThresholdCache(membership.tenantId);
+  invalidateSessionTimeoutCacheForTenant(membership.tenantId);
+
+  // Audit any team-policy clamping that cascaded from this tenant change.
+  for (const c of clampedTeams) {
+    await logAuditAsync({
+      ...tenantAuditBase(req, session.user.id, membership.tenantId),
+      action: AUDIT_ACTION.TEAM_POLICY_CLAMPED_BY_TENANT,
+      metadata: {
+        teamId: c.teamId,
+        field: c.field,
+        previousValue: c.previousValue,
+        newValue: c.newValue,
+      },
+    });
+  }
 
   await logAuditAsync({
     ...tenantAuditBase(req, session.user.id, membership.tenantId),
@@ -759,6 +938,9 @@ async function handlePATCH(req: NextRequest) {
     metadata: {
       maxConcurrentSessions: updated.maxConcurrentSessions,
       sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
+      sessionAbsoluteTimeoutMinutes: updated.sessionAbsoluteTimeoutMinutes,
+      extensionTokenIdleTimeoutMinutes: updated.extensionTokenIdleTimeoutMinutes,
+      extensionTokenAbsoluteTimeoutMinutes: updated.extensionTokenAbsoluteTimeoutMinutes,
       vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
       allowedCidrs: updated.allowedCidrs,
       tailscaleEnabled: updated.tailscaleEnabled,
@@ -792,6 +974,9 @@ async function handlePATCH(req: NextRequest) {
   return NextResponse.json({
     maxConcurrentSessions: updated.maxConcurrentSessions,
     sessionIdleTimeoutMinutes: updated.sessionIdleTimeoutMinutes,
+    sessionAbsoluteTimeoutMinutes: updated.sessionAbsoluteTimeoutMinutes,
+    extensionTokenIdleTimeoutMinutes: updated.extensionTokenIdleTimeoutMinutes,
+    extensionTokenAbsoluteTimeoutMinutes: updated.extensionTokenAbsoluteTimeoutMinutes,
     vaultAutoLockMinutes: updated.vaultAutoLockMinutes,
     allowedCidrs: updated.allowedCidrs,
     tailscaleEnabled: updated.tailscaleEnabled,
