@@ -10,7 +10,6 @@ import { adminVaultResetRevokedEmail } from "@/lib/email/templates/admin-vault-r
 import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
-  TenantAuthError,
 } from "@/lib/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
@@ -18,7 +17,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 

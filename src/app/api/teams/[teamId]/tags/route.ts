@@ -5,7 +5,6 @@ import { createTeamTagSchema } from "@/lib/validations";
 import {
   requireTeamMember,
   requireTeamPermission,
-  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
@@ -19,7 +18,7 @@ import {
   TagTreeError,
 } from "@/lib/tag-tree";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 

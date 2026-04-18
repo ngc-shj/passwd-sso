@@ -12,7 +12,7 @@ import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
+import { forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";

@@ -19,7 +19,7 @@ import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { handleAuthError, unauthorized } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,

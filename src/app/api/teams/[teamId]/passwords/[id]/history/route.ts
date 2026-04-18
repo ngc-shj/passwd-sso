@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTeamMember } from "@/lib/team-auth";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };

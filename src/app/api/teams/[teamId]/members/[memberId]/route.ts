@@ -6,7 +6,6 @@ import { updateMemberRoleSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
   isRoleAbove,
-  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";

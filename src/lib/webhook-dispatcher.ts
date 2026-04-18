@@ -20,7 +20,6 @@ import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
 import {
-  EXTERNAL_DELIVERY_METADATA_BLOCKLIST,
   sanitizeForExternalDelivery,
   resolveAndValidateIps,
   createPinnedDispatcher,
