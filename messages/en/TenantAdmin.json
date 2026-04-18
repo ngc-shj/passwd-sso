@@ -31,7 +31,7 @@
   "sessionPolicyTitle": "Session",
   "sessionPolicyDescription": "Configure session limits and timeouts.",
   "maxConcurrentSessions": "Concurrent session limit (per user)",
-  "maxConcurrentSessionsHelp": "Maximum number of simultaneous sessions per user. When a user exceeds this limit, the oldest session is automatically terminated.",
+  "maxConcurrentSessionsHelp": "Maximum number of simultaneous sessions per user. When a user exceeds this limit, the oldest session is automatically terminated. Range: {min}–{max}.",
   "concurrentSessionsUnlimited": "No limit on concurrent sessions per user",
   "sessionPolicySave": "Save",
   "sessionPolicySaved": "Session policy updated",

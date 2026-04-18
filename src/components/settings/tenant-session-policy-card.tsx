@@ -306,7 +306,7 @@ export function TenantSessionPolicyCard() {
               placeholder="3"
             />
             <p className="text-xs text-muted-foreground">
-              {t("maxConcurrentSessionsHelp")}
+              {t("maxConcurrentSessionsHelp", { min: MAX_CONCURRENT_SESSIONS_MIN, max: MAX_CONCURRENT_SESSIONS_MAX })}
             </p>
           </div>
         )}
