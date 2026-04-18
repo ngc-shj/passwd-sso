@@ -13,13 +13,13 @@ Before this design, session expiry was governed by three independent mechanisms:
 Symptoms:
 - Tenant admins set idle timeout to "disabled" and still saw forced re-sign-in after ~8 hours because the Auth.js cap kept firing. The UI help text promised "no timeout when disabled."
 - Tenant and team fields had mismatched semantics — tenant = rolling idle, team = absolute from `createdAt` — despite similar names.
-- Absolute cap was missing at the tenant level, violating OWASP ASVS V7.3.3.
+- Absolute cap was missing at the tenant level, violating [OWASP ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout).
 - Extension token TTL was unrelated to any of the above, giving a single user three different expiry behaviors across surfaces.
 
 ## Design Principles
 
 1. **Single source of truth per surface.** For a given surface (web / team scope / extension), one tenant-level field governs idle timeout and one governs absolute timeout. No hidden constants in code.
-2. **Two-axis model everywhere.** Idle and absolute are independent controls. ASVS V7.3.1 + V7.3.3 require both for L2/L3 apps. A credential-storage product is L3.
+2. **Two-axis model everywhere.** Idle and absolute are independent controls. [ASVS 5.0 V7.3.1 + V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) require both for L2 apps. A credential-storage product is L3 and inherits all L2 requirements.
 3. **No "disabled" option for session timeouts.** Admins must choose a number. Limits are enforced at the schema, not by convention.
 4. **Strictest-wins at team scope, with the same semantics as tenant.** Team fields mirror tenant fields one-for-one. `Math.min` of all non-null values across user's teams, clamped to ≤ tenant value at write time.
 5. **Extension is a distinct credential class.** Extension token TTL is NOT governed by web session policy. It lives under the existing "Machine Identity" axis alongside MCP / SA / API-key TTLs.
@@ -28,13 +28,12 @@ Symptoms:
 
 | Standard | Requirement | This Design |
 |----------|-------------|-------------|
-| OWASP ASVS 4.0.3 V7.3.1 | Idle timeout required (L2/L3) | `sessionIdleTimeoutMinutes` non-null |
-| OWASP ASVS 4.0.3 V7.3.3 | Absolute timeout required, independent of activity (L2/L3) | `sessionAbsoluteTimeoutMinutes` non-null |
-| NIST SP 800-63B §4.2.3 AAL2 | 12h absolute OR 30min inactivity | Defaults: 8h idle / 30d absolute; AAL3 sessions auto-tighten (see §AAL3) |
-| NIST SP 800-63B §4.2.3 AAL3 | 12h absolute OR 15min inactivity | WebAuthn/Passkey sessions clamp to AAL3 limits automatically |
-| NIST SP 800-207 §3.4.1 | Per-segment Zero Trust policy | Team-level override (strictest wins) |
-| OWASP Session Management Cheat Sheet | "Session timeouts must not be disabled" | Nullability removed |
-| RFC 9700 (OAuth 2.0 Security BCP) §2.2.2 | Refresh token rotation for long-lived delegated access | Extension reuses the rotation/revocation machinery already built for MCP |
+| [OWASP ASVS 5.0 V7.3.1](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) | Inactivity timeout required (L2) | `sessionIdleTimeoutMinutes` non-null |
+| [OWASP ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) | Absolute maximum session lifetime required (L2) | `sessionAbsoluteTimeoutMinutes` non-null |
+| [NIST SP 800-63B-4 §2.3.3 (AAL3 Reauthentication)](https://pages.nist.gov/800-63-4/sp800-63b.html) | 12h absolute OR 15min inactivity | WebAuthn/Passkey sessions clamp to AAL3 limits automatically |
+| [NIST SP 800-207 §2.1 tenet 6](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-207.pdf) | All resource authentication and authorization are dynamic and strictly enforced before access is allowed | Team-level override (strictest wins) |
+| [OWASP Session Management Cheat Sheet § Session Expiration](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html#session-expiration) | "It is mandatory to set expiration timeouts for every session" | Nullability removed |
+| [RFC 9700 §2.2.2 (Refresh Tokens)](https://www.rfc-editor.org/rfc/rfc9700#name-refresh-tokens) | Refresh tokens for public clients MUST be sender-constrained or use refresh token rotation | Extension reuses the rotation/revocation machinery already built for MCP |
 
 ## Field Inventory
 
@@ -75,7 +74,7 @@ Recomputed on every `auth()` call — not cached beyond the existing 60s team-po
 
 ## AAL3 Clamp
 
-When the current session was established via WebAuthn / Passkey (discoverable or non-discoverable), the resolved limits are clamped to NIST 800-63B AAL3 ceilings:
+When the current session was established via WebAuthn / Passkey (discoverable or non-discoverable), the resolved limits are clamped to [NIST SP 800-63B-4 §2.3.3](https://pages.nist.gov/800-63-4/sp800-63b.html) AAL3 ceilings:
 
 - `idle ≤ 15 min`
 - `absolute ≤ 12h`

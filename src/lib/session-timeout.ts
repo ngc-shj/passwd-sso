@@ -40,7 +40,8 @@ const WEBAUTHN_PROVIDER = "webauthn";
  * "tenant value, with a stricter team override if any."
  *
  * AAL3 clamp: when `sessionProvider === "webauthn"`, the result is clamped
- * to NIST SP 800-63B §4.2.3 AAL3 ceilings regardless of policy values.
+ * to NIST SP 800-63B-4 §2.3.3 AAL3 reauthentication ceilings (12h
+ * absolute / 15min inactivity) regardless of policy values.
  *
  * Cache: per-userId, 60s TTL, bounded map. Invalidate on:
  *  - tenant policy PATCH via `invalidateSessionTimeoutCacheForTenant`

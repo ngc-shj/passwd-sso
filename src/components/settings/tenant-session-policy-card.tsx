@@ -46,7 +46,7 @@ export function TenantSessionPolicyCard() {
   const [unlimited, setUnlimited] = useState(true);
   const [maxSessions, setMaxSessions] = useState<string>("");
 
-  // Web session timeouts (required, non-null per ASVS V7.3.1/V7.3.3)
+  // Web session timeouts (required, non-null per ASVS 5.0 V7.3.1/V7.3.2)
   const [idleTimeoutMinutes, setIdleTimeoutMinutes] = useState<string>("");
   const [absoluteTimeoutMinutes, setAbsoluteTimeoutMinutes] = useState<string>("");
 

@@ -265,7 +265,7 @@ so there is no immediate break scenario. Still, long-term migration planning is 
 
 ### 8.3 Operational Preparation
 
-- Track NIST standardization updates (ML-KEM / ML-DSA)
+- Track NIST standardization updates ([ML-KEM / FIPS 203](https://csrc.nist.gov/pubs/fips/203/final), [ML-DSA / FIPS 204](https://csrc.nist.gov/pubs/fips/204/final))
 - Define dependency upgrade policy for crypto-related libraries
 - Document migration strategy: new writes use new scheme, old data remains readable
 

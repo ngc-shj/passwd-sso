@@ -18,7 +18,7 @@ Initial review.
 ### [F2] [Major]: `updateSession` expires computation treats absolute as rolling
 - **Evidence**: Plan L88 states `update expires = now + min(idle, absolute)`.
 - **Problem**: The `absolute` axis is measured from `createdAt` (non-rolling per Design §Resolution Order and Considerations §Known risks "absolute cap is NOT rolling"). `now + min(idle, absolute)` computes a rolling absolute, which can extend the session past `createdAt + absolute`. Example: `createdAt = 0h, absolute = 12h`. At `now = 10h`, the formula yields `10h + 12h = 22h`, but correct is `12h`. Results in sessions that survive past their absolute cap.
-- **Impact**: Violates ASVS V7.3.3 absolute-timeout invariant for sessions that are active throughout the window. This is the exact bug the redesign claims to fix — it would reappear.
+- **Impact**: Violates [ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout) absolute-timeout invariant for sessions that are active throughout the window. This is the exact bug the redesign claims to fix — it would reappear.
 - **Fix**: Change expires formula to `min(now + idleMinutes, createdAt + absoluteMinutes)`. Equivalently: `new Date(Math.min(Date.now() + idle * MS_PER_MINUTE, createdAt.getTime() + absolute * MS_PER_MINUTE))`. Update Plan L88 and Technical Approach > Auth.js adapter integration.
 
 ### [F3] [Minor]: AsyncLocalStorage mutation pattern for `provider` is subtle; add an implementation note
@@ -64,7 +64,7 @@ Initial review.
 - **Preconditions**: `sessionMetaStorage` is writable from the request layer in a way that reaches `createSession`.
 - **Impact**: If `provider` could be spoofed, an attacker could either gain AAL3-only UI surfaces without passkey authentication, or avoid AAL3 tightening to keep a long-lived session after passkey auth.
 - **Fix**: Add explicit security note: "`provider` is set **only** by server-side code: (a) the `signIn` callback in `src/auth.ts` via `params.account?.provider` (provided by Auth.js after the OAuth/OIDC exchange — not user-controlled), and (b) the passkey verify route via a literal string. No request headers, query params, or body fields feed into this value. Verified by greppng all writes to the provider field." State that any future extension of session-establishment paths (e.g., SAML-only direct flow) must also set provider from a trusted source, not user input.
-- **Spec citation**: OWASP ASVS V7.1.2 (session binding integrity), NIST SP 800-63B §5.1 (authentication assurance levels are properties of the authentication event).
+- **Spec citation**: [OWASP ASVS 5.0 V7.2 (Fundamental Session Management Security)](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v72-fundamental-session-management-security) (session binding / integrity controls), [NIST SP 800-63B Rev 4 §5.1 (Session Bindings)](https://pages.nist.gov/800-63-4/sp800-63b.html): "A session SHOULD inherit the AAL properties of the authentication event that triggered its creation."
 - escalate: false
 - escalate_reason: standard auth-flow integrity check; not a chained vuln
 
@@ -77,7 +77,7 @@ Initial review.
 - **Fix**: Option A (strict): Delete all existing Session rows in the migration. Forces all users to re-auth. Operationally disruptive.
   Option B (safer default): Accept the one-time degradation; document it clearly in `CHANGELOG.md` and admin release notes; state the longest window ≤ 30d; recommend tenant admins with strict AAL3 needs run `/api/sessions` DELETE for all users post-deploy.
   Plan should pick one. Recommend B with documented acceptance criteria.
-- **Spec citation**: NIST SP 800-63B §4.2.3 (AAL reauthentication requirements apply to new sessions; existing sessions at a lower AAL are a migration artifact, not a compliance violation).
+- **Spec citation**: [NIST SP 800-63B-4 §2.3.3 (AAL3 Reauthentication)](https://pages.nist.gov/800-63-4/sp800-63b.html) (AAL reauthentication requirements apply to new sessions; existing sessions at a lower AAL are a migration artifact, not a compliance violation).
 - escalate: false
 
 ### [S3] [Major]: Team PATCH `≤ tenant value` validation must reject ≤0 and NaN
@@ -87,7 +87,7 @@ Initial review.
 - **Preconditions**: Team admin permission on any team.
 - **Impact**: Team's effective idle = 0 means every session is immediately expired → all team members permanently locked out of their team workspace.
 - **Fix**: Add to step 7: "Validation: `value === null || (Number.isInteger(value) && value >= 1 && value <= tenant.sessionIdleTimeoutMinutes)`. Reject 0, negative, non-integer, and values exceeding tenant. Same for absolute."
-- **Spec citation**: ASVS V5.1.4 (input validation at schema boundaries).
+- **Spec citation**: [ASVS 5.0 V2.2.1 (Input Validation)](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x11-V2-Validation-and-Business-Logic.md#v22-input-validation) — "input is validated to enforce business or functional expectations".
 - escalate: false
 
 ### [S4] [Minor]: Extension family revocation must be audited

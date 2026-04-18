@@ -16,7 +16,7 @@ Password content (plaintext) is encrypted client-side before reaching the server
 |-------|------------|-------|----------|-------|
 | `maxConcurrentSessions` | Blocking | Server | `auth-adapter.ts` `createSession()` | Oldest sessions evicted atomically in Serializable tx |
 | `sessionIdleTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted when `now - lastActiveAt > value`. See [session-timeout-design.md](session-timeout-design.md) |
-| `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted + `SESSION_REVOKE` audit when `now - createdAt > value`, independent of activity (ASVS V7.3.3) |
+| `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Non-nullable. Session deleted + `SESSION_REVOKE` audit when `now - createdAt > value`, independent of activity ([ASVS 5.0 V7.3.2](https://github.com/OWASP/ASVS/blob/v5.0.0_release/5.0/en/0x16-V7-Session-Management.md#v73-session-timeout)) |
 | `extensionTokenIdleTimeoutMinutes` | Blocking | Server | `extension-token.ts` `issueExtensionToken()` + `token/refresh/route.ts` | Access token `expiresAt = now + value` at issuance and on every refresh |
 | `extensionTokenAbsoluteTimeoutMinutes` | Blocking | Server | `extension-token.ts` + `token/refresh/route.ts` | Family is revoked and refresh rejected with `EXTENSION_TOKEN_FAMILY_EXPIRED` when `now - familyCreatedAt > value` |
 | `vaultAutoLockMinutes` | Timer | Client | `auto-lock-context.tsx` | Browser inactivity timer; server cannot know vault lock state |

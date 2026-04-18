@@ -105,7 +105,7 @@ Areas already considered at production level.
 - Load testing (k6 6 scenarios, triple-guard seed script, initial SLOs, threshold pass/fail)
 - Dependency license audit (allowlist JSON 17 entries, strict CI enforcement, expiry checks, policy docs)
 - Multi-tenant isolation (FORCE RLS on 39 tables, `withBypassRls` CI allowlist guard, nested auth CI guard)
-- SCIM 2.0 provisioning (Users + Groups, tenant-scoped tokens, RFC 7644)
+- SCIM 2.0 provisioning (Users + Groups, tenant-scoped tokens, [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644))
 - Production code `console.log`: 0, `TODO/FIXME`: 0
 
 ---

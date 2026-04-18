@@ -154,7 +154,7 @@ If the app is served at the domain root (no base path), the discovery endpoint i
 #### Flow
 
 1. Client discovers `/.well-known/oauth-authorization-server` → gets `registration_endpoint`
-2. Client POSTs to `/api/mcp/register` (RFC 7591) → receives `client_id`; public clients omit `client_secret` by sending `token_endpoint_auth_method: "none"`
+2. Client POSTs to `/api/mcp/register` ([RFC 7591](https://www.rfc-editor.org/rfc/rfc7591)) → receives `client_id`; public clients omit `client_secret` by sending `token_endpoint_auth_method: "none"`
 3. Client opens browser to `/api/mcp/authorize` with PKCE params
 4. User sees consent screen at `/{locale}/mcp/authorize`, clicks Allow — **claiming happens here** (the DCR client is bound to the user's tenant at Allow time, not on page load; clicking Deny leaves the client unclaimed so the user can retry)
 5. Client receives authorization code, exchanges for `access_token` + `refresh_token`
@@ -203,7 +203,7 @@ sequenceDiagram
 - PKCE S256 required (no plain)
 - `client_secret` hashed with SHA-256 (same as SA tokens); omitted for public clients
 - Code exchange wrapped in `prisma.$transaction` to prevent replay
-- Redirect URIs restricted to `https://` or `http://localhost` / `http://127.0.0.1` (RFC 8252; both localhost forms accepted)
+- Redirect URIs restricted to `https://` or the loopback forms `http://127.0.0.1` / `http://[::1]` / `http://localhost`. [RFC 8252 §7.3](https://www.rfc-editor.org/rfc/rfc8252#section-7.3) specifies the loopback IP literals; [§8.3](https://www.rfc-editor.org/rfc/rfc8252#section-8.3) marks `localhost` as NOT RECOMMENDED, but we accept it as a pragmatic deviation because real clients (Claude Code/Desktop) use it
 
 ### Tools
 

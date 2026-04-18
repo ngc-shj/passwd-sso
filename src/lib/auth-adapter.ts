@@ -478,7 +478,7 @@ export function createCustomAdapter(): Adapter {
         }
 
         // Absolute cap: non-rolling; measured from createdAt. Enforced
-        // independently of activity per OWASP ASVS V7.3.3.
+        // independently of activity per OWASP ASVS 5.0 V7.3.2.
         if (now > absoluteDeadlineMs) {
           await withBypassRls(prisma, async () =>
             prisma.session.delete({

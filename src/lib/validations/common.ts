@@ -169,7 +169,8 @@ export const EXTENSION_TOKEN_IDLE_TIMEOUT_MIN = 5;
 export const EXTENSION_TOKEN_IDLE_TIMEOUT_MAX = 43200; // 30 days in minutes
 export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN = 5;
 export const EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX = 43200;
-// NIST SP 800-63B AAL3 ceilings applied when session.provider === "webauthn"
+// NIST SP 800-63B-4 §2.3.3 AAL3 reauthentication ceilings (12h absolute /
+// 15min inactivity) applied when session.provider === "webauthn"
 export const AAL3_IDLE_TIMEOUT_MAX_MINUTES = 15;
 export const AAL3_ABSOLUTE_TIMEOUT_MAX_MINUTES = 720;  // 12 hours
 // Defaults used by schema + migration backfill

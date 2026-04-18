@@ -144,7 +144,7 @@ describe("POST /api/mcp/register", () => {
     expect(status).toBe(201);
   });
 
-  it("accepts http://127.0.0.1:<port>/ loopback redirect URIs (RFC 8252 §8.3)", async () => {
+  it("accepts http://127.0.0.1:<port>/ loopback redirect URIs (RFC 8252 §7.3)", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {
         client_name: "Test",

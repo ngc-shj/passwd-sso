@@ -265,7 +265,7 @@ Client(valid時):
 
 ### 8.3 運用レベルの準備項目
 
-- NIST 標準化の更新を定期レビューする（ML-KEM / ML-DSA）
+- NIST 標準化の更新を定期レビューする（[ML-KEM / FIPS 203](https://csrc.nist.gov/pubs/fips/203/final)、[ML-DSA / FIPS 204](https://csrc.nist.gov/pubs/fips/204/final)）
 - ライブラリ更新ポリシーを定義し、暗号依存を長期間固定しない
 - 「新規作成データは新方式、既存データは読める限り旧方式」の移行手順を文書化する
 

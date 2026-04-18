@@ -25,8 +25,9 @@ const dcrRateLimiter = createRateLimiter({
   max: DCR_RATE_LIMIT_MAX,
 });
 
-// Loopback redirect URIs: allow both 127.0.0.1 and localhost with a port.
-// RFC 8252 §7.3 recommends 127.0.0.1 but real clients (Claude Code) use localhost.
+// Loopback redirect URIs: allow both the loopback IP literals and localhost with a port.
+// RFC 8252 §7.3 specifies loopback IP literals (127.0.0.1 / [::1]); §8.3 marks
+// localhost as NOT RECOMMENDED, but real clients (Claude Code) use it.
 const LOOPBACK_REDIRECT_RE = /^http:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//;
 
 const dcrSchema = z.object({
