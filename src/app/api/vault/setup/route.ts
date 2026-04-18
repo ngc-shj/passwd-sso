@@ -18,6 +18,7 @@ import {
   hexAuthTag,
   hexSalt,
   hexHash,
+  verificationArtifactSchema,
 } from "@/lib/validations/common";
 import {
   KDF_PBKDF2_ITERATIONS_MIN,
@@ -55,11 +56,7 @@ const setupSchema = z.object({
   accountSalt: hexSalt,
   authHash: hexHash,
   verifierHash: hexHash,
-  verificationArtifact: z.object({
-    ciphertext: z.string().min(1),
-    iv: hexIv,
-    authTag: hexAuthTag,
-  }),
+  verificationArtifact: verificationArtifactSchema,
   // ECDH key pair for team E2E encryption
   ecdhPublicKey: z.string().min(1),
   encryptedEcdhPrivateKey: z.string().min(1),

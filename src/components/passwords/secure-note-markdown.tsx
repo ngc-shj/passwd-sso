@@ -9,7 +9,7 @@ interface SecureNoteMarkdownProps {
   className?: string;
 }
 
-const SAFE_PROTOCOLS = ["http:", "https:", "mailto:"];
+const SAFE_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
 
 const components: Components = {
   a: ({ href, children, ...props }) => {
@@ -17,7 +17,7 @@ const components: Components = {
     let safeSrc = href ?? "";
     try {
       const url = new URL(safeSrc, "https://placeholder.invalid");
-      if (!SAFE_PROTOCOLS.includes(url.protocol)) {
+      if (!SAFE_PROTOCOLS.has(url.protocol)) {
         safeSrc = "";
       }
     } catch {

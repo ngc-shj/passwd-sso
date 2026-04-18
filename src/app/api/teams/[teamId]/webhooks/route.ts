@@ -31,7 +31,7 @@ const createWebhookSchema = z.object({
     isSsrfSafeWebhookUrl,
     { message: SSRF_URL_VALIDATION_MESSAGE },
   ),
-  events: z.array(z.enum(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]])).min(1).max(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
+  events: z.array(z.enum([...TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS] as [string, ...string[]])).min(1).max(TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
 });
 
 // GET /api/teams/[teamId]/webhooks — List team webhooks

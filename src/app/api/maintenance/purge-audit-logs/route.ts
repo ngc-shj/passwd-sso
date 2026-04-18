@@ -56,33 +56,32 @@ async function handlePOST(req: NextRequest) {
     }),
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
 
-  let totalPurged = 0;
+  // Per-tenant purge (parallel): each tenant's floor retention is respected
+  const perTenantCounts = await Promise.all(
+    tenants.map(async (tenant) => {
+      const tenantRetention = tenant.auditLogRetentionDays;
+      // Use the stricter (longer) of the requested vs tenant-configured retention
+      const effectiveRetentionDays = tenantRetention
+        ? Math.max(retentionDays, tenantRetention)
+        : retentionDays;
+      const tenantCutoff = new Date(Date.now() - effectiveRetentionDays * MS_PER_DAY);
 
-  // Per-tenant purge: each tenant's floor retention is respected
-  for (const tenant of tenants) {
-    const tenantRetention = tenant.auditLogRetentionDays;
-    // Use the stricter (longer) of the requested vs tenant-configured retention
-    const effectiveRetentionDays = tenantRetention
-      ? Math.max(retentionDays, tenantRetention)
-      : retentionDays;
-    const tenantCutoff = new Date(Date.now() - effectiveRetentionDays * MS_PER_DAY);
-
-    if (dryRun) {
-      const count = await withBypassRls(prisma, async () =>
-        prisma.auditLog.count({
-          where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
-        }),
-      BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-      totalPurged += count;
-    } else {
+      if (dryRun) {
+        return withBypassRls(prisma, async () =>
+          prisma.auditLog.count({
+            where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
+          }),
+        BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
+      }
       const result = await withBypassRls(prisma, async () =>
         prisma.auditLog.deleteMany({
           where: { tenantId: tenant.id, createdAt: { lt: tenantCutoff } },
         }),
       BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
-      totalPurged += result.count;
-    }
-  }
+      return result.count;
+    }),
+  );
+  const totalPurged = perTenantCounts.reduce((a, b) => a + b, 0);
 
   // AuditLog.tenantId is non-nullable (String, not String?), so no null-tenant handling needed.
   if (dryRun) {

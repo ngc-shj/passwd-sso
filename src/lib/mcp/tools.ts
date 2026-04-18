@@ -120,8 +120,10 @@ async function auditDelegationAccess(
     },
     ip: ip ?? undefined,
   };
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  await Promise.all([
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+  ]);
 }
 
 // ─── Tool handlers ────────────────────────────────────────────

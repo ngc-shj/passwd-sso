@@ -210,8 +210,10 @@ async function handlePOST(request: NextRequest) {
     ip: extractClientIp(request),
     userAgent: request.headers.get("user-agent"),
   };
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL });
-  await logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT });
+  await Promise.all([
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
+    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+  ]);
 
   return NextResponse.json({
     delegationSessionId: delegationSession.id,

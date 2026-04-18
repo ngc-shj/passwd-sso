@@ -21,6 +21,7 @@ import {
   hexSalt,
   hexHash,
   encryptedFieldSchema,
+  verificationArtifactSchema,
   VAULT_ROTATE_ENTRIES_MAX,
   VAULT_ROTATE_HISTORY_MAX,
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
@@ -43,11 +44,7 @@ const rotateKeySchema = z.object({
   accountSalt: hexSalt,
   newAuthHash: hexHash,
   newVerifierHash: hexHash.optional(),
-  verificationArtifact: z.object({
-    ciphertext: z.string().min(1),
-    iv: hexIv,
-    authTag: hexAuthTag,
-  }),
+  verificationArtifact: verificationArtifactSchema,
   // Entry re-encryption payload — aadVersion must be >= 1 (AAD binding required)
   entries: z.array(z.object({
     id: z.string().uuid(),

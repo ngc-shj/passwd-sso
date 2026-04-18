@@ -42,6 +42,9 @@ vi.mock("@/lib/prisma", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
+    for (const e of entries) await mockLogAudit(e);
+  }),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));

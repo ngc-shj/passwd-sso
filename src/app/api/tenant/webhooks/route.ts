@@ -30,7 +30,7 @@ const createWebhookSchema = z.object({
     { message: SSRF_URL_VALIDATION_MESSAGE },
   ),
   events: z.array(
-    z.enum(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS as unknown as [string, ...string[]]),
+    z.enum([...TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS] as [string, ...string[]]),
   ).min(1).max(TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS.length),
 });
 

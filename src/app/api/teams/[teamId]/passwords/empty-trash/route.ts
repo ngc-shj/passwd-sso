@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/team-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -59,8 +59,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
     },
   });
 
-  for (const entryId of entryIds) {
-    await logAuditAsync({
+  await logAuditBulkAsync(
+    entryIds.map((entryId) => ({
       ...requestMeta,
       action: AUDIT_ACTION.ENTRY_PERMANENT_DELETE,
       targetType: AUDIT_TARGET_TYPE.TEAM_PASSWORD_ENTRY,
@@ -69,8 +69,8 @@ async function handlePOST(req: NextRequest, { params }: Params) {
         source: "empty-trash",
         parentAction: AUDIT_ACTION.ENTRY_EMPTY_TRASH,
       },
-    });
-  }
+    })),
+  );
 
   return NextResponse.json({ success: true, deletedCount: deletedCount });
 }
