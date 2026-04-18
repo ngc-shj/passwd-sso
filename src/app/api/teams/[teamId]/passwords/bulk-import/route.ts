@@ -4,7 +4,7 @@ import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
+import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/rate-limit";

@@ -6,7 +6,7 @@ import { requireTeamPermission } from "@/lib/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 

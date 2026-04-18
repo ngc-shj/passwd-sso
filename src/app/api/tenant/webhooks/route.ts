@@ -19,7 +19,7 @@ import {
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { handleAuthError, unauthorized } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
 import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url-validation";

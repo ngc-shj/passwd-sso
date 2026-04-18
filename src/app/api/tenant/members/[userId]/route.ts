@@ -5,7 +5,6 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { updateTenantMemberRoleSchema } from "@/lib/validations";
 import {
   requireTenantPermission,
-  TenantAuthError,
 } from "@/lib/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";

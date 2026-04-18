@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, INVITATION_STATUS } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { handleAuthError, unauthorized } from "@/lib/api-response";
 import { SEARCH_QUERY_MAX_LENGTH } from "@/lib/validations/common";
 import { TEAM_MEMBER_SEARCH_LIMIT } from "@/lib/validations/common.server";
 

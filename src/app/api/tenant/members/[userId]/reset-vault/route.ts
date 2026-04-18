@@ -13,7 +13,6 @@ import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
   isTenantRoleAbove,
-  TenantAuthError,
 } from "@/lib/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
@@ -21,7 +20,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
+import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 

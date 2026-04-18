@@ -5,7 +5,7 @@ import { requireTenantPermission } from "@/lib/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { handleAuthError, unauthorized } from "@/lib/api-response";
 
 export const runtime = "nodejs";
 

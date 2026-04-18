@@ -10,7 +10,7 @@ import {
 } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { handleAuthError, unauthorized } from "@/lib/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 

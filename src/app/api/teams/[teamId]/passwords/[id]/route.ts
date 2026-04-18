@@ -7,7 +7,6 @@ import {
   requireTeamPermission,
   requireTeamMember,
   hasTeamPermission,
-  TeamAuthError,
 } from "@/lib/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";

@@ -7,7 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { parseActionsCsvParam } from "@/lib/audit-query";
 import type { AuditAction } from "@prisma/client";

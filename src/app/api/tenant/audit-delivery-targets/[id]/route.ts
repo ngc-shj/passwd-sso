@@ -11,7 +11,7 @@ import {
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import { z } from "zod";
 
 type Params = { params: Promise<{ id: string }> };

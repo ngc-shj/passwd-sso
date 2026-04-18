@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { scimResponse, scimError } from "@/lib/scim/response";
+import { scimResponse } from "@/lib/scim/response";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { prisma } from "@/lib/prisma";
 import { withRequestLog } from "@/lib/with-request-log";

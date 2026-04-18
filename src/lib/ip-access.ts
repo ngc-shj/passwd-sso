@@ -336,18 +336,6 @@ export function extractClientIpFromHeaders(
   return leftmost || socketIp || null;
 }
 
-function formatCidr(parsed: ParsedCidr): string {
-  if (parsed.version === 4) {
-    return `${parsed.ip.join(".")}/${parsed.prefixLen}`;
-  }
-  // Format IPv6 bytes back to colon notation
-  const groups: string[] = [];
-  for (let i = 0; i < 16; i += 2) {
-    groups.push(((parsed.ip[i] << 8) | parsed.ip[i + 1]).toString(16));
-  }
-  return `${groups.join(":")}/${parsed.prefixLen}`;
-}
-
 // ─── Tailscale IP detection ──────────────────────────────────
 
 const TAILSCALE_IPV4_CIDR = "100.64.0.0/10";

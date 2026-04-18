@@ -17,7 +17,7 @@ import { notificationTitle, notificationBody } from "@/lib/notification-messages
 import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
+import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { BREACH_COUNT_MAX } from "@/lib/validations/common.server";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 

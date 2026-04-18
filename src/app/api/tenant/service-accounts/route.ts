@@ -10,7 +10,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
+import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/service-account";
 import { serviceAccountCreateSchema } from "@/lib/validations/service-account";
