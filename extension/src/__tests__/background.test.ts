@@ -1030,6 +1030,43 @@ describe("session persistence", () => {
       expect.objectContaining({ when: expect.any(Number) })
     );
   });
+
+  it("clamps refresh buffer to half-TTL for short-lived tokens (prevents refresh loop)", async () => {
+    // 1-minute TTL — below the default 2-min refresh buffer.
+    // Without the adaptive buffer, the alarm would fire immediately and
+    // storm the refresh endpoint; with the clamp it should fire at ~30s.
+    const now = Date.now();
+    const expiresAt = now + 60_000; // 1 minute
+    await sendMessage({ type: "SET_TOKEN", token: "tok-short", expiresAt });
+
+    const alarmCalls = (chromeMock?.alarms.create as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([name]) => name === ALARM_TOKEN_REFRESH,
+    );
+    expect(alarmCalls.length).toBeGreaterThanOrEqual(1);
+    const lastCall = alarmCalls[alarmCalls.length - 1];
+    const when = lastCall[1].when as number;
+    // Should schedule ~half-TTL before expiry (≈ 30s from now), not before `now + 5s` (the minimum-delay floor)
+    // and not after `expiresAt` (the absolute deadline).
+    expect(when).toBeGreaterThanOrEqual(now + 5_000);
+    expect(when).toBeLessThanOrEqual(expiresAt);
+    // Specifically: at or after now + 25s (half-TTL - 5s slack)
+    expect(when).toBeGreaterThanOrEqual(now + 25_000);
+  });
+
+  it("uses the 2-min buffer for long-lived tokens (existing behavior)", async () => {
+    const now = Date.now();
+    const expiresAt = now + 10 * 60_000; // 10 minutes
+    await sendMessage({ type: "SET_TOKEN", token: "tok-long", expiresAt });
+
+    const alarmCalls = (chromeMock?.alarms.create as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([name]) => name === ALARM_TOKEN_REFRESH,
+    );
+    const lastCall = alarmCalls[alarmCalls.length - 1];
+    const when = lastCall[1].when as number;
+    // Expected ≈ expiresAt - 2min = now + 8min
+    expect(when).toBeGreaterThanOrEqual(now + 8 * 60_000 - 5_000);
+    expect(when).toBeLessThanOrEqual(now + 8 * 60_000 + 5_000);
+  });
 });
 
 describe("session hydration", () => {
