@@ -20,7 +20,7 @@ describe("validatePolicy", () => {
   });
 
   it("returns no errors for boundary values", () => {
-    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, sessionIdleTimeoutMinutes: 1, sessionAbsoluteTimeoutMinutes: 1 })).toEqual({});
+    expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MIN, sessionIdleTimeoutMinutes: 5, sessionAbsoluteTimeoutMinutes: 5 })).toEqual({});
     expect(validatePolicy({ ...VALID_BASE, minPasswordLength: POLICY_MIN_PW_LENGTH_MAX, sessionIdleTimeoutMinutes: 1440, sessionAbsoluteTimeoutMinutes: 43200 })).toEqual({});
   });
 
@@ -38,8 +38,8 @@ describe("validatePolicy", () => {
     expect(errs.minPasswordLength).toBe("minPasswordLengthRange");
   });
 
-  it("rejects sessionIdleTimeoutMinutes below 1", () => {
-    const errs = validatePolicy({ ...VALID_BASE, sessionIdleTimeoutMinutes: 0 });
+  it("rejects sessionIdleTimeoutMinutes below 5 (MIN)", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionIdleTimeoutMinutes: 4 });
     expect(errs.sessionIdleTimeoutMinutes).toBe("sessionIdleTimeoutRange");
   });
 
@@ -48,8 +48,8 @@ describe("validatePolicy", () => {
     expect(errs.sessionIdleTimeoutMinutes).toBe("sessionIdleTimeoutRange");
   });
 
-  it("rejects sessionAbsoluteTimeoutMinutes below 1", () => {
-    const errs = validatePolicy({ ...VALID_BASE, sessionAbsoluteTimeoutMinutes: 0 });
+  it("rejects sessionAbsoluteTimeoutMinutes below 5 (MIN)", () => {
+    const errs = validatePolicy({ ...VALID_BASE, sessionAbsoluteTimeoutMinutes: 4 });
     expect(errs.sessionAbsoluteTimeoutMinutes).toBe("sessionAbsoluteTimeoutRange");
   });
 
@@ -59,7 +59,7 @@ describe("validatePolicy", () => {
   });
 
   it("returns multiple errors at once", () => {
-    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: -1, sessionIdleTimeoutMinutes: 0, sessionAbsoluteTimeoutMinutes: -1 });
+    const errs = validatePolicy({ ...VALID_BASE, minPasswordLength: -1, sessionIdleTimeoutMinutes: 4, sessionAbsoluteTimeoutMinutes: -1 });
     expect(Object.keys(errs).length).toBeGreaterThanOrEqual(3);
   });
 

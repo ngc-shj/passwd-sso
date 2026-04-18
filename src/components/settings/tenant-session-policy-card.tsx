@@ -34,11 +34,24 @@ import { useFormDirty } from "@/hooks/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
-function parseIntInRange(raw: string, min: number, max: number): string {
+// Enforce ONLY the max during typing. If we also enforced min here, the user
+// would never be able to type "15" (the "1" keystroke would be rejected first).
+// min is enforced on blur + hard-stopped in validate() before save.
+function parseIntMaxOnly(raw: string, max: number): string {
   if (!raw) return "";
   const n = parseInt(raw, 10);
-  if (Number.isNaN(n) || n < min) return "";
+  if (Number.isNaN(n) || n < 0) return "";
   return String(Math.min(n, max));
+}
+
+// On blur, clamp values below the minimum up to the minimum. Preserves the
+// user's intent when they wanted a short value without letting them save
+// something below the server-side floor.
+function clampToMin(raw: string, min: number): string {
+  if (!raw) return "";
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) return "";
+  return n < min ? String(min) : raw;
 }
 
 export function TenantSessionPolicyCard() {
@@ -234,9 +247,10 @@ export function TenantSessionPolicyCard() {
               max={MAX_CONCURRENT_SESSIONS_MAX}
               value={maxSessions}
               onChange={(e) => {
-                setMaxSessions(parseIntInRange(e.target.value, MAX_CONCURRENT_SESSIONS_MIN, MAX_CONCURRENT_SESSIONS_MAX));
+                setMaxSessions(parseIntMaxOnly(e.target.value, MAX_CONCURRENT_SESSIONS_MAX));
                 setError(null);
               }}
+              onBlur={(e) => setMaxSessions(clampToMin(e.target.value, MAX_CONCURRENT_SESSIONS_MIN))}
               placeholder="3"
             />
             <p className="text-xs text-muted-foreground">
@@ -257,9 +271,10 @@ export function TenantSessionPolicyCard() {
             max={SESSION_IDLE_TIMEOUT_MAX}
             value={idleTimeoutMinutes}
             onChange={(e) => {
-              setIdleTimeoutMinutes(parseIntInRange(e.target.value, SESSION_IDLE_TIMEOUT_MIN, SESSION_IDLE_TIMEOUT_MAX));
+              setIdleTimeoutMinutes(parseIntMaxOnly(e.target.value, SESSION_IDLE_TIMEOUT_MAX));
               setError(null);
             }}
+            onBlur={(e) => setIdleTimeoutMinutes(clampToMin(e.target.value, SESSION_IDLE_TIMEOUT_MIN))}
             placeholder="480"
           />
           <p className="text-xs text-muted-foreground">
@@ -277,9 +292,10 @@ export function TenantSessionPolicyCard() {
             max={SESSION_ABSOLUTE_TIMEOUT_MAX}
             value={absoluteTimeoutMinutes}
             onChange={(e) => {
-              setAbsoluteTimeoutMinutes(parseIntInRange(e.target.value, SESSION_ABSOLUTE_TIMEOUT_MIN, SESSION_ABSOLUTE_TIMEOUT_MAX));
+              setAbsoluteTimeoutMinutes(parseIntMaxOnly(e.target.value, SESSION_ABSOLUTE_TIMEOUT_MAX));
               setError(null);
             }}
+            onBlur={(e) => setAbsoluteTimeoutMinutes(clampToMin(e.target.value, SESSION_ABSOLUTE_TIMEOUT_MIN))}
             placeholder="43200"
           />
           <p className="text-xs text-muted-foreground">
@@ -299,9 +315,10 @@ export function TenantSessionPolicyCard() {
             max={EXTENSION_TOKEN_IDLE_TIMEOUT_MAX}
             value={extensionIdleMinutes}
             onChange={(e) => {
-              setExtensionIdleMinutes(parseIntInRange(e.target.value, EXTENSION_TOKEN_IDLE_TIMEOUT_MIN, EXTENSION_TOKEN_IDLE_TIMEOUT_MAX));
+              setExtensionIdleMinutes(parseIntMaxOnly(e.target.value, EXTENSION_TOKEN_IDLE_TIMEOUT_MAX));
               setError(null);
             }}
+            onBlur={(e) => setExtensionIdleMinutes(clampToMin(e.target.value, EXTENSION_TOKEN_IDLE_TIMEOUT_MIN))}
             placeholder="10080"
           />
           <p className="text-xs text-muted-foreground">
@@ -319,9 +336,10 @@ export function TenantSessionPolicyCard() {
             max={EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX}
             value={extensionAbsoluteMinutes}
             onChange={(e) => {
-              setExtensionAbsoluteMinutes(parseIntInRange(e.target.value, EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN, EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX));
+              setExtensionAbsoluteMinutes(parseIntMaxOnly(e.target.value, EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MAX));
               setError(null);
             }}
+            onBlur={(e) => setExtensionAbsoluteMinutes(clampToMin(e.target.value, EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_MIN))}
             placeholder="43200"
           />
           <p className="text-xs text-muted-foreground">
@@ -355,9 +373,10 @@ export function TenantSessionPolicyCard() {
               max={VAULT_AUTO_LOCK_MAX}
               value={vaultAutoLockMinutes}
               onChange={(e) => {
-                setVaultAutoLockMinutes(parseIntInRange(e.target.value, VAULT_AUTO_LOCK_MIN, VAULT_AUTO_LOCK_MAX));
+                setVaultAutoLockMinutes(parseIntMaxOnly(e.target.value, VAULT_AUTO_LOCK_MAX));
                 setError(null);
               }}
+              onBlur={(e) => setVaultAutoLockMinutes(clampToMin(e.target.value, VAULT_AUTO_LOCK_MIN))}
               placeholder="15"
             />
             <p className="text-xs text-muted-foreground">

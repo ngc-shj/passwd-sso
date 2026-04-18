@@ -21,7 +21,27 @@ import {
   POLICY_MIN_PW_LENGTH_MAX,
   PASSWORD_HISTORY_COUNT_MAX,
   MAX_CIDRS,
+  SESSION_IDLE_TIMEOUT_MIN,
+  SESSION_IDLE_TIMEOUT_MAX,
+  SESSION_ABSOLUTE_TIMEOUT_MIN,
+  SESSION_ABSOLUTE_TIMEOUT_MAX,
 } from "@/lib/validations";
+
+// Parse a raw input string during typing: accept empty (→ null, "inherit
+// tenant"), or any non-negative integer ≤ max. Values below min are preserved
+// so the user can type multi-digit numbers (typing "15" should not be
+// rejected at the "1" keystroke); min is clamped on blur instead.
+function parseTeamTimeoutOnChange(raw: string, max: number): number | null {
+  if (!raw) return null;
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n) || n < 0) return null;
+  return Math.min(n, max);
+}
+
+function clampTeamTimeoutOnBlur(v: number | null, min: number): number | null {
+  if (v === null) return null;
+  return v < min ? min : v;
+}
 
 interface PolicyData {
   minPasswordLength: number;
@@ -77,11 +97,11 @@ export function validatePolicy(
     errs.minPasswordLength = "minPasswordLengthRange";
   }
   const idle = policy.sessionIdleTimeoutMinutes;
-  if (idle !== null && (Number.isNaN(idle) || idle < 1 || idle > 1440)) {
+  if (idle !== null && (Number.isNaN(idle) || idle < SESSION_IDLE_TIMEOUT_MIN || idle > SESSION_IDLE_TIMEOUT_MAX)) {
     errs.sessionIdleTimeoutMinutes = "sessionIdleTimeoutRange";
   }
   const abs = policy.sessionAbsoluteTimeoutMinutes;
-  if (abs !== null && (Number.isNaN(abs) || abs < 1 || abs > 43200)) {
+  if (abs !== null && (Number.isNaN(abs) || abs < SESSION_ABSOLUTE_TIMEOUT_MIN || abs > SESSION_ABSOLUTE_TIMEOUT_MAX)) {
     errs.sessionAbsoluteTimeoutMinutes = "sessionAbsoluteTimeoutRange";
   }
   const histCount = policy.passwordHistoryCount;
@@ -297,26 +317,26 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <Label>{t("sessionIdleTimeoutMinutes")}</Label>
             <Input
               type="number"
-              min={1}
-              max={1440}
+              min={SESSION_IDLE_TIMEOUT_MIN}
+              max={SESSION_IDLE_TIMEOUT_MAX}
               value={policy.sessionIdleTimeoutMinutes ?? ""}
               onChange={(e) => {
-                if (!e.target.value) {
-                  setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: null }));
-                } else {
-                  const parsed = parseInt(e.target.value, 10);
-                  if (Number.isNaN(parsed) || parsed < 1) {
-                    setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: null }));
-                  } else {
-                    const value = Math.min(1440, parsed);
-                    setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: value }));
-                  }
-                }
+                const v = parseTeamTimeoutOnChange(e.target.value, SESSION_IDLE_TIMEOUT_MAX);
+                setPolicy((p) => ({ ...p, sessionIdleTimeoutMinutes: v }));
                 setFieldErrors((prev) => {
                   const { sessionIdleTimeoutMinutes: _, ...rest } = prev;
                   return rest;
                 });
               }}
+              onBlur={() =>
+                setPolicy((p) => ({
+                  ...p,
+                  sessionIdleTimeoutMinutes: clampTeamTimeoutOnBlur(
+                    p.sessionIdleTimeoutMinutes,
+                    SESSION_IDLE_TIMEOUT_MIN,
+                  ),
+                }))
+              }
               placeholder={t("sessionIdleTimeoutHelp")}
               className="max-w-[200px]"
             />
@@ -330,26 +350,26 @@ export function TeamPolicySettings({ teamId }: TeamPolicySettingsProps) {
             <Label>{t("sessionAbsoluteTimeoutMinutes")}</Label>
             <Input
               type="number"
-              min={1}
-              max={43200}
+              min={SESSION_ABSOLUTE_TIMEOUT_MIN}
+              max={SESSION_ABSOLUTE_TIMEOUT_MAX}
               value={policy.sessionAbsoluteTimeoutMinutes ?? ""}
               onChange={(e) => {
-                if (!e.target.value) {
-                  setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: null }));
-                } else {
-                  const parsed = parseInt(e.target.value, 10);
-                  if (Number.isNaN(parsed) || parsed < 1) {
-                    setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: null }));
-                  } else {
-                    const value = Math.min(43200, parsed);
-                    setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: value }));
-                  }
-                }
+                const v = parseTeamTimeoutOnChange(e.target.value, SESSION_ABSOLUTE_TIMEOUT_MAX);
+                setPolicy((p) => ({ ...p, sessionAbsoluteTimeoutMinutes: v }));
                 setFieldErrors((prev) => {
                   const { sessionAbsoluteTimeoutMinutes: _, ...rest } = prev;
                   return rest;
                 });
               }}
+              onBlur={() =>
+                setPolicy((p) => ({
+                  ...p,
+                  sessionAbsoluteTimeoutMinutes: clampTeamTimeoutOnBlur(
+                    p.sessionAbsoluteTimeoutMinutes,
+                    SESSION_ABSOLUTE_TIMEOUT_MIN,
+                  ),
+                }))
+              }
               placeholder={t("sessionAbsoluteTimeoutHelp")}
               className="max-w-[200px]"
             />
