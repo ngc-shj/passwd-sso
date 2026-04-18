@@ -83,11 +83,7 @@ AAD version: `1` for all scopes.
 Six of nine HKDF derivations use an empty (32 zero bytes) salt. This is a deliberate
 design choice, not an omission.
 
-**RFC 5869 §3.1** states: "if not available, [the salt] is set to a string of zeros
-(of length HashLen)." The extract step then produces `PRK = HMAC-Hash(salt, IKM)`.
-When the IKM is already uniformly random (which is the case for our `secretKey`,
-`teamKey`, `ItemKey`, and `recoveryKey` — all generated via `crypto.getRandomValues`
-with 256 bits of entropy), a zero salt is cryptographically acceptable because:
+[**RFC 5869 §2.2 (Step 1: Extract)**](https://www.rfc-editor.org/rfc/rfc5869#section-2.2) states: "if not provided, it is set to a string of HashLen zeros." The extract step then produces `PRK = HMAC-Hash(salt, IKM)`. [**RFC 5869 §3.3 ("To Skip or not to Skip")**](https://www.rfc-editor.org/rfc/rfc5869#section-3.3) explicitly addresses this case: when the IKM is already a uniformly random cryptographic key, the extract step is not strictly necessary for security, so a zero salt does not weaken the construction. This is the case for our `secretKey`, `teamKey`, `ItemKey`, and `recoveryKey` — all generated via `crypto.getRandomValues` with 256 bits of entropy. A zero salt is cryptographically acceptable because:
 
 1. The IKM provides full entropy input to HMAC — the salt's purpose (to
    "standardize" weak IKM) is unnecessary.

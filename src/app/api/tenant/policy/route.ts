@@ -243,7 +243,7 @@ async function handlePATCH(req: NextRequest) {
     }
   }
 
-  // Validate sessionAbsoluteTimeoutMinutes (non-nullable; ASVS V7.3.3)
+  // Validate sessionAbsoluteTimeoutMinutes (non-nullable; ASVS 5.0 V7.3.2)
   if (sessionAbsoluteTimeoutMinutes !== undefined) {
     if (
       sessionAbsoluteTimeoutMinutes === null ||

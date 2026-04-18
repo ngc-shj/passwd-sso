@@ -119,7 +119,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 | D4: API abuse via extension token | TB5 | Token scope limits operations; rate limiting applies equally | Token holder can make rapid requests within scope |
 | D5: IPv6 subnet rotation bypasses rate limiting | All IP-based rate limits | Rate limit keys use /64 prefix for IPv6 (treats entire subnet as one entity) | Attacker with /48 or larger allocation |
 | D6: DCR endpoint abuse (mass registration) | /api/mcp/register | IP rate limit (20/hr, IPv6 /64), global cap (100 unclaimed), 24h auto-expiry | Distributed registration from many IPs |
-| D7: OAuth consent form CSRF (localhost redirect) | /api/mcp/authorize | CSP `form-action` allows `http://localhost:*` and `http://127.0.0.1:*` in all environments (required for RFC 8252 native app OAuth — Claude Code/Desktop use localhost callback) | XSS prerequisite; form-action alone cannot exfiltrate data without script execution |
+| D7: OAuth consent form CSRF (localhost redirect) | /api/mcp/authorize | CSP `form-action` allows `http://localhost:*` and `http://127.0.0.1:*` in all environments. [RFC 8252 §7.3](https://www.rfc-editor.org/rfc/rfc8252#section-7.3) specifies the loopback IP literal (`127.0.0.1` / `[::1]`) for native app OAuth callbacks and [§8.3](https://www.rfc-editor.org/rfc/rfc8252#section-8.3) explicitly marks `localhost` as NOT RECOMMENDED; the `localhost` form is a pragmatic accommodation for real clients (Claude Code/Desktop) that use it | XSS prerequisite; form-action alone cannot exfiltrate data without script execution |
 
 ### 3.6 Elevation of Privilege
 

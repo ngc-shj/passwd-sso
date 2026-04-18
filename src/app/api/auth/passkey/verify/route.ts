@@ -113,8 +113,9 @@ async function handlePOST(req: NextRequest) {
           expires,
           ipAddress: meta.ip ?? null,
           userAgent: meta.userAgent?.slice(0, 512) ?? null,
-          // AAL3 provenance: the resolver clamps idle/absolute to
-          // NIST 800-63B AAL3 ceilings for sessions with provider="webauthn".
+          // AAL3 provenance: the resolver clamps idle/absolute to NIST SP
+          // 800-63B-4 §2.3.3 AAL3 reauthentication ceilings (12h absolute /
+          // 15min inactivity) for sessions with provider="webauthn".
           provider: "webauthn",
         },
       });

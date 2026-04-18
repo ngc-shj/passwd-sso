@@ -167,9 +167,9 @@ All encryption uses the Web Crypto API (`crypto.subtle`). CryptoKey objects are 
 
 ### 4.1 HKDF Usage Notes
 
-HKDF (RFC 5869) is used for all key derivation from high-entropy input key material (IKM). Design rationale:
+HKDF ([RFC 5869](https://www.rfc-editor.org/rfc/rfc5869)) is used for all key derivation from high-entropy input key material (IKM). Design rationale:
 
-- **Zero salt**: Personal vault HKDF derivations use an empty (zero-length) salt. This is acceptable under RFC 5869 §3.1 when the IKM is uniformly random (256-bit `secretKey`). Domain separation is achieved exclusively via distinct `info` labels.
+- **Zero salt**: Personal vault HKDF derivations use an empty (zero-length) salt. Per [RFC 5869 §2.2](https://www.rfc-editor.org/rfc/rfc5869#section-2.2), an absent salt is equivalent to "a string of HashLen zeros"; the skipped-extract rationale in [§3.3](https://www.rfc-editor.org/rfc/rfc5869#section-3.3) justifies using HKDF with such a salt when the IKM is already a uniformly random cryptographic key (256-bit `secretKey`). Domain separation is achieved exclusively via distinct `info` labels.
 - **Non-zero salt**: Team key wrapping and recovery key wrapping use a random salt per operation. The salt is stored alongside the wrapped key and serves as a domain separator in addition to the `info` label.
 - **Info labels**: Each derivation path uses a unique info string (e.g., `passwd-sso-enc-v1`, `passwd-sso-auth-v1`). The full ledger is maintained in [crypto-domain-ledger.md](crypto-domain-ledger.md).
 

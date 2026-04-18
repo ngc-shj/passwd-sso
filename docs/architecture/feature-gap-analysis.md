@@ -340,7 +340,7 @@ Added a notification bell with unread count, paginated notification list, mark-a
 
 #### ~~B-1 SCIM provisioning~~ — Implemented (2026-02-27)
 
-Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/v2/Users` (CRUD), `/api/scim/v2/Groups` (CRUD), `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`. Bearer token auth with tenant-scoped token management. Groups map to team membership roles. Rate limiting and RFC 7644 compliant error responses included.
+Implemented SCIM 2.0 provisioning scoped to tenant level. Endpoints: `/api/scim/v2/Users` (CRUD), `/api/scim/v2/Groups` (CRUD), `/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas`. Bearer token auth with tenant-scoped token management. Groups map to team membership roles. Rate limiting and [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644) compliant error responses included.
 
 #### ~~B-3 SIEM integration~~ — Implemented (2026-03-02)
 
@@ -577,7 +577,7 @@ Feature-category coverage:
 
 **Improvements since previous report (2026-02-20):**
 
-- ~~No SCIM~~ -> implemented (Users + Groups, tenant-scoped tokens, RFC 7644)
+- ~~No SCIM~~ -> implemented (Users + Groups, tenant-scoped tokens, [RFC 7644](https://www.rfc-editor.org/rfc/rfc7644))
 - Multi-tenant model with FORCE ROW LEVEL SECURITY on all 28 tenant-scoped tables
 - Org-to-team rename completed (DB, API, UI, i18n)
 - CI guard scripts for RLS bypass allowlist and nested auth detection
