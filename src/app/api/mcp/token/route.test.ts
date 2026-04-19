@@ -272,6 +272,8 @@ describe("POST /api/mcp/token", () => {
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "MCP_REFRESH_TOKEN_REPLAY",
+        userId: SYSTEM_ACTOR_ID,
+        actorType: "SYSTEM",
         tenantId: "tenant-replay",
         metadata: expect.objectContaining({ familyId: "family-001" }),
       }),

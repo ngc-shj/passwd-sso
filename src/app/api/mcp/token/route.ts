@@ -9,7 +9,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
-import { NIL_UUID, resolveAuditUserId } from "@/lib/constants/app";
+import { resolveAuditUserId } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
@@ -122,7 +122,8 @@ async function handlePOST(req: NextRequest) {
         await logAuditAsync({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
-          userId: NIL_UUID,
+          userId: resolveAuditUserId(null, "system"),
+          actorType: ACTOR_TYPE.SYSTEM,
           tenantId: result.tenantId,
           metadata: { clientId: clientIdValue, familyId: result.familyId },
         });
