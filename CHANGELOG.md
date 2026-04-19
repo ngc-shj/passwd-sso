@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.4.44](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.43...passwd-sso-v0.4.44) (2026-04-19)
+
+
+### Bug Fixes
+
+* correct external spec citations and i18n share group label ([#386](https://github.com/ngc-shj/passwd-sso/issues/386)) ([0c1753a](https://github.com/ngc-shj/passwd-sso/commit/0c1753aafa91dbce74e64a02ecf32fd58caaf881))
+
+
+### Code Refactoring
+
+* **audit:** enforce *AuditBase helper usage on logAudit calls ([#389](https://github.com/ngc-shj/passwd-sso/issues/389)) ([7f8e039](https://github.com/ngc-shj/passwd-sso/commit/7f8e039cfdd0b17a0a9e5f13ed3b207b04cef1de))
+* cleanup legacy extension token relay + audit doc/comment sync ([#388](https://github.com/ngc-shj/passwd-sso/issues/388)) ([f3f9975](https://github.com/ngc-shj/passwd-sso/commit/f3f9975cf030a092011e58fa270d36343dea6e87))
+
 ## [0.4.43](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.42...passwd-sso-v0.4.43) (2026-04-18)
 
 
