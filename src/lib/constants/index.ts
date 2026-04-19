@@ -37,7 +37,6 @@ export type { ConnectStatus } from "./connect-status";
 export {
   TOKEN_ELEMENT_ID,
   TOKEN_READY_EVENT,
-  TOKEN_BRIDGE_MSG_TYPE,
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
   BRIDGE_CODE_MAX_ACTIVE,

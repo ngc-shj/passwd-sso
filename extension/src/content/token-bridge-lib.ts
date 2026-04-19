@@ -1,7 +1,4 @@
-import {
-  TOKEN_BRIDGE_MSG_TYPE,
-  BRIDGE_CODE_MSG_TYPE,
-} from "../lib/constants";
+import { BRIDGE_CODE_MSG_TYPE } from "../lib/constants";
 import { EXT_API_PATH } from "../lib/api-paths";
 
 function isContextValid(): boolean {
@@ -64,25 +61,11 @@ async function handleBridgeCodeMessage(event: MessageEvent): Promise<boolean> {
   }
 }
 
-/** Handle the legacy token relay postMessage (kept until extension v0.5.x). */
-function handleLegacyTokenMessage(event: MessageEvent): boolean {
-  const { token, expiresAt } = event.data ?? {};
-  if (typeof token !== "string" || typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
-    return false;
-  }
-  if (!isContextValid()) return false;
-  forwardToken(token, expiresAt);
-  return true;
-}
-
 /**
  * Validate and forward a postMessage from the web app to the background.
- * Supports two message types during migration:
- *   - BRIDGE_CODE_MSG_TYPE (new): code → fetch exchange → forward token
- *   - TOKEN_BRIDGE_MSG_TYPE (legacy): bearer token → forward directly
- *
- * The legacy path is kept until the extension reaches v0.5.x and all
- * users have updated. See plan §Step 11 (deprecation lifecycle).
+ * Accepts only BRIDGE_CODE_MSG_TYPE: the web app posts a one-time code, the
+ * content script exchanges it for a bearer token via direct fetch, then
+ * forwards the token to background.
  *
  * Returns true if the message was valid and processed.
  */
@@ -94,12 +77,6 @@ export async function handlePostMessage(event: MessageEvent): Promise<boolean> {
 
   if (event.data.type === BRIDGE_CODE_MSG_TYPE) {
     return handleBridgeCodeMessage(event);
-  }
-
-  if (event.data.type === TOKEN_BRIDGE_MSG_TYPE) {
-    // TODO: remove after web app + extension reach v0.5.x and telemetry
-    // shows zero legacy traffic for 30 days.
-    return handleLegacyTokenMessage(event);
   }
 
   return false;
