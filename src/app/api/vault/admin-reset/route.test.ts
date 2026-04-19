@@ -30,6 +30,9 @@ vi.mock("@/lib/csrf", () => ({
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
+  personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test" }),
+  teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test" }),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test" }),
 }));
 vi.mock("@/lib/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
@@ -247,9 +250,13 @@ describe("POST /api/vault/admin-reset", () => {
       expect.objectContaining({
         scope: "TENANT",
         tenantId: "tenant-1",
-        teamId: undefined,
       }),
     );
+    // teamId is absent from the params object on TENANT scope (helper omits it,
+    // and the legacy explicit `teamId: undefined` was an implementation detail
+    // that did not affect the persisted audit_logs row).
+    const lastCall = mockLogAudit.mock.calls[mockLogAudit.mock.calls.length - 1]?.[0] as Record<string, unknown> | undefined;
+    expect(lastCall?.teamId).toBeUndefined();
   });
 
   it("confirmation must be English regardless of locale", async () => {

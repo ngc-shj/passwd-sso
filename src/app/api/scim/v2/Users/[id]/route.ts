@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { invalidateUserSessions } from "@/lib/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
@@ -101,11 +101,9 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: auditAction,
-    userId: auditUserId,
+    ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: putActorType,
-    tenantId,
+    action: auditAction,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: {
@@ -115,7 +113,6 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       ...(invalidationCounts ?? {}),
       ...(sessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
     },
-    ...extractRequestMeta(req),
   });
 
   return scimResponse(resource);
@@ -180,11 +177,9 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: auditAction,
-    userId: auditUserId,
+    ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: patchActorType,
-    tenantId,
+    action: auditAction,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: {
@@ -193,7 +188,6 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
       ...(patchInvalidationCounts ?? {}),
       ...(patchSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
     },
-    ...extractRequestMeta(req),
   });
 
   return scimResponse(resource);
@@ -239,11 +233,9 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.SCIM_USER_DELETE,
-    userId: auditUserId,
+    ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: deleteActorType,
-    tenantId,
+    action: AUDIT_ACTION.SCIM_USER_DELETE,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: userId,
     metadata: {
@@ -251,7 +243,6 @@ async function handleDELETE(req: NextRequest, { params }: Params): Promise<Respo
       ...(deleteInvalidationCounts ?? {}),
       ...(deleteSessionInvalidationFailed ? { sessionInvalidationFailed: true } : {}),
     },
-    ...extractRequestMeta(req),
   });
 
   return new Response(null, { status: 204 });

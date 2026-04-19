@@ -12,11 +12,10 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authOrToken, hasUserId } from "@/lib/auth-or-token";
-import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIp } from "@/lib/ip-access";
 
 const checkRateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 
@@ -90,13 +89,10 @@ export async function GET(request: NextRequest) {
 
   // Lightweight audit (success only)
   await logAuditAsync({
+    ...personalAuditBase(request, userId),
     action: AUDIT_ACTION.DELEGATION_CHECK,
-    scope: AUDIT_SCOPE.PERSONAL,
-    userId,
     targetId: entryId,
     metadata: { clientId, sessionId: session.id },
-    ip: extractClientIp(request),
-    userAgent: request.headers.get("user-agent"),
   });
 
   return NextResponse.json({

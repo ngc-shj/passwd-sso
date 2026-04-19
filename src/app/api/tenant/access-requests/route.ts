@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit";
 import { requireTenantPermission } from "@/lib/tenant-auth";
 import { authOrToken } from "@/lib/auth-or-token";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
@@ -198,12 +198,10 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.CROSS_TENANT_LOOKUP);
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.ACCESS_REQUEST_CREATE,
-    userId,
+    ...tenantAuditBase(req, userId, tenantId),
     actorType: resolveActorType(authResult),
     serviceAccountId: authResult.type === "service_account" ? serviceAccountId : undefined,
-    tenantId,
+    action: AUDIT_ACTION.ACCESS_REQUEST_CREATE,
     targetType: AUDIT_TARGET_TYPE.ACCESS_REQUEST,
     targetId: accessRequest.id,
     metadata: {
@@ -211,7 +209,6 @@ async function handlePOST(req: NextRequest) {
       requestedScope: requestedScope.join(","),
       expiresInMinutes,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json(accessRequest, { status: 201 });

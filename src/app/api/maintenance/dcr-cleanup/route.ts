@@ -13,8 +13,8 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import { verifyAdminToken } from "@/lib/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/maintenance-auth";
@@ -63,20 +63,15 @@ async function handlePOST(req: NextRequest) {
   BYPASS_PURPOSE.SYSTEM_MAINTENANCE);
 
   // Audit log
-  const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.MCP_CLIENT_DCR_CLEANUP,
-    userId: SYSTEM_ACTOR_ID,
+    ...tenantAuditBase(req, SYSTEM_ACTOR_ID, membership.tenantId),
     actorType: ACTOR_TYPE.SYSTEM,
-    tenantId: membership.tenantId,
+    action: AUDIT_ACTION.MCP_CLIENT_DCR_CLEANUP,
     metadata: {
       operatorId,
       [AUDIT_METADATA_KEY.PURGED_COUNT]: deleted.count,
       systemWide: true,
     },
-    ip,
-    userAgent,
   });
 
   return NextResponse.json({ deleted: deleted.count });

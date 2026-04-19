@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimPatchOpSchema, scimGroupSchema } from "@/lib/scim/validations";
 import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
@@ -83,12 +83,10 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
-    userId: auditUserId,
+    ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: putActorType,
+    action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     teamId: serviceResult.teamId,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: id,
     metadata: {
@@ -96,7 +94,6 @@ async function handlePUT(req: NextRequest, { params }: Params): Promise<Response
       added: serviceResult.added,
       removed: serviceResult.removed,
     },
-    ...extractRequestMeta(req),
   });
 
   return scimResponse(serviceResult.resource);
@@ -151,19 +148,16 @@ async function handlePATCH(req: NextRequest, { params }: Params): Promise<Respon
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
-    userId: auditUserId,
+    ...tenantAuditBase(req, auditUserId, tenantId),
     actorType: patchActorType,
+    action: AUDIT_ACTION.SCIM_GROUP_UPDATE,
     teamId: serviceResult.teamId,
-    tenantId,
     targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
     targetId: id,
     metadata: {
       role: serviceResult.role,
       operations: actions.map((a) => ({ op: a.op, userId: a.userId })),
     },
-    ...extractRequestMeta(req),
   });
 
   return scimResponse(serviceResult.resource);

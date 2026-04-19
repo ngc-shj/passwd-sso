@@ -35,10 +35,10 @@ import {
 import { issueExtensionToken } from "@/lib/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAuditAsync } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";
@@ -152,12 +152,9 @@ async function handlePOST(req: NextRequest) {
     });
   } catch (err) {
     await logAuditAsync({
-      scope: AUDIT_SCOPE.PERSONAL,
-      action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_FAILURE,
-      userId: consumed.userId,
+      ...personalAuditBase(req, consumed.userId),
       tenantId: consumed.tenantId,
-      ip,
-      userAgent: req.headers.get("user-agent"),
+      action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_FAILURE,
       metadata: { reason: "issue_failed" },
     });
     getLogger().error(
@@ -174,12 +171,9 @@ async function handlePOST(req: NextRequest) {
 
   // Audit success: userId and tenantId both come from the consumed code record
   await logAuditAsync({
-    scope: AUDIT_SCOPE.PERSONAL,
-    action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_SUCCESS,
-    userId: consumed.userId,
+    ...personalAuditBase(req, consumed.userId),
     tenantId: consumed.tenantId,
-    ip,
-    userAgent: req.headers.get("user-agent"),
+    action: AUDIT_ACTION.EXTENSION_TOKEN_EXCHANGE_SUCCESS,
   });
 
   return NextResponse.json(

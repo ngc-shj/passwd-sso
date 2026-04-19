@@ -6,6 +6,47 @@
  * the direct-write-to-audit_logs path is removed — all application-emitted events flow through the outbox.
  * Dual-write: PostgreSQL audit_logs + structured JSON to stdout (via pino).
  * extractRequestMeta() extracts IP and User-Agent from NextRequest headers.
+ *
+ * ─── Helper usage policy ──────────────────────────────────────────
+ *
+ * Route handlers that have `req: NextRequest` in scope MUST use one of:
+ *   personalAuditBase(req, userId)
+ *   teamAuditBase(req, userId, teamId)
+ *   tenantAuditBase(req, userId, tenantId)
+ *
+ * Spread the helper FIRST in the call params; place explicit overrides
+ * (action, targetType, targetId, metadata, actorType, serviceAccountId, etc.)
+ * AFTER the spread so override-ordering is correct:
+ *
+ *   await logAuditAsync({
+ *     ...tenantAuditBase(req, userId, tenantId),
+ *     actorType: ACTOR_TYPE.SYSTEM,   // override after spread
+ *     action: AUDIT_ACTION.X,
+ *     targetType, targetId, metadata,
+ *   });
+ *
+ * The helpers ensure forensic ip/userAgent capture and prevent the recurring
+ * class of bug where call sites forget extractRequestMeta(req) or set the
+ * wrong scope.
+ *
+ * ─── Bucket C exceptions (helpers do NOT apply) ───────────────────
+ *
+ * The following contexts cannot use the helpers because no NextRequest is
+ * available at the call site:
+ *   - NextAuth event/jwt callbacks (src/auth.ts, src/lib/auth-adapter.ts)
+ *   - Library functions invoked outside HTTP context
+ *     (src/lib/access-restriction.ts, src/lib/account-lockout.ts when
+ *      request is undefined, src/lib/delegation.ts post-response cleanup,
+ *      src/lib/team-policy.ts, src/lib/extension-token.ts, src/lib/notification.ts)
+ *   - MCP tool execution (src/lib/mcp/tools.ts)
+ *   - Background workers (src/workers/audit-outbox-worker.ts,
+ *     src/lib/directory-sync/engine.ts, src/lib/webhook-dispatcher.ts)
+ *   - Constants validation (src/lib/constants/audit.ts)
+ *   - TENANT-scope routes where tenantId is not available without an extra
+ *     DB lookup (e.g., src/app/api/internal/audit-emit/route.ts,
+ *     src/app/api/mcp/register/route.ts during DCR registration before
+ *     tenant binding) — resolveTenantId() looks up tenant from userId
+ *     internally; using the helper would require redundant lookups.
  */
 
 import { prisma } from "@/lib/prisma";

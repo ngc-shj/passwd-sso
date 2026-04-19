@@ -458,4 +458,68 @@ These scenarios cover the affected endpoints and are used to mentally validate b
    - Event with `actorType: SYSTEM`, `userId: SYSTEM_ACTOR_ID`, scope `TENANT`. Pattern 2.
 
 10. **Internal audit emit** (`POST /api/internal/audit-emit`):
-    - Internal helper endpoint. The route uses `request` (not `req`); migration must preserve the variable name.
+    - Internal helper endpoint. **MOVED to Bucket C** during plan review — `tenantId` is not available without an extra DB lookup; `resolveTenantId()` performs the lookup transparently. No migration applies.
+
+## Implementation Checklist
+
+Generated during Phase 2 Step 2-1 (impact analysis).
+
+### Files to modify (23 source files)
+
+**Batch 1 — Maintenance & admin (7 files)**
+- [ ] `src/app/api/admin/rotate-master-key/route.ts` — Pattern 2 (system actor), userAgent ADDED per Functional 2 EXCEPTION
+- [ ] `src/app/api/maintenance/audit-chain-verify/route.ts` — Pattern 2
+- [ ] `src/app/api/maintenance/audit-outbox-metrics/route.ts` — Pattern 2
+- [ ] `src/app/api/maintenance/audit-outbox-purge-failed/route.ts` — Pattern 2
+- [ ] `src/app/api/maintenance/dcr-cleanup/route.ts` — Pattern 2
+- [ ] `src/app/api/maintenance/purge-audit-logs/route.ts` — Pattern 2
+- [ ] `src/app/api/maintenance/purge-history/route.ts` — Pattern 2
+
+**Batch 2 — MCP & extension (3 files; `internal/audit-emit/route.ts` excluded → Bucket C)**
+- [ ] `src/app/api/mcp/authorize/consent/route.ts` — Pattern 2 (3 calls; line 152 userAgent ADDED per EXCEPTION)
+- [ ] `src/app/api/mcp/register/route.ts` — Pattern 2
+- [ ] `src/app/api/extension/token/exchange/route.ts` — Pattern 1 (2 calls)
+
+**Batch 3 — Audit-log meta + watchtower (3 files)**
+- [ ] `src/app/api/audit-logs/export/route.ts` — Pattern 3 (conditional team/personal)
+- [ ] `src/app/api/audit-logs/import/route.ts` — Pattern 3
+- [ ] `src/app/api/watchtower/alert/route.ts` — Pattern 3
+
+**Batch 4 — Vault + share-links (6 files)**
+- [ ] `src/app/api/vault/admin-reset/route.ts` — Pattern 4 (conditional team/tenant)
+- [ ] `src/app/api/vault/delegation/route.ts` — Pattern 5 (dual-emit; `tenantId` MUST be preserved on PERSONAL emit)
+- [ ] `src/app/api/vault/delegation/check/route.ts` — Pattern 7 (extractClientIp direct)
+- [ ] `src/app/api/share-links/route.ts` — Pattern 6 (logAuditInTx; delete pre-tx extractRequestMeta)
+- [ ] `src/app/api/share-links/[id]/route.ts` — Pattern 6 + Pattern 3 (logAuditInTx + conditional team/personal)
+- [ ] `src/app/api/share-links/verify-access/route.ts` — Pattern 1 (2 calls)
+
+**Batch 5 — SCIM + access-requests (4 files)**
+- [ ] `src/app/api/scim/v2/Users/route.ts` — Pattern 1
+- [ ] `src/app/api/scim/v2/Users/[id]/route.ts` — Pattern 1 (3 calls)
+- [ ] `src/app/api/scim/v2/Groups/[id]/route.ts` — Pattern 1 (2 calls)
+- [ ] `src/app/api/tenant/access-requests/route.ts` — Pattern 1
+
+**Batch 6 — Documentation update (after Batches 1-5)**
+- [ ] `src/lib/audit.ts` module-doc — mandate helper usage; document Bucket C exceptions
+
+### Shared utilities to reuse (NEVER reimplement)
+
+- `personalAuditBase(req, userId)` from `@/lib/audit` — PERSONAL scope helper
+- `teamAuditBase(req, userId, teamId)` from `@/lib/audit` — TEAM scope helper
+- `tenantAuditBase(req, userId, tenantId)` from `@/lib/audit` — TENANT scope helper
+
+### Imports to remove per file (if no remaining usage)
+
+After migration of each file, remove the following imports IF and only IF no other code in the file uses them:
+- `extractRequestMeta` from `@/lib/audit`
+- `extractClientIp` from `@/lib/ip-access`
+- `AUDIT_SCOPE` from `@/lib/constants`
+
+CI's zero-warning lint will catch unused imports automatically.
+
+### Verification gate (after every batch)
+
+1. `npx eslint .` — zero warnings
+2. `npx vitest run` — all tests pass
+3. `npx next build` — production build succeeds
+4. `npm run test:integration` — priority tests: `audit-and-isolation.test.ts`, `audit-logaudit-non-atomic.integration.test.ts`
