@@ -143,7 +143,7 @@ The content script performs four checks before forwarding:
 |-------|---------|-------------|
 | `event.source === window` | Reject messages from child iframes | Silent drop |
 | `event.origin === window.location.origin` | Reject cross-origin messages | Silent drop |
-| `event.data.type === "PASSWD_SSO_BRIDGE_CODE"` (or legacy `PASSWD_SSO_TOKEN_RELAY`) | Reject unrelated postMessage traffic | Silent drop |
+| `event.data.type === "PASSWD_SSO_BRIDGE_CODE"` | Reject unrelated postMessage traffic | Silent drop |
 | `code.length === 64` and hex (bridge code path only) | Reject malformed payloads | Silent drop |
 
 All rejections are silent (no error response) to prevent oracle attacks.
@@ -202,6 +202,8 @@ extension does not yet have.
 | DevTools / memory forensics | Memory only | Memory only |
 | Cross-tenant escalation via tampered request | N/A | Server-side identity resolution from DB record |
 
+After the 2026-04 cleanup the postMessage column is no longer reachable from any in-tree code; the column is retained for historical comparison.
+
 ## File Map
 
 | File | Role |
@@ -210,7 +212,7 @@ extension does not yet have.
 | `src/app/api/extension/bridge-code/route.ts` | Web app endpoint: issues a one-time code (Auth.js session required) |
 | `src/app/api/extension/token/exchange/route.ts` | Web app endpoint: atomically consumes a code, returns a token (no session) |
 | `src/lib/extension-token.ts` | Shared `issueExtensionToken()` helper used by legacy POST + new exchange |
-| `src/lib/constants/extension.ts` | Shared constants: `TOKEN_BRIDGE_MSG_TYPE` (legacy), `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
+| `src/lib/constants/extension.ts` | Shared constants: `BRIDGE_CODE_MSG_TYPE`, `BRIDGE_CODE_TTL_MS`, `BRIDGE_CODE_MAX_ACTIVE` |
 | `extension/src/content/token-bridge.js` | Content script (ISOLATED): receives postMessage, exchanges bridge code, forwards token to background. Plain JS — see project memory `project_extension_parallel_impl.md`. |
 | `extension/src/content/token-bridge-lib.ts` | TypeScript version of content script (for tests only — not registered at runtime) |
 | `extension/src/lib/constants.ts` | Extension constants (mirrors web app constants; cross-repo sync test enforces equality) |
@@ -220,17 +222,14 @@ extension does not yet have.
 | `extension/src/background/index.ts` | Background SW: token state, refresh, dynamic script registration |
 | `prisma/schema.prisma` | `ExtensionBridgeCode` model + `EXTENSION_BRIDGE_CODE_ISSUE` / `EXTENSION_TOKEN_EXCHANGE_SUCCESS` / `EXTENSION_TOKEN_EXCHANGE_FAILURE` audit actions |
 
-### Migration period (Phase 1)
+### Migration status
 
-The legacy `POST /api/extension/token` endpoint and the legacy `TOKEN_BRIDGE_MSG_TYPE`
-postMessage path are kept operational for the transition period. Older installed
-extensions (pre-bridge-code) only listen for `TOKEN_BRIDGE_MSG_TYPE`; they will
-not be able to receive a token from a web app that has switched to the new flow
-until the user updates the extension.
-
-The legacy POST route emits a structured log entry
-(`event: extension_token_legacy_issuance`) on every call so we can measure
-when legacy traffic drops to zero and remove the endpoint in a future phase.
+The legacy `TOKEN_BRIDGE_MSG_TYPE` postMessage relay path was removed in the
+2026-04 cleanup; the extension content script no longer accepts that message
+type. The legacy `POST /api/extension/token` endpoint remains operational and
+continues to emit a structured log entry (`event: extension_token_legacy_issuance`)
+on every call so we can measure when legacy traffic drops to zero — that
+endpoint's removal is tracked separately.
 
 ---
 
