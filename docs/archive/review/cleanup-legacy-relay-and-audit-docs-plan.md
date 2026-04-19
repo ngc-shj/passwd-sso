@@ -223,3 +223,66 @@ This PR has near-zero user-facing change — it is removal of dead code and doc 
 4. **Page hosting a malicious script that sends `PASSWD_SSO_TOKEN_RELAY` postMessage**: Before this PR, the extension would accept and forward the token (security concern). After this PR, the extension silently drops the message. Expected: tightens trust surface.
 5. **Audit outbox worker stopped**: Audit events accumulate in `audit_outbox` with status `PENDING`. The web app continues to function. Documentation now correctly describes this state instead of "in-memory buffer overflow". Expected: behavior unchanged; only the doc explanation matches reality.
 6. **Audit outbox worker dead-letters a row**: Worker writes an `AUDIT_OUTBOX_DEAD_LETTER` row directly via `writeDirectAuditLog()` AND emits a `deadLetterLogger.warn(...)`. Expected: behavior unchanged; documentation now mentions both surfaces instead of only the in-memory dead-letter path.
+7. **MCP refresh-token replay attempt**: a stolen-and-rotated refresh token is presented; `exchangeRefreshToken` returns `ok: false, reason: "replay"`; `MCP_REFRESH_TOKEN_REPLAY` audit row emitted. Pre-PR: row carried `userId: NIL_UUID, actorType: HUMAN (default)` — appeared as a phantom `00000000-…` user in human audit views. Post-PR: row carries `userId: SYSTEM_ACTOR_ID, actorType: SYSTEM` — properly grouped under the SYSTEM actor filter and excluded from per-user audit views via `SENTINEL_ACTOR_IDS`.
+
+---
+
+## Implementation Checklist
+
+(Generated during Phase 2 Step 2-1 impact analysis. Each entry maps to one or more Implementation steps above. Fully exhaustive — no other source/test/active-doc files require modification.)
+
+### Files to modify (10 source/test files + 4 doc files)
+
+#### Extension (legacy relay removal — F1/F2/F3, single commit)
+- [ ] `extension/src/content/token-bridge-lib.ts` — remove `TOKEN_BRIDGE_MSG_TYPE` import; remove `handleLegacyTokenMessage()`; remove legacy if-branch in `handlePostMessage()`; rewrite head JSDoc that names two message types.
+- [ ] `extension/src/content/token-bridge.js` — remove `LEGACY_MSG_TYPE` var; remove `handleLegacyTokenMessage()` function; remove legacy if-branch; rewrite head-comment listing supported message types.
+- [ ] `extension/src/lib/constants.ts` — delete `TOKEN_BRIDGE_MSG_TYPE` line (line 7) and surrounding section comment; rephrase Bridge code flow comment to stand alone.
+- [ ] `src/lib/constants/extension.ts` — delete `TOKEN_BRIDGE_MSG_TYPE` line (line 9) and preceding section comment (lines 7–9); rephrase `BRIDGE_CODE_MSG_TYPE` comment (lines 11–13) to drop "Replaces TOKEN_BRIDGE_MSG_TYPE" framing.
+- [ ] `src/lib/constants/index.ts` — remove `TOKEN_BRIDGE_MSG_TYPE` from re-export block (lines 37–45).
+- [ ] `extension/src/__tests__/content/token-bridge.test.ts` — port 3 guard tests to bridge-code shape (cross-origin / wrong-type / oracle-prevention) FIRST; then delete legacy describe block (lines 46–107); remove `TOKEN_BRIDGE_MSG_TYPE` import (line 7).
+- [ ] `extension/src/__tests__/content/token-bridge-js-sync.test.ts` — remove `TOKEN_BRIDGE_MSG_TYPE` from import (line 3); delete legacy `it()` (lines 8–11).
+- [ ] `src/__tests__/i18n/extension-constants-sync.test.ts` — remove `TOKEN_BRIDGE_MSG_TYPE` from import (line 24); delete legacy `it()` (lines 53–55); rewrite leading JSDoc to "covers `BRIDGE_CODE_MSG_TYPE` in the bundled JS" (forward-looking).
+
+#### Audit pipeline doc sync (F5/F6/F7, separate commits)
+- [ ] `docs/security/threat-model.md` — rewrite §5 item 3 to describe outbox + worker architecture.
+- [ ] `docs/security/security-review.md` — rewrite the "Audit write failures do not break primary operation" subsection (~lines 214–228); cite audit-chain mechanism, full path `src/workers/audit-delivery.ts`, qualify WORM as "not implemented"; add 256-char `lastError` METADATA_BLOCKLIST-bypass note.
+- [ ] `docs/architecture/extension-token-bridge.md` — drop `(or legacy PASSWD_SSO_TOKEN_RELAY)` clause (line 146); remove `TOKEN_BRIDGE_MSG_TYPE (legacy)` from file-map row (line 213); rewrite Migration Period subsection (lines 223–229) + telemetry paragraph (lines 231–233) to a single paragraph noting (a) postMessage path removed, (b) legacy POST endpoint + telemetry remain, (c) endpoint cleanup tracked separately; insert one sentence after attack-vector table at line 204.
+- [ ] `src/lib/audit-logger.ts` — change "or were dropped due to buffer overflow" (lines 89–93) to "or whose tenantId could not be resolved".
+
+#### NIL_UUID / actorId comments (F8/F9, separate commits)
+- [ ] `src/lib/constants/app.ts` — replace NIL_UUID JSDoc (lines 9–17) with the wording in Technical approach §F8 (preserves "Nil UUID (RFC 4122 §4.1.7)." first line; adds Note + Primary/Secondary use cases + structural-impossibility invariant + FK-transitivity; "MUST NOT" prescription, no exception caveat).
+- [ ] `prisma/schema.prisma` — add `///` triple-slash doc comment block above `AuditLog.userId` (line ~974) stating actorId semantics + `TODO(actorId-rename)` marker.
+- [ ] `src/lib/audit.ts` — add JSDoc above `AuditLogParams.userId` (line 39) stating actorId semantics + `TODO(actorId-rename)` marker.
+
+#### MCP replay-audit fix (F10, separate commit)
+- [ ] `src/app/api/mcp/token/route.ts` — line 12: remove `NIL_UUID` from import (keep `resolveAuditUserId`). Line 125: replace `userId: NIL_UUID` with `userId: resolveAuditUserId(null, "system")`. Add `actorType: ACTOR_TYPE.SYSTEM` immediately after.
+- [ ] `src/app/api/mcp/token/route.test.ts` — extend `expect.objectContaining({...})` (lines 272–278) with `userId: SYSTEM_ACTOR_ID` and `actorType: "SYSTEM"` (import already present at line 38, no edit needed).
+
+### Shared utilities reused (no new helpers introduced)
+- `resolveAuditUserId(userId, fallback)` from `src/lib/constants/app.ts:47-53` — already used by route.ts:139 (success branch); F10 reuses for replay branch.
+- `SYSTEM_ACTOR_ID` from `src/lib/constants/app.ts:34` — already used by route.test.ts T3.1 ROTATE test.
+- `ACTOR_TYPE.SYSTEM` from `src/lib/constants/audit.ts` — Prisma enum exposed via constants module.
+- `BRIDGE_CODE_MSG_TYPE` from `extension/src/lib/constants.ts:12` — already imported in surviving bridge-code tests.
+
+### Patterns to follow consistently
+- Test names use the "bridge code" framing (per Round 2 T5 fix): "rejects bridge code message …", "does not respond to bridge code messages …".
+- Plan §F8 JSDoc uses `///` triple-slash style for the Prisma schema, JSDoc `/** */` style for TS source.
+- TODO marker is the literal string `TODO(actorId-rename)` — must appear in 3 source locations (NIL_UUID JSDoc, schema, audit.ts) for grep-discoverability. F10 fix removes the need to mention the mcp/token route.ts:125 exception.
+
+### Commit grouping
+1. `refactor(extension): remove legacy PASSWD_SSO_TOKEN_RELAY postMessage path` — Steps 2–4 + F1/F2/F3 (single commit per Round 1 F5 finding).
+2. `docs(security): sync audit pipeline docs to outbox + worker reality` — Steps 6–8 + F5/F6/F7 (single commit; touches threat-model.md, security-review.md, audit-logger.ts).
+3. `docs(architecture): remove legacy PASSWD_SSO_TOKEN_RELAY references` — Step 5 + F4 (single commit; touches extension-token-bridge.md only).
+4. `refactor(audit): clarify NIL_UUID + audit_logs.userId semantics + actorId TODO marker` — Steps 9–10 + F8/F9 (single commit; touches app.ts, schema.prisma, audit.ts).
+5. `fix(mcp): use SYSTEM_ACTOR_ID for MCP_REFRESH_TOKEN_REPLAY audit (was NIL_UUID)` — Step 11 + F10 (single commit; touches route.ts + route.test.ts).
+
+Five logically distinct commits map cleanly to release-please conventional-commit prefixes (`refactor:` / `docs:` / `fix:`).
+
+### Out-of-checklist verifications during impact analysis
+- `extension/dist/` is gitignored AND not tracked (verified: `git ls-files extension/dist/` empty). F1 finding-Skip valid.
+- `audit-retry.ts` does NOT exist in `src/lib/`. F5/F6 doc-rewrite directives valid.
+- `src/workers/audit-delivery.ts` exists and exposes `AuditDeliverer` interface. F6 cite-target valid.
+- `src/workers/audit-outbox-worker.ts:451` writes 256-char `lastError`. S4 doc-note target valid.
+- All three `///` doc-comment example sites in plan §F9 verified to exist (`Session.authMethod` line 44, `RefreshToken.familyId` line 188, `TeamPolicy.maxSessionDurationMinutes` line 1355).
+- `SYSTEM_ACTOR_ID` import already at `route.test.ts:38` (Round 4 T-F10-1 fix valid).
+- `injectExtensionToken` no longer exists (only `injectExtensionBridgeCode`). F1 hard-delete justification valid.
