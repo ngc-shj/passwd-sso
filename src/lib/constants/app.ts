@@ -9,10 +9,38 @@ export const APP_NAME = process.env.NEXT_PUBLIC_APP_NAME ?? "passwd-sso";
 /**
  * Nil UUID (RFC 4122 §4.1.7).
  *
+ * Note: previously this constant was documented as the audit `userId`
+ * placeholder; that guidance was superseded in 2026-04 by
+ * `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID` (defined below). After the
+ * 2026-04 cleanup there are no remaining audit-userId call sites for
+ * `NIL_UUID`.
+ *
  * Used as:
- * - userId placeholder for system-initiated audit events (no human actor)
- * - Fallback tenant_id in RLS policy evaluation (avoids PostgreSQL UUID parse errors)
- * - Sentinel for anonymous / non-existent user lookups
+ * - **Primary**: RLS-bypass sentinel for the `app.tenant_id` GUC inside
+ *   transactions that need to write across tenant boundaries (audit
+ *   outbox, worker meta-events, integration test helpers). See
+ *   `src/lib/audit-outbox.ts`, `src/lib/tenant-rls.ts`,
+ *   `src/workers/audit-outbox-worker.ts`.
+ * - **Secondary**: Timing-balanced no-match WHERE filter for
+ *   anti-enumeration database probes (e.g., the dummy passkey lookup in
+ *   `src/app/api/auth/passkey/options/email/route.ts`). The all-zero
+ *   structural UUID guarantees no row matches while preserving the
+ *   query's wall-clock cost. This relies on the invariant that
+ *   `users.id` is generated via `gen_random_uuid()` (UUIDv4) and
+ *   therefore can never equal `NIL_UUID` — structural impossibility,
+ *   since UUIDv4 forces version nibble `4` and variant bits `10`, while
+ *   `NIL_UUID` has both set to zero. The guarantee carries through
+ *   `webAuthnCredential.userId` (and any other table) via the FK
+ *   constraint to `users.id`.
+ *
+ * MUST NOT be used as an audit `userId` placeholder. Use
+ * `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID` (defined below) — those are
+ * valid UUIDv4-structural sentinels and are listed in
+ * `SENTINEL_ACTOR_IDS` for filter exclusion in human audit-log views.
+ *
+ * TODO(actorId-rename): rename audit_logs.userId column to actor_id
+ * (and corresponding TS field). Tracked separately — out of scope for
+ * the 2026-04 cleanup PR.
  */
 export const NIL_UUID = "00000000-0000-0000-0000-000000000000";
 

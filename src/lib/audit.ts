@@ -36,6 +36,13 @@ import { UUID_RE } from "@/lib/constants/app";
 export interface AuditLogParams {
   scope: AuditScope;
   action: AuditAction;
+  /**
+   * Actor ID of any `ActorType` (HUMAN / SERVICE_ACCOUNT / MCP_AGENT / SYSTEM / ANONYMOUS) — not strictly a user ID.
+   * For HUMAN: real user UUID. For SYSTEM / ANONYMOUS: sentinel from `SENTINEL_ACTOR_IDS` (see `src/lib/constants/app.ts`).
+   * For SERVICE_ACCOUNT / MCP_AGENT: the agent's representing user UUID when applicable.
+   * MUST NOT be `NIL_UUID` — use `resolveAuditUserId(null, "system")` or `resolveAuditUserId(null, "anonymous")` instead.
+   * TODO(actorId-rename): rename audit_logs.userId column to actor_id and this field to actorId. Tracked separately — out of scope for the 2026-04 cleanup PR.
+   */
   userId: string;
   actorType?: ActorType;
   serviceAccountId?: string | null;
