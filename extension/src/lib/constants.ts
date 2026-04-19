@@ -1,4 +1,4 @@
-// ── Token bridge (shared contract with web app's inject-extension-token.ts) ──
+// ── Token bridge (shared contract with web app's inject-extension-bridge-code.ts) ──
 /** @deprecated Use TOKEN_BRIDGE_EVENT for new code. */
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";

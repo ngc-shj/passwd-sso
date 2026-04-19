@@ -94,7 +94,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 
 | Threat | Component | Mitigation | Residual risk |
 | --- | --- | --- | --- |
-| R1: User denies performing sensitive action | Server | Audit log records userId, action, IP, user-agent, timestamp for all sensitive operations; failed writes buffered in-memory (FIFO 100 entries, max 3 retries per entry) with dead-letter log on overflow/exhaustion | Buffer is in-memory only; entries lost on process restart or pod replacement |
+| R1: User denies performing sensitive action | Server | Audit log records actorId, action, IP, user-agent, timestamp for all sensitive operations; written via durable `audit_outbox` table in the same DB transaction as the originating business write, drained by `audit-outbox-worker` with exponential backoff capped at `max_attempts` (default 8); permanent failures emit an `AUDIT_OUTBOX_DEAD_LETTER` audit row + pino dead-letter log. See §5 bullet 3. | `lastError` in `AUDIT_OUTBOX_DEAD_LETTER` metadata bypasses `METADATA_BLOCKLIST` (256-char truncation; operator-diagnostics only) — scrubbing tracked as follow-up |
 | R2: Admin denies modifying team membership | Server | Audit log with TEAM_MEMBER_ADD/REMOVE actions; extractRequestMeta captures IP/UA | Same as R1 |
 | R3: Emergency access activation without consent | Server | Configurable waiting period; email notification on request; audit trail for approve/activate | Owner must actively monitor email |
 
