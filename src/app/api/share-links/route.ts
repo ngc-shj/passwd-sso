@@ -11,7 +11,7 @@ import {
 } from "@/lib/crypto-server";
 import { requireTeamPermission } from "@/lib/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
-import { logAuditInTx, extractRequestMeta } from "@/lib/audit";
+import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
@@ -20,7 +20,6 @@ import {
   TEAM_PERMISSION,
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
-  AUDIT_SCOPE,
   applySharePermissions,
 } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
@@ -183,18 +182,15 @@ async function handlePOST(req: NextRequest) {
   );
 
   // Atomic audit: SHARE_CREATE
-  const { ip, userAgent } = extractRequestMeta(req);
   await withBypassRls(prisma, async (tx) => {
     await logAuditInTx(tx, tenantId, {
-      scope: teamPasswordEntryId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+      ...(teamPasswordEntryId && teamId
+        ? teamAuditBase(req, session.user.id, teamId)
+        : personalAuditBase(req, session.user.id)),
       action: AUDIT_ACTION.SHARE_CREATE,
-      userId: session.user.id,
-      teamId,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
       metadata: { expiresIn, maxViews: maxViews ?? null },
-      ip,
-      userAgent,
     });
   }, BYPASS_PURPOSE.AUDIT_WRITE);
 

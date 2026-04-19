@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit";
 import { requireTeamPermission } from "@/lib/team-auth";
 import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team-policy";
 import { z } from "zod/v4";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_SCOPE, EXPORT_FORMAT_VALUES } from "@/lib/constants";
+import { TEAM_PERMISSION, AUDIT_ACTION, EXPORT_FORMAT_VALUES } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
@@ -58,10 +58,10 @@ async function handlePOST(req: NextRequest) {
   }
 
   await logAuditAsync({
-    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+    ...(teamId
+      ? teamAuditBase(req, session.user.id, teamId)
+      : personalAuditBase(req, session.user.id)),
     action: AUDIT_ACTION.ENTRY_EXPORT,
-    userId: session.user.id,
-    teamId: teamId ?? undefined,
     metadata: {
       entryCount,
       format,
@@ -69,7 +69,6 @@ async function handlePOST(req: NextRequest) {
       ...(typeof encrypted === "boolean" ? { encrypted } : {}),
       ...(typeof includeTeams === "boolean" ? { includeTeams } : {}),
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ ok: true });

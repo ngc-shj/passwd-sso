@@ -33,7 +33,9 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
-  extractRequestMeta: () => ({ ip: "10.0.0.1", userAgent: "Test" }),
+  personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "10.0.0.1", userAgent: "Test", acceptLanguage: null }),
+  teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "10.0.0.1", userAgent: "Test", acceptLanguage: null }),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "10.0.0.1", userAgent: "Test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,

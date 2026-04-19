@@ -70,7 +70,9 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
-  extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
+  personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
+  teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: mockExtractClientIp,

@@ -7,10 +7,10 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase, tenantAuditBase } from "@/lib/audit";
 import { executeVaultReset } from "@/lib/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
@@ -126,14 +126,15 @@ async function handlePOST(req: NextRequest) {
   const { deletedEntries, deletedAttachments } =
     await executeVaultReset(session.user.id);
 
-  // Audit log — use TENANT scope for tenant-level resets (teamId is null)
-  const auditScope = resetRecord.teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.TENANT;
+  // Audit log — use TENANT scope for tenant-level resets (teamId is null).
+  // tenantId is preserved on TEAM emit so the JSON log line + downstream
+  // consumers see it (helper does not set it for team scope).
   await logAuditAsync({
-    scope: auditScope,
-    action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
-    userId: session.user.id,
+    ...(resetRecord.teamId
+      ? teamAuditBase(req, session.user.id, resetRecord.teamId)
+      : tenantAuditBase(req, session.user.id, resetRecord.tenantId)),
     tenantId: resetRecord.tenantId,
-    teamId: resetRecord.teamId ?? undefined,
+    action: AUDIT_ACTION.ADMIN_VAULT_RESET_EXECUTE,
     targetType: "User",
     targetId: session.user.id,
     metadata: {
@@ -141,7 +142,6 @@ async function handlePOST(req: NextRequest) {
       deletedAttachments,
       initiatedById: resetRecord.initiatedById,
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ success: true });

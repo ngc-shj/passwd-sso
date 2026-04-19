@@ -22,8 +22,8 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -109,19 +109,15 @@ async function handlePOST(req: NextRequest) {
   }
 
   // Audit log (async nonblocking; logAudit handles errors internally)
-  const { ip } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.MASTER_KEY_ROTATION,
-    userId: SYSTEM_ACTOR_ID,
+    ...tenantAuditBase(req, SYSTEM_ACTOR_ID, operator.tenantId),
     actorType: ACTOR_TYPE.SYSTEM,
-    tenantId: operator.tenantId,
+    action: AUDIT_ACTION.MASTER_KEY_ROTATION,
     metadata: {
       operatorId,
       targetVersion,
       revokedShares,
     },
-    ip,
   });
 
   return NextResponse.json({

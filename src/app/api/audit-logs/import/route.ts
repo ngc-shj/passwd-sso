@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit";
 import { z } from "zod/v4";
 import { handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { AUDIT_ACTION, AUDIT_SCOPE, IMPORT_FORMAT_VALUES } from "@/lib/constants";
+import { AUDIT_ACTION, IMPORT_FORMAT_VALUES } from "@/lib/constants";
 import { requireTeamPermission } from "@/lib/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -41,10 +41,10 @@ async function handlePOST(req: NextRequest) {
   }
 
   await logAuditAsync({
-    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+    ...(teamId
+      ? teamAuditBase(req, session.user.id, teamId)
+      : personalAuditBase(req, session.user.id)),
     action: AUDIT_ACTION.ENTRY_IMPORT,
-    userId: session.user.id,
-    ...(teamId ? { teamId } : {}),
     metadata: {
       requestedCount,
       successCount,
@@ -53,7 +53,6 @@ async function handlePOST(req: NextRequest) {
       ...(format ? { format } : {}),
       ...(typeof encrypted === "boolean" ? { encrypted } : {}),
     },
-    ...extractRequestMeta(req),
   });
 
   return NextResponse.json({ ok: true });

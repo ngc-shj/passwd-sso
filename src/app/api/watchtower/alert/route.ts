@@ -6,7 +6,7 @@ import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { requireTeamMember } from "@/lib/team-auth";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { watchtowerAlertEmail } from "@/lib/email/templates/watchtower-alert";
@@ -14,7 +14,7 @@ import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
-import { AUDIT_SCOPE, AUDIT_ACTION } from "@/lib/constants";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
@@ -87,12 +87,11 @@ async function handlePOST(req: NextRequest) {
 
   // Audit log
   await logAuditAsync({
-    scope: teamId ? AUDIT_SCOPE.TEAM : AUDIT_SCOPE.PERSONAL,
+    ...(teamId
+      ? teamAuditBase(req, session.user.id, teamId)
+      : personalAuditBase(req, session.user.id)),
     action: AUDIT_ACTION.WATCHTOWER_ALERT_SENT,
-    userId: session.user.id,
-    ...(teamId ? { teamId } : {}),
     metadata: { newBreachCount, ...(teamId ? { teamId } : {}) },
-    ...extractRequestMeta(req),
   });
 
   // Send email notification if configured

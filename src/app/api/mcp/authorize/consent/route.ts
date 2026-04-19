@@ -4,8 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { assertOrigin } from "@/lib/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
@@ -63,17 +63,12 @@ export async function POST(req: NextRequest) {
 
   // Handle deny action (before claiming — deny should not bind the client)
   if (action === "deny") {
-    const { ip, userAgent } = extractRequestMeta(req);
     await logAuditAsync({
-      scope: AUDIT_SCOPE.TENANT,
+      ...tenantAuditBase(req, session.user.id, userTenantId),
       action: AUDIT_ACTION.MCP_CONSENT_DENY,
-      userId: session.user.id,
-      tenantId: userTenantId,
       targetType: "McpClient",
       targetId: foundClient.id,
       metadata: { clientId },
-      ip: ip ?? undefined,
-      userAgent: userAgent ?? undefined,
     });
     const denyUrl = new URL(redirectUri);
     denyUrl.searchParams.set("error", "access_denied");
@@ -147,17 +142,13 @@ export async function POST(req: NextRequest) {
       }
       effectiveClient = refetched;
     } else {
-      // Freshly claimed
-      const { ip: claimIp } = extractRequestMeta(req);
+      // Freshly claimed — userAgent is added by helper (forensic upgrade per plan §Functional 2 EXCEPTION)
       await logAuditAsync({
-        scope: AUDIT_SCOPE.TENANT,
+        ...tenantAuditBase(req, session.user.id, userTenantId),
         action: AUDIT_ACTION.MCP_CLIENT_DCR_CLAIM,
-        userId: session.user.id,
-        tenantId: userTenantId,
         targetType: "McpClient",
         targetId: clientIdDb,
         metadata: { clientId: foundClient.clientId },
-        ip: claimIp ?? undefined,
       });
     }
   }
@@ -188,17 +179,12 @@ export async function POST(req: NextRequest) {
   });
 
   // Audit the consent grant
-  const { ip, userAgent } = extractRequestMeta(req);
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
+    ...tenantAuditBase(req, session.user.id, userTenantId),
     action: AUDIT_ACTION.MCP_CONSENT_GRANT,
-    userId: session.user.id,
-    tenantId: userTenantId,
     targetType: "McpClient",
     targetId: effectiveClient.id,
     metadata: { clientId: effectiveClient.clientId, scopes: grantedScopes },
-    ip: ip ?? undefined,
-    userAgent: userAgent ?? undefined,
   });
 
   // Redirect back to the OAuth client with the authorization code

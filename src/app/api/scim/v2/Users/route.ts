@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import {
   scimResponse,
   scimError,
@@ -16,7 +16,7 @@ import {
   FilterParseError,
 } from "@/lib/scim/filter-parser";
 import { scimUserSchema } from "@/lib/scim/validations";
-import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -218,15 +218,12 @@ async function handlePOST(req: NextRequest) {
     );
 
     await logAuditAsync({
-      scope: AUDIT_SCOPE.TENANT,
-      action: AUDIT_ACTION.SCIM_USER_CREATE,
-      userId: auditUserId,
+      ...tenantAuditBase(req, auditUserId, tenantId),
       actorType,
-      tenantId,
+      action: AUDIT_ACTION.SCIM_USER_CREATE,
       targetType: AUDIT_TARGET_TYPE.TEAM_MEMBER,
       targetId: created.user.id,
       metadata: { email: userName, externalId },
-      ...extractRequestMeta(req),
     });
 
     const baseUrl = getScimBaseUrl();

@@ -13,15 +13,14 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { extractClientIp } from "@/lib/ip-access";
 import {
   DELEGATION_DEFAULT_TTL_SEC,
   DELEGATION_MAX_TTL_SEC,
@@ -201,18 +200,16 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Audit log — both personal and tenant scope (no plaintext in metadata!)
-  const auditBase = {
+  // tenantId is preserved on the PERSONAL emit (helper does not set it for personal scope,
+  // but downstream JSON log + test assertions require the field — see plan Pattern 5).
+  const auditBody = {
     action: AUDIT_ACTION.DELEGATION_CREATE,
-    userId,
-    tenantId,
     targetId: delegationSession.id,
     metadata: { entryCount: entryIds.length, mcpClientId: mcpToken.clientId },
-    ip: extractClientIp(request),
-    userAgent: request.headers.get("user-agent"),
   };
   await Promise.all([
-    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.PERSONAL }),
-    logAuditAsync({ ...auditBase, scope: AUDIT_SCOPE.TENANT }),
+    logAuditAsync({ ...personalAuditBase(request, userId), tenantId, ...auditBody }),
+    logAuditAsync({ ...tenantAuditBase(request, userId, tenantId), ...auditBody }),
   ]);
 
   return NextResponse.json({

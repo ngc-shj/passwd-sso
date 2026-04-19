@@ -6,11 +6,11 @@ import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
 import { createShareAccessToken } from "@/lib/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAuditAsync, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
+import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -21,7 +21,6 @@ const tokenLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 // POST /api/share-links/verify-access — Verify access password for a share
 async function handlePOST(req: NextRequest) {
   const ip = extractClientIp(req) ?? "unknown";
-  const reqMeta = extractRequestMeta(req);
 
   const result = await parseBody(req, verifyShareAccessSchema);
   if (!result.ok) return result.response;
@@ -72,30 +71,24 @@ async function handlePOST(req: NextRequest) {
 
   if (!verifyAccessPassword(password, share.accessPasswordHash)) {
     await logAuditAsync({
-      scope: AUDIT_SCOPE.TENANT,
-      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
-      userId: ANONYMOUS_ACTOR_ID,
+      ...tenantAuditBase(req, ANONYMOUS_ACTOR_ID, share.tenantId),
       actorType: ACTOR_TYPE.ANONYMOUS,
-      tenantId: share.tenantId,
+      action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_FAILED,
       targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
       targetId: share.id,
       metadata: { ip },
-      ...reqMeta,
     });
 
     return errorResponse(API_ERROR.SHARE_PASSWORD_INCORRECT, 403);
   }
 
   await logAuditAsync({
-    scope: AUDIT_SCOPE.TENANT,
-    action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
-    userId: ANONYMOUS_ACTOR_ID,
+    ...tenantAuditBase(req, ANONYMOUS_ACTOR_ID, share.tenantId),
     actorType: ACTOR_TYPE.ANONYMOUS,
-    tenantId: share.tenantId,
+    action: AUDIT_ACTION.SHARE_ACCESS_VERIFY_SUCCESS,
     targetType: AUDIT_TARGET_TYPE.PASSWORD_SHARE,
     targetId: share.id,
     metadata: { ip },
-    ...reqMeta,
   });
 
   const accessToken = createShareAccessToken(share.id);
