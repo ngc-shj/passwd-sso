@@ -7,8 +7,8 @@ import {
 } from "@/lib/mcp/oauth-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAuditAsync } from "@/lib/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 
@@ -120,11 +120,9 @@ async function handlePOST(req: NextRequest) {
     if (!result.ok) {
       if (result.reason === "replay" && result.tenantId) {
         await logAuditAsync({
-          scope: AUDIT_SCOPE.TENANT,
+          ...tenantAuditBase(req, resolveAuditUserId(null, "system"), result.tenantId),
           action: AUDIT_ACTION.MCP_REFRESH_TOKEN_REPLAY,
-          userId: resolveAuditUserId(null, "system"),
           actorType: ACTOR_TYPE.SYSTEM,
-          tenantId: result.tenantId,
           metadata: { clientId: clientIdValue, familyId: result.familyId },
         });
       }
@@ -135,11 +133,9 @@ async function handlePOST(req: NextRequest) {
     }
 
     await logAuditAsync({
-      scope: AUDIT_SCOPE.TENANT,
+      ...tenantAuditBase(req, resolveAuditUserId(result.userId, "system"), result.tenantId),
       action: AUDIT_ACTION.MCP_REFRESH_TOKEN_ROTATE,
-      userId: resolveAuditUserId(result.userId, "system"),
       actorType: result.userId ? ACTOR_TYPE.MCP_AGENT : ACTOR_TYPE.SYSTEM,
-      tenantId: result.tenantId,
       metadata: { clientId: clientIdValue },
     });
 

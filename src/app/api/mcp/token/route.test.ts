@@ -32,6 +32,7 @@ vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent" })),
 }));
 
 import { POST } from "@/app/api/mcp/token/route";
@@ -275,6 +276,8 @@ describe("POST /api/mcp/token", () => {
         userId: SYSTEM_ACTOR_ID,
         actorType: "SYSTEM",
         tenantId: "tenant-replay",
+        ip: "127.0.0.1",
+        userAgent: "test-agent",
         metadata: expect.objectContaining({ familyId: "family-001" }),
       }),
     );
@@ -334,6 +337,8 @@ describe("POST /api/mcp/token", () => {
         userId: SYSTEM_ACTOR_ID,
         actorType: "SYSTEM",
         tenantId: "tenant-machine",
+        ip: "127.0.0.1",
+        userAgent: "test-agent",
       }),
     );
   });
