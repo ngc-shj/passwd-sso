@@ -7,7 +7,6 @@ const {
   mockFindUnique,
   mockCreateAuthorizationCode,
   mockLogAudit,
-  mockExtractRequestMeta,
   mockMcpClientCount,
   mockMcpClientUpdateMany,
   mockMcpClientFindUnique,
@@ -19,7 +18,6 @@ const {
   mockFindUnique: vi.fn(),
   mockCreateAuthorizationCode: vi.fn(),
   mockLogAudit: vi.fn(),
-  mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
   mockMcpClientCount: vi.fn().mockResolvedValue(0),
   mockMcpClientUpdateMany: vi.fn().mockResolvedValue({ count: 1 }),
   mockMcpClientFindUnique: vi.fn(),
@@ -64,10 +62,9 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
-  extractRequestMeta: mockExtractRequestMeta,
-  personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test-agent" }),
-  teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test-agent" }),
-  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent" }),
+  personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
+  teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
+  tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
 }));
 
 vi.mock("@/lib/csrf", () => ({
