@@ -23,7 +23,7 @@ Three independent cleanups bundled into one PR:
 
 1. **Remove the legacy `PASSWD_SSO_TOKEN_RELAY` postMessage path** from the extension content script. The web app no longer emits this message (it was replaced by `PASSWD_SSO_BRIDGE_CODE` in PR #357 / extension-bridge-code-exchange). The receiver code in the extension is now dead surface that only widens the attack surface and confuses readers.
 2. **Update the audit-pipeline documentation** (`docs/security/threat-model.md`, `docs/security/security-review.md`, plus a stale comment in `src/lib/audit-logger.ts`) to match the current implementation. The docs still describe an "in-memory FIFO retry buffer" backed by `src/lib/audit-retry.ts`, but that file no longer exists — application-emitted audit events now flow through the durable `audit_outbox` table and are drained by `src/workers/audit-outbox-worker.ts`.
-3. **Clarify the `NIL_UUID` and `audit_logs.userId` semantics in code comments.** Today `NIL_UUID` has three actual use sites in the codebase: (a) primary — RLS-bypass `app.tenant_id` sentinel inside the audit-outbox transaction (`src/lib/audit-outbox.ts:56,74`, `src/lib/tenant-rls.ts:49`, `src/workers/audit-outbox-worker.ts:61`); (b) timing-balanced no-match WHERE filter for anti-enumeration in passkey lookup (`src/app/api/auth/passkey/options/email/route.ts:118`); (c) **residual** — audit `userId` in the MCP refresh-token replay branch (`src/app/api/mcp/token/route.ts:125`), which is inconsistent with the surrounding code that uses `resolveAuditUserId(..., "system")` → `SYSTEM_ACTOR_ID`. Use case (c) is a known inconsistency that should migrate to `SYSTEM_ACTOR_ID` — tracked as an out-of-scope follow-up in this plan. And `audit_logs.userId` is no longer a strict user identifier — it carries actor IDs of any `ActorType` (HUMAN / SERVICE_ACCOUNT / MCP_AGENT / SYSTEM / ANONYMOUS). The full rename `userId → actorId` is **out of scope** for this PR (tracked separately).
+3. **Clarify the `NIL_UUID` and `audit_logs.userId` semantics in code comments, AND fix the one inconsistent call site.** Today `NIL_UUID` has three actual use sites in the codebase: (a) primary — RLS-bypass `app.tenant_id` sentinel inside the audit-outbox transaction (`src/lib/audit-outbox.ts:56,74`, `src/lib/tenant-rls.ts:49`, `src/workers/audit-outbox-worker.ts:61`); (b) timing-balanced no-match WHERE filter for anti-enumeration in passkey lookup (`src/app/api/auth/passkey/options/email/route.ts:118`); (c) audit `userId` in the MCP refresh-token replay branch (`src/app/api/mcp/token/route.ts:125`) — **bug**, inconsistent with the surrounding code that uses `resolveAuditUserId(..., "system")` → `SYSTEM_ACTOR_ID`. Use case (c) is fixed in this PR (one-line code change + test addition); after the fix, NIL_UUID has no audit-userId use site, so the JSDoc can prescribe the rule cleanly. `audit_logs.userId` itself is no longer a strict user identifier — it carries actor IDs of any `ActorType` (HUMAN / SERVICE_ACCOUNT / MCP_AGENT / SYSTEM / ANONYMOUS). The full column rename `userId → actorId` (DB migration + schema + all callers) is **out of scope** for this PR (tracked separately).
 
 ## Requirements
 
@@ -36,8 +36,9 @@ Three independent cleanups bundled into one PR:
 - F5: Update `docs/security/threat-model.md` §5 item 3 ("In-memory audit retry") to describe the current outbox + worker architecture.
 - F6: Update `docs/security/security-review.md` §5 (audit retry section, lines ~210–228) to describe the current architecture.
 - F7: Fix the stale comment in `src/lib/audit-logger.ts` (`// or were dropped due to buffer overflow`) — there is no buffer anymore.
-- F8: Replace the misleading `NIL_UUID` JSDoc in `src/lib/constants/app.ts`. The new doc names the RLS-bypass `app.tenant_id` use case as primary, names the timing-balanced no-match WHERE filter use as a secondary legitimate pattern, and explicitly notes that audit `userId` placeholders SHOULD use `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID` (the one residual exception in `src/app/api/mcp/token/route.ts:125` is called out as a known follow-up, not as the prescribed pattern).
-- F9: Add a clarifying comment near `prisma/schema.prisma` `AuditLog.userId` and near `src/lib/audit.ts` `AuditLogParams.userId` stating that the field carries an actor ID of any `ActorType`. Add a single grep-able TODO marker (`TODO(actorId-rename)`) recording that the column rename is deferred to a future PR.
+- F8: Replace the misleading `NIL_UUID` JSDoc in `src/lib/constants/app.ts`. The new doc names the RLS-bypass `app.tenant_id` use case as primary, names the timing-balanced no-match WHERE filter use as a secondary legitimate pattern, and prescribes that audit `userId` placeholders MUST use `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID` (no exception, since F10 below removes the one residual misuse in this PR).
+- F9: Add a clarifying comment near `prisma/schema.prisma` `AuditLog.userId` and near `src/lib/audit.ts` `AuditLogParams.userId` stating that the field carries an actor ID of any `ActorType`. Add a single grep-able TODO marker (`TODO(actorId-rename)`) recording that the column rename (DB migration + schema + all callers) is deferred to a future PR.
+- F10: Fix `src/app/api/mcp/token/route.ts:125` — the `MCP_REFRESH_TOKEN_REPLAY` audit call passes `userId: NIL_UUID` instead of a valid sentinel actor ID, leaving the row outside `SENTINEL_ACTOR_IDS` and therefore not filter-excluded from human audit-log views. Replace with `userId: resolveAuditUserId(null, "system")` (which returns `SYSTEM_ACTOR_ID`) and add `actorType: ACTOR_TYPE.SYSTEM`, matching the surrounding success-branch pattern at `route.ts:139-140`. Remove the now-unused `NIL_UUID` import. Augment the existing test (`src/app/api/mcp/token/route.test.ts:272-278`) to assert `userId: SYSTEM_ACTOR_ID` and `actorType: "SYSTEM"` so the regression is caught at test time.
 
 ### Non-functional
 
@@ -80,20 +81,22 @@ Strategy: rewrite the offending paragraphs in `threat-model.md` and `security-re
 
 `audit-logger.ts` comment fix: the `deadLetterLogger` JSDoc currently says "or were dropped due to buffer overflow" — there is no buffer; just delete that clause and replace it with "or whose tenantId could not be resolved". Verified against `src/lib/audit.ts:212-217` and `:221-224`.
 
-### F8–F9: NIL_UUID / actorId clarification
+### F8–F10: NIL_UUID / actorId clarification + MCP replay-audit fix
 
-Strategy: comment-only changes. No symbol renames, no signature changes. **In-scope for this PR only**: comments in `src/lib/constants/app.ts`, `prisma/schema.prisma`, and `src/lib/audit.ts`. The mcp/token/route.ts:125 inconsistency is out of scope but noted in §"Out of scope" below.
+Strategy: comment changes in `src/lib/constants/app.ts`, `prisma/schema.prisma`, and `src/lib/audit.ts`, **plus a 1-line + 1-line code fix in `src/app/api/mcp/token/route.ts`** (F10) and corresponding test assertion. F10 was originally deferred but pulled into this PR per anti-deferral 30-minute rule (cost is 3 source lines + 2 test lines + 1 import edit). The full column rename `audit_logs.userId → actorId` remains out of scope.
+
+**Rationale for F10 inclusion**: After the F8 JSDoc rewrite says NIL_UUID "MUST NOT be used as audit userId placeholder", leaving the one violating call site in place would create a self-contradicting codebase. Better to fix the call site in the same PR so the prescription is honest. The fix is also strictly an audit-correctness improvement: replay events emitted with `userId: NIL_UUID` were not filter-excluded from human audit-log views (because NIL_UUID is not in `SENTINEL_ACTOR_IDS`), so they appeared as a phantom "user 00000000-..." row instead of being grouped with other system events.
 
 - `src/lib/constants/app.ts` `NIL_UUID` JSDoc — rewrite to (preserve the existing first-line RFC citation, then add new content below):
   > Nil UUID (RFC 4122 §4.1.7).
   >
-  > **Note**: previously this constant was documented as the audit `userId` placeholder; that guidance was superseded in 2026-04 by `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID`. The single residual call site (`src/app/api/mcp/token/route.ts:125`) is tracked as TODO(actorId-rename).
+  > **Note**: previously this constant was documented as the audit `userId` placeholder; that guidance was superseded in 2026-04 by `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID`. After the F10 fix in this PR there are no remaining audit-userId call sites.
   >
   > Used as:
   > - **Primary**: RLS-bypass sentinel for `app.tenant_id` GUC inside transactions that need to write across tenant boundaries (audit outbox, worker meta-events, integration test helpers). See `src/lib/audit-outbox.ts`, `src/lib/tenant-rls.ts`, `src/workers/audit-outbox-worker.ts`.
   > - **Secondary**: Timing-balanced no-match WHERE filter for anti-enumeration database probes (e.g., dummy passkey lookup in `src/app/api/auth/passkey/options/email/route.ts`). The all-zero structural UUID guarantees no row matches while preserving the query's wall-clock cost. This relies on the invariant that `users.id` is generated via `gen_random_uuid()` (UUIDv4) and therefore can never equal `NIL_UUID` — **structural impossibility**, since UUIDv4 forces version nibble `4` and variant bits `10`, while `NIL_UUID` has both set to zero. The guarantee carries through `webAuthnCredential.userId` (and any other table) via the FK constraint to `users.id`.
   >
-  > **NOT prescribed for audit `userId` placeholders.** Use `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID` (defined below) — those are valid UUIDv4-structural sentinels and are listed in `SENTINEL_ACTOR_IDS` for filter exclusion in human audit-log views.
+  > **MUST NOT be used as an audit `userId` placeholder.** Use `ANONYMOUS_ACTOR_ID` / `SYSTEM_ACTOR_ID` (defined below) — those are valid UUIDv4-structural sentinels and are listed in `SENTINEL_ACTOR_IDS` for filter exclusion in human audit-log views.
 - `prisma/schema.prisma` `AuditLog.userId` — add a `///` triple-slash doc comment block above the field stating the actorId semantics. Verified: Prisma 7 already uses `///` extensively in this schema (e.g., `Session.authMethod`, `RefreshToken.familyId`), so this is the established pattern, no fallback needed.
 - `src/lib/audit.ts` `AuditLogParams.userId` — add a JSDoc above the field with the same statement.
 - TODO marker — embed the literal string `TODO(actorId-rename)` in the comments at all three sites (NIL_UUID JSDoc, schema, audit.ts). This makes future cleanup grep-able. The marker text:
@@ -144,7 +147,14 @@ Strategy: comment-only changes. No symbol renames, no signature changes. **In-sc
     - `prisma/schema.prisma` line ~974 (`userId String @map("user_id") @db.Uuid` inside `model AuditLog`): add a `///` triple-slash comment block above the field. **Verified pattern**: the schema already uses `///` extensively (e.g., `Session.authMethod` line 44, `RefreshToken.familyId` line 188, `TeamPolicy.maxSessionDurationMinutes` line 1355). No fallback needed.
     - `src/lib/audit.ts` `AuditLogParams.userId` (line 39): add a JSDoc above the field.
     - Both comments include the literal `TODO(actorId-rename)` marker.
-11. **Run lint, tests, build:**
+11. **F10 — MCP refresh-token replay audit fix:**
+    - `src/app/api/mcp/token/route.ts` lines 122–128 (the `if (result.reason === "replay" && result.tenantId)` block):
+      - Change `userId: NIL_UUID` → `userId: resolveAuditUserId(null, "system")` (returns `SYSTEM_ACTOR_ID`).
+      - Add `actorType: ACTOR_TYPE.SYSTEM` immediately after the `userId` line, matching the success-branch shape on lines 139–140.
+    - `src/app/api/mcp/token/route.ts:12`: remove `NIL_UUID` from the import statement (no other use in this file). Keep `resolveAuditUserId`. Result: `import { resolveAuditUserId } from "@/lib/constants/app";`.
+    - `src/app/api/mcp/token/route.test.ts` lines 272–278: extend the `expect.objectContaining({...})` block to also assert `userId: SYSTEM_ACTOR_ID` and `actorType: "SYSTEM"`. **Verified pre-existing**: `SYSTEM_ACTOR_ID` is already imported at `route.test.ts:38` (used by the T3.1 `MCP_REFRESH_TOKEN_ROTATE` test at lines 312–337) — do NOT add a duplicate import. This locks the regression: a future revert to `NIL_UUID` would fail the test.
+    - **Commit grouping**: F10 is its own commit titled `fix(mcp): use SYSTEM_ACTOR_ID for MCP_REFRESH_TOKEN_REPLAY audit (was NIL_UUID)`. Independent from the legacy-relay commit (Steps 2–4) and the doc-comment commits.
+12. **Run lint, tests, build:**
     - `npx next lint`
     - `npx vitest run`
     - `npx vitest run --config vitest.integration.config.ts` (requires `docker compose up -d db` if not running)
@@ -173,8 +183,7 @@ Strategy: comment-only changes. No symbol renames, no signature changes. **In-sc
 
 - `POST /api/extension/token` legacy endpoint removal — tracked separately. Web-side emitter is gone; the endpoint's other callers (if any) need to be confirmed before removal.
 - `TOKEN_ELEMENT_ID` and `TOKEN_READY_EVENT` constant removal — these are also `@deprecated` and reference a non-existent `TOKEN_BRIDGE_EVENT`. Belongs in a follow-up cleanup.
-- **MCP refresh-token replay audit `userId` consistency fix** (`src/app/api/mcp/token/route.ts:125`) — currently passes `NIL_UUID`, should pass `SYSTEM_ACTOR_ID` (or `resolveAuditUserId(null, "system")`) to match the success branch on line 139 and to be filterable via `SENTINEL_ACTOR_IDS`. This is a one-line code fix in an UNCHANGED file (not in this PR's diff), so it falls under [Adjacent] / out-of-scope rather than the pre-existing-in-changed-file rule. Tracked as a follow-up; the TODO(actorId-rename) marker in F9 will remain grep-able after the rename PR replaces the column.
-- `audit_logs.userId → actor_id` column rename and TS field rename — large change touching prisma migrations, all callers, and grep patterns. Planned for a future PR (issue to be filed). The TODO marker added by F9 is the breadcrumb.
+- `audit_logs.userId → actor_id` column rename and TS field rename — large change touching prisma migrations, all callers, and grep patterns. Planned for a future PR (issue to be filed). The TODO(actorId-rename) marker added by F9 is the breadcrumb. Note: per user direction during plan review, the `mcp/token/route.ts:125` one-line consistency fix WAS pulled into this PR (see F10) — only the column rename remains deferred.
 - Renaming `src/__tests__/audit-fifo-flusher.test.ts` (the file itself is a stale name from the FIFO era — its tests now correctly verify outbox routing). Renaming requires updating CI test discovery patterns; not worth the diff. Listed here as a known stale name, not a deferred task.
 
 ### Why no regression-guard test for `TOKEN_BRIDGE_MSG_TYPE` re-introduction

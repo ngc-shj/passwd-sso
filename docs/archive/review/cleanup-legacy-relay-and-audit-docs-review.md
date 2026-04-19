@@ -1,7 +1,7 @@
 # Plan Review: cleanup-legacy-relay-and-audit-docs
 
 Date: 2026-04-19
-Review rounds: 1, 2, 3 (converged — all 3 experts returned "No findings" in round 3)
+Review rounds: 1, 2, 3, 4, 5 (rounds 1-3 converged; rounds 4-5 added after user-directed scope expansion to include F10 mcp/token route.ts fix; converged at round 5)
 
 ## Changes from Previous Round
 
@@ -236,3 +236,30 @@ All three experts returned **No findings**. The plan converged at Round 3.
 - Functionality round 3: F8 (round 2) Resolved. No new issues.
 - Security round 3: S8/S9/S10 (round 2) all Resolved. No new issues.
 - Testing round 3: T4/T5/T6 (round 2) all Resolved. No new issues.
+
+---
+
+## Scope Expansion (post-Round-3, user-directed)
+
+User flagged that the previously-Skipped S6-related entry "MCP refresh-token replay audit `userId` consistency fix" (`src/app/api/mcp/token/route.ts:125`) violated the anti-deferral 30-minute rule and should be pulled into this PR. Plan amended to add **F10**:
+
+- `src/app/api/mcp/token/route.ts:125`: replace `userId: NIL_UUID` with `userId: resolveAuditUserId(null, "system")` and add `actorType: ACTOR_TYPE.SYSTEM`. Remove `NIL_UUID` from the file's import (no other use site).
+- `src/app/api/mcp/token/route.test.ts:272-278`: extend the `expect.objectContaining({...})` block to assert `userId: SYSTEM_ACTOR_ID` and `actorType: "SYSTEM"`. (Import already exists at line 38.)
+- §F8 JSDoc rewrite simplified: prescription is now "MUST NOT be used as audit `userId` placeholder" with no exception caveat (since F10 removes the one violator).
+- Separate commit: `fix(mcp): use SYSTEM_ACTOR_ID for MCP_REFRESH_TOKEN_REPLAY audit (was NIL_UUID)`.
+
+## Round 4 Findings (F10 focus)
+
+- Functionality round 4: **No findings**. Verified F10 source/test line numbers, helper signature, enum value, §F8/§Out-of-scope consistency.
+- Security round 4: **No findings**. Audit-log readers unaffected; SENTINEL_ACTOR_IDS exclusion impact is **positive** (replay events now properly grouped under `actorType=SYSTEM` instead of appearing as phantom `00000000-...` user); RLS path unchanged; metadata preservation confirmed; test addition catches regression.
+- Testing round 4: **T-F10-1 [Minor]** — plan instructed to "add `SYSTEM_ACTOR_ID` import" but it already exists at `route.test.ts:38` (used by T3.1 ROTATE test). Plan would have caused duplicate-import error.
+
+### T-F10-1 Resolution
+- Action: amended plan step 11 to "Verified pre-existing: `SYSTEM_ACTOR_ID` is already imported at `route.test.ts:38` (used by the T3.1 `MCP_REFRESH_TOKEN_ROTATE` test at lines 312–337) — do NOT add a duplicate import."
+- Modified: docs/archive/review/cleanup-legacy-relay-and-audit-docs-plan.md §Implementation steps step 11.
+
+## Round 5 Findings
+
+Testing round 5 (focused on T-F10-1 verification): **No findings**. Plan amendment confirmed; no conflicting "add import" wording elsewhere.
+
+Plan converged at Round 5. Phase 1 complete.
