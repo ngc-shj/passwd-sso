@@ -971,6 +971,9 @@ model AuditLog {
   tenantId         String      @map("tenant_id") @db.Uuid
   scope            AuditScope
   action           AuditAction
+  /// Actor ID of any ActorType (HUMAN / SERVICE_ACCOUNT / MCP_AGENT / SYSTEM / ANONYMOUS) — not strictly a user ID.
+  /// For HUMAN: real user UUID. For SYSTEM/ANONYMOUS: sentinel from SENTINEL_ACTOR_IDS (see src/lib/constants/app.ts). For SERVICE_ACCOUNT/MCP_AGENT: the agent's representing user UUID, when applicable.
+  /// TODO(actorId-rename): rename column to actor_id and the corresponding TS field. Tracked separately — out of scope for the 2026-04 cleanup PR.
   userId           String      @map("user_id") @db.Uuid
   actorType        ActorType   @default(HUMAN) @map("actor_type")
   serviceAccountId String?     @map("service_account_id") @db.Uuid

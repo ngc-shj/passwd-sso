@@ -1,15 +1,7 @@
 import { describe, expect, it } from "vitest";
-import {
-  TOKEN_BRIDGE_MSG_TYPE,
-  BRIDGE_CODE_MSG_TYPE,
-} from "../../lib/constants";
+import { BRIDGE_CODE_MSG_TYPE } from "../../lib/constants";
 
 describe("token-bridge.js sync", () => {
-  it("keeps hardcoded legacy MSG_TYPE aligned with shared constants", async () => {
-    const { default: file } = await import("../../content/token-bridge.js?raw");
-    expect(file).toContain(`"${TOKEN_BRIDGE_MSG_TYPE}"`);
-  });
-
   it("keeps hardcoded bridge code MSG_TYPE aligned with shared constants", async () => {
     // token-bridge.js is a hand-maintained plain JS content script (no import
     // support). When BRIDGE_CODE_MSG_TYPE changes in constants.ts, this test

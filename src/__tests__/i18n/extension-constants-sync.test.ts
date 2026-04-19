@@ -9,9 +9,9 @@
  *
  * Why this lives in the web app and not the extension: the web app vitest
  * environment can read sibling repo files via relative path. The extension
- * `?raw` import inside `token-bridge-js-sync.test.ts` covers the legacy
- * string constant in the bundled JS, but cannot verify numeric values that
- * may be inlined or absent from the bundle.
+ * `?raw` import inside `token-bridge-js-sync.test.ts` covers
+ * `BRIDGE_CODE_MSG_TYPE` in the bundled JS, but cannot verify numeric values
+ * that may be inlined or absent from the bundle.
  */
 
 import path from "node:path";
@@ -21,7 +21,6 @@ import {
   BRIDGE_CODE_MAX_ACTIVE,
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
-  TOKEN_BRIDGE_MSG_TYPE,
 } from "@/lib/constants/extension";
 
 const EXT_CONSTANTS_PATH = path.join(
@@ -50,10 +49,6 @@ function extractNumericConst(name: string): number | undefined {
 }
 
 describe("extension constants sync (web app ↔ extension repo)", () => {
-  it("TOKEN_BRIDGE_MSG_TYPE matches between web app and extension", () => {
-    expect(extractStringConst("TOKEN_BRIDGE_MSG_TYPE")).toBe(TOKEN_BRIDGE_MSG_TYPE);
-  });
-
   it("BRIDGE_CODE_MSG_TYPE matches between web app and extension", () => {
     expect(extractStringConst("BRIDGE_CODE_MSG_TYPE")).toBe(BRIDGE_CODE_MSG_TYPE);
   });

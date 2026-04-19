@@ -3,10 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handlePostMessage } from "../../content/token-bridge-lib";
-import {
-  TOKEN_BRIDGE_MSG_TYPE,
-  BRIDGE_CODE_MSG_TYPE,
-} from "../../lib/constants";
+import { BRIDGE_CODE_MSG_TYPE } from "../../lib/constants";
 
 const VALID_CODE = "a".repeat(64);
 
@@ -41,74 +38,33 @@ describe("token bridge (postMessage)", () => {
     return { data, source, origin } as unknown as MessageEvent;
   }
 
-  // ── Legacy token relay path (kept until extension v0.5.x) ──
-
-  describe("legacy token relay (TOKEN_BRIDGE_MSG_TYPE)", () => {
-    it("forwards valid relay message to background", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: TOKEN_BRIDGE_MSG_TYPE, token: "tkn", expiresAt: 123 }),
-      );
-      expect(ok).toBe(true);
-      expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
-        type: "SET_TOKEN",
-        token: "tkn",
-        expiresAt: 123,
-      });
-    });
-
-    it("rejects message from different source (iframe)", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: TOKEN_BRIDGE_MSG_TYPE, token: "tkn", expiresAt: 123 }, {}),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("rejects message with wrong type", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: "OTHER_MSG", token: "tkn", expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("rejects message with missing token", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: TOKEN_BRIDGE_MSG_TYPE, expiresAt: 123 }),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("rejects message with NaN expiresAt", async () => {
-      const ok = await handlePostMessage(
-        makeEvent({ type: TOKEN_BRIDGE_MSG_TYPE, token: "tkn", expiresAt: NaN }),
-      );
-      expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("does not send error response on invalid messages (oracle prevention)", async () => {
-      await handlePostMessage(makeEvent({ type: "WRONG" }, {}));
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
-    });
-
-    it("rejects message from a different origin", async () => {
+  describe("bridge code exchange (BRIDGE_CODE_MSG_TYPE)", () => {
+    it("rejects bridge code message from a different origin", async () => {
       const ok = await handlePostMessage(
         makeEvent(
-          { type: TOKEN_BRIDGE_MSG_TYPE, token: "tkn", expiresAt: 123 },
+          { type: BRIDGE_CODE_MSG_TYPE, code: VALID_CODE, expiresAt: 123 },
           window,
           "https://evil.com",
         ),
       );
       expect(ok).toBe(false);
-      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
     });
-  });
 
-  // ── New bridge code path ──
+    it("rejects bridge code message with wrong type", async () => {
+      const ok = await handlePostMessage(
+        makeEvent({ type: "OTHER_MSG", code: VALID_CODE, expiresAt: 123 }),
+      );
+      expect(ok).toBe(false);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
 
-  describe("bridge code exchange (BRIDGE_CODE_MSG_TYPE)", () => {
+    it("does not respond to bridge code messages with invalid type (oracle prevention)", async () => {
+      await handlePostMessage(makeEvent({ type: "WRONG" }, {}));
+      expect(chrome.runtime.sendMessage).not.toHaveBeenCalled();
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it("forwards token to background after successful exchange", async () => {
       mockFetch.mockResolvedValueOnce(
         new Response(

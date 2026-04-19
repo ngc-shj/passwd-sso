@@ -2,19 +2,15 @@
 // CRXJS copies web_accessible_resources as-is without transpilation.
 // Typed version: token-bridge-lib.ts (for tests).
 //
-// Supports two message types during migration:
-//   - PASSWD_SSO_BRIDGE_CODE (new): receives a one-time code, exchanges it
-//     for a token via direct fetch to /api/extension/token/exchange, then
-//     forwards the token to background via chrome.runtime.sendMessage.
-//   - PASSWD_SSO_TOKEN_RELAY (legacy): receives a bearer token directly,
-//     forwards it to background. Kept until web app and extension both
-//     migrate to the bridge code flow exclusively.
+// Accepts a single message type:
+//   - PASSWD_SSO_BRIDGE_CODE: receives a one-time code, exchanges it for a
+//     token via direct fetch to /api/extension/token/exchange, then forwards
+//     the token to background via chrome.runtime.sendMessage.
 //
 // Constants (must stay in sync with extension/src/lib/constants.ts +
 // src/lib/constants/extension.ts on the web app side). The sync test
 // src/__tests__/i18n/extension-constants-sync.test.ts enforces this.
 
-var LEGACY_MSG_TYPE = "PASSWD_SSO_TOKEN_RELAY";
 var BRIDGE_CODE_MSG_TYPE = "PASSWD_SSO_BRIDGE_CODE";
 var EXCHANGE_PATH = "/api/extension/token/exchange";
 
@@ -46,16 +42,6 @@ function forwardToken(token, expiresAtMs) {
     token: token,
     expiresAt: expiresAtMs,
   });
-}
-
-function handleLegacyTokenMessage(event) {
-  var token = event.data.token;
-  var expiresAt = event.data.expiresAt;
-  if (typeof token !== "string" || typeof expiresAt !== "number" || !Number.isFinite(expiresAt)) {
-    return;
-  }
-  if (!isContextValid()) return;
-  forwardToken(token, expiresAt);
 }
 
 function handleBridgeCodeMessage(event) {
@@ -96,13 +82,6 @@ function handlePostMessage(event) {
 
   if (event.data.type === BRIDGE_CODE_MSG_TYPE) {
     handleBridgeCodeMessage(event);
-    return;
-  }
-
-  if (event.data.type === LEGACY_MSG_TYPE) {
-    // TODO: remove after web app + extension reach v0.5.x and telemetry
-    // shows zero legacy traffic for 30 days.
-    handleLegacyTokenMessage(event);
     return;
   }
 }

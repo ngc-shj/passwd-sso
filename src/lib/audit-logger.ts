@@ -87,7 +87,7 @@ export const auditLogger = createAuditLogger();
 
 /**
  * Dead-letter logger for audit entries that failed after max retries
- * or were dropped due to buffer overflow.
+ * or whose tenantId could not be resolved.
  *
  * Always enabled (unlike auditLogger which depends on AUDIT_LOG_FORWARD).
  * External alerting should monitor for `_logType: "audit-dead-letter"`.

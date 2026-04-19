@@ -94,7 +94,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 
 | Threat | Component | Mitigation | Residual risk |
 | --- | --- | --- | --- |
-| R1: User denies performing sensitive action | Server | Audit log records userId, action, IP, user-agent, timestamp for all sensitive operations; failed writes buffered in-memory (FIFO 100 entries, max 3 retries per entry) with dead-letter log on overflow/exhaustion | Buffer is in-memory only; entries lost on process restart or pod replacement |
+| R1: User denies performing sensitive action | Server | Audit log records actorId, action, IP, user-agent, timestamp for all sensitive operations; written via durable `audit_outbox` table in the same DB transaction as the originating business write, drained by `audit-outbox-worker` with exponential backoff capped at `max_attempts` (default 8); permanent failures emit an `AUDIT_OUTBOX_DEAD_LETTER` audit row + pino dead-letter log. See §5 bullet 3. | `lastError` in `AUDIT_OUTBOX_DEAD_LETTER` metadata bypasses `METADATA_BLOCKLIST` (256-char truncation; operator-diagnostics only) — scrubbing tracked as follow-up |
 | R2: Admin denies modifying team membership | Server | Audit log with TEAM_MEMBER_ADD/REMOVE actions; extractRequestMeta captures IP/UA | Same as R1 |
 | R3: Emergency access activation without consent | Server | Configurable waiting period; email notification on request; audit trail for approve/activate | Owner must actively monitor email |
 
@@ -154,7 +154,7 @@ TB7: Extension Passkey Provider (MAIN world <-> content script <-> Service Worke
 
 2. **JavaScript GC non-determinism**: Secret key material in JS heap cannot be reliably zeroized. Mitigated by non-extractable CryptoKey usage and explicit clearing on lock events.
 
-3. **In-memory audit retry**: Failed audit writes are buffered in an in-memory FIFO queue (max 100 entries, max 3 retries per entry). On overflow the oldest entry is moved to a dead-letter log; on retry exhaustion the entry is also sent to the dead-letter log. Buffer is not durable across process restarts or pod replacements; compliance-sensitive deployments should add a persistent queue (e.g., Postgres outbox or message broker).
+3. **Audit pipeline (durable outbox)**: All application-emitted audit events flow through the durable `audit_outbox` Postgres table. `enqueueAudit*()` writes the outbox row in the same DB transaction as the originating business write, so commit atomicity guarantees no audit loss for successfully committed operations. A separate `audit-outbox-worker` process (`src/workers/audit-outbox-worker.ts`) drains pending rows, applying exponential backoff on failure capped at `max_attempts` (default 8); permanently failed rows are dead-lettered both as an `AUDIT_OUTBOX_DEAD_LETTER` audit row (via `writeDirectAuditLog()`) and via `deadLetterLogger.warn(...)` for external alerting. Worker meta-events (`AUDIT_OUTBOX_REAPED`, `AUDIT_OUTBOX_RETENTION_PURGED`, `AUDIT_OUTBOX_DEAD_LETTER`, `AUDIT_DELIVERY_DEAD_LETTER`) deliberately bypass the outbox via `writeDirectAuditLog()` to avoid R13 re-entrant dispatch loops — events about an outbox failure must not themselves require the outbox.
 
 4. **Compromised IdP**: A compromised Google/SAML identity provider could issue valid authentication tokens. Mitigated by vault passphrase requirement (IdP compromise alone does not decrypt vault data).
 

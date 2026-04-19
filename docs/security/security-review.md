@@ -214,18 +214,18 @@ Evidence:
 3. Audit write failures do not break primary operation  
 Status: `PASS`  
 Evidence:
-- `src/lib/audit.ts` catches DB write errors and enqueues failed entries for retry (`src/lib/audit-retry.ts`).
-- Retry mechanism: in-memory FIFO buffer (max 100 entries), piggyback flush on subsequent `logAudit()` calls (drains up to 10 entries per call), bounded at 3 retries per entry.
-- Entries exceeding max retries or dropped due to buffer overflow are logged to a dead-letter logger (`_logType: "audit-dead-letter"`) for external collection.
+- `src/lib/audit.ts` writes audit events to the durable `audit_outbox` Postgres table inside the same DB transaction as the originating business write, so commit atomicity guarantees no audit loss for successfully committed operations.
+- A separate `audit-outbox-worker` process (`src/workers/audit-outbox-worker.ts`) drains pending rows with exponential backoff capped at `max_attempts` (default 8). Permanently failed rows are dead-lettered both as an `AUDIT_OUTBOX_DEAD_LETTER` audit row (via `writeDirectAuditLog()`) and via the pino dead-letter logger (`_logType: "audit-dead-letter"`) for external alerting.
+- Tamper-evident hash chaining (`src/lib/audit-chain.ts`, schema in `prisma/migrations/20260413110000_add_audit_chain/`) protects committed `audit_logs` rows from undetected modification or deletion. The verify endpoint `/api/maintenance/audit-chain-verify` recomputes the chain and reports breaks.
+- External sink delivery is pluggable via the `AuditDeliverer` interface in `src/workers/audit-delivery.ts` (current concrete deliverers: webhook / SIEM HEC (Splunk HTTP Event Collector–compatible protocol; vendor-neutral) / S3-object).
 
 ### Notes / residual risk
-- The retry buffer is memory-resident only and does not survive process restart, pod eviction, or crash. Entries in flight at the time of termination are lost (they will appear in dead-letter logs only if the logger flushed before termination).
-  Therefore this mechanism improves availability but does not provide durable audit guarantees.
-- If strict compliance requires guaranteed delivery, a durable queue or transactional outbox would be needed.
+- AUDIT_OUTBOX_DEAD_LETTER metadata includes a 256-char truncated `lastError` from the failing write (`src/workers/audit-outbox-worker.ts:451`); this is intended for operator diagnostics and bypasses the standard `METADATA_BLOCKLIST`. Adding blocklist scrubbing to `lastError` is tracked as a follow-up.
+- Further compliance-grade hardening (e.g., external WORM-backed sink) is not implemented; the existing AuditDeliverer interface is the integration seam if needed.
 
 ### Conclusion (Section 5)
-- Current audit model is best-effort with bounded retry, reducing audit loss compared to pure fire-and-forget.
-- Compliance-hardening beyond this would require a durable delivery mechanism.
+- Current audit model is a durable transactional outbox combined with a tamper-evident hash chain on `audit_logs`, providing atomicity with the business write and detection of post-commit modification.
+- Further compliance-grade hardening (e.g., WORM-backed external sinks) is delegated to operators via the `AuditDeliverer` integration seam rather than implemented in-app.
 
 ## 6. Test Coverage Review (Current Security Findings)
 

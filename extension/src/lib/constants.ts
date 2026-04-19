@@ -1,10 +1,7 @@
-// ── Token bridge (shared contract with web app's inject-extension-token.ts) ──
+// ── Token bridge (shared contract with web app's inject-extension-bridge-code.ts) ──
 /** @deprecated Use TOKEN_BRIDGE_EVENT for new code. */
 export const TOKEN_ELEMENT_ID = "passwd-sso-ext-token";
 export const TOKEN_READY_EVENT = "passwd-sso-token-ready";
-
-// New token bridge: postMessage (web app) → content script (ISOLATED world)
-export const TOKEN_BRIDGE_MSG_TYPE = "PASSWD_SSO_TOKEN_RELAY";
 
 // Bridge code flow: postMessage (web app) → content script → exchange endpoint.
 // Mirror values in src/lib/constants/extension.ts (web app side); a sync test
