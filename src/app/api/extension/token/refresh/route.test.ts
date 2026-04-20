@@ -14,6 +14,7 @@ const {
   mockTransaction,
   mockWithUserTenantRls,
   mockWithBypassRls,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockRevokeExtensionTokenFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
@@ -28,11 +29,16 @@ const {
   mockTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
+}));
+
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -181,6 +187,30 @@ describe("POST /api/extension/token/refresh", () => {
 
     expect(status).toBe(401);
     expect(json.error).toBe("UNAUTHORIZED");
+  });
+
+  it("returns 403 when client IP is outside the tenant access restriction", async () => {
+    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
+    const denied = new Response(
+      JSON.stringify({ error: "ACCESS_DENIED" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+    mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
+
+    const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(403);
+    // Must not rotate token when IP is denied
+    expect(mockExtTokenCreate).not.toHaveBeenCalled();
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "tenant-1",
+    );
   });
 
   it("refreshes token successfully", async () => {

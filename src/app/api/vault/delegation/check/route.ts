@@ -12,6 +12,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
 import { authOrToken, hasUserId } from "@/lib/auth-or-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
@@ -38,6 +39,18 @@ export async function GET(request: NextRequest) {
   }
 
   const userId = authResult.userId;
+
+  // Tenant network-boundary enforcement for non-session auth. Session
+  // already passed the middleware check; Bearer (extension / api_key /
+  // mcp_token) bypassed middleware and must be re-checked here.
+  if (authResult.type !== "session") {
+    const tenantIdOverride =
+      authResult.type === "api_key" || authResult.type === "mcp_token"
+        ? authResult.tenantId
+        : undefined;
+    const denied = await enforceAccessRestriction(request, userId, tenantIdOverride);
+    if (denied) return denied;
+  }
 
   // Rate limit per user
   const rl = await checkRateLimiter.check(`delegation:check:${userId}`);

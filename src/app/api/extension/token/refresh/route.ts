@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/extension-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -53,6 +54,13 @@ async function handlePOST(req: NextRequest) {
   if (!activeSession) {
     return unauthorized();
   }
+
+  // Tenant network-boundary enforcement: Bearer reached this handler via
+  // proxy.ts bearer-bypass, so IP must be re-checked here or an extension
+  // token could be rotated indefinitely from outside the tenant CIDR /
+  // Tailscale range up to the family absolute cap.
+  const denied = await enforceAccessRestriction(req, userId, activeSession.tenantId);
+  if (denied) return denied;
 
   // Read tenant extension-token TTL policy
   const tenant = await withBypassRls(prisma, async () =>

@@ -14,6 +14,7 @@ const {
   mockAccessRequestCreate,
   mockServiceAccountFindUnique,
   mockDispatchTenantWebhook,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockAuthOrToken: vi.fn(),
@@ -26,6 +27,7 @@ const {
   mockAccessRequestCreate: vi.fn(),
   mockServiceAccountFindUnique: vi.fn(),
   mockDispatchTenantWebhook: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -76,6 +78,9 @@ vi.mock("@/lib/with-request-log", () => ({
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
+}));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 import { GET, POST } from "@/app/api/tenant/access-requests/route";
@@ -343,6 +348,34 @@ describe("POST /api/tenant/access-requests", () => {
 
     expect(status).toBe(201);
     expect(json.id).toBe("req-sa-1");
+  });
+
+  it("returns 403 when SA token request is from outside tenant IP range", async () => {
+    mockAuthOrToken.mockResolvedValue({
+      type: "service_account",
+      serviceAccountId: SA_ID,
+      tenantId: "tenant-1",
+      tokenId: "tok-denied",
+      scopes: ["access-request:create"],
+    });
+    mockServiceAccountFindUnique.mockResolvedValue({
+      isActive: true,
+      createdById: DEFAULT_SESSION.user.id,
+    });
+    const denied = new Response(
+      JSON.stringify({ error: "ACCESS_DENIED" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+    mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
+
+    const req = createRequest("POST", "http://localhost/api/tenant/access-requests", {
+      body: { requestedScope: ["passwords:read"] },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(403);
+    // Must not create the request when IP is denied
+    expect(mockAccessRequestCreate).not.toHaveBeenCalled();
   });
 
   it("returns 403 when SA token lacks access-request:create scope", async () => {

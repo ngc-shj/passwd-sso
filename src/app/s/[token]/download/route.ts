@@ -87,22 +87,31 @@ export async function GET(req: NextRequest, { params }: Params) {
         );
       }
 
-      // Atomically increment viewCount for password-protected downloads
+      // Atomically increment viewCount for password-protected downloads.
+      // The revoked_at/expires_at predicates are re-asserted here (in addition
+      // to the JS check above) to close a TOCTOU window: between findUnique
+      // and the UPDATE the share may be revoked or expire, and we must not
+      // leak the decrypted file in that window.
       const updated: number = await prisma.$executeRaw`
         UPDATE "password_shares"
         SET "view_count" = "view_count" + 1
         WHERE "id" = ${share.id}
+          AND "revoked_at" IS NULL
+          AND "expires_at" > NOW()
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
         return new NextResponse(null, { status: 410 });
       }
     } else {
-      // Non-protected: atomically check and increment viewCount at download time
+      // Non-protected: atomically check and increment viewCount at download time.
+      // Same TOCTOU-closing predicates as the password-protected branch.
       const updated: number = await prisma.$executeRaw`
         UPDATE "password_shares"
         SET "view_count" = "view_count" + 1
         WHERE "id" = ${share.id}
+          AND "revoked_at" IS NULL
+          AND "expires_at" > NOW()
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {

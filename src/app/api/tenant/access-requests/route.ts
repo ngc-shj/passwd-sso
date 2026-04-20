@@ -4,10 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit";
 import { requireTenantPermission } from "@/lib/tenant-auth";
 import { authOrToken } from "@/lib/auth-or-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
@@ -138,6 +140,16 @@ async function handlePOST(req: NextRequest) {
       return errorResponse(API_ERROR.SA_NOT_FOUND, 404);
     }
     userId = sa.createdById;
+
+    // Enforce tenant network-boundary policy for SA self-service — the
+    // Bearer path in proxy.ts bypasses middleware access restriction.
+    const denied = await enforceAccessRestriction(
+      req,
+      userId,
+      tenantId,
+      ACTOR_TYPE.SERVICE_ACCOUNT,
+    );
+    if (denied) return denied;
   } else {
     // Admin path: session or API key auth
     if (!("userId" in authResult)) return unauthorized();
@@ -150,6 +162,19 @@ async function handlePOST(req: NextRequest) {
       return handleAuthError(err);
     }
     tenantId = actor.tenantId;
+
+    // Session reaches this handler via middleware which already enforces
+    // tenant IP restriction. API key / other token types bypass middleware
+    // access restriction and must be checked here.
+    if (authResult.type !== "session") {
+      const denied = await enforceAccessRestriction(
+        req,
+        userId,
+        tenantId,
+        resolveActorType(authResult),
+      );
+      if (denied) return denied;
+    }
 
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${tenantId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);

@@ -16,6 +16,7 @@ const {
   mockCheck,
   mockWithUserTenantRls,
   mockWithBypassRls,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
   mockCreate: vi.fn(),
@@ -28,6 +29,7 @@ const {
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
+  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
@@ -65,6 +67,9 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
+}));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 import { POST, DELETE } from "./route";
@@ -235,5 +240,33 @@ describe("DELETE /api/extension/token", () => {
 
     expect(status).toBe(404);
     expect(json.error).toBe("EXTENSION_TOKEN_INVALID");
+  });
+
+  it("returns 403 when client IP is outside the tenant access restriction", async () => {
+    mockFindUnique.mockResolvedValue({
+      id: "t1",
+      userId: DEFAULT_SESSION.user.id,
+      scope: "passwords:read,vault:unlock-data",
+      expiresAt: new Date("2030-01-01"),
+      revokedAt: null,
+    });
+    const denied = new Response(
+      JSON.stringify({ error: "ACCESS_DENIED" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+    mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
+
+    const req = createRequest("DELETE", "http://localhost/api/extension/token", {
+      headers: { Authorization: `Bearer ${"a".repeat(64)}` },
+    });
+    const res = await DELETE(req);
+
+    expect(res.status).toBe(403);
+    // validateExtensionToken internally updates lastUsedAt on every successful
+    // validation; that call is expected. What must NOT happen under IP denial
+    // is the revoke write (`revokedAt: <date>`).
+    for (const call of mockUpdate.mock.calls) {
+      expect(call[0].data).not.toHaveProperty("revokedAt");
+    }
   });
 });
