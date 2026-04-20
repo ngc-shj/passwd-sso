@@ -93,7 +93,7 @@ describe("GET /api/vault/delegation/check", () => {
   });
 
   it("accepts Bearer token auth (extension token)", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "extension", userId: "user-1" });
+    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: [] });
     mockPrismaDelegationSession.findFirst.mockResolvedValue({
       id: SESSION_ID,
       expiresAt: EXPIRES_AT,
@@ -107,7 +107,7 @@ describe("GET /api/vault/delegation/check", () => {
   });
 
   it("returns 403 when Bearer token is from outside tenant IP range", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "extension", userId: "user-1" });
+    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: [] });
     const denied = new Response(
       JSON.stringify({ error: "ACCESS_DENIED" }),
       { status: 403, headers: { "Content-Type": "application/json" } },

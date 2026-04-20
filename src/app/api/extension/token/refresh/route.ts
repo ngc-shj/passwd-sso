@@ -33,7 +33,14 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR[result.error], 401);
   }
 
-  const { tokenId, userId, scopes, familyId, familyCreatedAt } = result.data;
+  const { tokenId, userId, tenantId, scopes, familyId, familyCreatedAt } = result.data;
+
+  // Tenant network-boundary enforcement comes BEFORE rate limit so an
+  // off-network holder of a stolen bearer cannot burn the legitimate
+  // user's per-user refresh budget (DoS the live extension). tenantId
+  // comes directly from the validated token row.
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   const rl = await refreshLimiter.check(`rl:ext_refresh:${userId}`);
   if (!rl.allowed) {
@@ -54,13 +61,6 @@ async function handlePOST(req: NextRequest) {
   if (!activeSession) {
     return unauthorized();
   }
-
-  // Tenant network-boundary enforcement: Bearer reached this handler via
-  // proxy.ts bearer-bypass, so IP must be re-checked here or an extension
-  // token could be rotated indefinitely from outside the tenant CIDR /
-  // Tailscale range up to the family absolute cap.
-  const denied = await enforceAccessRestriction(req, userId, activeSession.tenantId);
-  if (denied) return denied;
 
   // Read tenant extension-token TTL policy
   const tenant = await withBypassRls(prisma, async () =>

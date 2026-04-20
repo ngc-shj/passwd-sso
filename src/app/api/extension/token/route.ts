@@ -92,8 +92,14 @@ async function handleDELETE(req: NextRequest) {
 
   // Tenant network-boundary enforcement: Bearer bypasses middleware access
   // restriction, so the full extension-token lifecycle (issue/refresh/revoke)
-  // must be gated at the tenant CIDR / Tailscale boundary.
-  const denied = await enforceAccessRestriction(req, result.data.userId);
+  // must be gated at the tenant CIDR / Tailscale boundary. tenantId is
+  // taken directly from the validated token row (not resolved from userId)
+  // to avoid a silent fail-open if user→tenant resolution returns null.
+  const denied = await enforceAccessRestriction(
+    req,
+    result.data.userId,
+    result.data.tenantId,
+  );
   if (denied) return denied;
 
   await withUserTenantRls(result.data.userId, async () =>

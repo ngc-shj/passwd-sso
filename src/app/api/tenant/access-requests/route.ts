@@ -5,6 +5,7 @@ import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit";
 import { requireTenantPermission } from "@/lib/tenant-auth";
 import { authOrToken } from "@/lib/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
@@ -119,6 +120,20 @@ async function handlePOST(req: NextRequest) {
     tenantId = authResult.tenantId;
     serviceAccountId = authResult.serviceAccountId;
 
+    // Enforce tenant network-boundary policy BEFORE rate limit so an
+    // off-network holder of a stolen SA bearer cannot burn the per-SA
+    // request budget against the legitimate SA. userId is the SA sentinel
+    // (SYSTEM_ACTOR_ID) here because sa.createdById is not resolved until
+    // the active-SA lookup below; the denial audit records tenantId and
+    // serviceAccountId via actorType/metadata regardless.
+    const denied = await enforceAccessRestriction(
+      req,
+      SYSTEM_ACTOR_ID,
+      tenantId,
+      ACTOR_TYPE.SERVICE_ACCOUNT,
+    );
+    if (denied) return denied;
+
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:sa:${serviceAccountId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
@@ -140,16 +155,6 @@ async function handlePOST(req: NextRequest) {
       return errorResponse(API_ERROR.SA_NOT_FOUND, 404);
     }
     userId = sa.createdById;
-
-    // Enforce tenant network-boundary policy for SA self-service — the
-    // Bearer path in proxy.ts bypasses middleware access restriction.
-    const denied = await enforceAccessRestriction(
-      req,
-      userId,
-      tenantId,
-      ACTOR_TYPE.SERVICE_ACCOUNT,
-    );
-    if (denied) return denied;
   } else {
     // Admin path: session or API key auth
     if (!("userId" in authResult)) return unauthorized();

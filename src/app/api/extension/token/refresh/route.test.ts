@@ -84,6 +84,7 @@ function validTokenResult(overrides?: Record<string, unknown>) {
     data: {
       tokenId: "old-tok-id",
       userId: "user-1",
+      tenantId: "tenant-1",
       scopes: ["passwords:read", "vault:unlock-data"],
       expiresAt: new Date("2030-01-01"),
       familyId: "fam-1",
@@ -215,7 +216,7 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("refreshes token successfully", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
@@ -231,7 +232,7 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("revokes old token and creates new in transaction", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
@@ -251,7 +252,7 @@ describe("POST /api/extension/token/refresh", () => {
     mockValidateExtensionToken.mockResolvedValue(
       validTokenResult({ scopes: ["passwords:read"] }),
     );
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     mockExtTokenCreate.mockResolvedValue({
       expiresAt: new Date("2030-01-01"),
       scope: "passwords:read",
@@ -268,7 +269,7 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("returns 401 on concurrent refresh (optimistic lock)", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     // updateMany returns count: 0 — already revoked by concurrent request
     mockExtTokenUpdateMany.mockResolvedValue({ count: 0 });
 
