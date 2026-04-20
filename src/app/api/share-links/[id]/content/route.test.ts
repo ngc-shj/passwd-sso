@@ -194,8 +194,13 @@ describe("GET /api/share-links/[id]/content", () => {
       ...MOCK_SHARE,
       shareType: "FILE",
     });
-    await GET(createContentRequest(), createParams({ id: SHARE_ID }));
-    expect(mockPrismaExecuteRaw).not.toHaveBeenCalled();
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    // FILE path runs a no-op conditional UPDATE to atomically recheck
+    // revocation/expiry/maxViews, but view_count is incremented by the
+    // download route instead — response viewCount reflects the DB row.
+    expect(json.viewCount).toBe(MOCK_SHARE.viewCount);
   });
 
   it("returns 410 when FILE share max views exceeded", async () => {
@@ -205,6 +210,29 @@ describe("GET /api/share-links/[id]/content", () => {
       maxViews: 3,
       viewCount: 3,
     });
+    // Conditional UPDATE matches 0 rows when maxViews is reached.
+    mockPrismaExecuteRaw.mockResolvedValue(0);
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(410);
+  });
+
+  // TOCTOU atomicity: findUnique returns a share that still looks valid,
+  // but the share is revoked/expired between the JS check and the UPDATE.
+  // The UPDATE's re-asserted predicates must match 0 rows and the handler
+  // must return 410 without leaking data.
+  it("returns 410 when revoked between findUnique and UPDATE (TOCTOU)", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue(MOCK_SHARE);
+    mockPrismaExecuteRaw.mockResolvedValue(0);
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(410);
+  });
+
+  it("returns 410 for FILE share revoked between findUnique and recheck (TOCTOU)", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue({
+      ...MOCK_SHARE,
+      shareType: "FILE",
+    });
+    mockPrismaExecuteRaw.mockResolvedValue(0);
     const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
     expect(res.status).toBe(410);
   });

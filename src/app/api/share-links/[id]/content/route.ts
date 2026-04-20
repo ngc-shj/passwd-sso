@@ -76,7 +76,11 @@ async function handleGET(req: NextRequest, { params }: Params) {
       return notFound();
     }
 
-    // Atomically check maxViews and increment viewCount.
+    // Atomically check revocation/expiry/maxViews and increment viewCount.
+    // The revoked_at/expires_at predicates are re-asserted here (in addition
+    // to the JS check above) to close a TOCTOU window: between findUnique
+    // and the UPDATE, the share may be revoked or expire, and we must not
+    // leak data in that window.
     // For FILE shares, viewCount is incremented by the download route instead,
     // to prevent bypass via direct download (skipping content API).
     let viewCountDelta = 0;
@@ -85,6 +89,8 @@ async function handleGET(req: NextRequest, { params }: Params) {
         UPDATE "password_shares"
         SET "view_count" = "view_count" + 1
         WHERE "id" = ${share.id}
+          AND "revoked_at" IS NULL
+          AND "expires_at" > NOW()
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
@@ -92,8 +98,19 @@ async function handleGET(req: NextRequest, { params }: Params) {
       }
       viewCountDelta = 1;
     } else {
-      // FILE: just check maxViews without incrementing
-      if (share.maxViews !== null && share.viewCount >= share.maxViews) {
+      // FILE: check revocation/expiry/maxViews atomically without incrementing.
+      // viewCount is incremented by the download route. We use a no-op
+      // conditional UPDATE (SET view_count = view_count) to re-assert the
+      // state under the same row-lock semantics as the non-FILE path.
+      const stillValid: number = await prisma.$executeRaw`
+        UPDATE "password_shares"
+        SET "view_count" = "view_count"
+        WHERE "id" = ${share.id}
+          AND "revoked_at" IS NULL
+          AND "expires_at" > NOW()
+          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+
+      if (stillValid === 0) {
         return errorResponse(API_ERROR.NOT_FOUND, 410);
       }
     }

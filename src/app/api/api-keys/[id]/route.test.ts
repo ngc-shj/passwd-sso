@@ -143,7 +143,7 @@ describe("DELETE /api/api-keys/[id]", () => {
     expect(res.status).toBe(404);
   });
 
-  it("calls checkAuth with allowTokens and skipAccessRestriction", async () => {
+  it("calls checkAuth with allowTokens and enforces access restriction", async () => {
     mockCheckAuth.mockResolvedValue(authFail());
 
     await DELETE(
@@ -152,7 +152,7 @@ describe("DELETE /api/api-keys/[id]", () => {
     );
     expect(mockCheckAuth).toHaveBeenCalledWith(
       expect.any(NextRequest),
-      { allowTokens: true, skipAccessRestriction: true },
+      { allowTokens: true },
     );
   });
 
