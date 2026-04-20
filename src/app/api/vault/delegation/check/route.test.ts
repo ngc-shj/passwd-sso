@@ -6,6 +6,7 @@ const {
   mockWithBypassRls,
   mockRateLimiterCheck,
   mockLogAudit,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockAuthOrToken: vi.fn(),
   mockPrismaDelegationSession: {
@@ -14,6 +15,7 @@ const {
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
   mockLogAudit: vi.fn(),
+  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/auth-or-token", () => ({
@@ -39,6 +41,9 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/ip-access", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
+}));
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -88,7 +93,7 @@ describe("GET /api/vault/delegation/check", () => {
   });
 
   it("accepts Bearer token auth (extension token)", async () => {
-    mockAuthOrToken.mockResolvedValue({ type: "extension", userId: "user-1" });
+    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: [] });
     mockPrismaDelegationSession.findFirst.mockResolvedValue({
       id: SESSION_ID,
       expiresAt: EXPIRES_AT,
@@ -99,6 +104,22 @@ describe("GET /api/vault/delegation/check", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.authorized).toBe(true);
+  });
+
+  it("returns 403 when Bearer token is from outside tenant IP range", async () => {
+    mockAuthOrToken.mockResolvedValue({ type: "token", userId: "user-1", scopes: [] });
+    const denied = new Response(
+      JSON.stringify({ error: "ACCESS_DENIED" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+    mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
+
+    const res = await GET(makeRequest({ clientId: VALID_CLIENT_ID, entryId: VALID_ENTRY_ID }));
+
+    expect(res.status).toBe(403);
+    // Must not look up delegation or log audit when IP is denied
+    expect(mockPrismaDelegationSession.findFirst).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("returns 429 when rate limited", async () => {

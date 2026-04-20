@@ -228,7 +228,17 @@ async function handleApiAuth(request: NextRequest) {
     .get("authorization")
     ?.startsWith("Bearer ");
 
-  if (hasBearer && isBearerRoute) {
+  // Bearer-bypass only applies when no session cookie is present. If both
+  // are sent, authOrToken prefers session (auth-or-token.ts:64-68) and the
+  // tenant IP restriction must still gate the request — falling through to
+  // the session-authenticated path below enforces it. Legitimate Bearer-
+  // only clients (extension from chrome-extension:// origin, API key
+  // clients, SA / MCP tokens) do not ship the Auth.js session cookie, so
+  // the bypass still applies to them.
+  const hasSessionCookie =
+    extractSessionToken(request.headers.get("cookie") ?? "") !== "";
+
+  if (hasBearer && isBearerRoute && !hasSessionCookie) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });

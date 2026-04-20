@@ -257,4 +257,56 @@ describe("GET /s/[token]/download", () => {
     expect(res.status).toBe(200);
     expect(mockVerifyAccessToken).toHaveBeenCalledWith("valid-access-token", "share-1");
   });
+
+  // TOCTOU atomicity: findUnique returns a share that still looks valid,
+  // but it is revoked/expired between the JS check and the UPDATE. The
+  // UPDATE's re-asserted revoked_at/expires_at predicates must match 0
+  // rows and the handler must return 410 without streaming the file.
+  it("returns 410 when non-protected share is revoked between findUnique and UPDATE (TOCTOU)", async () => {
+    mockFindUnique.mockResolvedValue(makeFileShare());
+    mockExecuteRaw.mockResolvedValueOnce(0);
+
+    const req = createDownloadRequest(VALID_TOKEN);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(410);
+    expect(mockDecryptShareBinary).not.toHaveBeenCalled();
+  });
+
+  it("returns 410 when password-protected share is revoked between findUnique and UPDATE (TOCTOU)", async () => {
+    mockFindUnique.mockResolvedValue(
+      makeFileShare({ accessPasswordHash: "some-hash" })
+    );
+    mockVerifyAccessToken.mockReturnValueOnce(true);
+    mockExecuteRaw.mockResolvedValueOnce(0);
+
+    const req = new NextRequest(`http://localhost/s/${VALID_TOKEN}/download`, {
+      headers: {
+        "x-forwarded-for": "1.2.3.4",
+        authorization: "Bearer valid-access-token",
+      },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+    const res = await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(res.status).toBe(410);
+    expect(mockDecryptShareBinary).not.toHaveBeenCalled();
+  });
+
+  // T1: the UPDATE's SQL body must contain every TOCTOU predicate so a
+  // regression that drops one of them fails the test instead of silently
+  // returning "0 rows updated" under the mock.
+  it("UPDATE SQL re-asserts revoked_at, expires_at, and max_views predicates", async () => {
+    mockFindUnique.mockResolvedValue(makeFileShare());
+
+    const req = createDownloadRequest(VALID_TOKEN);
+    await GET(req as never, createParams({ token: VALID_TOKEN }));
+
+    expect(mockExecuteRaw).toHaveBeenCalledTimes(1);
+    const callArg = mockExecuteRaw.mock.calls[0][0] as unknown;
+    const sqlBody = Array.isArray(callArg) ? callArg.join("?") : String(callArg);
+    expect(sqlBody).toMatch(/"revoked_at"\s+IS\s+NULL/i);
+    expect(sqlBody).toMatch(/"expires_at"\s*>\s*NOW\(\)/i);
+    expect(sqlBody).toMatch(/"max_views"\s+IS\s+NULL\s+OR\s+"view_count"\s*<\s*"max_views"/i);
+    expect(sqlBody).toMatch(/"view_count"\s*=\s*"view_count"\s*\+\s*1/i);
+  });
 });

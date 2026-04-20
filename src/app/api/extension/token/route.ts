@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { issueExtensionToken, validateExtensionToken } from "@/lib/extension-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { EXTENSION_TOKEN_DEFAULT_SCOPES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -88,6 +89,18 @@ async function handleDELETE(req: NextRequest) {
     };
     return errorResponse(API_ERROR[result.error], statusMap[result.error] ?? 400);
   }
+
+  // Tenant network-boundary enforcement: Bearer bypasses middleware access
+  // restriction, so the full extension-token lifecycle (issue/refresh/revoke)
+  // must be gated at the tenant CIDR / Tailscale boundary. tenantId is
+  // taken directly from the validated token row (not resolved from userId)
+  // to avoid a silent fail-open if user→tenant resolution returns null.
+  const denied = await enforceAccessRestriction(
+    req,
+    result.data.userId,
+    result.data.tenantId,
+  );
+  if (denied) return denied;
 
   await withUserTenantRls(result.data.userId, async () =>
     prisma.extensionToken.update({

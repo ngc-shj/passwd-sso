@@ -4,10 +4,13 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit";
 import { requireTenantPermission } from "@/lib/tenant-auth";
 import { authOrToken } from "@/lib/auth-or-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
+import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
@@ -117,6 +120,20 @@ async function handlePOST(req: NextRequest) {
     tenantId = authResult.tenantId;
     serviceAccountId = authResult.serviceAccountId;
 
+    // Enforce tenant network-boundary policy BEFORE rate limit so an
+    // off-network holder of a stolen SA bearer cannot burn the per-SA
+    // request budget against the legitimate SA. userId is the SA sentinel
+    // (SYSTEM_ACTOR_ID) here because sa.createdById is not resolved until
+    // the active-SA lookup below; the denial audit records tenantId and
+    // serviceAccountId via actorType/metadata regardless.
+    const denied = await enforceAccessRestriction(
+      req,
+      SYSTEM_ACTOR_ID,
+      tenantId,
+      ACTOR_TYPE.SERVICE_ACCOUNT,
+    );
+    if (denied) return denied;
+
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:sa:${serviceAccountId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);
 
@@ -150,6 +167,19 @@ async function handlePOST(req: NextRequest) {
       return handleAuthError(err);
     }
     tenantId = actor.tenantId;
+
+    // Session reaches this handler via middleware which already enforces
+    // tenant IP restriction. API key / other token types bypass middleware
+    // access restriction and must be checked here.
+    if (authResult.type !== "session") {
+      const denied = await enforceAccessRestriction(
+        req,
+        userId,
+        tenantId,
+        resolveActorType(authResult),
+      );
+      if (denied) return denied;
+    }
 
     const rl = await accessRequestCreateLimiter.check(`rl:access_request_create:${tenantId}`);
     if (!rl.allowed) return rateLimited(rl.retryAfterMs);

@@ -23,9 +23,9 @@ const apiKeyCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 5 })
 
 // GET /api/api-keys — List API keys for the current user
 async function handleGET(req: NextRequest) {
-  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
-  // IP restriction is not enforced here (matches pre-checkAuth behavior).
-  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  // Tenant IP restriction applies to all auth types (session + extension token)
+  // to prevent long-lived API-key issuance from outside the tenant network boundary.
+  const authed = await checkAuth(req, { allowTokens: true });
   if (!authed.ok) return authed.response;
   // Only session and extension token can manage API keys
   if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {
@@ -66,9 +66,7 @@ async function handleGET(req: NextRequest) {
 
 // POST /api/api-keys — Create a new API key (session or extension token, NOT API key)
 async function handlePOST(req: NextRequest) {
-  // skipAccessRestriction: deliberate — API key management is session/extension-token only;
-  // IP restriction is not enforced here (matches pre-checkAuth behavior).
-  const authed = await checkAuth(req, { allowTokens: true, skipAccessRestriction: true });
+  const authed = await checkAuth(req, { allowTokens: true });
   if (!authed.ok) return authed.response;
   // Only session and extension token can create API keys
   if (authed.auth.type === "api_key" || authed.auth.type === "mcp_token") {

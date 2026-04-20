@@ -148,7 +148,7 @@ describe("GET /api/api-keys", () => {
     expect(json).toEqual([]);
   });
 
-  it("calls checkAuth with allowTokens and skipAccessRestriction", async () => {
+  it("calls checkAuth with allowTokens and enforces access restriction", async () => {
     mockCheckAuth.mockResolvedValue({
       ok: true,
       auth: { type: "session", userId: "u1" },
@@ -158,7 +158,7 @@ describe("GET /api/api-keys", () => {
     await GET(createRequest("GET", "http://localhost:3000/api/api-keys"));
     expect(mockCheckAuth).toHaveBeenCalledWith(
       expect.any(NextRequest),
-      { allowTokens: true, skipAccessRestriction: true },
+      { allowTokens: true },
     );
   });
 });
@@ -203,7 +203,7 @@ describe("POST /api/api-keys", () => {
     expect(res.status).toBe(401);
   });
 
-  it("calls checkAuth with allowTokens and skipAccessRestriction", async () => {
+  it("calls checkAuth with allowTokens and enforces access restriction", async () => {
     mockCheckAuth.mockResolvedValue(authFail());
 
     await POST(
@@ -213,7 +213,7 @@ describe("POST /api/api-keys", () => {
     );
     expect(mockCheckAuth).toHaveBeenCalledWith(
       expect.any(NextRequest),
-      { allowTokens: true, skipAccessRestriction: true },
+      { allowTokens: true },
     );
   });
 

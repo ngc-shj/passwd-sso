@@ -14,6 +14,7 @@ const {
   mockTransaction,
   mockWithUserTenantRls,
   mockWithBypassRls,
+  mockEnforceAccessRestriction,
 } = vi.hoisted(() => ({
   mockValidateExtensionToken: vi.fn(),
   mockRevokeExtensionTokenFamily: vi.fn().mockResolvedValue({ rowsRevoked: 0 }),
@@ -28,11 +29,16 @@ const {
   mockTransaction: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockWithBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
+  mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
 vi.mock("@/lib/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
+}));
+
+vi.mock("@/lib/access-restriction", () => ({
+  enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 vi.mock("@/lib/prisma", () => ({
@@ -78,6 +84,7 @@ function validTokenResult(overrides?: Record<string, unknown>) {
     data: {
       tokenId: "old-tok-id",
       userId: "user-1",
+      tenantId: "tenant-1",
       scopes: ["passwords:read", "vault:unlock-data"],
       expiresAt: new Date("2030-01-01"),
       familyId: "fam-1",
@@ -183,9 +190,33 @@ describe("POST /api/extension/token/refresh", () => {
     expect(json.error).toBe("UNAUTHORIZED");
   });
 
+  it("returns 403 when client IP is outside the tenant access restriction", async () => {
+    mockValidateExtensionToken.mockResolvedValue(validTokenResult());
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
+    const denied = new Response(
+      JSON.stringify({ error: "ACCESS_DENIED" }),
+      { status: 403, headers: { "Content-Type": "application/json" } },
+    );
+    mockEnforceAccessRestriction.mockResolvedValueOnce(denied);
+
+    const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
+      headers: { Authorization: "Bearer valid-token" },
+    });
+    const res = await POST(req);
+
+    expect(res.status).toBe(403);
+    // Must not rotate token when IP is denied
+    expect(mockExtTokenCreate).not.toHaveBeenCalled();
+    expect(mockEnforceAccessRestriction).toHaveBeenCalledWith(
+      expect.anything(),
+      "user-1",
+      "tenant-1",
+    );
+  });
+
   it("refreshes token successfully", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
@@ -201,7 +232,7 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("revokes old token and creates new in transaction", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
 
     const req = createRequest("POST", "http://localhost/api/extension/token/refresh", {
       headers: { Authorization: "Bearer valid-token" },
@@ -221,7 +252,7 @@ describe("POST /api/extension/token/refresh", () => {
     mockValidateExtensionToken.mockResolvedValue(
       validTokenResult({ scopes: ["passwords:read"] }),
     );
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     mockExtTokenCreate.mockResolvedValue({
       expiresAt: new Date("2030-01-01"),
       scope: "passwords:read",
@@ -238,7 +269,7 @@ describe("POST /api/extension/token/refresh", () => {
 
   it("returns 401 on concurrent refresh (optimistic lock)", async () => {
     mockValidateExtensionToken.mockResolvedValue(validTokenResult());
-    mockSessionFindFirst.mockResolvedValue({ id: "session-1" });
+    mockSessionFindFirst.mockResolvedValue({ id: "session-1", tenantId: "tenant-1" });
     // updateMany returns count: 0 — already revoked by concurrent request
     mockExtTokenUpdateMany.mockResolvedValue({ count: 0 });
 

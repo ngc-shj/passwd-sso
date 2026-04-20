@@ -212,6 +212,50 @@ describe("proxy — handleApiAuth Bearer bypass", () => {
     expect(res.status).toBe(401);
   });
 
+  // N2: session cookie + arbitrary Bearer must not skip the middleware
+  // session+IP check. If it did, an attacker off-network could combine a
+  // valid session cookie with any Bearer string to defeat the tenant IP
+  // restriction — authOrToken prefers session, so the handler would grant
+  // access without any IP gate.
+  it("does NOT bypass when session cookie is present alongside Bearer + /api/passwords", async () => {
+    const res = await proxy(
+      createApiRequest("/api/passwords", {
+        Authorization: "Bearer tok123",
+        Cookie: "authjs.session-token=sess-cookie-plus-bearer",
+      }),
+      dummyOptions,
+    );
+    // Falls through to the session-authenticated path; session fetch mock
+    // returns { user: null } so the middleware rejects with 401.
+    expect(res.status).toBe(401);
+    // The session lookup MUST have run (proves we did not bypass).
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("does NOT bypass when session cookie is present alongside Bearer + /api/api-keys", async () => {
+    const res = await proxy(
+      createApiRequest("/api/api-keys", {
+        Authorization: "Bearer tok123",
+        Cookie: "authjs.session-token=sess-cookie-plus-bearer-apikey",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it("does NOT bypass when session cookie is present alongside Bearer + /api/vault/delegation", async () => {
+    const res = await proxy(
+      createApiRequest("/api/vault/delegation/check", {
+        Authorization: "Bearer tok123",
+        Cookie: "authjs.session-token=sess-cookie-plus-bearer-deleg",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
   it("returns 401 for /api/sends without session", async () => {
     const res = await proxy(
       createApiRequest("/api/sends", {

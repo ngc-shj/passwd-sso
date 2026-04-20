@@ -89,18 +89,36 @@ export default async function SharePage({ params }: Props) {
     // Non-protected share: increment viewCount for non-FILE shares.
     // FILE shares defer viewCount increment to the download route to prevent
     // race conditions where concurrent page loads allow extra downloads.
+    // The revoked_at/expires_at predicates are re-asserted here to close a
+    // TOCTOU window between findUnique and the UPDATE — without them, a
+    // share revoked/expired in that window would still render.
     if (share.shareType !== "FILE") {
       const updated: number = await prisma.$executeRaw`
         UPDATE "password_shares"
         SET "view_count" = "view_count" + 1
         WHERE "id" = ${share.id}
+          AND "revoked_at" IS NULL
+          AND "expires_at" > NOW()
           AND ("max_views" IS NULL OR "view_count" < "max_views")`;
 
       if (updated === 0) {
         return <ShareError reason="maxViews" />;
       }
-    } else if (share.maxViews !== null && share.viewCount >= share.maxViews) {
-      return <ShareError reason="maxViews" />;
+    } else {
+      // FILE: no-op conditional UPDATE to atomically recheck revocation/
+      // expiry/maxViews without touching view_count (incremented by the
+      // download route).
+      const stillValid: number = await prisma.$executeRaw`
+        UPDATE "password_shares"
+        SET "view_count" = "view_count"
+        WHERE "id" = ${share.id}
+          AND "revoked_at" IS NULL
+          AND "expires_at" > NOW()
+          AND ("max_views" IS NULL OR "view_count" < "max_views")`;
+
+      if (stillValid === 0) {
+        return <ShareError reason="maxViews" />;
+      }
     }
 
     // Record access log (must await inside withBypassRls transaction)

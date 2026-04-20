@@ -18,6 +18,7 @@ import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 export interface ValidatedExtensionToken {
   tokenId: string;
   userId: string;
+  tenantId: string;
   scopes: ExtensionTokenScope[];
   expiresAt: Date;
   familyId: string;
@@ -88,6 +89,7 @@ export async function validateExtensionToken(
       select: {
         id: true,
         userId: true,
+        tenantId: true,
         scope: true,
         expiresAt: true,
         revokedAt: true,
@@ -120,6 +122,7 @@ export async function validateExtensionToken(
     data: {
       tokenId: token.id,
       userId: token.userId,
+      tenantId: token.tenantId,
       scopes: parseScopes(token.scope),
       expiresAt: token.expiresAt,
       familyId: token.familyId,

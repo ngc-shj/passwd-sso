@@ -5,6 +5,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
 import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/extension-token";
+import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
@@ -32,7 +33,14 @@ async function handlePOST(req: NextRequest) {
     return errorResponse(API_ERROR[result.error], 401);
   }
 
-  const { tokenId, userId, scopes, familyId, familyCreatedAt } = result.data;
+  const { tokenId, userId, tenantId, scopes, familyId, familyCreatedAt } = result.data;
+
+  // Tenant network-boundary enforcement comes BEFORE rate limit so an
+  // off-network holder of a stolen bearer cannot burn the legitimate
+  // user's per-user refresh budget (DoS the live extension). tenantId
+  // comes directly from the validated token row.
+  const denied = await enforceAccessRestriction(req, userId, tenantId);
+  if (denied) return denied;
 
   const rl = await refreshLimiter.check(`rl:ext_refresh:${userId}`);
   if (!rl.allowed) {

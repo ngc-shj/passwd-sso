@@ -88,6 +88,15 @@ function createContentRequest(overrides: Record<string, string> = {}) {
   });
 }
 
+// Collapse a tagged-template `$executeRaw` call (captured by vi.fn()) into a
+// single SQL string for predicate assertions. The first call argument is a
+// readonly string[] (the template parts); remaining args are interpolated
+// values we don't need for shape verification.
+function sqlBodyOf(callArgs: readonly unknown[]): string {
+  const strings = callArgs[0];
+  return Array.isArray(strings) ? strings.join("?") : String(strings);
+}
+
 describe("GET /api/share-links/[id]/content", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -149,12 +158,6 @@ describe("GET /api/share-links/[id]/content", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 410 when max views exceeded", async () => {
-    mockPrismaExecuteRaw.mockResolvedValue(0); // 0 rows updated = view limit reached
-    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
-    expect(res.status).toBe(410);
-  });
-
   it("returns encrypted data for E2E share (masterKeyVersion=0)", async () => {
     const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
     expect(res.status).toBe(200);
@@ -189,23 +192,79 @@ describe("GET /api/share-links/[id]/content", () => {
     expect(res.status).toBe(404);
   });
 
-  it("does not increment viewCount for FILE shares", async () => {
+  it("does not increment viewCount for FILE shares (no-op UPDATE only)", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue({
+      ...MOCK_SHARE,
+      shareType: "FILE",
+    });
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.viewCount).toBe(MOCK_SHARE.viewCount);
+
+    // T2: prove the UPDATE is a no-op write, not an accidental `+ 1`.
+    expect(mockPrismaExecuteRaw).toHaveBeenCalledTimes(1);
+    const sql = sqlBodyOf(mockPrismaExecuteRaw.mock.calls[0]);
+    expect(sql).toMatch(/"view_count"\s*=\s*"view_count"(?!\s*\+)/i);
+    expect(sql).not.toMatch(/"view_count"\s*=\s*"view_count"\s*\+\s*1/i);
+  });
+
+  // Non-FILE TOCTOU: the JS pre-check reads revokedAt=null / expiresAt=future
+  // from findUnique, but the UPDATE must re-assert those predicates. Running
+  // the test with findUnique returning a still-valid share and $executeRaw
+  // returning 0 simulates the row being revoked/expired/max-views-hit in the
+  // interleaving window.
+  it("returns 410 when atomic UPDATE matches 0 rows (TOCTOU or maxViews)", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue(MOCK_SHARE);
+    mockPrismaExecuteRaw.mockResolvedValue(0);
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(410);
+  });
+
+  // FILE path mirrors the TOCTOU recheck but with a no-op SET (view_count
+  // increment is owned by the download route). $executeRaw returning 0
+  // simulates revocation/expiry/max-views in the interleaving window.
+  it("returns 410 for FILE share when atomic recheck matches 0 rows (TOCTOU or maxViews)", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue({
+      ...MOCK_SHARE,
+      shareType: "FILE",
+    });
+    mockPrismaExecuteRaw.mockResolvedValue(0);
+    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+    expect(res.status).toBe(410);
+  });
+
+  // T1: verify the UPDATE SQL actually contains every TOCTOU predicate so a
+  // predicate-dropping regression fails the test instead of silently returning
+  // "0 rows" under the mock. Non-FILE path increments view_count.
+  it("non-FILE UPDATE SQL re-asserts revoked_at, expires_at, max_views predicates and increments view_count", async () => {
+    mockPrismaPasswordShare.findUnique.mockResolvedValue(MOCK_SHARE);
+    await GET(createContentRequest(), createParams({ id: SHARE_ID }));
+
+    expect(mockPrismaExecuteRaw).toHaveBeenCalledTimes(1);
+    const sql = sqlBodyOf(mockPrismaExecuteRaw.mock.calls[0]);
+    expect(sql).toMatch(/"revoked_at"\s+IS\s+NULL/i);
+    expect(sql).toMatch(/"expires_at"\s*>\s*NOW\(\)/i);
+    expect(sql).toMatch(/"max_views"\s+IS\s+NULL\s+OR\s+"view_count"\s*<\s*"max_views"/i);
+    expect(sql).toMatch(/"view_count"\s*=\s*"view_count"\s*\+\s*1/i);
+  });
+
+  // T1: FILE path must carry the same predicates; view_count must NOT be
+  // incremented here (download route owns that).
+  it("FILE recheck SQL re-asserts revoked_at, expires_at, max_views predicates without incrementing view_count", async () => {
     mockPrismaPasswordShare.findUnique.mockResolvedValue({
       ...MOCK_SHARE,
       shareType: "FILE",
     });
     await GET(createContentRequest(), createParams({ id: SHARE_ID }));
-    expect(mockPrismaExecuteRaw).not.toHaveBeenCalled();
-  });
 
-  it("returns 410 when FILE share max views exceeded", async () => {
-    mockPrismaPasswordShare.findUnique.mockResolvedValue({
-      ...MOCK_SHARE,
-      shareType: "FILE",
-      maxViews: 3,
-      viewCount: 3,
-    });
-    const res = await GET(createContentRequest(), createParams({ id: SHARE_ID }));
-    expect(res.status).toBe(410);
+    expect(mockPrismaExecuteRaw).toHaveBeenCalledTimes(1);
+    const sql = sqlBodyOf(mockPrismaExecuteRaw.mock.calls[0]);
+    expect(sql).toMatch(/"revoked_at"\s+IS\s+NULL/i);
+    expect(sql).toMatch(/"expires_at"\s*>\s*NOW\(\)/i);
+    expect(sql).toMatch(/"max_views"\s+IS\s+NULL\s+OR\s+"view_count"\s*<\s*"max_views"/i);
+    // No-op SET, not `+ 1` — download route handles the increment.
+    expect(sql).toMatch(/"view_count"\s*=\s*"view_count"(?!\s*\+)/i);
+    expect(sql).not.toMatch(/"view_count"\s*=\s*"view_count"\s*\+\s*1/i);
   });
 });
