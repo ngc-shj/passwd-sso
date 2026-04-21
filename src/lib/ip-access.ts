@@ -268,11 +268,28 @@ export function isValidCidr(cidr: string): boolean {
 // ─── Client IP extraction ────────────────────────────────────
 
 /**
+ * Whether to trust forwarded headers (XFF / X-Real-IP) when the socket IP is
+ * unavailable. Without the socket IP we cannot verify the direct connection
+ * came from a trusted proxy, so defaulting to trust would let any client
+ * spoof its IP via a header. Set `TRUST_PROXY_HEADERS=true` only when the
+ * deployment is guaranteed to sit behind a trusted reverse proxy that
+ * overwrites these headers (e.g. nginx, K8s ingress, Cloudflare).
+ */
+function trustProxyHeadersWithoutSocket(): boolean {
+  return process.env.TRUST_PROXY_HEADERS === "true";
+}
+
+/**
  * Extract the real client IP from a request using the rightmost-untrusted pattern.
  *
  * Walks X-Forwarded-For from right to left, stripping trusted proxy IPs.
  * Returns the first untrusted IP. If the direct connection is not from a
  * trusted proxy, X-Forwarded-For is ignored and the socket address is used.
+ *
+ * When the socket IP is unavailable (common in Next.js 16 and some serverless
+ * runtimes), forwarded headers are ignored unless `TRUST_PROXY_HEADERS=true`
+ * is explicitly set. This prevents IP spoofing via client-controlled headers
+ * when the framework does not expose the underlying connection address.
  */
 export function extractClientIp(request: NextRequest): string | null {
   // Next.js provides the socket IP via request.ip (may be undefined in some environments)
@@ -294,15 +311,12 @@ export function extractClientIpFromHeaders(
   const xff = headers.get("x-forwarded-for");
   const xRealIp = headers.get("x-real-ip");
 
-  // If no forwarded headers, use socket IP or x-real-ip
-  if (!xff) {
-    const raw = socketIp ?? xRealIp ?? null;
-    return raw ? normalizeIp(raw) : null;
-  }
-
-  // Check if the direct connection comes from a trusted proxy.
-  // In many environments (Docker, reverse proxy), socketIp may be unavailable.
-  // If socketIp is available and NOT trusted, ignore X-Forwarded-For.
+  // Determine whether we can trust forwarded headers from the direct peer.
+  // - socketIp available + in TRUSTED_PROXIES  -> trust headers
+  // - socketIp available + NOT in TRUSTED_PROXIES -> ignore headers, use socketIp
+  // - socketIp unavailable -> trust only if TRUST_PROXY_HEADERS=true is set
+  //   (explicit opt-in for environments where the runtime hides the peer IP)
+  let headersTrusted: boolean;
   if (socketIp) {
     const normalizedSocket = normalizeIp(socketIp);
     const trusted = getTrustedProxies();
@@ -312,6 +326,19 @@ export function extractClientIpFromHeaders(
     if (!socketTrusted) {
       return normalizedSocket;
     }
+    headersTrusted = true;
+  } else {
+    headersTrusted = trustProxyHeadersWithoutSocket();
+  }
+
+  if (!headersTrusted) {
+    // Fail-closed: forwarded headers could be attacker-controlled.
+    // Callers treat null as "unknown IP" and deny when restrictions are active.
+    return null;
+  }
+
+  if (!xff) {
+    return xRealIp ? normalizeIp(xRealIp) : null;
   }
 
   // Rightmost-untrusted: walk from right to left

@@ -22,6 +22,10 @@ process.env.WEBAUTHN_RP_ID = "localhost";
 process.env.WEBAUTHN_RP_NAME = "Test App";
 process.env.WEBAUTHN_PRF_SECRET = "c".repeat(64);
 process.env.DIRECTORY_SYNC_MASTER_KEY = "d".repeat(64);
+// NextRequest in the Node test env does not expose request.ip, so tests that
+// exercise XFF / X-Real-IP extraction need the reverse-proxy opt-in. Tests
+// verifying the fail-closed path unset this locally.
+process.env.TRUST_PROXY_HEADERS = "true";
 
 // Initialize the EnvKeyProvider singleton so getKeyProviderSync() works in tests.
 // Tests that exercise provider selection (key-provider/index.test.ts) reset and
