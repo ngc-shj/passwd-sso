@@ -83,7 +83,9 @@ services:
       args:
         DATABASE_URL: postgresql://build:build@localhost:5432/passwd_sso
     environment:
-      - DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
+      # MIGRATION_DATABASE_URL is the canonical name for the SUPERUSER URL
+      # used by Prisma CLI (see prisma.config.ts); matches .env.example.
+      - MIGRATION_DATABASE_URL=postgresql://passwd_user:passwd_pass@db:5432/passwd_sso
     depends_on:
       db:
         condition: service_healthy

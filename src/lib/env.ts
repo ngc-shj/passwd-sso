@@ -98,6 +98,19 @@ const envSchema = z
       )
       .optional(),
 
+    // --- Reverse proxy / client IP extraction ---
+    // CIDRs of trusted proxies whose X-Forwarded-For is honored.
+    // Comma-separated. Defaults to loopback when unset.
+    TRUSTED_PROXIES: z.string().optional(),
+    // Opt-in to trusting forwarded headers when the runtime does not expose
+    // the socket peer IP (Next.js 16 and some serverless runtimes). Without
+    // this flag, forwarded headers are ignored to prevent IP spoofing.
+    // Set only when behind a trusted reverse proxy that overwrites XFF.
+    TRUST_PROXY_HEADERS: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+
     // --- Auth.js core ---
     AUTH_SECRET: z.string().optional(),
     AUTH_URL: z

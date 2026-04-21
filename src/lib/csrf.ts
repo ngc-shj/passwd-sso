@@ -14,9 +14,18 @@ import { NextResponse } from "next/server";
 import { API_ERROR } from "./api-error-codes";
 import { getAppOrigin } from "@/lib/url-helpers";
 
+const forbidden = (): NextResponse =>
+  NextResponse.json({ error: API_ERROR.INVALID_ORIGIN }, { status: 403 });
+
 /**
  * Assert that the request's Origin header matches the application URL.
  * Returns null if valid, or a 403 NextResponse if invalid.
+ *
+ * Destructive endpoints always require an Origin header. When APP_URL /
+ * AUTH_URL is not configured, the expected origin is derived from the Host
+ * header. Note: `x-forwarded-proto` is only honored as a scheme hint — the
+ * origin comparison still requires Host to match, so a spoofed proto alone
+ * cannot forge a same-origin request.
  *
  * Usage in route handlers:
  *   const originError = assertOrigin(request);
@@ -24,52 +33,25 @@ import { getAppOrigin } from "@/lib/url-helpers";
  */
 export function assertOrigin(request: Request): NextResponse | null {
   const origin = request.headers.get("origin");
+  if (!origin) return forbidden();
+
+  let expectedOrigin: string;
   const appUrl = getAppOrigin();
-
-  if (!appUrl) {
-    // Derive expected origin from Host header when APP_URL is not configured
+  if (appUrl) {
+    expectedOrigin = appUrl;
+  } else {
     const host = request.headers.get("host");
-    if (!host || !origin) return null;
+    if (!host) return forbidden();
     const proto = request.headers.get("x-forwarded-proto") || "http";
-    const expectedOrigin = `${proto}://${host}`;
-    try {
-      if (new URL(origin).origin !== new URL(expectedOrigin).origin) {
-        return NextResponse.json(
-          { error: API_ERROR.INVALID_ORIGIN },
-          { status: 403 },
-        );
-      }
-    } catch {
-      return NextResponse.json(
-        { error: API_ERROR.INVALID_ORIGIN },
-        { status: 403 },
-      );
-    }
-    return null;
-  }
-
-  if (!origin) {
-    // Missing Origin header — reject for destructive endpoints
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_ORIGIN },
-      { status: 403 },
-    );
+    expectedOrigin = `${proto}://${host}`;
   }
 
   try {
-    const originUrl = new URL(origin);
-    const expectedUrl = new URL(appUrl);
-    if (originUrl.origin !== expectedUrl.origin) {
-      return NextResponse.json(
-        { error: API_ERROR.INVALID_ORIGIN },
-        { status: 403 },
-      );
+    if (new URL(origin).origin !== new URL(expectedOrigin).origin) {
+      return forbidden();
     }
   } catch {
-    return NextResponse.json(
-      { error: API_ERROR.INVALID_ORIGIN },
-      { status: 403 },
-    );
+    return forbidden();
   }
 
   return null;

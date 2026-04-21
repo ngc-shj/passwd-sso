@@ -153,18 +153,28 @@ describe("isValidIpAddress", () => {
 });
 
 describe("extractClientIp", () => {
-  const originalEnv = process.env.TRUSTED_PROXIES;
+  const originalProxies = process.env.TRUSTED_PROXIES;
+  const originalTrustHeaders = process.env.TRUST_PROXY_HEADERS;
 
   beforeEach(() => {
     _resetTrustedProxyCache();
     delete process.env.TRUSTED_PROXIES;
+    // NextRequest in the test env does not expose a socket peer IP, so XFF /
+    // x-real-ip extraction requires the explicit opt-in. Tests that verify
+    // the fail-closed path unset this flag locally.
+    process.env.TRUST_PROXY_HEADERS = "true";
   });
 
   afterEach(() => {
-    if (originalEnv !== undefined) {
-      process.env.TRUSTED_PROXIES = originalEnv;
+    if (originalProxies !== undefined) {
+      process.env.TRUSTED_PROXIES = originalProxies;
     } else {
       delete process.env.TRUSTED_PROXIES;
+    }
+    if (originalTrustHeaders !== undefined) {
+      process.env.TRUST_PROXY_HEADERS = originalTrustHeaders;
+    } else {
+      delete process.env.TRUST_PROXY_HEADERS;
     }
     _resetTrustedProxyCache();
   });
@@ -229,6 +239,42 @@ describe("extractClientIp", () => {
       "x-forwarded-for": "172.16.0.5",
     });
     expect(extractClientIp(req)).toBe("172.16.0.5");
+  });
+
+  describe("fail-closed when socket IP and opt-in are both absent", () => {
+    // Simulates the default Next.js 16 runtime state: request.ip is undefined
+    // and the operator has not set TRUST_PROXY_HEADERS=true. In this case
+    // forwarded headers MUST be ignored — otherwise any client can spoof
+    // their IP via X-Forwarded-For or X-Real-IP.
+    beforeEach(() => {
+      delete process.env.TRUST_PROXY_HEADERS;
+      _resetTrustedProxyCache();
+    });
+
+    it("ignores x-forwarded-for without TRUST_PROXY_HEADERS opt-in", () => {
+      const req = makeReq("/api/test", {
+        "x-forwarded-for": "203.0.113.99",
+      });
+      expect(extractClientIp(req)).toBeNull();
+    });
+
+    it("ignores x-real-ip without TRUST_PROXY_HEADERS opt-in", () => {
+      const req = makeReq("/api/test", {
+        "x-real-ip": "203.0.113.99",
+      });
+      expect(extractClientIp(req)).toBeNull();
+    });
+
+    it("rejects XFF spoofing even with explicit trusted proxy CIDR", () => {
+      // Without socket IP verification, TRUSTED_PROXIES alone cannot
+      // distinguish a real proxy from a spoofed header.
+      process.env.TRUSTED_PROXIES = "10.0.0.0/8";
+      _resetTrustedProxyCache();
+      const req = makeReq("/api/test", {
+        "x-forwarded-for": "203.0.113.99, 10.0.0.1",
+      });
+      expect(extractClientIp(req)).toBeNull();
+    });
   });
 });
 

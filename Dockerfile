@@ -11,11 +11,16 @@ RUN npm ci --ignore-scripts
 # Stage 2: Build the application
 FROM node:20-alpine@sha256:b88333c42c23fbd91596ebd7fd10de239cedab9617de04142dde7315e3bc0afa AS builder
 WORKDIR /app
-ARG DATABASE_URL
-ENV DATABASE_URL=$DATABASE_URL
+# DATABASE_URL is needed only for `prisma generate` to satisfy env("DATABASE_URL")
+# in prisma.config.ts — no actual DB connection is opened at build time. A dummy
+# default keeps standalone `docker build` working, and callers can override via
+# `--build-arg`. We intentionally do NOT persist it as ENV to avoid leaking any
+# overridden value into `docker history` / image metadata, and to keep it out
+# of later RUN layers.
+ARG DATABASE_URL=postgresql://build:build@localhost:5432/passwd_sso
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npx prisma generate
+RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 RUN npx next build
 RUN npx esbuild scripts/audit-outbox-worker.ts \
       --bundle --platform=node --target=node20 \
