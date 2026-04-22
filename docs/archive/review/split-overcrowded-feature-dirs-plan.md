@@ -394,6 +394,41 @@ Phase ordering (one PR each unless noted):
    Attacker proposes "Phase N rename" PR with `scripts/check-bypass-rls.mjs` diff adding `passwordEntry` to `webhook-dispatcher.ts`'s allowed models.
    Expected: `verify-allowlist-rename-only.mjs` detects model-set change (not a pure rename); PR fails pre-pr. CODEOWNERS requires security-team review. `verify-move-only-diff.mjs` (if file touched) catches any content change beyond imports.
 
+## Implementation Checklist (Phase 0)
+
+Deliverables for the Phase 0 PR (this commit):
+
+- [ ] `.github/CODEOWNERS` — pins security-sensitive paths to `@ngc-shj` (single-maintainer repo; replace with team handle when a security team exists)
+- [ ] `.git-blame-ignore-revs` — empty file, append move-commit SHAs per phase
+- [ ] `docs/forensics.md` — instruction for `git config blame.ignoreRevsFile .git-blame-ignore-revs` + recommended `git log --follow -M90%` invocation
+- [ ] `package.json` devDependencies: add `ts-morph` (for AST codemod)
+- [ ] `scripts/check-crypto-domains.mjs` (refactor existing):
+  - Replace hardcoded `cryptoFiles` array with glob + discover-all scan
+  - Add `LEDGER_EXEMPT = ["crypto-blob.ts"]` exclusion list
+  - Replace L98-102 `try/catch { continue }` with `fail("crypto file listed but not found: ${file}")`
+  - Preserve exports (`extractHkdfInfoStrings`, `extractAadScopes`, `parseLedgerHkdfInfo`, `parseLedgerAadScopes`) for backward compat
+- [ ] `scripts/move-and-rewrite-imports.mjs` — ts-morph AST codemod (handles alias + relative + re-export + `vi.mock` + `await import(string-literal)` + `vi.importActual` + `vi.importOriginal` + `typeof import()` + allowlist string rewrites)
+- [ ] `scripts/__tests__/move-and-rewrite-imports.test.mjs` — fixture-based tests for each rewrite pattern
+- [ ] `scripts/verify-allowlist-rename-only.mjs` — enforce rename-only diff on `check-bypass-rls.mjs`
+- [ ] `scripts/verify-move-only-diff.mjs` — strip import/export lines, assert remaining diff empty
+- [ ] `scripts/check-vitest-coverage-include.mjs` — every include/threshold path resolves; rename-parity vs git mv
+- [ ] `scripts/check-doc-paths.mjs` — validate every `src/...` ref in docs resolves
+- [ ] `scripts/check-mjs-imports.mjs` — validate every `import()` target in `*.mjs` files
+- [ ] `scripts/check-dynamic-import-specifiers.mjs` — zero stale `await import(string-literal)` / `vi.importActual(...)` / `typeof import(...)` specifiers
+- [ ] `scripts/refactor-phase-verify.mjs` — run all `check-*.mjs` on post-merge tree + stale-branch guard
+- [ ] `scripts/pre-pr.sh` — wire gitleaks (graceful skip if not installed) + verify-* scripts (conditional on refactor branch)
+- [ ] Dynamic-import audit committed to plan (currently: 2 template-literal dynamic imports in `src/i18n/messages.ts` — neither touches `src/lib/*`; 0 template-literal dynamic imports on moved-path prefix)
+
+Shared utility inventory (from Step 2-1; to reuse, not re-implement):
+- `scripts/check-bypass-rls.mjs` ALLOWED_USAGE map structure — codemod reads this via file parse, not via regex
+- `scripts/check-crypto-domains.mjs` exported extractors — call from new verification scripts if needed
+- `vitest.config.ts` defineConfig shape — parse as JS module, not regex
+
+Risks flagged by Step 2-1:
+- `gitleaks` CLI is not installed on the local machine — wire into `pre-pr.sh` with graceful fallback (skip with warning), but treat missing as a soft-fail for Phase 0 (so pre-pr still passes); CI can install it separately.
+- CODEOWNERS currently has no existing file in the repo — this IS the first such file; team handle `@security` used in the plan must be adjusted to `@ngc-shj` (single-maintainer repo).
+- Existing `check-crypto-domains.mjs` has exported functions that may be consumed by tests (via `scripts/__tests__/` structure). Preserve exports.
+
 ## Success criteria
 
 - All three target directories have ≤ 30 non-test top-level files.

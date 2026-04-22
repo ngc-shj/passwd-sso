@@ -1,0 +1,20 @@
+# Security-sensitive paths require review by the repository owner.
+# Changes to these files will not merge without an approving review from @ngc-shj.
+
+/scripts/move-and-rewrite-imports.mjs        @ngc-shj
+/scripts/check-bypass-rls.mjs                @ngc-shj
+/scripts/check-crypto-domains.mjs            @ngc-shj
+/scripts/check-team-auth-rls.mjs             @ngc-shj
+/scripts/verify-allowlist-rename-only.mjs    @ngc-shj
+/scripts/verify-move-only-diff.mjs           @ngc-shj
+/scripts/check-vitest-coverage-include.mjs   @ngc-shj
+/scripts/check-dynamic-import-specifiers.mjs @ngc-shj
+/scripts/check-mjs-imports.mjs               @ngc-shj
+/scripts/check-doc-paths.mjs                 @ngc-shj
+/scripts/refactor-phase-verify.mjs           @ngc-shj
+/src/lib/crypto*                             @ngc-shj
+/src/lib/auth*                               @ngc-shj
+/src/lib/tenant-rls.ts                       @ngc-shj
+/.github/workflows/                          @ngc-shj
+/.github/CODEOWNERS                          @ngc-shj
+/.git-blame-ignore-revs                      @ngc-shj

@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * Manual test: share-links/verify-access audit logging for anonymous access.
  *

@@ -1,0 +1,4 @@
+# Revisions listed here are skipped by `git blame` when configured with
+# `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
+# Append move-commit SHAs here as each refactor phase PR merges.
+# See docs/forensics.md for setup and usage.
