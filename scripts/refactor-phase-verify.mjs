@@ -20,7 +20,7 @@
  */
 
 import { spawnSync, execSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 const BASELINE_FILE = ".refactor-phase-verify-baseline";
 
@@ -66,18 +66,21 @@ if (!forceFlag && !/^refactor\//.test(branch)) {
 // Stale-branch guard
 const originSha = fetchOriginMainSha();
 const envSha = process.env["EXPECTED_MAIN_SHA"] ?? "";
-const baselineExists = existsSync(BASELINE_FILE);
 let expectedSha = envSha;
 
-if (!expectedSha && baselineExists) {
-  expectedSha = readFileSync(BASELINE_FILE, "utf8").trim();
-}
-
+// Read the baseline directly and fall through to first-run on ENOENT.
+// Avoids the TOCTOU race between existsSync() and readFileSync()
+// (CodeQL: js/file-system-race).
 if (!expectedSha) {
-  // First run: record current SHA as baseline
-  writeFileSync(BASELINE_FILE, originSha + "\n", "utf8");
-  console.log(`refactor-phase-verify: baseline recorded (${originSha}).`);
-  expectedSha = originSha;
+  try {
+    expectedSha = readFileSync(BASELINE_FILE, "utf8").trim();
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+    // First run: record current SHA as baseline
+    writeFileSync(BASELINE_FILE, originSha + "\n", "utf8");
+    console.log(`refactor-phase-verify: baseline recorded (${originSha}).`);
+    expectedSha = originSha;
+  }
 }
 
 if (originSha !== expectedSha) {

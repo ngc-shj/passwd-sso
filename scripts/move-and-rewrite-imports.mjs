@@ -8,7 +8,7 @@
  */
 
 import { execFileSync, execSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { resolve, relative, dirname, basename } from "node:path";
 import { createRequire } from "node:module";
 
@@ -86,10 +86,17 @@ function validateMovePath(p, repoRoot) {
 
 function loadConfig(configPath) {
   const abs = resolve(configPath);
-  if (!existsSync(abs)) {
-    throw new CodemodConfigError(`Config file not found: ${abs}`);
+  // Read the file directly; handle missing-file (ENOENT) explicitly instead
+  // of probing with existsSync first (CodeQL: js/file-system-race).
+  let raw;
+  try {
+    raw = readFileSync(abs, "utf-8");
+  } catch (err) {
+    if (err.code === "ENOENT") {
+      throw new CodemodConfigError(`Config file not found: ${abs}`);
+    }
+    throw err;
   }
-  const raw = readFileSync(abs, "utf-8");
   let parsed;
   try {
     parsed = JSON.parse(raw);
@@ -525,8 +532,15 @@ function rewriteRelativeInMovedFile(sourceFile, oldAbsPath, newAbsPath, absMap, 
 // ---------------------------------------------------------------------------
 
 function rewriteYamlFile(filePath, aliasMap, repoRoot, dryRun) {
-  if (!existsSync(filePath)) return;
-  let content = readFileSync(filePath, "utf-8");
+  // Read the file directly and bail on ENOENT. Avoids the TOCTOU race
+  // between existsSync() and readFileSync() (CodeQL: js/file-system-race).
+  let content;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch (err) {
+    if (err.code === "ENOENT") return;
+    throw err;
+  }
   let changed = false;
 
   // Build src/lib/... → src/lib/.../... mapping (plain paths for YAML grep strings)
@@ -572,8 +586,15 @@ function buildAnchoredReplaceRegex(needle) {
 }
 
 function rewriteAllowlistFile(filePath, aliasMap, _repoRoot, dryRun, _tag) {
-  if (!existsSync(filePath)) return;
-  let content = readFileSync(filePath, "utf-8");
+  // Read the file directly and bail on ENOENT. Avoids the TOCTOU race
+  // between existsSync() and readFileSync() (CodeQL: js/file-system-race).
+  let content;
+  try {
+    content = readFileSync(filePath, "utf-8");
+  } catch (err) {
+    if (err.code === "ENOENT") return;
+    throw err;
+  }
   let changed = false;
 
   for (const [fromAlias, toAlias] of aliasMap) {
