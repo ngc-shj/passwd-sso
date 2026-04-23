@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { getCommonTargetLabel } from "./audit-target-label";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 
 // Mock translation function: returns the key as a string (ignoring params)
 function makeMockT() {

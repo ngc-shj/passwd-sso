@@ -83,13 +83,13 @@ vi.mock("@/lib/notification", () => ({
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: {
     BREAKGLASS_REQUEST: "BREAKGLASS_REQUEST",
     AUDIT_LOG_VIEW: "AUDIT_LOG_VIEW",
   },
 }));
-vi.mock("@/lib/constants/notification", () => ({
+vi.mock("@/lib/constants/audit/notification", () => ({
   NOTIFICATION_TYPE: {
     PERSONAL_LOG_ACCESSED: "PERSONAL_LOG_ACCESSED",
   },
@@ -98,7 +98,7 @@ vi.mock("@/lib/constants/notification", () => ({
 import { POST, GET } from "@/app/api/tenant/breakglass/route";
 import { DELETE } from "@/app/api/tenant/breakglass/[id]/route";
 import { TenantAuthError } from "@/lib/auth/tenant-auth";
-import { GRANT_STATUS } from "@/lib/constants/breakglass";
+import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant1", role: "ADMIN" };

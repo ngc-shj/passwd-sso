@@ -68,7 +68,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/route";
 import { TenantAuthError } from "@/lib/auth/tenant-auth";
-import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/service-account";
+import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 

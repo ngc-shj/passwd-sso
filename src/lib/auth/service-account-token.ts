@@ -7,7 +7,7 @@ import {
   SA_TOKEN_SCOPE,
   SA_TOKEN_LAST_USED_THROTTLE_MS,
   type SaTokenScope,
-} from "@/lib/constants/service-account";
+} from "@/lib/constants/auth/service-account";
 
 // ─── Types ───────────────────────────────────────────────────
 

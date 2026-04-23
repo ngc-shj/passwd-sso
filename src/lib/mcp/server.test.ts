@@ -36,7 +36,7 @@ import {
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
-} from "@/lib/constants/mcp";
+} from "@/lib/constants/auth/mcp";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
 
 // ─── Fixtures ─────────────────────────────────────────────────

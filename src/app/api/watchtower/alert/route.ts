@@ -15,7 +15,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { BREACH_COUNT_MAX } from "@/lib/validations/common.server";

@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, unauthorized } from "@/lib/api-response";
 

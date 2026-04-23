@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_PATH } from "@/lib/constants";
-import { TENANT_ROLE, isTenantAdminRole } from "@/lib/constants/tenant-role";
+import { TENANT_ROLE, isTenantAdminRole } from "@/lib/constants/auth/tenant-role";
 import type { TenantRole } from "@prisma/client";
 
 interface UseTenantRoleResult {

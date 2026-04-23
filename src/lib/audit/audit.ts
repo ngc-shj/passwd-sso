@@ -54,7 +54,7 @@ import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit/a
 import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/ip-access";
-import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/auth-or-token";
@@ -71,7 +71,7 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
 }
 
 // Re-export from constants for backward compatibility
-export { OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit";
+export { OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit/audit";
 import { UUID_RE } from "@/lib/constants/app";
 
 export interface AuditLogParams {

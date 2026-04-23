@@ -8,7 +8,7 @@ import {
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 

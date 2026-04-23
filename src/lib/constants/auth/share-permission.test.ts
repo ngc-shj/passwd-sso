@@ -6,7 +6,7 @@ import {
   SENSITIVE_FIELDS,
   OVERVIEW_FIELDS,
 } from "./share-permission";
-import { ENTRY_TYPE_VALUES } from "./entry-type";
+import { ENTRY_TYPE_VALUES } from "../vault/entry-type";
 
 // ─── Test data per entry type ────────────────────────────────
 

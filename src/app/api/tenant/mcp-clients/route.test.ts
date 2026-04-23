@@ -80,7 +80,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 
 import { GET, POST } from "@/app/api/tenant/mcp-clients/route";
 import { TenantAuthError } from "@/lib/auth/tenant-auth";
-import { MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
+import { MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/auth/mcp";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 

@@ -10,7 +10,7 @@ import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers
 import {
   AUDIT_ACTION,
   OUTBOX_BYPASS_AUDIT_ACTIONS,
-} from "@/lib/constants/audit";
+} from "@/lib/constants/audit/audit";
 
 describe("audit-outbox reentrant guard (R13)", () => {
   let ctx: TestContext;

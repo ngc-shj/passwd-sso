@@ -95,7 +95,7 @@ vi.mock("@/lib/constants", () => ({
   AUDIT_SCOPE: { TENANT: "TENANT" },
 }));
 
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
 

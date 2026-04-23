@@ -21,7 +21,7 @@ import {
   MCP_REFRESH_TOKEN_EXPIRY_SEC,
   MAX_MCP_TOKEN_LAST_USED_THROTTLE_MS,
   type McpScope,
-} from "@/lib/constants/mcp";
+} from "@/lib/constants/auth/mcp";
 
 export interface McpTokenData {
   tokenId: string;

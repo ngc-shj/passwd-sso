@@ -4,8 +4,8 @@ import {
   validateServiceAccountToken,
   hasSaTokenScope,
 } from "@/lib/auth/service-account-token";
-import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/service-account";
-import type { ApiKeyScope } from "@/lib/constants/api-key";
+import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";
+import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
 
 interface V1AuthSuccess {
   ok: true;

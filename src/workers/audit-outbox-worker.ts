@@ -12,7 +12,7 @@ import {
   ACTOR_TYPE,
   OUTBOX_BYPASS_AUDIT_ACTIONS,
   WEBHOOK_DISPATCH_SUPPRESS,
-} from "@/lib/constants/audit";
+} from "@/lib/constants/audit/audit";
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";

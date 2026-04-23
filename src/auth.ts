@@ -13,7 +13,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId, resolveUserTenantIdFromClient } from "@/lib/tenant-context";
 import { getLogger } from "@/lib/logger";
 import authConfig from "./auth.config";
-import { TENANT_ROLE } from "@/lib/constants/tenant-role";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 
 function getAuthRouteBasePath(): string {
   const basePath = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");

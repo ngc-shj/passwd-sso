@@ -15,7 +15,7 @@
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { getLogger } from "@/lib/logger";
-import { AUDIT_OUTBOX } from "@/lib/constants/audit";
+import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 
 export type CheckStatus = "pass" | "fail" | "warn";
 

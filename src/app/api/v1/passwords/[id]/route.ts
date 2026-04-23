@@ -8,7 +8,7 @@ import { validateV1Auth } from "@/lib/auth/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
-import { API_KEY_SCOPE } from "@/lib/constants/api-key";
+import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 

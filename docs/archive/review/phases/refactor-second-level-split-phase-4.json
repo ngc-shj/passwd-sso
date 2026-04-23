@@ -1,0 +1,41 @@
+{
+  "phaseName": "refactor-second-level-split-phase-4-lib-constants-split",
+  "moves": [
+    { "from": "src/lib/constants/api-key.ts",                "to": "src/lib/constants/auth/api-key.ts" },
+    { "from": "src/lib/constants/api-path.ts",               "to": "src/lib/constants/auth/api-path.ts" },
+    { "from": "src/lib/constants/api-path.test.ts",          "to": "src/lib/constants/auth/api-path.test.ts" },
+    { "from": "src/lib/constants/extension-token.ts",        "to": "src/lib/constants/auth/extension-token.ts" },
+    { "from": "src/lib/constants/mcp.ts",                    "to": "src/lib/constants/auth/mcp.ts" },
+    { "from": "src/lib/constants/mcp.test.ts",               "to": "src/lib/constants/auth/mcp.test.ts" },
+    { "from": "src/lib/constants/service-account.ts",        "to": "src/lib/constants/auth/service-account.ts" },
+    { "from": "src/lib/constants/share-permission.ts",       "to": "src/lib/constants/auth/share-permission.ts" },
+    { "from": "src/lib/constants/share-permission.test.ts",  "to": "src/lib/constants/auth/share-permission.test.ts" },
+    { "from": "src/lib/constants/share-type.ts",             "to": "src/lib/constants/auth/share-type.ts" },
+    { "from": "src/lib/constants/tenant-permission.ts",      "to": "src/lib/constants/auth/tenant-permission.ts" },
+    { "from": "src/lib/constants/tenant-role.ts",            "to": "src/lib/constants/auth/tenant-role.ts" },
+    { "from": "src/lib/constants/totp.ts",                   "to": "src/lib/constants/auth/totp.ts" },
+
+    { "from": "src/lib/constants/audit-target.ts",           "to": "src/lib/constants/audit/audit-target.ts" },
+    { "from": "src/lib/constants/audit.ts",                  "to": "src/lib/constants/audit/audit.ts" },
+    { "from": "src/lib/constants/audit.test.ts",             "to": "src/lib/constants/audit/audit.test.ts" },
+    { "from": "src/lib/constants/notification.ts",           "to": "src/lib/constants/audit/notification.ts" },
+
+    { "from": "src/lib/constants/team-permission.ts",        "to": "src/lib/constants/team/team-permission.ts" },
+    { "from": "src/lib/constants/team-permission.test.ts",   "to": "src/lib/constants/team/team-permission.test.ts" },
+    { "from": "src/lib/constants/team-role.ts",              "to": "src/lib/constants/team/team-role.ts" },
+
+    { "from": "src/lib/constants/custom-field.ts",           "to": "src/lib/constants/vault/custom-field.ts" },
+    { "from": "src/lib/constants/entry-type.ts",             "to": "src/lib/constants/vault/entry-type.ts" },
+    { "from": "src/lib/constants/export-format.ts",          "to": "src/lib/constants/vault/export-format.ts" },
+    { "from": "src/lib/constants/import-format.ts",          "to": "src/lib/constants/vault/import-format.ts" },
+    { "from": "src/lib/constants/storage-key.ts",            "to": "src/lib/constants/vault/storage-key.ts" },
+    { "from": "src/lib/constants/vault.ts",                  "to": "src/lib/constants/vault/vault.ts" },
+
+    { "from": "src/lib/constants/breakglass.ts",             "to": "src/lib/constants/integrations/breakglass.ts" },
+    { "from": "src/lib/constants/breakglass.test.ts",        "to": "src/lib/constants/integrations/breakglass.test.ts" },
+    { "from": "src/lib/constants/connect-status.ts",         "to": "src/lib/constants/integrations/connect-status.ts" },
+    { "from": "src/lib/constants/emergency-access.ts",       "to": "src/lib/constants/integrations/emergency-access.ts" },
+    { "from": "src/lib/constants/extension.ts",              "to": "src/lib/constants/integrations/extension.ts" },
+    { "from": "src/lib/constants/invitation.ts",             "to": "src/lib/constants/integrations/invitation.ts" }
+  ]
+}

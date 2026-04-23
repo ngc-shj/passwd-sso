@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { GRANT_STATUS } from "@/lib/constants/breakglass";
-import type { GrantStatus } from "@/lib/constants/breakglass";
+import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
+import type { GrantStatus } from "@/lib/constants/integrations/breakglass";
 
 describe("breakglass constants", () => {
   it("GRANT_STATUS has all 3 values: active, expired, revoked", () => {

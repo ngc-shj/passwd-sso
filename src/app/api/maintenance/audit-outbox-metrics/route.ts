@@ -11,7 +11,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/auth/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/maintenance-auth";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";

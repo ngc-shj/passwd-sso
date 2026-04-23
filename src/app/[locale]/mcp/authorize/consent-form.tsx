@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { ShieldCheck, ShieldX, Loader2 } from "lucide-react";
 import { useTranslations, useMessages } from "next-intl";
 import { withBasePath } from "@/lib/url-helpers";
-import { MCP_SCOPE_RISK, type McpScope, type ScopeRiskLevel } from "@/lib/constants/mcp";
+import { MCP_SCOPE_RISK, type McpScope, type ScopeRiskLevel } from "@/lib/constants/auth/mcp";
 
 
 interface ConsentFormProps {

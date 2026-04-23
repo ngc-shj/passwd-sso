@@ -8,7 +8,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { TENANT_ROLE } from "@/lib/constants/tenant-role";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 
 export interface MaintenanceOperator {
   tenantId: string;

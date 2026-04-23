@@ -16,7 +16,7 @@ import {
 import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { WEBHOOK_CONCURRENCY, WEBHOOK_MAX_RETRIES } from "@/lib/validations/common.server";
 import { Agent as UndiciAgent } from "undici";
 import {

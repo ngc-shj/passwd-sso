@@ -33,7 +33,7 @@ import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { formatDate } from "@/lib/format/format-datetime";
-import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/api-key";
+import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/auth/api-key";
 
 interface ApiKeyEntry {
   id: string;

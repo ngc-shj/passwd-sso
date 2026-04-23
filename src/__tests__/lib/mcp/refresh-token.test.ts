@@ -3,7 +3,7 @@ import {
   createRefreshToken,
   exchangeRefreshToken,
 } from "@/lib/mcp/oauth-server";
-import { MCP_REFRESH_TOKEN_PREFIX, MCP_TOKEN_PREFIX } from "@/lib/constants/mcp";
+import { MCP_REFRESH_TOKEN_PREFIX, MCP_TOKEN_PREFIX } from "@/lib/constants/auth/mcp";
 
 // ─── Mock Prisma ──────────────────────────────────────────────
 

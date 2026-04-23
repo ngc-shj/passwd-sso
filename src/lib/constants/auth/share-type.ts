@@ -1,6 +1,6 @@
 import type { ShareType } from "@prisma/client";
 
-import { MS_PER_DAY, MS_PER_HOUR } from "./time";
+import { MS_PER_DAY, MS_PER_HOUR } from "../time";
 
 export const SHARE_TYPE = {
   ENTRY_SHARE: "ENTRY_SHARE",

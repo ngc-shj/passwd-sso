@@ -69,7 +69,7 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { SCIM_MANAGE: "SCIM_MANAGE" },
 }));
 vi.mock("@/lib/scim/token-utils", () => ({

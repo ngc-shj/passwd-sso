@@ -1,4 +1,4 @@
-import { MS_PER_MINUTE } from "./time";
+import { MS_PER_MINUTE } from "../time";
 
 export const MCP_TOKEN_PREFIX = "mcp_";
 export const MCP_CLIENT_ID_PREFIX = "mcpc_";

@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
-import { API_PATH, apiPath } from "@/lib/constants/api-path";
+import { API_PATH, apiPath } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 describe("audit-outbox null-invariant: outbox_id = NULL only allowed for SYSTEM actor", () => {

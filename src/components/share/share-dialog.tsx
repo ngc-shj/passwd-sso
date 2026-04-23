@@ -39,7 +39,7 @@ import {
   SHARE_PERMISSION,
   SHARE_PERMISSION_VALUES,
   applySharePermissions,
-} from "@/lib/constants/share-permission";
+} from "@/lib/constants/auth/share-permission";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";

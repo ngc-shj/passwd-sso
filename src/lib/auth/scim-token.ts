@@ -5,7 +5,7 @@ import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 import { resolveAuditUserId } from "@/lib/constants/app";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /** Minimum interval (ms) between lastUsedAt updates to reduce DB writes. */

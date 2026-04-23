@@ -12,7 +12,7 @@ import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/auth/ip-acces
 import { verifyTailscalePeer } from "@/lib/tailscale-client";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import type { ActorType } from "@prisma/client";
 import { resolveAuditUserId, SENTINEL_ACTOR_IDS } from "@/lib/constants/app";
 import { resolveUserTenantId } from "@/lib/tenant-context";

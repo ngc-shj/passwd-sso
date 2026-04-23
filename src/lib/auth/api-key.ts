@@ -6,7 +6,7 @@ import {
   API_KEY_PREFIX,
   API_KEY_SCOPE,
   type ApiKeyScope,
-} from "@/lib/constants/api-key";
+} from "@/lib/constants/auth/api-key";
 
 // ─── Types ───────────────────────────────────────────────────
 

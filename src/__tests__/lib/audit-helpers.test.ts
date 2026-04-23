@@ -5,7 +5,7 @@ import {
   teamAuditBase,
   tenantAuditBase,
 } from "@/lib/audit/audit";
-import { AUDIT_SCOPE } from "@/lib/constants/audit";
+import { AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 
 function makeReq(headers: Record<string, string> = {}): NextRequest {
   return new NextRequest("http://localhost/api/test", { headers });

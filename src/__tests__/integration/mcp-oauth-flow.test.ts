@@ -155,7 +155,7 @@ import { POST as postToken } from "@/app/api/mcp/token/route";
 
 import { GET as getDiscovery } from "@/app/api/mcp/.well-known/oauth-authorization-server/route";
 import { handleMcpRequest } from "@/lib/mcp/server";
-import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
+import { MCP_SCOPE, type McpScope } from "@/lib/constants/auth/mcp";
 
 // ─── Shared fixtures ──────────────────────────────────────────
 

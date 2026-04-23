@@ -6,7 +6,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";

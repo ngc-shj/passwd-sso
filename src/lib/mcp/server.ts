@@ -13,10 +13,10 @@ import {
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
-} from "@/lib/constants/mcp";
+} from "@/lib/constants/auth/mcp";
 import { MCP_TOOLS, toolListCredentials, toolSearchCredentials, toolWhoami } from "@/lib/mcp/tools";
 import type { McpTokenData } from "@/lib/mcp/oauth-server";
-import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
+import { MCP_SCOPE, type McpScope } from "@/lib/constants/auth/mcp";
 
 // ─── Tool → required scope mapping ───────────────────────────
 

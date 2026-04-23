@@ -33,7 +33,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 }));
 
 import { authOrToken, hasMcpScope } from "@/lib/auth/auth-or-token";
-import { MCP_TOKEN_PREFIX } from "@/lib/constants/mcp";
+import { MCP_TOKEN_PREFIX } from "@/lib/constants/auth/mcp";
 
 function makeRequest(token?: string): NextRequest {
   const headers: Record<string, string> = {};

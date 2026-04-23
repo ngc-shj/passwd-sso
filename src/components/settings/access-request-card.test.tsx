@@ -35,7 +35,7 @@ vi.mock("@/lib/format/format-datetime", () => ({
   formatDateTime: (date: string) => date,
 }));
 
-vi.mock("@/lib/constants/service-account", () => ({
+vi.mock("@/lib/constants/auth/service-account", () => ({
   SA_TOKEN_SCOPES: ["passwords:read", "passwords:write", "passwords:list"],
 }));
 

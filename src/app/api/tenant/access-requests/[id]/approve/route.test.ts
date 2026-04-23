@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
+import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 import { DEFAULT_SESSION } from "../../../../../../__tests__/helpers/mock-auth";
 import {
   createRequest,

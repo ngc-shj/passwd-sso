@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 import { routing } from "./i18n/routing";
 import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
-import { AUDIT_ACTION } from "./lib/constants/audit";
+import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import { PERMISSIONS_POLICY } from "./lib/security/security-headers";
 import { handlePreflight, applyCorsHeaders } from "./lib/cors";

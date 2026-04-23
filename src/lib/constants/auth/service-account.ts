@@ -1,4 +1,4 @@
-import { MS_PER_MINUTE } from "./time";
+import { MS_PER_MINUTE } from "../time";
 
 export const SA_TOKEN_PREFIX = "sa_";
 

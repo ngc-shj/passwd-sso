@@ -30,10 +30,10 @@ vi.mock("@/lib/auth/service-account-token", () => ({
   validateServiceAccountToken: mockValidateServiceAccountToken,
   hasSaTokenScope: mockHasSaTokenScope,
 }));
-vi.mock("@/lib/constants/api-key", () => ({
+vi.mock("@/lib/constants/auth/api-key", () => ({
   API_KEY_PREFIX: "api_",
 }));
-vi.mock("@/lib/constants/service-account", () => ({
+vi.mock("@/lib/constants/auth/service-account", () => ({
   SA_TOKEN_PREFIX: "sa_",
 }));
 

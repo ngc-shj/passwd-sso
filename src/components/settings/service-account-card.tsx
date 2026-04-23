@@ -39,7 +39,7 @@ import { Bot, ChevronDown, Loader2, Plus, Trash2, Pencil, KeyRound } from "lucid
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
-import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
+import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";

@@ -18,7 +18,7 @@ import {
 } from "@/lib/crypto/crypto-server";
 import type { ServerEncryptedData } from "@/lib/crypto/crypto-server";
 import { logAuditAsync } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 
 // ─── Constants ─────────────────────────────────────────────────
 

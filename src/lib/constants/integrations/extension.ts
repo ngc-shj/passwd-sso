@@ -1,4 +1,4 @@
-import { MS_PER_MINUTE } from "./time";
+import { MS_PER_MINUTE } from "../time";
 
 // ── Token bridge (shared contract with extension's token-bridge content script) ──
 /** @deprecated Use TOKEN_BRIDGE_EVENT for new code. Kept for reference only. */

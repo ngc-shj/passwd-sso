@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { API_KEY_SCOPES, MAX_API_KEY_EXPIRY_DAYS } from "@/lib/constants/api-key";
+import { API_KEY_SCOPES, MAX_API_KEY_EXPIRY_DAYS } from "@/lib/constants/auth/api-key";
 import { NAME_MAX_LENGTH } from "./common";
 
 // ─── API Key ──────────────────────────────────────────────

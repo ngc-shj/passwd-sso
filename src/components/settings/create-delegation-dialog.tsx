@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
-import { API_PATH } from "@/lib/constants/api-path";
+import { API_PATH } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";

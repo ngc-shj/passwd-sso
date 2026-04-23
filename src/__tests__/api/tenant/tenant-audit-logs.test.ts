@@ -54,7 +54,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: {
     AUDIT_LOG_VIEW: "tenant:auditLog:view",
   },

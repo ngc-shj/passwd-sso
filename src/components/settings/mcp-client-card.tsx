@@ -39,7 +39,7 @@ import { Blocks, ChevronDown, Loader2, Plus, Search, Trash2, Pencil, Users } fro
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
-import { MCP_SCOPES } from "@/lib/constants/mcp";
+import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";

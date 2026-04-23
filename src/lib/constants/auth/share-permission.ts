@@ -22,7 +22,7 @@ export const SHARE_PERMISSION_VALUES = [
 
 // ─── Entry-type-aware field definitions ─────────────────────
 
-import type { EntryTypeValue } from "./entry-type";
+import type { EntryTypeValue } from "../vault/entry-type";
 
 /**
  * Sensitive fields to remove per entry type for HIDE_PASSWORD.

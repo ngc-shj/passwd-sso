@@ -21,7 +21,7 @@ import {
   BRIDGE_CODE_MAX_ACTIVE,
   BRIDGE_CODE_MSG_TYPE,
   BRIDGE_CODE_TTL_MS,
-} from "@/lib/constants/extension";
+} from "@/lib/constants/integrations/extension";
 
 const EXT_CONSTANTS_PATH = path.join(
   __dirname,

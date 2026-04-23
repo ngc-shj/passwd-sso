@@ -11,7 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 

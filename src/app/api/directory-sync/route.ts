@@ -22,7 +22,7 @@ import {
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { handleAuthError } from "@/lib/api-response";
 
 // ─── Validation ──────────────────────────────────────────────

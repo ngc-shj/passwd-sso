@@ -17,7 +17,7 @@ import { runDirectorySync } from "@/lib/directory-sync/engine";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { errorResponse, rateLimited, zodValidationError, handleAuthError } from "@/lib/api-response";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

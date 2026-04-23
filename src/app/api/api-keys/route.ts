@@ -14,7 +14,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   API_KEY_PREFIX,
   MAX_API_KEYS_PER_USER,
-} from "@/lib/constants/api-key";
+} from "@/lib/constants/auth/api-key";
 import { API_KEY_TOKEN_LENGTH, API_KEY_PREFIX_LENGTH } from "@/lib/validations/common";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_HOUR } from "@/lib/constants/time";

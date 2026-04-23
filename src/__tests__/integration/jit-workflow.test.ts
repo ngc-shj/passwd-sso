@@ -105,7 +105,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 import { POST as createAccessRequest } from "@/app/api/tenant/access-requests/route";
 import { POST as approveAccessRequest } from "@/app/api/tenant/access-requests/[id]/approve/route";
 import { parseSaTokenScopes } from "@/lib/auth/service-account-token";
-import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
+import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { z } from "zod";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 

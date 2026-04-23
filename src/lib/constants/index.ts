@@ -1,38 +1,38 @@
 export { APP_NAME } from "./app";
-export { VAULT_STATUS } from "./vault";
-export type { VaultStatus } from "./vault";
+export { VAULT_STATUS } from "./vault/vault";
+export type { VaultStatus } from "./vault/vault";
 
-export { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "./entry-type";
-export type { EntryTypeValue } from "./entry-type";
+export { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "./vault/entry-type";
+export type { EntryTypeValue } from "./vault/entry-type";
 
-export { TOTP_ALGORITHM, TOTP_ALGORITHM_VALUES } from "./totp";
-export type { TotpAlgorithm } from "./totp";
+export { TOTP_ALGORITHM, TOTP_ALGORITHM_VALUES } from "./auth/totp";
+export type { TotpAlgorithm } from "./auth/totp";
 
-export { CUSTOM_FIELD_TYPE, CUSTOM_FIELD_TYPE_VALUES } from "./custom-field";
-export type { CustomFieldType } from "./custom-field";
+export { CUSTOM_FIELD_TYPE, CUSTOM_FIELD_TYPE_VALUES } from "./vault/custom-field";
+export type { CustomFieldType } from "./vault/custom-field";
 
 export {
   TEAM_ROLE,
   TEAM_ROLE_VALUES,
   TEAM_INVITE_ROLE_VALUES,
   isTeamAdminRole,
-} from "./team-role";
-export type { TeamRoleValue } from "./team-role";
-export { TEAM_PERMISSION } from "./team-permission";
-export type { TeamPermissionValue } from "./team-permission";
-export { TENANT_PERMISSION } from "./tenant-permission";
-export type { TenantPermissionValue } from "./tenant-permission";
-export { TENANT_ROLE, TENANT_ROLE_VALUES, isTenantAdminRole } from "./tenant-role";
-export type { TenantRoleValue } from "./tenant-role";
+} from "./team/team-role";
+export type { TeamRoleValue } from "./team/team-role";
+export { TEAM_PERMISSION } from "./team/team-permission";
+export type { TeamPermissionValue } from "./team/team-permission";
+export { TENANT_PERMISSION } from "./auth/tenant-permission";
+export type { TenantPermissionValue } from "./auth/tenant-permission";
+export { TENANT_ROLE, TENANT_ROLE_VALUES, isTenantAdminRole } from "./auth/tenant-role";
+export type { TenantRoleValue } from "./auth/tenant-role";
 
-export { EA_STATUS } from "./emergency-access";
-export type { EaStatusValue } from "./emergency-access";
+export { EA_STATUS } from "./integrations/emergency-access";
+export type { EaStatusValue } from "./integrations/emergency-access";
 
-export { INVITATION_STATUS } from "./invitation";
-export type { InvitationStatusValue } from "./invitation";
+export { INVITATION_STATUS } from "./integrations/invitation";
+export type { InvitationStatusValue } from "./integrations/invitation";
 
-export { CONNECT_STATUS } from "./connect-status";
-export type { ConnectStatus } from "./connect-status";
+export { CONNECT_STATUS } from "./integrations/connect-status";
+export type { ConnectStatus } from "./integrations/connect-status";
 
 export {
   TOKEN_ELEMENT_ID,
@@ -41,13 +41,13 @@ export {
   BRIDGE_CODE_TTL_MS,
   BRIDGE_CODE_MAX_ACTIVE,
   EXT_CONNECT_PARAM,
-} from "./extension";
-export { API_PATH, apiPath } from "./api-path";
-export { LOCAL_STORAGE_KEY } from "./storage-key";
-export { AUDIT_TARGET_TYPE } from "./audit-target";
-export type { AuditTargetType } from "./audit-target";
-export { SHARE_TYPE, SHARE_TYPE_VALUES, SEND_EXPIRY_MAP } from "./share-type";
-export type { ShareTypeValue } from "./share-type";
+} from "./integrations/extension";
+export { API_PATH, apiPath } from "./auth/api-path";
+export { LOCAL_STORAGE_KEY } from "./vault/storage-key";
+export { AUDIT_TARGET_TYPE } from "./audit/audit-target";
+export type { AuditTargetType } from "./audit/audit-target";
+export { SHARE_TYPE, SHARE_TYPE_VALUES, SEND_EXPIRY_MAP } from "./auth/share-type";
+export type { ShareTypeValue } from "./auth/share-type";
 export {
   AUDIT_SCOPE,
   AUDIT_ACTION,
@@ -63,8 +63,8 @@ export {
   TEAM_WEBHOOK_EVENT_GROUPS,
   TENANT_WEBHOOK_EVENT_GROUPS,
   mergeActionGroups,
-} from "./audit";
-export type { AuditScopeValue, AuditActionValue } from "./audit";
+} from "./audit/audit";
+export type { AuditScopeValue, AuditActionValue } from "./audit/audit";
 
 
 export {
@@ -72,14 +72,14 @@ export {
   EXTENSION_TOKEN_SCOPE_VALUES,
   EXTENSION_TOKEN_DEFAULT_SCOPES,
   EXTENSION_TOKEN_MAX_ACTIVE,
-} from "./extension-token";
-export type { ExtensionTokenScope } from "./extension-token";
+} from "./auth/extension-token";
+export type { ExtensionTokenScope } from "./auth/extension-token";
 
 export {
   NOTIFICATION_TYPE,
   NOTIFICATION_TYPE_VALUES,
-} from "./notification";
-export type { NotificationTypeValue } from "./notification";
+} from "./audit/notification";
+export type { NotificationTypeValue } from "./audit/notification";
 
 export {
   SHARE_PERMISSION,
@@ -87,8 +87,8 @@ export {
   SENSITIVE_FIELDS,
   OVERVIEW_FIELDS,
   applySharePermissions,
-} from "./share-permission";
-export type { SharePermissionValue } from "./share-permission";
+} from "./auth/share-permission";
+export type { SharePermissionValue } from "./auth/share-permission";
 
 export {
   API_KEY_PREFIX,
@@ -98,18 +98,18 @@ export {
   MAX_API_KEYS_PER_USER,
   MAX_API_KEY_EXPIRY_DAYS,
   DEFAULT_API_KEY_EXPIRY_DAYS,
-} from "./api-key";
-export type { ApiKeyScope } from "./api-key";
+} from "./auth/api-key";
+export type { ApiKeyScope } from "./auth/api-key";
 
-export { IMPORT_FORMAT_VALUES } from "./import-format";
-export type { ImportFormat } from "./import-format";
+export { IMPORT_FORMAT_VALUES } from "./vault/import-format";
+export type { ImportFormat } from "./vault/import-format";
 
-export { EXPORT_FORMAT_VALUES } from "./export-format";
-export type { ExportFormat } from "./export-format";
+export { EXPORT_FORMAT_VALUES } from "./vault/export-format";
+export type { ExportFormat } from "./vault/export-format";
 
 export { REVEAL_TIMEOUT_MS, CLIPBOARD_CLEAR_TIMEOUT_MS } from "./timing";
 
-export { GRANT_STATUS } from "./breakglass";
-export type { GrantStatus } from "./breakglass";
+export { GRANT_STATUS } from "./integrations/breakglass";
+export type { GrantStatus } from "./integrations/breakglass";
 
 export { MS_PER_SECOND, MS_PER_MINUTE, MS_PER_HOUR, MS_PER_DAY } from "./time";

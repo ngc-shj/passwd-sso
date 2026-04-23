@@ -8,15 +8,15 @@ import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { z } from "zod";
-import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
+import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 
 const accessRequestCreateLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 20 });

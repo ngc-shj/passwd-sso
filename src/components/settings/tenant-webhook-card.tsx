@@ -5,7 +5,7 @@ import { apiPath } from "@/lib/constants";
 import {
   AUDIT_ACTION_GROUP,
   TENANT_WEBHOOK_EVENT_GROUPS,
-} from "@/lib/constants/audit";
+} from "@/lib/constants/audit/audit";
 import { BaseWebhookCard } from "@/components/settings/base-webhook-card";
 
 const EVENT_GROUPS = Object.entries(TENANT_WEBHOOK_EVENT_GROUPS).map(

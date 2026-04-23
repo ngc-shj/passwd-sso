@@ -68,7 +68,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/[id]/tokens/route";
-import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
+import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const SA_ID = "sa-00000001";

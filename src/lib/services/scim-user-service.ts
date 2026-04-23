@@ -55,7 +55,7 @@ export class ScimUserNotFoundError extends Error {
 }
 
 import { ScimOwnerProtectedError } from "@/lib/scim/errors";
-import { TENANT_ROLE } from "@/lib/constants/tenant-role";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 export { ScimOwnerProtectedError };
 
 export class ScimExternalIdConflictError extends Error {

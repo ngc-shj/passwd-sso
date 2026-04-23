@@ -8,7 +8,7 @@ import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { Upload } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
-import { apiPath } from "@/lib/constants/api-path";
+import { apiPath } from "@/lib/constants/auth/api-path";
 import {
   ImportActions,
   ImportDecryptStep,

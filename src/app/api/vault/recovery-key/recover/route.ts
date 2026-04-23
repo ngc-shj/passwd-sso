@@ -10,7 +10,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION } from "@/lib/constants/audit";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";

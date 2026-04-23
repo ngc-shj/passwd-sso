@@ -16,9 +16,9 @@ import {
 } from "@/lib/auth/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
+import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
 import { withRequestLog } from "@/lib/with-request-log";
 import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";

@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import { evictDelegationRedisKeys } from "@/lib/auth/delegation";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });

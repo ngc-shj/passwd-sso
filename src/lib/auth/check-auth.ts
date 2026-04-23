@@ -5,8 +5,8 @@ import { authOrToken, hasUserId, type UserAuthResult } from "@/lib/auth/auth-or-
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { API_ERROR } from "@/lib/api-error-codes";
 import type { ExtensionTokenScope } from "@/lib/constants";
-import type { ApiKeyScope } from "@/lib/constants/api-key";
-import type { McpScope } from "@/lib/constants/mcp";
+import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
+import type { McpScope } from "@/lib/constants/auth/mcp";
 
 export interface CheckAuthOptions {
   /** Required scope for token/API key access. Presence enables token-aware auth. */

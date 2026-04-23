@@ -1,6 +1,6 @@
 import { type Dispatch, type SetStateAction, useCallback } from "react";
 import { fetchApi } from "@/lib/url-helpers";
-import { apiPath } from "@/lib/constants/api-path";
+import { apiPath } from "@/lib/constants/auth/api-path";
 import { notifyTeamDataChanged } from "@/lib/events";
 
 export interface UseTeamEntryMutationsOptions<T extends { id: string }> {

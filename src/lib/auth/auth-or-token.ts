@@ -10,9 +10,9 @@ import {
   hasSaTokenScope,
 } from "@/lib/auth/service-account-token";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
-import { API_KEY_PREFIX, type ApiKeyScope } from "@/lib/constants/api-key";
-import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/service-account";
-import { MCP_TOKEN_PREFIX, type McpScope } from "@/lib/constants/mcp";
+import { API_KEY_PREFIX, type ApiKeyScope } from "@/lib/constants/auth/api-key";
+import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";
+import { MCP_TOKEN_PREFIX, type McpScope } from "@/lib/constants/auth/mcp";
 import type { ExtensionTokenScope } from "@/lib/constants";
 
 /** Known Bearer token prefixes — tokens with these prefixes never fall through to extension token validation. */

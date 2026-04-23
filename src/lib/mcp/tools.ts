@@ -17,8 +17,8 @@ import {
   type DelegationMetadata,
 } from "@/lib/auth/delegation";
 import { logAuditAsync } from "@/lib/audit/audit";
-import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit";
-import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
+import { AUDIT_ACTION, AUDIT_SCOPE, ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 
 // ─── Tool definitions ─────────────────────────────────────────
 
