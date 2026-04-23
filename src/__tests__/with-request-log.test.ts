@@ -3,7 +3,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 
 // Override the global passthrough mock from setup.ts so we test the real implementation
-vi.unmock("@/lib/with-request-log");
+vi.unmock("@/lib/http/with-request-log");
 
 // Capture log output via mocked pino
 const { mockInfo, mockError, mockChild } = vi.hoisted(() => {
@@ -37,7 +37,7 @@ describe("withRequestLog", () => {
   });
 
   it("logs request.start and request.end on success", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ ok: true }, { status: 200 }),
@@ -74,7 +74,7 @@ describe("withRequestLog", () => {
   });
 
   it("logs request.error and rethrows on exception", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const error = new Error("DB connection failed");
     const handler = vi.fn().mockRejectedValue(error);
@@ -97,7 +97,7 @@ describe("withRequestLog", () => {
   });
 
   it("sets X-Request-Id response header", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ data: "test" }),
@@ -113,7 +113,7 @@ describe("withRequestLog", () => {
   });
 
   it("provides request-scoped logger via getLogger() inside handler", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
     const { getLogger } = await import("@/lib/logger");
 
     let loggerInsideHandler: unknown = null;
@@ -135,7 +135,7 @@ describe("withRequestLog", () => {
   // --- x-request-id validation ---
 
   it("inherits incoming x-request-id header when valid", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ ok: true }),
@@ -154,7 +154,7 @@ describe("withRequestLog", () => {
   });
 
   it("accepts x-request-id at max length (128 chars)", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ ok: true }),
@@ -171,7 +171,7 @@ describe("withRequestLog", () => {
   });
 
   it("rejects x-request-id exceeding max length (129 chars)", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ ok: true }),
@@ -189,7 +189,7 @@ describe("withRequestLog", () => {
   });
 
   it("rejects malicious x-request-id and generates a new UUID", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ ok: true }),
@@ -207,7 +207,7 @@ describe("withRequestLog", () => {
   });
 
   it("rejects empty x-request-id header", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const handler = vi.fn().mockResolvedValue(
       NextResponse.json({ ok: true }),
@@ -225,7 +225,7 @@ describe("withRequestLog", () => {
   // --- immutable headers ---
 
   it("clones response when headers are immutable (e.g. Auth.js redirect)", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const immutableResponse = Response.redirect(
       "http://localhost:3000/auth/signin",
@@ -255,7 +255,7 @@ describe("withRequestLog", () => {
   // --- params forwarding ---
 
   it("preserves handler context argument for routes with params", async () => {
-    const { withRequestLog } = await import("@/lib/with-request-log");
+    const { withRequestLog } = await import("@/lib/http/with-request-log");
 
     const paramsPromise = Promise.resolve({ id: "entry-123" });
     const handler = vi.fn().mockImplementation(
@@ -287,7 +287,7 @@ describe("withRequestLog", () => {
     }
 
     it("does not log Authorization header value", async () => {
-      const { withRequestLog } = await import("@/lib/with-request-log");
+      const { withRequestLog } = await import("@/lib/http/with-request-log");
 
       const handler = vi.fn().mockResolvedValue(
         NextResponse.json({ ok: true }),
@@ -308,7 +308,7 @@ describe("withRequestLog", () => {
     });
 
     it("does not serialize request headers into any log field", async () => {
-      const { withRequestLog } = await import("@/lib/with-request-log");
+      const { withRequestLog } = await import("@/lib/http/with-request-log");
 
       const handler = vi.fn().mockResolvedValue(
         NextResponse.json({ ok: true }),
@@ -334,7 +334,7 @@ describe("withRequestLog", () => {
     it("regression: detection mechanism catches intentional header leakage", async () => {
       // Verify the negative assertion is not vacuously passing by testing
       // a handler that intentionally logs headers — confirm our spy catches it.
-      const { withRequestLog } = await import("@/lib/with-request-log");
+      const { withRequestLog } = await import("@/lib/http/with-request-log");
 
       const leakyHandler = vi.fn().mockImplementation(async (req: NextRequest) => {
         // Intentionally leak headers via the request-scoped logger

@@ -25,7 +25,7 @@ vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn() },
 }));
 
-vi.mock("@/lib/ime-guard", () => ({
+vi.mock("@/lib/ui/ime-guard", () => ({
   preventIMESubmit: vi.fn(),
 }));
 
@@ -89,7 +89,7 @@ vi.mock("@/lib/generator/generator-prefs", () => ({
   SYMBOL_GROUP_KEYS: ["hashEtc", "punctuation", "quotes", "slashDash", "mathCompare", "brackets"],
 }));
 
-vi.mock("@/lib/credit-card", () => ({
+vi.mock("@/lib/ui/credit-card", () => ({
   CARD_BRANDS: ["Visa", "Mastercard"],
   detectCardBrand: vi.fn().mockReturnValue(""),
   formatCardNumber: vi.fn((_v: string) => _v),

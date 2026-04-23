@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { assertOrigin } from "@/lib/auth/csrf";
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
@@ -18,15 +18,15 @@ import {
 import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/api-response";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   MAX_AUDIT_DELIVERY_TARGETS,
   WEBHOOK_URL_MAX_LENGTH,
 } from "@/lib/validations/common";
 
-import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url-validation";
+import { isSsrfSafeWebhookUrl as ssrfSafeUrl, SSRF_URL_VALIDATION_MESSAGE as ssrfMessage } from "@/lib/url/url-validation";
 
 const createDeliveryTargetSchema = z.discriminatedUnion("kind", [
   z.object({

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/auth/check-auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { rateLimited } from "@/lib/api-response";
+import { rateLimited } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

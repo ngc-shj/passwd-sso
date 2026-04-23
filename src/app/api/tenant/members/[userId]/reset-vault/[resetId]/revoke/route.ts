@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
@@ -16,8 +16,8 @@ import { notificationTitle, notificationBody } from "@/lib/notification/notifica
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 export const runtime = "nodejs";
 

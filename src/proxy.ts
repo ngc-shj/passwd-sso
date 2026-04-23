@@ -7,7 +7,7 @@ import { API_PATH } from "./lib/constants";
 import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import { PERMISSIONS_POLICY } from "./lib/security/security-headers";
-import { handlePreflight, applyCorsHeaders } from "./lib/cors";
+import { handlePreflight, applyCorsHeaders } from "./lib/http/cors";
 import { isHttps } from "./lib/url-helpers";
 import { extractClientIp } from "./lib/auth/ip-access";
 import { checkAccessRestrictionWithAudit } from "./lib/auth/access-restriction";

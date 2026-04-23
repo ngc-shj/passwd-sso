@@ -4,7 +4,7 @@ import pg from "pg";
 import { randomUUID } from "node:crypto";
 import { getLogger } from "@/lib/logger";
 import { deadLetterLogger } from "@/lib/audit/audit-logger";
-import { computeBackoffMs, withFullJitter } from "@/lib/backoff";
+import { computeBackoffMs, withFullJitter } from "@/lib/http/backoff";
 import {
   AUDIT_OUTBOX,
   AUDIT_SCOPE,
@@ -17,7 +17,7 @@ import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
 import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
-import { sanitizeErrorForStorage } from "@/lib/external-http";
+import { sanitizeErrorForStorage } from "@/lib/http/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit/audit-chain";
 
 export interface AuditOutboxRow {

@@ -23,7 +23,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
-import { eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 

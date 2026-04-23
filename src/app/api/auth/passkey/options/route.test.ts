@@ -34,7 +34,7 @@ vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));

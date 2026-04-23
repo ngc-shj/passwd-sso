@@ -4,14 +4,14 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { assertOrigin } from "@/lib/auth/csrf";
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
 } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { z } from "zod";
 
 type Params = { params: Promise<{ id: string }> };

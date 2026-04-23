@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import {
   parseRecoveryKey,
   computeRecoveryVerifierHash,
@@ -17,7 +17,7 @@ import {
   generateAccountSalt,
   hexEncode,
 } from "@/lib/crypto/crypto-client";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

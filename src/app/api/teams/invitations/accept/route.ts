@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { INVITATION_STATUS } from "@/lib/constants";
 import { withUserTenantRls, withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
-import { parseBody } from "@/lib/parse-body";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { parseBody } from "@/lib/http/parse-body";
 import { invitationAcceptSchema } from "@/lib/validations";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 

@@ -1,16 +1,16 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
 import { checkLockout, recordFailure } from "@/lib/auth/account-lockout";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 
 export const runtime = "nodejs";
 

@@ -11,7 +11,7 @@ import {
   formatLabels,
   parseKeePassXcXml,
 } from "./password-import-parsers";
-import { formatExportCsv, type ExportEntry } from "@/lib/export-format-common";
+import { formatExportCsv, type ExportEntry } from "@/lib/format/export-format-common";
 
 // ─── parsePasswdSsoPayload ───────────────────────────────────
 

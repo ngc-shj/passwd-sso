@@ -38,7 +38,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
 vi.mock("@/lib/security/rate-limit", () => ({ createRateLimiter: () => ({ check: mockRateLimiterCheck }) }));
 vi.mock("@/lib/auth/delegation", () => ({ evictDelegationRedisKeys: mockEvictDelegationRedisKeys }));
-vi.mock("@/lib/with-request-log", () => ({ withRequestLog: <T>(fn: T) => fn }));
+vi.mock("@/lib/http/with-request-log", () => ({ withRequestLog: <T>(fn: T) => fn }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     mcpClient: { findMany: mockMcpClientFindMany },

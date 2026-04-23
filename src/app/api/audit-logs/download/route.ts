@@ -3,14 +3,14 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import {
   AUDIT_ACTION,
   AUDIT_SCOPE,
 } from "@/lib/constants";
 import type { Prisma } from "@prisma/client";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { parseActionsCsvParam } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";

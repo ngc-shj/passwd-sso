@@ -8,7 +8,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import type { TenantRole } from "@prisma/client";

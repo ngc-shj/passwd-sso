@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { validateV1Auth } from "@/lib/auth/v1-auth";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
 
 // GET /api/v1/tags — List tags (API key or SA token)

@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { normalizeAuditActionKey } from "@/lib/audit/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
-import { downloadBlob } from "@/lib/download-blob";
+import { downloadBlob } from "@/lib/ui/download-blob";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import type { AuditActionValue } from "@/lib/constants";
 

@@ -8,12 +8,12 @@ import {
   requireTeamMember,
   hasTeamPermission,
 } from "@/lib/auth/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 

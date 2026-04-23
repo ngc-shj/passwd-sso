@@ -15,8 +15,8 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
-import { CARD_BRANDS } from "@/lib/credit-card";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
+import { CARD_BRANDS } from "@/lib/ui/credit-card";
 import { handleTeamCardNumberChange } from "@/components/team/team-login-submit";
 import { getTeamCardValidationState } from "@/components/team/team-credit-card-validation";
 import { ENTRY_TYPE } from "@/lib/constants";

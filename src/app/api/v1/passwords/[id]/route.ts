@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { validateV1Auth } from "@/lib/auth/v1-auth";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
@@ -13,7 +13,7 @@ import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 
 
-import { notFound, rateLimited, validationError } from "@/lib/api-response";
+import { notFound, rateLimited, validationError } from "@/lib/http/api-response";
 import type { V1AuthResult } from "@/lib/auth/v1-auth";
 
 type V1AuthData = Extract<V1AuthResult, { ok: true }>["data"];

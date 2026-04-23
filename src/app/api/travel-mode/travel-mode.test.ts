@@ -38,7 +38,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 vi.mock("@/lib/logger", () => ({

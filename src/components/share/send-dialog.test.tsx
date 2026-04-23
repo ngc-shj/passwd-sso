@@ -71,7 +71,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: (e: string) => e,
 }));
 

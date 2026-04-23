@@ -2,7 +2,7 @@ import {
   getAllowedLengths,
   getCardNumberValidation,
   getMaxLength,
-} from "@/lib/credit-card";
+} from "@/lib/ui/credit-card";
 
 interface TeamCardValidationState {
   cardValidation: ReturnType<typeof getCardNumberValidation>;

@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID, randomBytes } from "node:crypto";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited } from "@/lib/http/api-response";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";

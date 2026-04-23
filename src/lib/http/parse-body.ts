@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { type ZodSchema } from "zod";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { zodValidationError } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { zodValidationError } from "@/lib/http/api-response";
 
 /**
  * Parse and validate URL query parameters against a Zod schema.

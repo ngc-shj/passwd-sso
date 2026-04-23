@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { SHARE_ACCESS_LOG_LIMIT } from "@/lib/validations/common.server";
 import { isValidCursorId } from "@/lib/audit/audit-query";
 

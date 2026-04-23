@@ -6,8 +6,8 @@ import {
   requireTeamMember,
   requireTeamPermission,
 } from "@/lib/auth/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
@@ -16,9 +16,9 @@ import {
   buildTagTree,
   flattenTagTree,
   TagTreeError,
-} from "@/lib/tag-tree";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+} from "@/lib/format/tag-tree";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 

@@ -31,7 +31,7 @@ vi.mock("@/lib/url-helpers", () => ({
 const { mockParseAllowedGoogleDomains } = vi.hoisted(() => ({
   mockParseAllowedGoogleDomains: vi.fn<() => string[]>(() => []),
 }));
-vi.mock("@/lib/google-domain", () => ({
+vi.mock("@/lib/url/google-domain", () => ({
   parseAllowedGoogleDomains: mockParseAllowedGoogleDomains,
 }));
 

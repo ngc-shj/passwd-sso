@@ -1,10 +1,10 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 
 export const runtime = "nodejs";
 

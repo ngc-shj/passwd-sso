@@ -29,7 +29,7 @@ import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { buildFolderPath } from "@/lib/folder/folder-path";
-import { buildTagPath } from "@/lib/tag-tree";
+import { buildTagPath } from "@/lib/format/tag-tree";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";

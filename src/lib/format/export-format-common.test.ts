@@ -7,7 +7,7 @@ import {
   formatExportJson,
   TEAM_EXPORT_OPTIONS,
   PERSONAL_EXPORT_OPTIONS,
-} from "@/lib/export-format-common";
+} from "@/lib/format/export-format-common";
 import { parseJson } from "@/components/passwords/import/password-import-parsers";
 
 const nullBankLicenseFields = {

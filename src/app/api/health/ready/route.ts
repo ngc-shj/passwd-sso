@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { runHealthChecks } from "@/lib/health";
 
 export const runtime = "nodejs";

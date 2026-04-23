@@ -34,7 +34,7 @@ import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
-import { bindRangeInput } from "@/lib/input-range";
+import { bindRangeInput } from "@/lib/ui/input-range";
 
 export function TenantSessionPolicyCard() {
   const t = useTranslations("TenantAdmin");

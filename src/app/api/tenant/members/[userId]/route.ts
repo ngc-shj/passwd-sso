@@ -6,12 +6,12 @@ import { updateTenantMemberRoleSchema } from "@/lib/validations";
 import {
   requireTenantPermission,
 } from "@/lib/auth/tenant-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { TENANT_PERMISSION, TENANT_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 export const runtime = "nodejs";
 

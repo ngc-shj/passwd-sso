@@ -3,10 +3,10 @@ import { auth } from "@/auth";
 import { generatePassword, generatePassphrase } from "@/lib/password-generator";
 import { generateRequestSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 
 const generateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 

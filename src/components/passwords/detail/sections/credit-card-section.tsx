@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "../../shared/copy-button";
 import { useRevealTimeout } from "@/hooks/vault/use-reveal-timeout";
 import type { RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
-import { formatCardNumber } from "@/lib/credit-card";
+import { formatCardNumber } from "@/lib/ui/credit-card";
 import type { InlineDetailData } from "@/types/entry";
 import type { CreateGuardedGetterFn } from "./types";
 

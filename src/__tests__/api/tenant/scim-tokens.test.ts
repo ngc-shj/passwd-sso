@@ -63,7 +63,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
@@ -78,7 +78,7 @@ vi.mock("@/lib/scim/token-utils", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hash:${t}`,
 }));
-vi.mock("@/lib/api-response", () => ({
+vi.mock("@/lib/http/api-response", () => ({
   unauthorized: () => new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
   errorResponse: (msg: string, status: number, extra?: unknown) =>
     new Response(JSON.stringify({ error: msg, ...extra }), { status }),

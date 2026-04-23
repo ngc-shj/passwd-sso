@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 // POST /api/passwords/[id]/history/[historyId]/restore - Restore a history version
 async function handlePOST(

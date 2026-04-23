@@ -3,8 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember } from "@/lib/auth/team-auth";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };

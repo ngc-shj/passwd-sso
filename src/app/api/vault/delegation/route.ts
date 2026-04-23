@@ -12,13 +12,13 @@ import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/auth/mcp";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {

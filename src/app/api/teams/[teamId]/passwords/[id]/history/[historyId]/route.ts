@@ -4,13 +4,13 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamMember } from "@/lib/auth/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { teamHistoryReencryptSchema } from "@/lib/validations";
 
 type Params = { params: Promise<{ teamId: string; id: string; historyId: string }> };

@@ -19,8 +19,8 @@ import { notificationTitle, notificationBody } from "@/lib/notification/notifica
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
-import { withRequestLog } from "@/lib/with-request-log";
-import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 

@@ -3,12 +3,12 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { updateTagSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { validateParentChain, TagTreeError } from "@/lib/tag-tree";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
+import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/http/api-response";
 
 // PUT /api/tags/[id] - Update a tag
 async function handlePUT(

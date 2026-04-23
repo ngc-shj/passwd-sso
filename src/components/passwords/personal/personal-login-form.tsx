@@ -11,7 +11,7 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
 import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal/personal-login-form-types";
 import { usePersonalLoginFormModel } from "@/hooks/personal/use-personal-login-form-model";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";

@@ -74,7 +74,7 @@ vi.mock("@/lib/auth/delegation", async (importOriginal) => {
     revokeAllDelegationSessions: mockRevokeAllDelegationSessions,
   };
 });
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: unknown) => handler,
 }));
 vi.mock("@/lib/logger", () => ({

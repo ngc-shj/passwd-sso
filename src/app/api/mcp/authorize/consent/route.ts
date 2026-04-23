@@ -7,8 +7,8 @@ import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/auth/mcp
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { assertOrigin } from "@/lib/auth/csrf";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
 
 export async function POST(req: NextRequest) {
   // CSRF protection: Origin header is mandatory for consent (defense-in-depth)

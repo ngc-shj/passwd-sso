@@ -2,7 +2,7 @@ import type { NextAuthConfig } from "next-auth";
 import Google from "next-auth/providers/google";
 import Nodemailer from "next-auth/providers/nodemailer";
 import { API_PATH } from "@/lib/constants";
-import { parseAllowedGoogleDomains } from "@/lib/google-domain";
+import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
 import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";

@@ -25,7 +25,7 @@ import {
   File,
 } from "lucide-react";
 import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import {
   encryptBinary,

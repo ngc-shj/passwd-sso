@@ -10,7 +10,7 @@ import { EntryExpirationSection } from "@/components/passwords/entry/entry-expir
 import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { EntryActionBar } from "@/components/passwords/entry/entry-form-ui";
 import { useTeamLoginFormModel } from "@/hooks/team/use-team-login-form-model";
 

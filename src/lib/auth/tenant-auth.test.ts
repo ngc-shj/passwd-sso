@@ -34,7 +34,7 @@ import {
   TenantAuthError,
 } from "./tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ─── Tests ──────────────────────────────────────────────────
 

@@ -8,7 +8,7 @@ vi.mock("@/auth", () => ({
     POST: vi.fn(async (req: NextRequest) => new Response(req.url)),
   },
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: <T>(h: T) => h,
 }));
 vi.mock("@/lib/audit/audit", () => ({

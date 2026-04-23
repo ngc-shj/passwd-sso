@@ -76,7 +76,7 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({

@@ -1,5 +1,5 @@
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
-import { formatCardNumber } from "@/lib/credit-card";
+import { formatCardNumber } from "@/lib/ui/credit-card";
 import {
   DEFAULT_GENERATOR_SETTINGS,
   DEFAULT_SYMBOL_GROUPS,

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveNavigationTarget } from "@/lib/client-navigation";
+import { resolveNavigationTarget } from "@/lib/url/client-navigation";
 
 describe("resolveNavigationTarget", () => {
   it("resolves internal path for same-origin urls", () => {

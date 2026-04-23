@@ -30,7 +30,7 @@ vi.mock("@/lib/url-helpers", () => ({
   ),
 }));
 
-vi.mock("@/lib/download-blob", () => ({
+vi.mock("@/lib/ui/download-blob", () => ({
   downloadBlob: vi.fn(() => Promise.resolve()),
 }));
 

@@ -37,7 +37,7 @@ import {
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
 import { hexDecode, hexEncode } from "../crypto/crypto-utils";
 import {

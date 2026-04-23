@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { Prisma } from "@prisma/client";
 import { mapPrismaError } from "@/lib/prisma/prisma-error";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 describe("mapPrismaError", () => {
   it.each([

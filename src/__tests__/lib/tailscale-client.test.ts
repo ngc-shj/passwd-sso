@@ -3,7 +3,7 @@ import {
   verifyTailscalePeer,
   _extractTailnetFromFqdn,
   _clearWhoIsCache,
-} from "@/lib/tailscale-client";
+} from "@/lib/services/tailscale-client";
 
 describe("_extractTailnetFromFqdn", () => {
   it("extracts tailnet from standard FQDN", () => {

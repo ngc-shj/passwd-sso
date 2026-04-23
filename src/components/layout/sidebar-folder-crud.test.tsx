@@ -25,7 +25,7 @@ const { mockToast, mockApiErrorToI18nKey, mockUseVaultContext } = vi.hoisted(() 
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: mockApiErrorToI18nKey,
 }));
 
@@ -77,7 +77,7 @@ vi.mock("@/hooks/use-local-storage", () => ({
   useLocalStorage: (_key: string, initial: Record<string, boolean>) => [initial, vi.fn()],
 }));
 
-vi.mock("@/lib/dynamic-styles", () => ({
+vi.mock("@/lib/ui/dynamic-styles", () => ({
   getTagColorClass: () => "",
 }));
 

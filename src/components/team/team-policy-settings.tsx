@@ -27,7 +27,7 @@ import {
   SESSION_ABSOLUTE_TIMEOUT_MAX,
 } from "@/lib/validations";
 
-import { bindRangeNullableInput } from "@/lib/input-range";
+import { bindRangeNullableInput } from "@/lib/ui/input-range";
 
 interface PolicyData {
   minPasswordLength: number;

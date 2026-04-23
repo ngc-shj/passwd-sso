@@ -18,7 +18,7 @@ import {
   DCR_RATE_LIMIT_MAX,
 } from "@/lib/constants/auth/mcp";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,

@@ -4,13 +4,13 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { updateTeamTagSchema } from "@/lib/validations";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { validateParentChain, TagTreeError } from "@/lib/tag-tree";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { validateParentChain, TagTreeError } from "@/lib/format/tag-tree";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string; id: string }> };
 

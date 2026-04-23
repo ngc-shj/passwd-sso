@@ -71,7 +71,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 

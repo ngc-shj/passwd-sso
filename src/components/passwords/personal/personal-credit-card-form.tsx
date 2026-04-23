@@ -11,7 +11,7 @@ import {
   getMaxLength,
   normalizeCardBrand,
   normalizeCardNumber,
-} from "@/lib/credit-card";
+} from "@/lib/ui/credit-card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,7 +30,7 @@ import { EntryRepromptSection } from "@/components/passwords/entry/entry-repromp
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { toTagPayload } from "@/components/passwords/entry/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/personal/use-personal-base-form-model";

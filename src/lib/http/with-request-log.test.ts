@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // Un-mock withRequestLog for this file so the real implementation is tested.
-vi.unmock("@/lib/with-request-log");
+vi.unmock("@/lib/http/with-request-log");
 
 // Hoisted mocks for @/lib/logger used by the real withRequestLog implementation.
 const mocks = vi.hoisted(() => {
@@ -42,7 +42,7 @@ vi.mock("@sentry/nextjs", () => ({
 }));
 
 // Import the REAL withRequestLog (not the global passthrough mock).
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 function makeRequest(
   method = "GET",

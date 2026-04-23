@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
-import { handlePreflight, applyCorsHeaders } from "@/lib/cors";
+import { handlePreflight, applyCorsHeaders } from "@/lib/http/cors";
 
 const APP_ORIGIN = "http://localhost:3000";
 const CROSS_ORIGIN = "http://evil.com";

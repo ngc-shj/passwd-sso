@@ -10,7 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import { verifyAdminToken } from "@/lib/auth/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
@@ -20,8 +20,8 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/maintenance-auth";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { MS_PER_DAY } from "@/lib/constants/time";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });
 

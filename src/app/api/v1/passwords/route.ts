@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { validateV1Auth } from "@/lib/auth/v1-auth";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
@@ -14,7 +14,7 @@ import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import type { EntryType } from "@prisma/client";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
 const VALID_ENTRY_TYPES: Set<string> = new Set(ENTRY_TYPE_VALUES);
 

@@ -13,7 +13,7 @@ import { SecurityKeySignInForm } from "@/components/auth/security-key-signin-for
 import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
-import { parseAllowedGoogleDomains } from "@/lib/google-domain";
+import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
 
 export default async function SignInPage({
   params,

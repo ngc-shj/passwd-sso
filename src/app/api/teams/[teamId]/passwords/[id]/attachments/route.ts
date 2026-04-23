@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
@@ -15,8 +15,8 @@ import {
   FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };

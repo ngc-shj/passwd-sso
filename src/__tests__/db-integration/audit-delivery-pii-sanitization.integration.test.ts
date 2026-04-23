@@ -11,7 +11,7 @@ import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import {
   EXTERNAL_DELIVERY_METADATA_BLOCKLIST,
   sanitizeForExternalDelivery,
-} from "@/lib/external-http";
+} from "@/lib/http/external-http";
 
 describe("audit-delivery PII sanitization", () => {
   let ctx: TestContext;

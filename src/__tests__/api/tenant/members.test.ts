@@ -51,7 +51,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
@@ -60,7 +60,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
-vi.mock("@/lib/api-response", () => ({
+vi.mock("@/lib/http/api-response", () => ({
   unauthorized: () => new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
   errorResponse: (msg: string, status: number, extra?: unknown) =>
     new Response(JSON.stringify({ error: msg, ...extra }), { status }),

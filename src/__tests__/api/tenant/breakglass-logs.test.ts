@@ -53,7 +53,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: mockExtractRequestMeta,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/constants/auth/tenant-permission", () => ({

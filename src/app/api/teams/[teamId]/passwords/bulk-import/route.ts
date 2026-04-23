@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit/audit";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";

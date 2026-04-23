@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { unauthorized, notFound, forbidden } from "@/lib/api-response";
+import { unauthorized, notFound, forbidden } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { HISTORY_PAGE_SIZE } from "@/lib/validations/common.server";
 
 // GET /api/passwords/[id]/history - List entry history (encrypted blobs)

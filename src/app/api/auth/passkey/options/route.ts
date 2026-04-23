@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited } from "@/lib/http/api-response";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { generateDiscoverableAuthOpts, derivePrfSalt } from "@/lib/auth/webauthn-server";

@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Plus, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { getTagColorClass } from "@/lib/dynamic-styles";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { getTagColorClass } from "@/lib/ui/dynamic-styles";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { apiPath } from "@/lib/constants";
-import { buildTagPathMap } from "@/lib/tag-tree";
+import { buildTagPathMap } from "@/lib/format/tag-tree";
 import { fetchApi } from "@/lib/url-helpers";
 import { TAG_NAME_MAX_LENGTH } from "@/lib/validations";
 

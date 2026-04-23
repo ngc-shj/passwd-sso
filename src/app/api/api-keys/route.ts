@@ -5,11 +5,11 @@ import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized, rateLimited } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   API_KEY_PREFIX,

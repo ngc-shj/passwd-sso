@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 
 interface PrismaErrorMapping {
   status: number;

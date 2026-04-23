@@ -15,12 +15,12 @@ import {
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
-import { parseSshPrivateKey } from "@/lib/ssh-key";
+import { parseSshPrivateKey } from "@/lib/format/ssh-key";
 
 export function TeamSshKeyForm({
   teamId,

@@ -11,7 +11,7 @@ const {
   mockSanitizeErrorForStorage: vi.fn((v: unknown) => v),
 }));
 
-vi.mock("@/lib/external-http", () => ({
+vi.mock("@/lib/http/external-http", () => ({
   validateAndFetch: mockValidateAndFetch,
   sanitizeForExternalDelivery: mockSanitizeForExternalDelivery,
   sanitizeErrorForStorage: mockSanitizeErrorForStorage,

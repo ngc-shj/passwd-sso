@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit/audit";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import { bulkImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";

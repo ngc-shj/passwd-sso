@@ -40,7 +40,7 @@ vi.mock("@/components/ui/badge", () => ({
   Badge: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
 }));
 
-vi.mock("@/lib/dynamic-styles", () => ({
+vi.mock("@/lib/ui/dynamic-styles", () => ({
   getTagColorClass: () => "",
 }));
 

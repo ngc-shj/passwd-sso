@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/ip-access";

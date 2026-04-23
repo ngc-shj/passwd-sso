@@ -10,7 +10,7 @@ import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 const tokenRateLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 const ipRateLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });

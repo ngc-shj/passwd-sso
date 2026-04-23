@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { CopyButton } from "./copy-button";
 import { X, ShieldCheck, QrCode } from "lucide-react";
 import { TOTP_ALGORITHM } from "@/lib/constants";
-import { parseOtpauthUri } from "@/lib/qr-scanner-client";
+import { parseOtpauthUri } from "@/lib/ui/qr-scanner-client";
 import { QRCaptureDialog } from "../dialogs/qr-capture-dialog";
 import type { EntryTotp } from "@/lib/vault/entry-form-types";
 

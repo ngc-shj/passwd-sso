@@ -4,11 +4,11 @@ import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit/aud
 import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team/team-policy";
 import { z } from "zod/v4";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, EXPORT_FORMAT_VALUES } from "@/lib/constants";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 
 const bodySchema = z.object({

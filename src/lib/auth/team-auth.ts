@@ -9,7 +9,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";

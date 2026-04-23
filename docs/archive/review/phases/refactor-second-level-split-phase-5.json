@@ -1,0 +1,48 @@
+{
+  "phaseName": "refactor-second-level-split-phase-5-lib-direct-split",
+  "moves": [
+    { "from": "src/lib/api-error-codes.ts",      "to": "src/lib/http/api-error-codes.ts" },
+    { "from": "src/lib/api-error-codes.test.ts", "to": "src/lib/http/api-error-codes.test.ts" },
+    { "from": "src/lib/api-response.ts",         "to": "src/lib/http/api-response.ts" },
+    { "from": "src/lib/api-response.test.ts",    "to": "src/lib/http/api-response.test.ts" },
+    { "from": "src/lib/cors.ts",                 "to": "src/lib/http/cors.ts" },
+    { "from": "src/lib/cors.test.ts",            "to": "src/lib/http/cors.test.ts" },
+    { "from": "src/lib/parse-body.ts",           "to": "src/lib/http/parse-body.ts" },
+    { "from": "src/lib/parse-body.test.ts",      "to": "src/lib/http/parse-body.test.ts" },
+    { "from": "src/lib/with-request-log.ts",     "to": "src/lib/http/with-request-log.ts" },
+    { "from": "src/lib/with-request-log.test.ts", "to": "src/lib/http/with-request-log.test.ts" },
+    { "from": "src/lib/external-http.ts",        "to": "src/lib/http/external-http.ts" },
+    { "from": "src/lib/external-http.test.ts",   "to": "src/lib/http/external-http.test.ts" },
+    { "from": "src/lib/backoff.ts",              "to": "src/lib/http/backoff.ts" },
+
+    { "from": "src/lib/url-validation.ts",       "to": "src/lib/url/url-validation.ts" },
+    { "from": "src/lib/client-navigation.ts",    "to": "src/lib/url/client-navigation.ts" },
+    { "from": "src/lib/client-navigation.test.ts", "to": "src/lib/url/client-navigation.test.ts" },
+    { "from": "src/lib/google-domain.ts",        "to": "src/lib/url/google-domain.ts" },
+    { "from": "src/lib/google-domain.test.ts",   "to": "src/lib/url/google-domain.test.ts" },
+
+    { "from": "src/lib/credit-card.ts",          "to": "src/lib/ui/credit-card.ts" },
+    { "from": "src/lib/credit-card.test.ts",     "to": "src/lib/ui/credit-card.test.ts" },
+    { "from": "src/lib/dynamic-styles.ts",       "to": "src/lib/ui/dynamic-styles.ts" },
+    { "from": "src/lib/dynamic-styles.test.ts",  "to": "src/lib/ui/dynamic-styles.test.ts" },
+    { "from": "src/lib/ime-guard.ts",            "to": "src/lib/ui/ime-guard.ts" },
+    { "from": "src/lib/ime-guard.test.ts",       "to": "src/lib/ui/ime-guard.test.ts" },
+    { "from": "src/lib/input-range.ts",          "to": "src/lib/ui/input-range.ts" },
+    { "from": "src/lib/input-range.test.ts",     "to": "src/lib/ui/input-range.test.ts" },
+    { "from": "src/lib/qr-scanner-client.ts",    "to": "src/lib/ui/qr-scanner-client.ts" },
+    { "from": "src/lib/download-blob.ts",        "to": "src/lib/ui/download-blob.ts" },
+
+    { "from": "src/lib/export-format-common.ts",   "to": "src/lib/format/export-format-common.ts" },
+    { "from": "src/lib/export-format-common.test.ts", "to": "src/lib/format/export-format-common.test.ts" },
+    { "from": "src/lib/secure-note-templates.ts",  "to": "src/lib/format/secure-note-templates.ts" },
+    { "from": "src/lib/secure-note-templates.test.ts", "to": "src/lib/format/secure-note-templates.test.ts" },
+    { "from": "src/lib/ssh-key.ts",                "to": "src/lib/format/ssh-key.ts" },
+    { "from": "src/lib/ssh-key.test.ts",           "to": "src/lib/format/ssh-key.test.ts" },
+    { "from": "src/lib/wordlist.ts",               "to": "src/lib/format/wordlist.ts" },
+    { "from": "src/lib/wordlist.test.ts",          "to": "src/lib/format/wordlist.test.ts" },
+    { "from": "src/lib/tag-tree.ts",               "to": "src/lib/format/tag-tree.ts" },
+    { "from": "src/lib/tag-tree.test.ts",          "to": "src/lib/format/tag-tree.test.ts" },
+
+    { "from": "src/lib/tailscale-client.ts",     "to": "src/lib/services/tailscale-client.ts" }
+  ]
+}

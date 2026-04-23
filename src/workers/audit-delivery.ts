@@ -14,7 +14,7 @@ import {
   validateAndFetch,
   sanitizeForExternalDelivery,
   sanitizeErrorForStorage,
-} from "@/lib/external-http";
+} from "@/lib/http/external-http";
 import { getLogger } from "@/lib/logger";
 
 // ─── Interface ────────────────────────────────────────────────

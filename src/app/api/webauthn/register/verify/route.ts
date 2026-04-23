@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";

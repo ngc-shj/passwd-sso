@@ -99,7 +99,7 @@ vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
 
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   API_ERROR: {
     UNAUTHORIZED: "UNAUTHORIZED",
     RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
@@ -108,7 +108,7 @@ vi.mock("@/lib/api-error-codes", () => ({
   },
 }));
 
-vi.mock("@/lib/api-response", () => ({
+vi.mock("@/lib/http/api-response", () => ({
   errorResponse: (error: string, status: number, extra?: Record<string, unknown>) => {
     const body = { error, ...extra };
     return new Response(JSON.stringify(body), {
@@ -134,7 +134,7 @@ vi.mock("@/lib/validations/common", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));

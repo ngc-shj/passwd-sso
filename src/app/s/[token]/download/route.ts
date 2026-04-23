@@ -6,7 +6,7 @@ import { verifyShareAccessToken } from "@/lib/auth/share-access-token";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 

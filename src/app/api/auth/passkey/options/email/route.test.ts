@@ -53,7 +53,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));

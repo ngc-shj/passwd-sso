@@ -23,7 +23,7 @@ import {
   sanitizeForExternalDelivery,
   resolveAndValidateIps,
   createPinnedDispatcher,
-} from "@/lib/external-http";
+} from "@/lib/http/external-http";
 
 // ─── Types ──────────────────────────────────────────────────────
 

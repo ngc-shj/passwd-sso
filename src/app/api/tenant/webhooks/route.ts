@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { assertOrigin } from "@/lib/auth/csrf";
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,
@@ -18,11 +18,11 @@ import {
 } from "@/lib/crypto/crypto-server";
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, unauthorized } from "@/lib/api-response";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { MAX_WEBHOOKS, WEBHOOK_URL_MAX_LENGTH } from "@/lib/validations/common";
-import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url-validation";
+import { isSsrfSafeWebhookUrl, SSRF_URL_VALIDATION_MESSAGE } from "@/lib/url/url-validation";
 
 const createWebhookSchema = z.object({
   url: z.string().url().max(WEBHOOK_URL_MAX_LENGTH).refine(

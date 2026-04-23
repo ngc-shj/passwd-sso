@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { unauthorized } from "@/lib/api-response";
+import { unauthorized } from "@/lib/http/api-response";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 // GET /api/teams/pending-key-distributions
 // Returns all pending key distributions across all teams where the user is OWNER/ADMIN.

@@ -143,11 +143,11 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   getMasterKeyByVersion: vi.fn().mockReturnValue(Buffer.alloc(32)),
 }));
 
-vi.mock("@/lib/external-http", () => ({
+vi.mock("@/lib/http/external-http", () => ({
   sanitizeErrorForStorage: vi.fn((msg: string) => msg),
 }));
 
-vi.mock("@/lib/backoff", () => ({
+vi.mock("@/lib/http/backoff", () => ({
   computeBackoffMs: mockComputeBackoffMs,
   withFullJitter: mockWithFullJitter,
 }));

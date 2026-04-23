@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { authOrToken, hasUserId, type UserAuthResult } from "@/lib/auth/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import type { ExtensionTokenScope } from "@/lib/constants";
 import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
 import type { McpScope } from "@/lib/constants/auth/mcp";

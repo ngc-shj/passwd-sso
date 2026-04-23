@@ -8,13 +8,13 @@ import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
 import { revokeAllDelegationSessions } from "@/lib/auth/delegation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
 import {
   hexIv,
   hexAuthTag,

@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { checkAuth } from "@/lib/auth/check-auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 

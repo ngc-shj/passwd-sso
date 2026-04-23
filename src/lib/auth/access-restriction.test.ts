@@ -28,7 +28,7 @@ vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("1.2.3.4"),
 }));
 
-vi.mock("@/lib/tailscale-client", () => ({
+vi.mock("@/lib/services/tailscale-client", () => ({
   verifyTailscalePeer: vi.fn().mockResolvedValue(false),
 }));
 

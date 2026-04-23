@@ -1,7 +1,7 @@
 "use client";
 
 import { Lock, Download, Loader2 } from "lucide-react";
-import type { ExportFormat, ExportProfile } from "@/lib/export-format-common";
+import type { ExportFormat, ExportProfile } from "@/lib/format/export-format-common";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
