@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";

@@ -7,7 +7,7 @@ const { mockAuth, mockLogAudit } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

@@ -16,7 +16,7 @@ vi.mock("@/lib/auth/delegation", () => ({
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
 }));
 
-vi.mock("@/lib/audit", () => ({ logAuditAsync: mockLogAudit }));
+vi.mock("@/lib/audit/audit", () => ({ logAuditAsync: mockLogAudit }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {},

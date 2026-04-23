@@ -6,7 +6,7 @@ import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { requireTeamMember } from "@/lib/auth/team-auth";
-import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { watchtowerAlertEmail } from "@/lib/email/templates/watchtower-alert";

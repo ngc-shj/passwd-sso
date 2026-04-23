@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createAuthorizationCode } from "@/lib/mcp/oauth-server";
 import { MCP_SCOPES, MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";

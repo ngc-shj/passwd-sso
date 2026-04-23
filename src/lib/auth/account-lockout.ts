@@ -12,7 +12,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit";
+import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";

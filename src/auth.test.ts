@@ -113,7 +113,7 @@ vi.mock("@/lib/auth/auth-adapter", () => ({
   createCustomAdapter: vi.fn(() => ({})),
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 

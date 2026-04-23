@@ -9,7 +9,7 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto/crypto-server";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";

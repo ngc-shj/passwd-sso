@@ -19,7 +19,7 @@ const {
 
 vi.mock("@/lib/auth/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
-vi.mock("@/lib/audit", () => ({ logAuditAsync: vi.fn(), extractRequestMeta: () => ({ ip: null, userAgent: null }) }));
+vi.mock("@/lib/audit/audit", () => ({ logAuditAsync: vi.fn(), extractRequestMeta: () => ({ ip: null, userAgent: null }) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     scimGroupMapping: mockScimGroupMapping,

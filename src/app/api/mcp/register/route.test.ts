@@ -55,7 +55,7 @@ vi.mock("@/lib/auth/ip-access", () => ({
   rateLimitKeyFromIp: mockRateLimitKeyFromIp,
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 

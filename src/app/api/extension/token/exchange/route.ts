@@ -35,7 +35,7 @@ import {
 import { issueExtensionToken } from "@/lib/auth/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION } from "@/lib/constants";

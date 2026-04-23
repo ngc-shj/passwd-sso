@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser },
 }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

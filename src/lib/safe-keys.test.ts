@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isProtoKey, safeRecord } from "./safe-keys";
-import { sanitizeMetadata } from "@/lib/audit";
+import { sanitizeMetadata } from "@/lib/audit/audit";
 
 describe("isProtoKey", () => {
   it.each(["__proto__", "constructor", "prototype"])(

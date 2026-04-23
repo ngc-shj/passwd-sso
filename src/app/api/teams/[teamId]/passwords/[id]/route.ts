@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { checkAuth } from "@/lib/auth/check-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
   requireTeamPermission,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";

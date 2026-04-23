@@ -10,7 +10,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { verifyAdminToken } from "@/lib/auth/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { requireMaintenanceOperator } from "@/lib/auth/maintenance-auth";

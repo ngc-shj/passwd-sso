@@ -61,7 +61,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
   personalAuditBase: (_req: unknown, userId: string) => ({

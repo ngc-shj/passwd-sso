@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimPatchOpSchema, scimGroupSchema } from "@/lib/scim/validations";
 import { parseGroupPatchOps, PatchParseError } from "@/lib/scim/patch-parser";

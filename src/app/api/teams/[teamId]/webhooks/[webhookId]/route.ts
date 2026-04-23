@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,

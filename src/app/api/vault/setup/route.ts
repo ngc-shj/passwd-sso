@@ -7,7 +7,7 @@ import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { getLogger } from "@/lib/logger";
 import { z } from "zod";

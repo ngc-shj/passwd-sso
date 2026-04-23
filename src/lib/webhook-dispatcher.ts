@@ -222,7 +222,7 @@ export function dispatchWebhook(event: TeamWebhookEvent): void {
         }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
         // Lazy import to break circular dependency: webhook-dispatcher.ts ↔ audit.ts
-        const { logAuditAsync } = await import("@/lib/audit");
+        const { logAuditAsync } = await import("@/lib/audit/audit");
         await logAuditAsync({
           scope: AUDIT_SCOPE.TEAM,
           action: AUDIT_ACTION.WEBHOOK_DELIVERY_FAILED,
@@ -294,7 +294,7 @@ export function dispatchTenantWebhook(event: TenantWebhookEvent): void {
           });
         }, BYPASS_PURPOSE.WEBHOOK_DISPATCH);
 
-        const { logAuditAsync } = await import("@/lib/audit");
+        const { logAuditAsync } = await import("@/lib/audit/audit");
         await logAuditAsync({
           scope: AUDIT_SCOPE.TENANT,
           action: AUDIT_ACTION.TENANT_WEBHOOK_DELIVERY_FAILED,

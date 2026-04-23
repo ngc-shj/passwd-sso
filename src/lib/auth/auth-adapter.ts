@@ -9,7 +9,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
-import { logAuditAsync } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";

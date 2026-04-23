@@ -10,7 +10,7 @@ import {
   type ExtensionTokenScope,
 } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { logAuditAsync } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 
 // ─── Types ───────────────────────────────────────────────────

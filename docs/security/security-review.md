@@ -214,7 +214,7 @@ Evidence:
 3. Audit write failures do not break primary operation  
 Status: `PASS`  
 Evidence:
-- `src/lib/audit.ts` writes audit events to the durable `audit_outbox` Postgres table inside the same DB transaction as the originating business write, so commit atomicity guarantees no audit loss for successfully committed operations.
+- `src/lib/audit/audit.ts` writes audit events to the durable `audit_outbox` Postgres table inside the same DB transaction as the originating business write, so commit atomicity guarantees no audit loss for successfully committed operations.
 - A separate `audit-outbox-worker` process (`src/workers/audit-outbox-worker.ts`) drains pending rows with exponential backoff capped at `max_attempts` (default 8). Permanently failed rows are dead-lettered both as an `AUDIT_OUTBOX_DEAD_LETTER` audit row (via `writeDirectAuditLog()`) and via the pino dead-letter logger (`_logType: "audit-dead-letter"`) for external alerting.
 - Tamper-evident hash chaining (`src/lib/audit-chain.ts`, schema in `prisma/migrations/20260413110000_add_audit_chain/`) protects committed `audit_logs` rows from undetected modification or deletion. The verify endpoint `/api/maintenance/audit-chain-verify` recomputes the chain and reports breaks.
 - External sink delivery is pluggable via the `AuditDeliverer` interface in `src/workers/audit-delivery.ts` (current concrete deliverers: webhook / SIEM HEC (Splunk HTTP Event Collector–compatible protocol; vendor-neutral) / S3-object).

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit/audit";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";

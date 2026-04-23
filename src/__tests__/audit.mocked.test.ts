@@ -31,7 +31,7 @@ vi.mock("@/lib/audit-logger", async (importOriginal) => {
   };
 });
 
-import { logAuditAsync, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, sanitizeMetadata, extractRequestMeta, resolveActorType } from "@/lib/audit/audit";
 
 describe("logAuditAsync", () => {
   it("emits structured JSON to auditLogger", async () => {

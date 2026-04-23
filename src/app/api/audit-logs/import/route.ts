@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { z } from "zod/v4";
 import { handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";

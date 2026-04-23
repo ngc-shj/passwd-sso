@@ -11,7 +11,7 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: <T>(h: T) => h,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));

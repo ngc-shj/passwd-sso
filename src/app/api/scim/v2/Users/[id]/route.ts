@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { scimResponse, scimError, getScimBaseUrl } from "@/lib/scim/response";
 import { scimUserSchema, scimPatchOpSchema } from "@/lib/scim/validations";
 import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";

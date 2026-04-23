@@ -11,7 +11,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";

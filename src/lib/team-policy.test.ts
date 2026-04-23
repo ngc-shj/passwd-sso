@@ -30,7 +30,7 @@ vi.mock("@/lib/tenant-rls", () => ({
 // T3.5: mocks for checkTeamAccessRestriction sentinel fallback tests
 const { mockLogAudit } = vi.hoisted(() => ({ mockLogAudit: vi.fn() }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 

@@ -22,7 +22,7 @@ import {
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";

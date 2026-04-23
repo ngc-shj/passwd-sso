@@ -5,7 +5,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn-authorize";
-import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";

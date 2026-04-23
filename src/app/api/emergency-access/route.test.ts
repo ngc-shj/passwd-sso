@@ -24,7 +24,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "mock-token-hex",
   hashToken: (t: string) => `hashed-${t}`,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

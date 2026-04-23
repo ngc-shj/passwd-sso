@@ -27,7 +27,7 @@ vi.mock("@/lib/auth/account-lockout", () => ({
   checkLockout: mockCheckLockout,
   recordFailure: mockRecordFailure,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

@@ -4,7 +4,7 @@ import {
   personalAuditBase,
   teamAuditBase,
   tenantAuditBase,
-} from "@/lib/audit";
+} from "@/lib/audit/audit";
 import { AUDIT_SCOPE } from "@/lib/constants/audit";
 
 function makeReq(headers: Record<string, string> = {}): NextRequest {

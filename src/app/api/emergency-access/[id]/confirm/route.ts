@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { confirmEmergencyGrantSchema } from "@/lib/validations";
 import { canTransition } from "@/lib/emergency-access-state";
 import { SUPPORTED_KEY_ALGORITHMS } from "@/lib/crypto/crypto-emergency";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";

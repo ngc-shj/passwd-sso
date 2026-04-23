@@ -17,7 +17,7 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import {
   AUDIT_ACTION,

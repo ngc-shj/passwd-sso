@@ -5,7 +5,7 @@ import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { extractRequestMeta } from "@/lib/audit";
+import { extractRequestMeta } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";

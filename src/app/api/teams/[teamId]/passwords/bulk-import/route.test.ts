@@ -61,7 +61,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
     for (const e of entries) await mockLogAudit(e);

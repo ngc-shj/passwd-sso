@@ -24,8 +24,8 @@ const {
   mockAuth: vi.fn(),
 }));
 
-vi.mock("@/lib/audit", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/audit")>();
+vi.mock("@/lib/audit/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit/audit")>();
   return {
     ...actual,
     logAuditAsync: mockLogAudit,
@@ -62,7 +62,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 
 // ─── Imports after mocks ───────────────────────────────────────────────────────
 
-import { logAuditAsync, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, resolveActorType } from "@/lib/audit/audit";
 import type { AuthResult } from "@/lib/auth/auth-or-token";
 
 // ─── Scenario 5: SA action audit logging ──────────────────────────────────────

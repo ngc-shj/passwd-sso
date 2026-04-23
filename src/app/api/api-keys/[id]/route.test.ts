@@ -34,7 +34,7 @@ vi.mock("@/lib/logger", () => {
     requestContext: { run: (_s: unknown, fn: () => unknown) => fn(), getStore: () => undefined },
   };
 });
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

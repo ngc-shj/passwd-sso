@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, teamAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";

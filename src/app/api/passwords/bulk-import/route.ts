@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";

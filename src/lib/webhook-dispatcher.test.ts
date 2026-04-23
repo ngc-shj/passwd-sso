@@ -39,8 +39,8 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
+vi.mock("@/lib/audit/audit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/audit/audit")>("@/lib/audit/audit");
   return {
     ...actual,
     logAuditAsync: mockLogAudit,

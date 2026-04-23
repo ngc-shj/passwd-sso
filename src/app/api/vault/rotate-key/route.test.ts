@@ -60,7 +60,7 @@ vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/auth/delegation", () => ({
   revokeAllDelegationSessions: vi.fn(async () => 0),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn(() => ({})),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

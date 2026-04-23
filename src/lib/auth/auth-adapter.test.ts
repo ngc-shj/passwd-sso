@@ -71,7 +71,7 @@ vi.mock("@auth/prisma-adapter", () => ({
     // Base adapter methods (not used in tests but spread into custom adapter)
   }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 vi.mock("@/lib/notification", () => ({

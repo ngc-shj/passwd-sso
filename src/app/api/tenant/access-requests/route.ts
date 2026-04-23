@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit/audit";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { authOrToken } from "@/lib/auth/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";

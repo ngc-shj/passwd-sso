@@ -11,7 +11,7 @@ import {
 } from "@/lib/crypto/crypto-server";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
-import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit";
+import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";

@@ -32,7 +32,7 @@ vi.mock("@/lib/tailscale-client", () => ({
   verifyTailscalePeer: vi.fn().mockResolvedValue(false),
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 

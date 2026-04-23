@@ -1,0 +1,6 @@
+{
+  "phaseName": "phase-3-1-audit-core",
+  "moves": [
+    { "from": "src/lib/audit.ts", "to": "src/lib/audit/audit.ts" }
+  ]
+}

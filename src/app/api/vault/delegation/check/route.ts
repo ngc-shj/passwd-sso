@@ -13,7 +13,7 @@ import { z } from "zod";
 
 import { authOrToken, hasUserId } from "@/lib/auth/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
 import { createRateLimiter } from "@/lib/rate-limit";

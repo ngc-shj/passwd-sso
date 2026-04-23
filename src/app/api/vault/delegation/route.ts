@@ -13,7 +13,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
