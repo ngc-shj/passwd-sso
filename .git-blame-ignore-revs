@@ -6,3 +6,4 @@
 f4dac45748c2342f8c5c68bac0da4bd60c78f7f6  # Phase 1a — move token modules into src/lib/auth/
 f0f0d0b1103defc2a9c41266047e6b617c368dec  # Phase 1b — move WebAuthn modules into src/lib/auth/
 0fe72675b88b3635b8554d943d78e2fe814b1549  # Phase 1c — move session/lockout/device modules into src/lib/auth/
+8c257a7a078c2b9d01ca0bd8dd4ba6b7849ac50a  # Phase 1d-1 — move tenant-auth + team-auth into src/lib/auth/
