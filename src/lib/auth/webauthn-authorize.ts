@@ -15,7 +15,7 @@ import {
   verifyAuthentication,
   getRpOrigin,
   base64urlToUint8Array,
-} from "@/lib/webauthn-server";
+} from "@/lib/auth/webauthn-server";
 import type { AuthenticatorDevice } from "@simplewebauthn/types";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/types";
 

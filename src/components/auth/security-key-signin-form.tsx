@@ -10,7 +10,7 @@ import {
   isWebAuthnSupported,
   startPasskeyAuthentication,
   hexEncode,
-} from "@/lib/webauthn-client";
+} from "@/lib/auth/webauthn-client";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";

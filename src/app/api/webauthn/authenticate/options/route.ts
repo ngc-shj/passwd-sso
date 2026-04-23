@@ -10,7 +10,7 @@ import { withUserTenantRls } from "@/lib/tenant-context";
 import {
   generateAuthenticationOpts,
   derivePrfSalt,
-} from "@/lib/webauthn-server";
+} from "@/lib/auth/webauthn-server";
 
 export const runtime = "nodejs";
 

@@ -43,7 +43,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-vi.mock("@/lib/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn-server", () => ({
   generateRegistrationOpts: mockGenerateRegistrationOpts,
   derivePrfSalt: mockDerivePrfSalt,
 }));

@@ -43,7 +43,7 @@ import { hexDecode, hexEncode } from "./crypto-utils";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
-} from "./webauthn-client";
+} from "./auth/webauthn-client";
 import { AutoLockProvider } from "./auto-lock-context";
 import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "./emergency-access-context";
 

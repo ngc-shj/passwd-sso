@@ -1,0 +1,10 @@
+{
+  "phaseName": "phase-1b-webauthn",
+  "moves": [
+    { "from": "src/lib/webauthn-authorize.ts",      "to": "src/lib/auth/webauthn-authorize.ts" },
+    { "from": "src/lib/webauthn-authorize.test.ts", "to": "src/lib/auth/webauthn-authorize.test.ts" },
+    { "from": "src/lib/webauthn-client.ts",         "to": "src/lib/auth/webauthn-client.ts" },
+    { "from": "src/lib/webauthn-server.ts",         "to": "src/lib/auth/webauthn-server.ts" },
+    { "from": "src/lib/webauthn-server.test.ts",    "to": "src/lib/auth/webauthn-server.test.ts" }
+  ]
+}

@@ -37,7 +37,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn-server", () => ({
   verifyAuthentication: mockVerifyAuthentication,
   getRpOrigin: mockGetRpOrigin,
   base64urlToUint8Array: mockBase64urlToUint8Array,

@@ -6,7 +6,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { generateDiscoverableAuthOpts, derivePrfSalt } from "@/lib/webauthn-server";
+import { generateDiscoverableAuthOpts, derivePrfSalt } from "@/lib/auth/webauthn-server";
 import { randomBytes } from "node:crypto";
 
 export const runtime = "nodejs";

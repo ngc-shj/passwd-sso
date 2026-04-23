@@ -23,7 +23,7 @@ import {
   verifyRegistration,
   uint8ArrayToBase64url,
   getRpOrigin,
-} from "@/lib/webauthn-server";
+} from "@/lib/auth/webauthn-server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 import { sendEmail } from "@/lib/email";
 import { passkeyRegisteredEmail } from "@/lib/email/templates/passkey-registered";

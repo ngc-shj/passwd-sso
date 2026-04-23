@@ -36,7 +36,7 @@ import {
   startPasskeyAuthentication,
   wrapSecretKeyWithPrf,
   generateDefaultNickname,
-} from "@/lib/webauthn-client";
+} from "@/lib/auth/webauthn-client";
 
 interface Credential {
   id: string;

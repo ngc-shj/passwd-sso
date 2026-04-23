@@ -49,7 +49,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
   ["src/lib/auth/api-key.ts", ["apiKey"]],
-  ["src/lib/webauthn-authorize.ts", ["webAuthnCredential"]],
+  ["src/lib/auth/webauthn-authorize.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
   ["src/lib/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],

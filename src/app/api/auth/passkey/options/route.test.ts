@@ -26,7 +26,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 
-vi.mock("@/lib/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn-server", () => ({
   generateDiscoverableAuthOpts: mockGenerateDiscoverableAuthOpts,
 }));
 

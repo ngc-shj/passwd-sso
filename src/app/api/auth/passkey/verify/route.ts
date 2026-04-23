@@ -4,7 +4,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
-import { authorizeWebAuthn } from "@/lib/webauthn-authorize";
+import { authorizeWebAuthn } from "@/lib/auth/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { AUDIT_ACTION } from "@/lib/constants";
