@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EntrySectionCard } from "@/components/passwords/entry/entry-form-ui";
-import { TOTPField } from "@/components/passwords/totp-field";
+import { TOTPField } from "@/components/passwords/shared/totp-field";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";

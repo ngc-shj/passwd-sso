@@ -2,7 +2,7 @@
 
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SecureNoteMarkdown } from "@/components/passwords/secure-note-markdown";
+import { SecureNoteMarkdown } from "@/components/passwords/shared/secure-note-markdown";
 import { SECURE_NOTE_MAX } from "@/lib/validations";
 
 interface SecureNoteFieldsProps {

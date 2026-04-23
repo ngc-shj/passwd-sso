@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 describe("trash-list bulk wiring", () => {
   const src = readFileSync(
-    join(process.cwd(), "src/components/passwords/trash-list.tsx"),
+    join(process.cwd(), "src/components/passwords/shared/trash-list.tsx"),
     "utf8"
   );
 

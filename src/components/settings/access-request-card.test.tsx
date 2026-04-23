@@ -39,7 +39,7 @@ vi.mock("@/lib/constants/service-account", () => ({
   SA_TOKEN_SCOPES: ["passwords:read", "passwords:write", "passwords:list"],
 }));
 
-vi.mock("@/components/passwords/copy-button", () => ({
+vi.mock("@/components/passwords/shared/copy-button", () => ({
   CopyButton: ({ getValue }: { getValue: () => string }) => (
     <button data-testid="copy-button" data-value={getValue()}>
       Copy

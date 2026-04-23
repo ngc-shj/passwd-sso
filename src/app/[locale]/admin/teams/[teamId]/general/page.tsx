@@ -24,7 +24,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { Link } from "@/i18n/navigation";
 import { Loader2, ShieldAlert, Settings2 } from "lucide-react";
 import { toast } from "sonner";

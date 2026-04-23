@@ -4,7 +4,7 @@ import { useTranslations } from "next-intl";
 import { Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { CopyButton } from "../../copy-button";
+import { CopyButton } from "../../shared/copy-button";
 import { useRevealTimeout } from "@/hooks/vault/use-reveal-timeout";
 import type { RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
 import { formatCardNumber } from "@/lib/credit-card";

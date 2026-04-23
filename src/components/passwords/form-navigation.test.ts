@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
+import { createFormNavigationHandlers } from "@/components/passwords/shared/form-navigation";
 
 describe("createFormNavigationHandlers", () => {
   it("calls onCancel on cancel when provided", () => {

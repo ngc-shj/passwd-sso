@@ -17,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MemberInfo } from "@/components/member-info";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { Loader2, UserPlus, X, LinkIcon, Mail, Search } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";

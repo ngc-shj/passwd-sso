@@ -24,7 +24,7 @@ vi.mock("@/components/ui/button", () => ({
     asChild ? <>{children}</> : <button {...rest}>{children}</button>,
 }));
 
-vi.mock("@/components/passwords/copy-button", () => ({
+vi.mock("@/components/passwords/shared/copy-button", () => ({
   CopyButton: () => <button>Copy</button>,
 }));
 

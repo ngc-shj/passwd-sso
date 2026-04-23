@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { ENTRY_TYPE, CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import {
   Eye,

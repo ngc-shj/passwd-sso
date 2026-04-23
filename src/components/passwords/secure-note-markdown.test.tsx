@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { SecureNoteMarkdown } from "./secure-note-markdown";
+import { SecureNoteMarkdown } from "./shared/secure-note-markdown";
 
 describe("SecureNoteMarkdown", () => {
   it("renders headings", () => {

@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react";
 import { EntryFolderSelectSection } from "@/components/passwords/entry/entry-folder-select-section";
-import type { FolderLike } from "@/components/passwords/folder-like";
+import type { FolderLike } from "@/components/passwords/shared/folder-like";
 import { EntryTagsSection } from "@/components/passwords/entry/entry-tags-section";
 
 interface EntryTagsAndFolderLayoutProps {

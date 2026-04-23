@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Select,
   SelectContent,

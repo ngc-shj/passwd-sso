@@ -21,8 +21,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TagBadge } from "@/components/tags/tag-badge";
-import { CopyButton } from "../copy-button";
-import { Favicon } from "../favicon";
+import { CopyButton } from "../shared/copy-button";
+import { Favicon } from "../shared/favicon";
 import {
   PasswordDetailInline,
   type InlineDetailData,

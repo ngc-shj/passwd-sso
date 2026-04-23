@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 
-vi.mock("@/components/passwords/password-generator", () => ({
+vi.mock("@/components/passwords/shared/password-generator", () => ({
   PasswordGenerator: ({ onUse }: { onUse: (password: string, settings: typeof DEFAULT_GENERATOR_SETTINGS) => void }) => (
     <button
       type="button"

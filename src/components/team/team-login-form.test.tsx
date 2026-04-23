@@ -249,11 +249,11 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 
-vi.mock("@/components/passwords/password-generator", () => ({
+vi.mock("@/components/passwords/shared/password-generator", () => ({
   PasswordGenerator: () => null,
 }));
 
-vi.mock("@/components/passwords/totp-field", () => ({
+vi.mock("@/components/passwords/shared/totp-field", () => ({
   TOTPField: () => null,
 }));
 

@@ -13,7 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Collapsible,
   CollapsibleContent,

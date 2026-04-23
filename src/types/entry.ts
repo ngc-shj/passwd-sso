@@ -10,7 +10,7 @@ import type {
   EntryTagNameColor,
   EntryTotp,
 } from "@/lib/vault/entry-form-types";
-import type { TOTPEntry } from "@/components/passwords/totp-field";
+import type { TOTPEntry } from "@/components/passwords/shared/totp-field";
 
 /**
  * Detail view data for a single entry (after decryption).

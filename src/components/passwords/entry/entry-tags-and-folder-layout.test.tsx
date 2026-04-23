@@ -3,7 +3,7 @@
 import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
-import type { FolderLike } from "@/components/passwords/folder-like";
+import type { FolderLike } from "@/components/passwords/shared/folder-like";
 import { EntryTagsAndFolderLayout } from "@/components/passwords/entry/entry-tags-and-folder-layout";
 
 const tagsSectionMock = vi.fn();
