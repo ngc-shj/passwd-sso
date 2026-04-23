@@ -64,7 +64,7 @@ vi.mock("@/lib/email/templates/admin-vault-reset-revoked", () => ({
   adminVaultResetRevokedEmail: mockAdminVaultResetRevokedEmail,
 }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));

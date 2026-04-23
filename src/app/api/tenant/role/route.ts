@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { getTenantMembership } from "@/lib/tenant-auth";
+import { getTenantMembership } from "@/lib/auth/tenant-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { unauthorized } from "@/lib/api-response";
 

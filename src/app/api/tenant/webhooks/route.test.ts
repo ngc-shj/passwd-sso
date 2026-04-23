@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -78,7 +78,7 @@ vi.mock("@/lib/crypto-server", () => ({
 // node:crypto randomBytes is used for secret generation — real implementation is fine in tests
 
 import { GET, POST } from "@/app/api/tenant/webhooks/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 

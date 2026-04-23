@@ -1,7 +1,7 @@
 import { auth } from "@/auth";
 import { notFound } from "next/navigation";
 import { WatchtowerPage } from "@/components/watchtower/watchtower-page";
-import { requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamPermission, TeamAuthError } from "@/lib/auth/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
 
 export default async function TeamWatchtowerPage({

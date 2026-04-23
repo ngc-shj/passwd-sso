@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";

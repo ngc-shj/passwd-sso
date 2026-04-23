@@ -59,7 +59,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {

@@ -29,7 +29,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -79,7 +79,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/mcp-clients/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 import { MAX_MCP_CLIENTS_PER_TENANT } from "@/lib/constants/mcp";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };

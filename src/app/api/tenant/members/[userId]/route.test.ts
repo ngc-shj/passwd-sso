@@ -29,7 +29,7 @@ vi.mock("@/lib/prisma", () => ({
     tenantMember: mockPrismaTenantMember,
   },
 }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));

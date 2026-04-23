@@ -9,7 +9,7 @@ import { parseBody } from "@/lib/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 
 type Params = { params: Promise<{ teamId: string }> };

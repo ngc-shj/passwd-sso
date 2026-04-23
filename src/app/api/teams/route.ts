@@ -10,7 +10,7 @@ import { parseBody } from "@/lib/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";

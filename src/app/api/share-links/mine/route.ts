@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
-import { requireTeamMember } from "@/lib/team-auth";
+import { requireTeamMember } from "@/lib/auth/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";

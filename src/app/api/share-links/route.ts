@@ -9,7 +9,7 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto-server";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";

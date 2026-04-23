@@ -21,7 +21,7 @@ export default defineConfig({
         "src/lib/crypto-aad.ts",
         "src/lib/crypto-emergency.ts",
         "src/lib/crypto-recovery.ts",
-        "src/lib/team-auth.ts",
+        "src/lib/auth/team-auth.ts",
         "src/lib/crypto-server.ts",
         "src/lib/crypto-team.ts",
         "src/lib/team-vault-core.tsx",

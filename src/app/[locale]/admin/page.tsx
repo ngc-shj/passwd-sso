@@ -1,8 +1,8 @@
 import { redirect } from "@/i18n/navigation";
 import { setRequestLocale } from "next-intl/server";
 import { auth } from "@/auth";
-import { getTenantRole, isTenantAdminRole } from "@/lib/tenant-auth";
-import { getAdminTeamMemberships } from "@/lib/team-auth";
+import { getTenantRole, isTenantAdminRole } from "@/lib/auth/tenant-auth";
+import { getAdminTeamMemberships } from "@/lib/auth/team-auth";
 
 export default async function AdminPage({
   params,

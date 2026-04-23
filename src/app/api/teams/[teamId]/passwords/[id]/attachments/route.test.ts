@@ -40,7 +40,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: MockTeamAuthError,
 }));

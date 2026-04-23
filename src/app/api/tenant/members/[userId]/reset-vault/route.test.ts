@@ -78,7 +78,7 @@ vi.mock("@/lib/email/templates/admin-vault-reset", () => ({
 }));
 vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: mockServerAppUrl }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   isTenantRoleAbove: mockIsTenantRoleAbove,
   TenantAuthError,

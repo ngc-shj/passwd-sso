@@ -40,7 +40,7 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
   },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));

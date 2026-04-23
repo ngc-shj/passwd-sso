@@ -44,7 +44,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/logger", () => ({
   getLogger: mockGetLogger,
 }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError: MockTenantAuthError,
 }));

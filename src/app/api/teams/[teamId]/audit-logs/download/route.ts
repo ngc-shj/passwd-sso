@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team-policy";

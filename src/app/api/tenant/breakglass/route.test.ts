@@ -43,7 +43,7 @@ const {
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));

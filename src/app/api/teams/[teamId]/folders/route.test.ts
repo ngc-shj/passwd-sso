@@ -32,7 +32,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { teamFolder: mockPrismaTeamFolder, team: mockPrismaTeam },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,

@@ -25,7 +25,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -65,7 +65,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { GET, POST } from "@/app/api/teams/[teamId]/folders/route";
-import { TeamAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/auth/team-auth";
 import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
 
 describe("GET /api/teams/[teamId]/folders", () => {

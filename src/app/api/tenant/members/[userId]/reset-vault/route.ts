@@ -13,7 +13,7 @@ import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
   isTenantRoleAbove,
-} from "@/lib/tenant-auth";
+} from "@/lib/auth/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";

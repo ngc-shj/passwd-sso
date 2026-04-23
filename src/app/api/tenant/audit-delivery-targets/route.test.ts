@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -83,7 +83,7 @@ vi.mock("@/lib/crypto-server", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/audit-delivery-targets/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 import { AUDIT_ACTION } from "@/lib/constants";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };

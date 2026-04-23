@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamMember } from "@/lib/team-auth";
+import { requireTeamMember } from "@/lib/auth/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";

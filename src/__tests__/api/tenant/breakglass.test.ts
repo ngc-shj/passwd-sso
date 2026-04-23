@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -97,7 +97,7 @@ vi.mock("@/lib/constants/notification", () => ({
 
 import { POST, GET } from "@/app/api/tenant/breakglass/route";
 import { DELETE } from "@/app/api/tenant/breakglass/[id]/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 import { GRANT_STATUS } from "@/lib/constants/breakglass";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 

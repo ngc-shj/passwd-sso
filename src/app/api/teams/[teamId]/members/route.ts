@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { addMemberSchema } from "@/lib/validations";
-import { requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/team-auth";
+import { requireTeamMember, requireTeamPermission, TeamAuthError } from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";

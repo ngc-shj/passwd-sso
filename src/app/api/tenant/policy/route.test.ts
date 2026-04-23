@@ -75,7 +75,7 @@ vi.mock("@/lib/auth/account-lockout", () => ({
   invalidateLockoutThresholdCache: mockInvalidateLockoutThresholdCache,
 }));
 
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));

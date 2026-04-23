@@ -25,7 +25,7 @@ vi.mock("@/lib/prisma", () => ({
     directorySyncLog: { findMany: mockLogFindMany },
   },
 }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
 }));
 vi.mock("@/lib/tenant-context", () => ({

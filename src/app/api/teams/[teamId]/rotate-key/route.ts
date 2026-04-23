@@ -3,7 +3,7 @@ import { z } from "zod";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/csrf";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";

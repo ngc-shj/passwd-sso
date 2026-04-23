@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { requireTeamMember } from "@/lib/team-auth";
+import { requireTeamMember } from "@/lib/auth/team-auth";
 import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";

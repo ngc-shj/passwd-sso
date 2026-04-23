@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -55,7 +55,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { GET, PATCH } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route";
-import { TeamAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/auth/team-auth";
 
 const VALID_IV = "a".repeat(24);
 const VALID_AUTH_TAG = "b".repeat(32);

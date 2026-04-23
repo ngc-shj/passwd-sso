@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto-server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";

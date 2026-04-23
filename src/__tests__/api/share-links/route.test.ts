@@ -35,7 +35,7 @@ vi.mock("@/lib/crypto-server", () => ({
   generateAccessPassword: () => "test-access-password-base64url-43ch",
   hashAccessPassword: () => "hashed-access-password",
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: vi.fn(),
   TeamAuthError: class extends Error {
     status: number;
@@ -283,8 +283,8 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValueOnce({ teamId: "team-123" });
 
-    const { requireTeamPermission } = await import("@/lib/team-auth");
-    const { TeamAuthError: RealTeamAuthError } = await import("@/lib/team-auth");
+    const { requireTeamPermission } = await import("@/lib/auth/team-auth");
+    const { TeamAuthError: RealTeamAuthError } = await import("@/lib/auth/team-auth");
     vi.mocked(requireTeamPermission).mockRejectedValueOnce(
       new RealTeamAuthError("INSUFFICIENT_PERMISSION", 403)
     );

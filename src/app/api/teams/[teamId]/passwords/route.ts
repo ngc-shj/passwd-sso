@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { checkAuth } from "@/lib/check-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { createTeamE2EPasswordSchema } from "@/lib/validations";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { parseBody } from "@/lib/parse-body";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";

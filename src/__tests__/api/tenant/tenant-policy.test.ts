@@ -27,7 +27,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -82,7 +82,7 @@ vi.mock("@/lib/auth/account-lockout", () => ({
 }));
 
 import { GET, PATCH } from "@/app/api/tenant/policy/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 
 const FULL_POLICY_RESPONSE = {
   maxConcurrentSessions: null,

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, tenantAuditBase, resolveActorType } from "@/lib/audit";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { authOrToken } from "@/lib/auth-or-token";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
