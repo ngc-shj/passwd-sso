@@ -25,7 +25,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/audit/audit", () => ({

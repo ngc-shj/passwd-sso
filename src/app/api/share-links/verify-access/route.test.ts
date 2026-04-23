@@ -39,7 +39,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/auth/share-access-token", () => ({
   createShareAccessToken: mockCreateShareAccessToken,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn()
     .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockTokenCheck, clear: vi.fn() }),

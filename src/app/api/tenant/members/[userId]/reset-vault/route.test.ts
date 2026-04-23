@@ -63,7 +63,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
 }));
 vi.mock("@/lib/audit/audit", () => ({

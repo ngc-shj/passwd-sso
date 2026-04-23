@@ -5,7 +5,7 @@ import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { checkAuth } from "@/lib/auth/check-auth";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { rateLimited } from "@/lib/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 

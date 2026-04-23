@@ -14,7 +14,7 @@ import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";
 import { forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

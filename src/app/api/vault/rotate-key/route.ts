@@ -7,7 +7,7 @@ import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
 import { revokeAllDelegationSessions } from "@/lib/auth/delegation";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";

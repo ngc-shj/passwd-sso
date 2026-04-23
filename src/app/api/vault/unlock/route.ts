@@ -3,7 +3,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";

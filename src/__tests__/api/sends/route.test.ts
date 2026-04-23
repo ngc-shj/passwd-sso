@@ -30,7 +30,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   generateAccessPassword: () => "test-access-password-base64url-43ch",
   hashAccessPassword: () => "hashed-access-password",
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/audit/audit", () => ({

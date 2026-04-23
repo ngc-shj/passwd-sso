@@ -1,0 +1,16 @@
+{
+  "phaseName": "phase-4a-security",
+  "moves": [
+    { "from": "src/lib/security-headers.ts",     "to": "src/lib/security/security-headers.ts" },
+    { "from": "src/lib/sentry-sanitize.ts",      "to": "src/lib/security/sentry-sanitize.ts" },
+    { "from": "src/lib/sentry-sanitize.test.ts", "to": "src/lib/security/sentry-sanitize.test.ts" },
+    { "from": "src/lib/sentry-scrub.ts",         "to": "src/lib/security/sentry-scrub.ts" },
+    { "from": "src/lib/sentry-scrub.test.ts",    "to": "src/lib/security/sentry-scrub.test.ts" },
+    { "from": "src/lib/rate-limit.ts",           "to": "src/lib/security/rate-limit.ts" },
+    { "from": "src/lib/rate-limiters.ts",        "to": "src/lib/security/rate-limiters.ts" },
+    { "from": "src/lib/password-policy-validation.ts",      "to": "src/lib/security/password-policy-validation.ts" },
+    { "from": "src/lib/password-policy-validation.test.ts", "to": "src/lib/security/password-policy-validation.test.ts" },
+    { "from": "src/lib/password-analyzer.ts",      "to": "src/lib/security/password-analyzer.ts" },
+    { "from": "src/lib/password-analyzer.test.ts", "to": "src/lib/security/password-analyzer.test.ts" }
+  ]
+}

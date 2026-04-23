@@ -14,7 +14,7 @@ import { ACTOR_TYPE } from "@/lib/constants/audit";
 import { withTenantRls, withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { z } from "zod";
 import { SA_TOKEN_SCOPE, SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";

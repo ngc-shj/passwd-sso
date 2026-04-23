@@ -10,7 +10,7 @@ import { rateLimited, unauthorized } from "@/lib/api-response";
 
 import { parseBody } from "@/lib/parse-body";
 import { bulkImportSchema } from "@/lib/validations";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 
 const bulkImportLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });

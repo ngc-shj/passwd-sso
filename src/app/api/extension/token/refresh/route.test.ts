@@ -62,7 +62,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: () => "new-token-hash",
 }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 

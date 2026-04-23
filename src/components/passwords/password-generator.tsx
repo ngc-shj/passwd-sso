@@ -21,7 +21,7 @@ import {
 } from "@/lib/generator-prefs";
 import { API_PATH } from "@/lib/constants";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
-import { getPolicyViolations } from "@/lib/password-policy-validation";
+import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
 import {

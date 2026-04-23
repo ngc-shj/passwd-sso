@@ -17,7 +17,7 @@ import {
 } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 
 type RouteContext = { params: Promise<{ teamId: string; id: string }> };
 

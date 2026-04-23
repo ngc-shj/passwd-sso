@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";

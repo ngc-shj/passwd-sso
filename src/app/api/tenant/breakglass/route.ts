@@ -10,7 +10,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { assertOrigin } from "@/lib/auth/csrf";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";

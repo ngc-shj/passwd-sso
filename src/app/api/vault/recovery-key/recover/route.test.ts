@@ -15,7 +15,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn()
     .mockReturnValueOnce({ check: mockVerifyCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockResetCheck, clear: mockResetClear }),

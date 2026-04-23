@@ -16,7 +16,7 @@ import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/mcp";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 
 const checkRateLimiter = createRateLimiter({ windowMs: 60_000, max: 120 });
 

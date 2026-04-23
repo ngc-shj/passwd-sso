@@ -14,7 +14,7 @@ const { mockToolListCredentials, mockToolSearchCredentials, mockToolWhoami } = v
 
 // ─── Mocks ────────────────────────────────────────────────────
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),

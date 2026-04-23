@@ -12,7 +12,7 @@ vi.mock("@sentry/nextjs", () => ({
   captureRequestError: mocks.captureRequestError,
 }));
 
-vi.mock("@/lib/sentry-sanitize", () => ({
+vi.mock("@/lib/security/sentry-sanitize", () => ({
   sanitizeErrorForSentry: mocks.sanitizeErrorForSentry,
 }));
 

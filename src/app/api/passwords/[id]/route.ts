@@ -5,7 +5,7 @@ import { updateE2EPasswordSchema } from "@/lib/validations";
 import { forbidden, notFound, rateLimited, validationError } from "@/lib/api-response";
 import { checkAuth } from "@/lib/auth/check-auth";
 import { parseBody } from "@/lib/parse-body";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withRequestLog } from "@/lib/with-request-log";
 import { EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";

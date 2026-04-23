@@ -5,7 +5,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { checkAuth } from "@/lib/auth/check-auth";
 import { errorResponse, rateLimited } from "@/lib/api-response";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

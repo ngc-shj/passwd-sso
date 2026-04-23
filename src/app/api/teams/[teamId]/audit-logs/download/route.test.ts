@@ -59,7 +59,7 @@ vi.mock("@/lib/team-policy", () => ({
   assertPolicyAllowsExport: mockAssertPolicyAllowsExport,
   PolicyViolationError,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheckRateLimit }),
 }));
 

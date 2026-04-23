@@ -28,7 +28,7 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

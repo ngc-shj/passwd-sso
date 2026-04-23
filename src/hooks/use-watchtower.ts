@@ -21,7 +21,7 @@ import {
   checkHIBP,
   delay,
   type StrengthResult,
-} from "@/lib/password-analyzer";
+} from "@/lib/security/password-analyzer";
 import { fetchApi } from "@/lib/url-helpers";
 
 // ─── Constants ──────────────────────────────────────────────

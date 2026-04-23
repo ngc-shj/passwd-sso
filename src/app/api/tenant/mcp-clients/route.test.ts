@@ -71,7 +71,7 @@ vi.mock("@/lib/audit/audit", () => ({
     acceptLanguage: null,
   }),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({

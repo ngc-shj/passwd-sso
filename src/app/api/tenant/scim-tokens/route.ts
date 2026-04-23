@@ -14,7 +14,7 @@ import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,
   SCIM_TOKEN_EXPIRY_MAX_DAYS,

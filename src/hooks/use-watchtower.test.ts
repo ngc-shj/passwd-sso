@@ -63,7 +63,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
   deriveItemEncryptionKey: mockDeriveItemEncryptionKey,
 }));
 
-vi.mock("@/lib/password-analyzer", () => ({
+vi.mock("@/lib/security/password-analyzer", () => ({
   analyzeStrength: mockAnalyzeStrength,
   checkHIBP: mockCheckHIBP,
   delay: mockDelay,

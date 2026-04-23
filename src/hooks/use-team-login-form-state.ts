@@ -10,7 +10,7 @@ import {
   applyPolicyToGeneratorSettings,
   buildPolicyAwareGeneratorSettings,
 } from "@/hooks/team-login-form-initial-values";
-import { getPolicyViolations, checkPasswordReuse, type PolicyViolation } from "@/lib/password-policy-validation";
+import { getPolicyViolations, checkPasswordReuse, type PolicyViolation } from "@/lib/security/password-policy-validation";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";

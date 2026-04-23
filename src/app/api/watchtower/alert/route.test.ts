@@ -23,7 +23,7 @@ const { mockAuth, mockCheck, mockCreateNotification, mockLogAudit, mockSendEmail
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockCheck,
     clear: vi.fn(),

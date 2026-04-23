@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/tenant-context", () => ({

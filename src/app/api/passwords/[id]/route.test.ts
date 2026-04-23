@@ -24,7 +24,7 @@ const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUse
   mockWithBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
   mockRateLimiterCheck: vi.fn(),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));

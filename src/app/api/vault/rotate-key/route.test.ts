@@ -45,7 +45,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/emergency-access-server", () => ({
   markGrantsStaleForOwner: mockMarkStale,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/logger", () => ({

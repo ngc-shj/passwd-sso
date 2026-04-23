@@ -29,7 +29,7 @@ vi.mock("@/lib/prisma", () => ({
     tenant: { findMany: mockTenantFindMany },
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/audit/audit", () => ({

@@ -53,7 +53,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
 vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),

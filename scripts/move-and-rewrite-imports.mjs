@@ -612,28 +612,105 @@ function rewriteExternalRelativeImports(project, absMap, repoRoot, dryRun) {
   // These files are handled by rewriteRelativeInMovedFile, not here.
   const movingFiles = new Set(absMap.keys());
 
+  // Helper: given a relative specifier in `fileDir`, compute the rewritten
+  // relative specifier if the target is in absMap. Preserves any explicit
+  // `.ts`/`.tsx` extension the caller carried (required for .mjs files that
+  // import TypeScript sources with explicit extensions, e.g.
+  // `../../src/lib/foo.ts` in scripts/__tests__/*.test.mjs).
+  function computeRewrite(spec, fileDir) {
+    if (!spec.startsWith(".")) return null;
+    const resolved = resolve(fileDir, spec);
+    const originalExtMatch = spec.match(/\.(ts|tsx)$/);
+    const preserveExt = originalExtMatch ? originalExtMatch[0] : "";
+    for (const ext of ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]) {
+      const candidate = resolved + ext;
+      if (absMap.has(candidate)) {
+        const newTarget = absMap.get(candidate);
+        // Strip .ts/.tsx from the canonical path, then optionally re-add
+        // if the original specifier had an explicit extension.
+        const canonical = newTarget.replace(/\.(ts|tsx)$/, "");
+        let newRel = relative(fileDir, canonical).replace(/\\/g, "/");
+        if (!newRel.startsWith(".")) newRel = "./" + newRel;
+        if (preserveExt) newRel += preserveExt;
+        return newRel;
+      }
+    }
+    return null;
+  }
+
   for (const sourceFile of project.getSourceFiles()) {
     const filePath = sourceFile.getFilePath();
     // Skip files that are themselves being moved (they have dedicated handling)
     if (movingFiles.has(filePath)) continue;
     const fileDir = dirname(filePath);
 
+    // Static ImportDeclaration
     for (const decl of sourceFile.getImportDeclarations()) {
       const spec = decl.getModuleSpecifierValue();
+      const newRel = computeRewrite(spec, fileDir);
+      if (newRel && newRel !== spec) {
+        console.log(`[relative] ${toRepoRelative(filePath, repoRoot)}: ${spec} -> ${newRel}`);
+        if (!dryRun) decl.setModuleSpecifier(newRel);
+        counts.relative++;
+      }
+    }
+
+    // Static ExportDeclaration with `from "..."` (re-exports)
+    for (const decl of sourceFile.getExportDeclarations()) {
+      const spec = decl.getModuleSpecifierValue?.();
+      if (!spec) continue;
+      const newRel = computeRewrite(spec, fileDir);
+      if (newRel && newRel !== spec) {
+        console.log(`[re-export-relative] ${toRepoRelative(filePath, repoRoot)}: ${spec} -> ${newRel}`);
+        if (!dryRun) decl.setModuleSpecifier(newRel);
+        counts.relative++;
+      }
+    }
+
+    // Dynamic CallExpression: import("..."), require("..."),
+    // vi.mock("..."), vi.doMock("..."), vi.importActual("..."),
+    // vi.importOriginal("..."). We only rewrite string-literal args whose
+    // value is relative; alias specifiers are handled by rewriteAliasInFile.
+    const DYNAMIC_CALLEES = new Set([
+      "require",
+      "vi.mock",
+      "vi.doMock",
+      "vi.importActual",
+      "vi.importOriginal",
+    ]);
+    const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+    for (const call of calls) {
+      const expr = call.getExpression();
+      const args = call.getArguments();
+      if (args.length === 0 || args[0].getKind() !== SyntaxKind.StringLiteral) continue;
+      const arg = args[0];
+      const spec = arg.getLiteralText();
       if (!spec.startsWith(".")) continue;
-      const resolved = resolve(fileDir, spec);
-      for (const ext of ["", ".ts", ".tsx", "/index.ts", "/index.tsx"]) {
-        const candidate = resolved + ext;
-        if (absMap.has(candidate)) {
-          const newTarget = absMap.get(candidate);
-          let newRel = relative(fileDir, newTarget.replace(/\.(ts|tsx)$/, "")).replace(/\\/g, "/");
-          if (!newRel.startsWith(".")) newRel = "./" + newRel;
-          if (newRel !== spec) {
-            console.log(`[relative] ${toRepoRelative(filePath, repoRoot)}: ${spec} -> ${newRel}`);
-            if (!dryRun) decl.setModuleSpecifier(newRel);
-            counts.relative++;
-          }
-          break;
+      const isImport = expr.getKind() === SyntaxKind.ImportKeyword;
+      const isAllowed = isImport || DYNAMIC_CALLEES.has(expr.getText());
+      if (!isAllowed) continue;
+      const newRel = computeRewrite(spec, fileDir);
+      if (newRel && newRel !== spec) {
+        const tag = isImport ? "await-import-relative" : `${expr.getText()}-relative`;
+        if (rewriteStringLiteralNode(arg, newRel, tag, filePath, dryRun, repoRoot)) {
+          counts.relative++;
+        }
+      }
+    }
+
+    // typeof import("...") with a relative specifier
+    const importTypes = sourceFile.getDescendantsOfKind(SyntaxKind.ImportType);
+    for (const importType of importTypes) {
+      const argNode = importType.getArgument?.();
+      if (!argNode || argNode.getKind() !== SyntaxKind.LiteralType) continue;
+      const strNode = argNode.getLiteral?.();
+      if (!strNode || strNode.getKind() !== SyntaxKind.StringLiteral) continue;
+      const spec = strNode.getLiteralText();
+      if (!spec.startsWith(".")) continue;
+      const newRel = computeRewrite(spec, fileDir);
+      if (newRel && newRel !== spec) {
+        if (rewriteStringLiteralNode(strNode, newRel, "typeof-import-relative", filePath, dryRun, repoRoot)) {
+          counts.relative++;
         }
       }
     }

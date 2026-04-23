@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { type PolicyViolation } from "@/lib/password-policy-validation";
+import { type PolicyViolation } from "@/lib/security/password-policy-validation";
 import type { EntryTypeValue } from "@/lib/constants";
 import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
 import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";

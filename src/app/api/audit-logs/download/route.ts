@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import {

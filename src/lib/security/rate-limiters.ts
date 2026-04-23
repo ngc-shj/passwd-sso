@@ -7,7 +7,7 @@
  * not per individual endpoint.
  */
 
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 /** Shared limiter for `/api/v1/*` API-key-authenticated routes (100 req/min). */

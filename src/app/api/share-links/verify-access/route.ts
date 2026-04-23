@@ -4,7 +4,7 @@ import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/share-access-token";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";

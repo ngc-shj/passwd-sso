@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import { sanitizeErrorForSentry } from "@/lib/sentry-sanitize";
+import { sanitizeErrorForSentry } from "@/lib/security/sentry-sanitize";
 
 // Hardcoded fallback strings — no i18n dependency in global error boundary
 const STRINGS = {

@@ -7,7 +7,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { bulkTeamImportSchema } from "@/lib/validations";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
 import * as teamPasswordService from "@/lib/services/team-password-service";

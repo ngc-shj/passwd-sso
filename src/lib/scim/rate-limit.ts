@@ -1,4 +1,4 @@
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 
 /**
  * SCIM-specific rate limiter.

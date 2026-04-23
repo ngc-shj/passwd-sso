@@ -68,7 +68,7 @@ vi.mock("@/lib/audit/audit", () => ({
     scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test",
   }),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/with-request-log", () => ({

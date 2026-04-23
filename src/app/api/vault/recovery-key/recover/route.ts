@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/auth/csrf";

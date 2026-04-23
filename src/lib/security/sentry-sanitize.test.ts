@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizeErrorForSentry } from "@/lib/sentry-sanitize";
+import { sanitizeErrorForSentry } from "@/lib/security/sentry-sanitize";
 
 describe("sanitizeErrorForSentry", () => {
   it("scrubs 64-char hex strings from error message", () => {

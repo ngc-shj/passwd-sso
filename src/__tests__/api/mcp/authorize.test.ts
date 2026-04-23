@@ -25,7 +25,7 @@ vi.mock("@/lib/url-helpers", () => ({
 vi.mock("@/i18n/locale-utils", () => ({
   detectBestLocaleFromAcceptLanguage: mockDetectLocale,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/auth/ip-access", () => ({

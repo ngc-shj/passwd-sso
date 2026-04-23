@@ -6,7 +6,7 @@ const { mockAuth, mockCheck } = vi.hoisted(() => ({
   mockCheck: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockCheck,
     clear: vi.fn(),
