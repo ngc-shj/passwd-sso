@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
-import type { AuditLogItem } from "@/hooks/use-audit-logs";
+import type { AuditLogItem } from "@/hooks/vault/use-audit-logs";
 
 interface AuditLogListProps {
   logs: AuditLogItem[];

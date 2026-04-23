@@ -25,7 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useTeamVaultContext } from "@/hooks/use-vault-context";
+import { useTeamVaultContext } from "@/hooks/vault/use-vault-context";
 import { useSetActiveVault } from "@/lib/vault/active-vault-context";
 import { useTenantRole } from "@/hooks/use-tenant-role";
 import { isTeamAdminRole } from "@/lib/constants";

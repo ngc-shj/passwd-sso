@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "../copy-button";
 import { SecureNoteMarkdown } from "../secure-note-markdown";
 import type { InlineDetailData } from "@/types/entry";
-import type { RequireVerificationFn } from "@/hooks/use-reveal-timeout";
+import type { RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
 import type { CreateGuardedGetterFn } from "./types";
 
 interface SectionProps {

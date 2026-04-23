@@ -16,7 +16,7 @@ import type {
   SidebarTeamItem,
   SidebarTeamTagItem,
 } from "@/hooks/sidebar/use-sidebar-data";
-import type { VaultContext } from "@/hooks/use-vault-context";
+import type { VaultContext } from "@/hooks/vault/use-vault-context";
 import { TEAM_ROLE } from "@/lib/constants";
 
 export interface SidebarContentProps {

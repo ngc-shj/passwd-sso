@@ -5,8 +5,8 @@ import { Eye, EyeOff } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "../copy-button";
-import { useRevealTimeout } from "@/hooks/use-reveal-timeout";
-import type { RequireVerificationFn } from "@/hooks/use-reveal-timeout";
+import { useRevealTimeout } from "@/hooks/vault/use-reveal-timeout";
+import type { RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
 import type { InlineDetailData } from "@/types/entry";
 import type { CreateGuardedGetterFn } from "./types";
 

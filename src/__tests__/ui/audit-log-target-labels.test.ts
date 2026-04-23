@@ -25,7 +25,7 @@ describe("audit log target labels", () => {
   it("has i18n fallback when action key translation is missing", () => {
     // The canonical actionLabel fallback implementation lives in use-audit-logs.ts
     const hook = readFileSync(
-      join(process.cwd(), "src/hooks/use-audit-logs.ts"),
+      join(process.cwd(), "src/hooks/vault/use-audit-logs.ts"),
       "utf8"
     );
 

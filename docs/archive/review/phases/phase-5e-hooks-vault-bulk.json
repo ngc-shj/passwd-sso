@@ -1,0 +1,18 @@
+{
+  "phaseName": "phase-5e-hooks-vault-bulk",
+  "moves": [
+    { "from": "src/hooks/use-reveal-timeout.ts",      "to": "src/hooks/vault/use-reveal-timeout.ts" },
+    { "from": "src/hooks/use-reveal-timeout.test.ts", "to": "src/hooks/vault/use-reveal-timeout.test.ts" },
+    { "from": "src/hooks/use-reprompt.ts",      "to": "src/hooks/vault/use-reprompt.ts" },
+    { "from": "src/hooks/use-reprompt.test.ts", "to": "src/hooks/vault/use-reprompt.test.ts" },
+    { "from": "src/hooks/use-reprompt-hook.test.ts", "to": "src/hooks/vault/use-reprompt-hook.test.ts" },
+    { "from": "src/hooks/use-vault-context.ts", "to": "src/hooks/vault/use-vault-context.ts" },
+    { "from": "src/hooks/use-audit-logs.ts",      "to": "src/hooks/vault/use-audit-logs.ts" },
+    { "from": "src/hooks/use-audit-logs.test.ts", "to": "src/hooks/vault/use-audit-logs.test.ts" },
+
+    { "from": "src/hooks/use-bulk-action.ts",      "to": "src/hooks/bulk/use-bulk-action.ts" },
+    { "from": "src/hooks/use-bulk-action.test.ts", "to": "src/hooks/bulk/use-bulk-action.test.ts" },
+    { "from": "src/hooks/use-bulk-selection.ts",      "to": "src/hooks/bulk/use-bulk-selection.ts" },
+    { "from": "src/hooks/use-bulk-selection.test.ts", "to": "src/hooks/bulk/use-bulk-selection.test.ts" }
+  ]
+}

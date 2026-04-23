@@ -27,7 +27,7 @@ import {
 } from "@/lib/constants";
 import { formatUserName } from "@/lib/format/format-user";
 import { useAuditDelegationLabel } from "@/components/audit/audit-delegation-detail";
-import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
+import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { getActionLabel } from "@/lib/audit/audit-action-label";
 import { getCommonTargetLabel } from "@/lib/audit/audit-target-label";
 import { AuditActionFilter } from "@/components/audit/audit-action-filter";

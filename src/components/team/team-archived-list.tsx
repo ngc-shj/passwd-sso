@@ -8,8 +8,8 @@ import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader"
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useBulkSelection } from "@/hooks/use-bulk-selection";
-import { useBulkAction } from "@/hooks/use-bulk-action";
+import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
+import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";

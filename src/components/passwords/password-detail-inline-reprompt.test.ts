@@ -23,7 +23,7 @@ const loginSource = readFileSync(LOGIN_SECTION_PATH, "utf-8");
 
 describe("PasswordDetailInline reprompt guards", () => {
   it("imports useReprompt hook", () => {
-    expect(source).toContain('import { useReprompt } from "@/hooks/use-reprompt"');
+    expect(source).toContain('import { useReprompt } from "@/hooks/vault/use-reprompt"');
   });
 
   it("calls useReprompt()", () => {

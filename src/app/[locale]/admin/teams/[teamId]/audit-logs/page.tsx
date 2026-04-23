@@ -30,7 +30,7 @@ import { useTeamVaultOptional } from "@/lib/team/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
-import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
+import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { getActionLabel } from "@/lib/audit/audit-action-label";
 import { getCommonTargetLabel } from "@/lib/audit/audit-target-label";
 import { AuditActionFilter } from "@/components/audit/audit-action-filter";

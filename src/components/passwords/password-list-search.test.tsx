@@ -49,7 +49,7 @@ vi.mock("@/lib/vault/entry-sort", () => ({
   compareEntriesWithFavorite: () => 0,
 }));
 
-vi.mock("@/hooks/use-bulk-selection", () => ({
+vi.mock("@/hooks/bulk/use-bulk-selection", () => ({
   useBulkSelection: () => ({
     selectedIds: new Set<string>(),
     atLimit: false,
@@ -58,7 +58,7 @@ vi.mock("@/hooks/use-bulk-selection", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-bulk-action", () => ({
+vi.mock("@/hooks/bulk/use-bulk-action", () => ({
   useBulkAction: () => ({
     dialogOpen: false,
     setDialogOpen: vi.fn(),

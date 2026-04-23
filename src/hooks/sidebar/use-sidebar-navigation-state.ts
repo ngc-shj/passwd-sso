@@ -10,7 +10,7 @@ import type {
   SidebarTeamTagGroup,
   SidebarTagItem,
 } from "@/hooks/sidebar/use-sidebar-data";
-import type { VaultContext } from "@/hooks/use-vault-context";
+import type { VaultContext } from "@/hooks/vault/use-vault-context";
 
 interface UseSidebarNavigationStateParams {
   pathname: string;

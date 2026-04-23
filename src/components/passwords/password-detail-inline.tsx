@@ -11,7 +11,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
-import { useReprompt } from "@/hooks/use-reprompt";
+import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { Edit } from "lucide-react";
 
 import { SshKeySection } from "./detail-sections/ssh-key-section";

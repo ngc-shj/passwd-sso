@@ -8,7 +8,7 @@ import type {
   SidebarTeamTagItem,
 } from "@/hooks/sidebar/use-sidebar-data";
 import type { SidebarSection } from "@/hooks/sidebar/use-sidebar-sections-state";
-import type { VaultContext } from "@/hooks/use-vault-context";
+import type { VaultContext } from "@/hooks/vault/use-vault-context";
 
 interface UseSidebarViewModelParams {
   t: (key: string) => string;

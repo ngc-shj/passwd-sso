@@ -7,7 +7,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { VaultContext } from "@/hooks/use-vault-context";
+import type { VaultContext } from "@/hooks/vault/use-vault-context";
 
 interface ActiveVaultContextValue {
   vault: VaultContext | null;

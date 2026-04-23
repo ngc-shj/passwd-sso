@@ -4,7 +4,7 @@ import { renderHook, act } from "@testing-library/react";
 import {
   useBulkSelection,
   type BulkSelectionHandle,
-} from "@/hooks/use-bulk-selection";
+} from "@/hooks/bulk/use-bulk-selection";
 
 describe("useBulkSelection", () => {
   it("starts with empty selectedIds", () => {

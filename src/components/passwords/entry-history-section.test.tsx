@@ -30,7 +30,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-reprompt", () => ({
+vi.mock("@/hooks/vault/use-reprompt", () => ({
   useReprompt: () => ({
     requireVerification: mockRequireVerification,
     repromptDialog: mockRepromptDialog,

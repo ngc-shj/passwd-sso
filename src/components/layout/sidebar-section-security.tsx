@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Link } from "@/i18n/navigation";
 import { TEAM_ROLE } from "@/lib/constants";
 import { CollapsibleSectionHeader } from "@/components/layout/sidebar-shared";
-import type { VaultContext } from "@/hooks/use-vault-context";
+import type { VaultContext } from "@/hooks/vault/use-vault-context";
 import {
   Download,
   HeartPulse,

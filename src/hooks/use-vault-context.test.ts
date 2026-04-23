@@ -16,7 +16,7 @@ vi.mock("@/hooks/use-local-storage", () => ({
   useLocalStorage: () => [mockLastContext, mockSetLastContext],
 }));
 
-import { useVaultContext } from "./use-vault-context";
+import { useVaultContext } from "./vault/use-vault-context";
 
 describe("useVaultContext", () => {
   beforeEach(() => {

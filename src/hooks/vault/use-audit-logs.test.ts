@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
-import { useAuditLogs, type UseAuditLogsConfig } from "@/hooks/use-audit-logs";
+import { useAuditLogs, type UseAuditLogsConfig } from "@/hooks/vault/use-audit-logs";
 import type { AuditActionValue } from "@/lib/constants";
 
 // ---- Mocks ----

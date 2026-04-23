@@ -16,12 +16,12 @@ import {
 } from "@/components/ui/dialog";
 import { Trash2, Loader2, RotateCcw, FileText, CreditCard, IdCard } from "lucide-react";
 import { toast } from "sonner";
-import { useBulkSelection } from "@/hooks/use-bulk-selection";
-import { useBulkAction } from "@/hooks/use-bulk-action";
+import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
+import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { EntryListShell, type EntrySelectionState } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { BulkSelectionHandle } from "@/hooks/use-bulk-selection";
+import type { BulkSelectionHandle } from "@/hooks/bulk/use-bulk-selection";
 import {
   compareEntriesByDeletedAt,
   type EntrySortOption,

@@ -6,8 +6,8 @@ import {
   resolveEndpoint,
   buildBody,
   extractCount,
-} from "@/hooks/use-bulk-action";
-import type { BulkScope } from "@/hooks/use-bulk-action";
+} from "@/hooks/bulk/use-bulk-action";
+import type { BulkScope } from "@/hooks/bulk/use-bulk-action";
 
 // ---------------------------------------------------------------------------
 // Mock sonner
