@@ -19,7 +19,7 @@ vi.mock("@/lib/scim/rate-limit", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 

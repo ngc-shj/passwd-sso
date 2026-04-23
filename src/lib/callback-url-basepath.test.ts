@@ -9,7 +9,7 @@ vi.mock("./url-helpers", () => ({
   BASE_PATH: "/passwd-sso",
 }));
 
-import { callbackUrlToHref } from "./callback-url";
+import { callbackUrlToHref } from "./auth/callback-url";
 
 describe("callbackUrlToHref (BASE_PATH=/passwd-sso)", () => {
   it("strips basePath and locale prefix", () => {

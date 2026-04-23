@@ -9,7 +9,7 @@ import { isWebAuthnSupported, startPasskeyAuthentication, hexEncode } from "@/li
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
-import { callbackUrlToHref } from "@/lib/callback-url";
+import { callbackUrlToHref } from "@/lib/auth/callback-url";
 
 /** sessionStorage keys for passing PRF data to vault auto-unlock */
 const SS_PRF_OUTPUT = "psso:prf-output";

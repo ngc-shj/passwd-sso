@@ -16,7 +16,7 @@ const {
 }));
 
 vi.mock("@/lib/auth/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
-vi.mock("@/lib/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
+vi.mock("@/lib/auth/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck }),
 }));

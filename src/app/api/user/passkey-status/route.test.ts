@@ -16,7 +16,7 @@ const {
   mockUserFindUnique: vi.fn(),
 }));
 
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));

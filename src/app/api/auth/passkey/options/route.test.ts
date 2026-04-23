@@ -30,7 +30,7 @@ vi.mock("@/lib/auth/webauthn-server", () => ({
   generateDiscoverableAuthOpts: mockGenerateDiscoverableAuthOpts,
 }));
 
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

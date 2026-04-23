@@ -70,7 +70,7 @@ vi.mock("@/lib/auth/ip-access", async () => {
   const actual = await vi.importActual<typeof import("@/lib/auth/ip-access")>("@/lib/auth/ip-access");
   return { ...actual, extractClientIp: mockExtractClientIp };
 });
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));

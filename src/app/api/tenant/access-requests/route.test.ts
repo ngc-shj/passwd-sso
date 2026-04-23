@@ -56,7 +56,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -79,7 +79,7 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 

@@ -25,7 +25,7 @@ const {
   mockWithBypassRls: vi.fn(),
 }));
 
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

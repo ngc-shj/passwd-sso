@@ -57,7 +57,7 @@ import { extractClientIp } from "@/lib/auth/ip-access";
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
-import type { AuthResult } from "@/lib/auth-or-token";
+import type { AuthResult } from "@/lib/auth/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit-outbox";
 

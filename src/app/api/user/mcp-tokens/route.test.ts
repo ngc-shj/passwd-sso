@@ -37,7 +37,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withBypassRls: mockWithBypassRls }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
 vi.mock("@/lib/rate-limit", () => ({ createRateLimiter: () => ({ check: mockRateLimiterCheck }) }));
-vi.mock("@/lib/delegation", () => ({ evictDelegationRedisKeys: mockEvictDelegationRedisKeys }));
+vi.mock("@/lib/auth/delegation", () => ({ evictDelegationRedisKeys: mockEvictDelegationRedisKeys }));
 vi.mock("@/lib/with-request-log", () => ({ withRequestLog: <T>(fn: T) => fn }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {

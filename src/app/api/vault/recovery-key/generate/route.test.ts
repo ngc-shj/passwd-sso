@@ -23,7 +23,7 @@ vi.mock("@/lib/crypto-server", () => ({
 vi.mock("@/lib/crypto-client", () => ({
   VERIFIER_VERSION: 1,
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
 vi.mock("@/lib/audit", () => ({

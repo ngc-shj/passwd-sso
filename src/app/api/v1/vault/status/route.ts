@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { validateV1Auth } from "@/lib/v1-auth";
+import { validateV1Auth } from "@/lib/auth/v1-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
 

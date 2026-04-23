@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";

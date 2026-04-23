@@ -20,7 +20,7 @@ const {
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
-vi.mock("@/lib/check-auth", () => ({
+vi.mock("@/lib/auth/check-auth", () => ({
   checkAuth: mockCheckAuth,
 }));
 vi.mock("@/lib/rate-limit", () => ({

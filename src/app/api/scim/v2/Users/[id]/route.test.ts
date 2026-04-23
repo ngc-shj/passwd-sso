@@ -49,7 +49,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/logger", () => ({

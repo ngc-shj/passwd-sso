@@ -3,7 +3,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";

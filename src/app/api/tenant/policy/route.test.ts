@@ -144,7 +144,7 @@ vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
 
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateTenantPolicyCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));

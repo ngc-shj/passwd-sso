@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkAuth } from "@/lib/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";

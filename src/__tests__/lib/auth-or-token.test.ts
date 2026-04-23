@@ -32,7 +32,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
   validateMcpToken: mockValidateMcpToken,
 }));
 
-import { authOrToken, hasMcpScope } from "@/lib/auth-or-token";
+import { authOrToken, hasMcpScope } from "@/lib/auth/auth-or-token";
 import { MCP_TOKEN_PREFIX } from "@/lib/constants/mcp";
 
 function makeRequest(token?: string): NextRequest {
@@ -124,7 +124,7 @@ describe("authOrToken mcp_token dispatch", () => {
   });
 
   it("returns scope_insufficient when MCP token lacks required scope", async () => {
-    const { hasMcpScope: _hasMcpScope } = await import("@/lib/auth-or-token");
+    const { hasMcpScope: _hasMcpScope } = await import("@/lib/auth/auth-or-token");
     // Override hasScope check by mocking hasMcpScope indirectly via the module
     mockValidateMcpToken.mockResolvedValue({
       ok: true,

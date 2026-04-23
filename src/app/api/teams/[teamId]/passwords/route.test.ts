@@ -30,7 +30,7 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,

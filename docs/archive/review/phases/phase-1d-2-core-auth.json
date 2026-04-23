@@ -1,0 +1,24 @@
+{
+  "phaseName": "phase-1d-2-core-auth",
+  "moves": [
+    { "from": "src/lib/auth-adapter.ts",      "to": "src/lib/auth/auth-adapter.ts" },
+    { "from": "src/lib/auth-adapter.test.ts", "to": "src/lib/auth/auth-adapter.test.ts" },
+    { "from": "src/lib/auth-or-token.ts",      "to": "src/lib/auth/auth-or-token.ts" },
+    { "from": "src/lib/auth-or-token.test.ts", "to": "src/lib/auth/auth-or-token.test.ts" },
+    { "from": "src/lib/check-auth.ts",      "to": "src/lib/auth/check-auth.ts" },
+    { "from": "src/lib/check-auth.test.ts", "to": "src/lib/auth/check-auth.test.ts" },
+    { "from": "src/lib/csrf.ts",      "to": "src/lib/auth/csrf.ts" },
+    { "from": "src/lib/csrf.test.ts", "to": "src/lib/auth/csrf.test.ts" },
+    { "from": "src/lib/access-restriction.ts",      "to": "src/lib/auth/access-restriction.ts" },
+    { "from": "src/lib/access-restriction.test.ts", "to": "src/lib/auth/access-restriction.test.ts" },
+    { "from": "src/lib/callback-url.ts",      "to": "src/lib/auth/callback-url.ts" },
+    { "from": "src/lib/callback-url.test.ts", "to": "src/lib/auth/callback-url.test.ts" },
+    { "from": "src/lib/delegation.ts",      "to": "src/lib/auth/delegation.ts" },
+    { "from": "src/lib/delegation.test.ts", "to": "src/lib/auth/delegation.test.ts" },
+    { "from": "src/lib/maintenance-auth.ts", "to": "src/lib/auth/maintenance-auth.ts" },
+    { "from": "src/lib/scope-parser.ts",      "to": "src/lib/auth/scope-parser.ts" },
+    { "from": "src/lib/scope-parser.test.ts", "to": "src/lib/auth/scope-parser.test.ts" },
+    { "from": "src/lib/v1-auth.ts",      "to": "src/lib/auth/v1-auth.ts" },
+    { "from": "src/lib/v1-auth.test.ts", "to": "src/lib/auth/v1-auth.test.ts" }
+  ]
+}

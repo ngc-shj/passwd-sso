@@ -1,12 +1,12 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { hmacVerifier } from "@/lib/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
-import { revokeAllDelegationSessions } from "@/lib/delegation";
+import { revokeAllDelegationSessions } from "@/lib/auth/delegation";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";

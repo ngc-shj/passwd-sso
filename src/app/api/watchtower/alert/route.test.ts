@@ -29,7 +29,7 @@ vi.mock("@/lib/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
 vi.mock("@/lib/audit", () => ({

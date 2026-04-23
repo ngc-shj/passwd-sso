@@ -74,7 +74,7 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/notification", () => ({

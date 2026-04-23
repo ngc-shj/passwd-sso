@@ -40,7 +40,7 @@ vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: vi.fn(),
 }));
 
-import { checkAccessRestrictionWithAudit, _clearPolicyCache } from "@/lib/access-restriction";
+import { checkAccessRestrictionWithAudit, _clearPolicyCache } from "@/lib/auth/access-restriction";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestrictionWithAudit — sentinel fallback", () => {

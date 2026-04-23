@@ -47,7 +47,7 @@ vi.mock("@/lib/auth/account-lockout", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 
 import { POST } from "./route";
 
@@ -82,7 +82,7 @@ describe("POST /api/vault/unlock", () => {
   });
 
   it("returns 403 when Origin header is invalid", async () => {
-    const { assertOrigin } = await import("@/lib/csrf");
+    const { assertOrigin } = await import("@/lib/auth/csrf");
     vi.mocked(assertOrigin).mockReturnValueOnce(
       new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 })
     );

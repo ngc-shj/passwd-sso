@@ -2,7 +2,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { createNotification } from "@/lib/notification";

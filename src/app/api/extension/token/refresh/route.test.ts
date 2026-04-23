@@ -37,7 +37,7 @@ vi.mock("@/lib/auth/extension-token", () => ({
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
 }));
 
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 

@@ -22,14 +22,14 @@ const SCAN_RADIUS = 10;
 const ALLOWED_USAGE = new Map([
   ["src/lib/tenant-rls.ts", ["*"]], // definition
   ["src/lib/tenant-context.ts", ["tenantMember", "team"]],
-  ["src/lib/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
+  ["src/lib/auth/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit.ts", ["team", "user", "auditLog"]],
   ["src/lib/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit-user-lookup.ts", ["user"]],
   ["src/lib/auth/scim-token.ts", ["scimToken"]],
   ["src/lib/auth/extension-token.ts", ["extensionToken", "tenant"]],
-  ["src/lib/maintenance-auth.ts", ["tenantMember"]],
+  ["src/lib/auth/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
@@ -54,7 +54,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
   ["src/lib/auth/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
-  ["src/lib/access-restriction.ts", ["tenant"]],
+  ["src/lib/auth/access-restriction.ts", ["tenant"]],
   ["src/lib/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
   ["src/lib/auth/session-timeout.ts", ["user"]],
@@ -96,7 +96,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
   // Delegated Decryption: cross-tenant session lookup + delegation CRUD
-  ["src/lib/delegation.ts", ["delegationSession"]],
+  ["src/lib/auth/delegation.ts", ["delegationSession"]],
   ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
   ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)

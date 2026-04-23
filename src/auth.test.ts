@@ -109,7 +109,7 @@ vi.mock("next-auth", () => ({
   default: mockNextAuth,
 }));
 
-vi.mock("@/lib/auth-adapter", () => ({
+vi.mock("@/lib/auth/auth-adapter", () => ({
   createCustomAdapter: vi.fn(() => ({})),
 }));
 

@@ -74,7 +74,7 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

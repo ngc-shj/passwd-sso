@@ -38,7 +38,7 @@ vi.mock("@/lib/auth/webauthn-server", () => ({
   derivePrfSalt: () => "a".repeat(64),
 }));
 
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

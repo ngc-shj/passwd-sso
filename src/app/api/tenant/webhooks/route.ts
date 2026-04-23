@@ -3,7 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { parseBody } from "@/lib/parse-body";
 import {
   TENANT_PERMISSION,

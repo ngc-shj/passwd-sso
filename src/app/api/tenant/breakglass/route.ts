@@ -9,7 +9,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { BREAKGLASS_USER_LIST_LIMIT } from "@/lib/validations/common.server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { createNotification } from "@/lib/notification";
 import { createBreakglassGrantSchema } from "@/lib/validations";

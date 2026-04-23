@@ -6,7 +6,7 @@ import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
 import { AUDIT_ACTION, TENANT_ROLE } from "@/lib/constants";

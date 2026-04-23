@@ -23,7 +23,7 @@ const {
   };
 });
 
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError,

@@ -141,7 +141,7 @@ vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
-vi.mock("@/lib/delegation", () => ({
+vi.mock("@/lib/auth/delegation", () => ({
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,

@@ -59,7 +59,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/logger", () => {

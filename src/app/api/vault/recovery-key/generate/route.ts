@@ -6,7 +6,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";

@@ -7,7 +7,7 @@ const { mockCheckAuth, mockPrismaUser, mockWithUserTenantRls } = vi.hoisted(() =
   mockPrismaUser: { findUnique: vi.fn() },
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));

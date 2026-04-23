@@ -16,7 +16,7 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { requireMaintenanceOperator } from "@/lib/maintenance-auth";
+import { requireMaintenanceOperator } from "@/lib/auth/maintenance-auth";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited, unauthorized } from "@/lib/api-response";

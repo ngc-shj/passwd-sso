@@ -1,6 +1,6 @@
 import NextAuth from "next-auth";
 import type { Account } from "next-auth";
-import { createCustomAdapter } from "@/lib/auth-adapter";
+import { createCustomAdapter } from "@/lib/auth/auth-adapter";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";

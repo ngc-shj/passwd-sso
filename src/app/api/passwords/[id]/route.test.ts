@@ -27,7 +27,7 @@ const { mockCheckAuth, mockPrismaPasswordEntry, mockPrismaHistory, mockPrismaUse
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,

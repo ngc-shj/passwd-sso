@@ -61,7 +61,7 @@ vi.mock("@/lib/audit", () => ({
     userAgent: "test",
   }),
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/with-request-log", () => ({

@@ -4,7 +4,7 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { rateLimited, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { checkAuth } from "@/lib/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";

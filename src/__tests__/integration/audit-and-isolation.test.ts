@@ -63,7 +63,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 // ─── Imports after mocks ───────────────────────────────────────────────────────
 
 import { logAuditAsync, resolveActorType } from "@/lib/audit";
-import type { AuthResult } from "@/lib/auth-or-token";
+import type { AuthResult } from "@/lib/auth/auth-or-token";
 
 // ─── Scenario 5: SA action audit logging ──────────────────────────────────────
 

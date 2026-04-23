@@ -123,12 +123,12 @@ vi.mock("@/lib/crypto-server", () => ({
 // parseSaTokenScopes run; their Prisma dependencies are intercepted via mocked prisma/withBypassRls.
 
 // passwords route uses authOrToken from @/lib/auth-or-token
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockPasswordsAuthOrToken,
   hasUserId: (a: { userId?: string }) => "userId" in a,
 }));
 
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
@@ -147,7 +147,7 @@ import {
   validateServiceAccountToken,
   parseSaTokenScopes,
 } from "@/lib/auth/service-account-token";
-import { authOrToken } from "@/lib/auth-or-token";
+import { authOrToken } from "@/lib/auth/auth-or-token";
 
 // ─── Shared fixtures ─────────────────────────────────────────────────────────
 

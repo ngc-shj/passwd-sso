@@ -35,7 +35,7 @@ import {
   wouldIpBeAllowed,
   invalidateTenantPolicyCache,
   _clearPolicyCache,
-} from "@/lib/access-restriction";
+} from "@/lib/auth/access-restriction";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestriction", () => {

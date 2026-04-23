@@ -45,7 +45,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: mockAssertOrigin }));
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: mockAssertOrigin }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
@@ -65,8 +65,8 @@ vi.mock("@/lib/prisma", () => ({
     delegationSession: mockPrismaDelegationSession,
   },
 }));
-vi.mock("@/lib/delegation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/delegation")>();
+vi.mock("@/lib/auth/delegation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/delegation")>();
   return {
     ...actual,
     storeDelegationEntries: mockStoreDelegationEntries,

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { checkAuth } from "@/lib/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
 import { requireTeamMember } from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EXTENSION_TOKEN_SCOPE } from "@/lib/constants";

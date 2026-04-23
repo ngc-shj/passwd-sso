@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";

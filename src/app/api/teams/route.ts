@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { checkAuth } from "@/lib/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
 import { createTeamE2ESchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, forbidden, handleAuthError, unauthorized } from "@/lib/api-response";

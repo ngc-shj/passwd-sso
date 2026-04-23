@@ -80,7 +80,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 vi.mock("@/lib/audit", () => ({

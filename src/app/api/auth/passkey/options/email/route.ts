@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/auth/webauthn-server";

@@ -16,7 +16,7 @@ import {
   encryptServerData,
 } from "@/lib/crypto-server";
 import { randomBytes } from "node:crypto";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";

@@ -66,7 +66,7 @@ vi.mock("@/lib/crypto-server", () => ({
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/logger", () => ({
   default: {
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
