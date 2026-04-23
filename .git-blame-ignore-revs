@@ -16,3 +16,4 @@ d29020df448935bc9dd13809982f08c7c82300cd  # Phase 4a — move security modules i
 3a159c2cc9062c2decf6e357124879b46c43fe09  # Phase 4c — move team modules into src/lib/team/
 66c5c1dbd077bef1e97c295b8b737fc25f22fe29  # Phase 4d — remaining src/lib clusters into named subdirs
 b882c22ee228036f4007574d831aac00c52f039a  # Phase 5a — move sidebar hooks into src/hooks/sidebar/
+04d2e7352670fe2b0e5b1808538012c969526446  # Phase 5b — move personal hooks into src/hooks/personal/
