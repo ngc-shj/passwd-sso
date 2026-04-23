@@ -20,7 +20,7 @@ import {
   SYNC_INTERVAL_MAX,
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { handleAuthError } from "@/lib/http/api-response";
 

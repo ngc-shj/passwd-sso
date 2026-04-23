@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { assertOrigin } from "@/lib/auth/csrf";
+import { assertOrigin } from "@/lib/auth/session/csrf";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
@@ -10,7 +10,7 @@ import { adminVaultResetRevokedEmail } from "@/lib/email/templates/admin-vault-r
 import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
-} from "@/lib/auth/tenant-auth";
+} from "@/lib/auth/access/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";

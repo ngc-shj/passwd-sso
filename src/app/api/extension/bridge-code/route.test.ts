@@ -71,10 +71,10 @@ vi.mock("@/lib/audit/audit", () => ({
     userAgent: "test",
   }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: { findMany: mockFindMany },
   },
 }));
-vi.mock("@/lib/auth/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError: class extends Error {
     status: number;
@@ -287,7 +287,7 @@ describe("GET /api/share-links/mine", () => {
 
   it("returns TeamAuthError status when team membership check fails", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
-    const { TeamAuthError } = await import("@/lib/auth/team-auth");
+    const { TeamAuthError } = await import("@/lib/auth/access/team-auth");
     mockRequireTeamMember.mockRejectedValue(new TeamAuthError("FORBIDDEN", 403));
 
     const req = createRequest("GET", "http://localhost/api/share-links/mine?team=team-1");

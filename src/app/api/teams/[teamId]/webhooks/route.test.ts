@@ -42,7 +42,7 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
   },
 }));
-vi.mock("@/lib/auth/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: class TeamAuthError extends Error {
     status: number;
@@ -66,7 +66,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
 }));
-vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/logger", () => ({
   default: {
     child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
@@ -98,7 +98,7 @@ describe("GET /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 403 when lacking permission", async () => {
-    const TeamAuthError = (await import("@/lib/auth/team-auth")).TeamAuthError;
+    const TeamAuthError = (await import("@/lib/auth/access/team-auth")).TeamAuthError;
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("Forbidden", 403),
     );
@@ -231,7 +231,7 @@ describe("POST /api/teams/[teamId]/webhooks", () => {
   });
 
   it("returns 403 when MEMBER tries to create webhook", async () => {
-    const TeamAuthError = (await import("@/lib/auth/team-auth")).TeamAuthError;
+    const TeamAuthError = (await import("@/lib/auth/access/team-auth")).TeamAuthError;
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("Forbidden", 403),
     );

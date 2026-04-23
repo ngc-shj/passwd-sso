@@ -67,15 +67,15 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/auth/session-timeout", () => ({
+vi.mock("@/lib/auth/session/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
 
-vi.mock("@/lib/auth/account-lockout", () => ({
+vi.mock("@/lib/auth/policy/account-lockout", () => ({
   invalidateLockoutThresholdCache: mockInvalidateLockoutThresholdCache,
 }));
 
-vi.mock("@/lib/auth/tenant-auth", () => ({
+vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));
@@ -139,12 +139,12 @@ vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   isValidCidr: () => true,
   extractClientIp: mockExtractClientIp,
 }));
 
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateTenantPolicyCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));

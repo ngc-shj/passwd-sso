@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -62,7 +62,7 @@ vi.mock("@/lib/constants/auth/tenant-permission", () => ({
 
 import { GET } from "@/app/api/tenant/audit-logs/route";
 import { GET as GET_DOWNLOAD } from "@/app/api/tenant/audit-logs/download/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 function makeLog(overrides: Record<string, unknown> = {}) {
   return {

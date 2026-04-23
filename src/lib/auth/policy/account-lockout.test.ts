@@ -53,7 +53,7 @@ vi.mock("@/lib/constants", () => ({
   },
   AUDIT_SCOPE: { PERSONAL: "PERSONAL" },
 }));
-vi.mock("@/lib/auth/lockout-admin-notify", () => ({
+vi.mock("@/lib/auth/policy/lockout-admin-notify", () => ({
   notifyAdminsOfLockout: mockNotifyAdminsOfLockout,
 }));
 

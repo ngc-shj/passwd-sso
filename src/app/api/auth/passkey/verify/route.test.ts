@@ -25,7 +25,7 @@ const {
   mockWithBypassRls: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 
@@ -33,7 +33,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 
-vi.mock("@/lib/auth/webauthn-authorize", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-authorize", () => ({
   authorizeWebAuthn: mockAuthorizeWebAuthn,
 }));
 
@@ -62,7 +62,7 @@ vi.mock("@/lib/constants", async (importOriginal) => ({
   AUDIT_SCOPE: { PERSONAL: "PERSONAL" },
 }));
 
-vi.mock("@/lib/auth/extension-token", () => ({
+vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
 }));
 

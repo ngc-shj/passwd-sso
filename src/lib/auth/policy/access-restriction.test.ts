@@ -22,7 +22,7 @@ vi.mock("@/lib/tenant-rls", () => ({
   BYPASS_PURPOSE: { AUTH_FLOW: "auth_flow" },
 }));
 
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   isIpAllowed: vi.fn().mockReturnValue(false), // IP not in allowlist
   isTailscaleIp: vi.fn().mockReturnValue(false),
   extractClientIp: vi.fn().mockReturnValue("1.2.3.4"),
@@ -40,7 +40,7 @@ vi.mock("@/lib/tenant-context", () => ({
   resolveUserTenantId: vi.fn(),
 }));
 
-import { checkAccessRestrictionWithAudit, _clearPolicyCache } from "@/lib/auth/access-restriction";
+import { checkAccessRestrictionWithAudit, _clearPolicyCache } from "@/lib/auth/policy/access-restriction";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestrictionWithAudit — sentinel fallback", () => {

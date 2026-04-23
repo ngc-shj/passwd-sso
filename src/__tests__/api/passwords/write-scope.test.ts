@@ -16,8 +16,8 @@ const { mockAuth, mockAuthOrToken, mockCreate, mockFindUnique, mockUpdate, mockT
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/auth-or-token", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/auth-or-token")>();
+vi.mock("@/lib/auth/session/auth-or-token", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/session/auth-or-token")>();
   return { ...actual, authOrToken: mockAuthOrToken };
 });
 vi.mock("@/lib/prisma", () => ({
@@ -46,7 +46,7 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 

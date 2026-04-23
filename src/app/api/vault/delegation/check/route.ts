@@ -11,8 +11,8 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-import { authOrToken, hasUserId } from "@/lib/auth/auth-or-token";
-import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
+import { authOrToken, hasUserId } from "@/lib/auth/session/auth-or-token";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { MCP_CLIENT_ID_PREFIX } from "@/lib/constants/auth/mcp";

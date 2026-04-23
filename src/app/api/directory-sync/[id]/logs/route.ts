@@ -14,7 +14,7 @@ import { unauthorized, notFound, errorResponse, handleAuthError } from "@/lib/ht
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { isValidCursorId } from "@/lib/audit/audit-query";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };

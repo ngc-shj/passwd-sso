@@ -7,7 +7,7 @@ import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
-import { isWebAuthnSupported } from "@/lib/auth/webauthn-client";
+import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
 import { fetchApi } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

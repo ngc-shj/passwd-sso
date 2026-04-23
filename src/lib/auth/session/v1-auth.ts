@@ -1,9 +1,9 @@
 import type { NextRequest } from "next/server";
-import { validateApiKeyOnly } from "@/lib/auth/api-key";
+import { validateApiKeyOnly } from "@/lib/auth/tokens/api-key";
 import {
   validateServiceAccountToken,
   hasSaTokenScope,
-} from "@/lib/auth/service-account-token";
+} from "@/lib/auth/tokens/service-account-token";
 import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";
 import type { ApiKeyScope } from "@/lib/constants/auth/api-key";
 

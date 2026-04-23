@@ -43,7 +43,7 @@ vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
 }));
 
-vi.mock("@/lib/auth/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   verifyRegistration: mockVerifyRegistration,
   uint8ArrayToBase64url: mockUint8ArrayToBase64url,
   getRpOrigin: mockGetRpOrigin,

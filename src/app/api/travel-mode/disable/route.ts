@@ -5,7 +5,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
-import { checkLockout, recordFailure } from "@/lib/auth/account-lockout";
+import { checkLockout, recordFailure } from "@/lib/auth/policy/account-lockout";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";

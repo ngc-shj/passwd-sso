@@ -1,4 +1,4 @@
-import { BASE_PATH } from "../url-helpers";
+import { BASE_PATH } from "../../url-helpers";
 import { stripLocalePrefix } from "@/i18n/locale-utils";
 
 const DEFAULT_PATH = `${BASE_PATH}/dashboard`;

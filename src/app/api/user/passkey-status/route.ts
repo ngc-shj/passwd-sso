@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/http/with-request-log";
-import { checkAuth } from "@/lib/auth/check-auth";
+import { checkAuth } from "@/lib/auth/session/check-auth";
 import { errorResponse, rateLimited } from "@/lib/http/api-response";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { createRateLimiter } from "@/lib/security/rate-limit";

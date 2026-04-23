@@ -33,7 +33,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   resolveUserTenantId: vi.fn().mockResolvedValue("tenant-1"),
 }));
-vi.mock("@/lib/auth/extension-token", () => ({
+vi.mock("@/lib/auth/tokens/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
 }));
 vi.mock("@/lib/logger", () => ({

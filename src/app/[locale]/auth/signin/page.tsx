@@ -2,7 +2,7 @@ import { redirect } from "@/i18n/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
-import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/auth/callback-url";
+import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/auth/session/callback-url";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";

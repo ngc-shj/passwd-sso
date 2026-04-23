@@ -12,7 +12,7 @@
  * to force TCP mode.
  */
 
-import { isTailscaleIp, isValidIpAddress } from "@/lib/auth/ip-access";
+import { isTailscaleIp, isValidIpAddress } from "@/lib/auth/policy/ip-access";
 import http from "node:http";
 
 const DEFAULT_TAILSCALE_SOCKET = "/run/tailscale/tailscaled.sock";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { resolveCallbackUrl } from "@/lib/auth/callback-url";
+import { resolveCallbackUrl } from "@/lib/auth/session/callback-url";
 
 /**
  * Resolve the callbackUrl search parameter to a safe redirect target.

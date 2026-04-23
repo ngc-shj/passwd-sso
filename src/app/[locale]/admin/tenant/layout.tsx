@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
-import { getTenantRole, isTenantAdminRole } from "@/lib/auth/tenant-auth";
+import { getTenantRole, isTenantAdminRole } from "@/lib/auth/access/tenant-auth";
 
 export default async function TenantAdminLayout({
   children,

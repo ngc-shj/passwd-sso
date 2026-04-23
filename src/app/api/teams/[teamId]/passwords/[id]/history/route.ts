@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamMember } from "@/lib/auth/team-auth";
+import { requireTeamMember } from "@/lib/auth/access/team-auth";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";

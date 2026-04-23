@@ -1,11 +1,11 @@
 import NextAuth from "next-auth";
 import type { Account } from "next-auth";
-import { createCustomAdapter } from "@/lib/auth/auth-adapter";
+import { createCustomAdapter } from "@/lib/auth/session/auth-adapter";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant/tenant-claim";
-import { sessionMetaStorage } from "@/lib/auth/session-meta";
+import { sessionMetaStorage } from "@/lib/auth/session/session-meta";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";

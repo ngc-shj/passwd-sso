@@ -32,9 +32,9 @@ import {
   unauthorized,
   zodValidationError,
 } from "@/lib/http/api-response";
-import { issueExtensionToken } from "@/lib/auth/extension-token";
+import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/http/with-request-log";

@@ -5,7 +5,7 @@ import { createTeamTagSchema } from "@/lib/validations";
 import {
   requireTeamMember,
   requireTeamPermission,
-} from "@/lib/auth/team-auth";
+} from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";

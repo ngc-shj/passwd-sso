@@ -7,7 +7,7 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { rateLimited } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { generateRegistrationOpts, derivePrfSalt } from "@/lib/auth/webauthn-server";
+import { generateRegistrationOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
 
 export const runtime = "nodejs";
 

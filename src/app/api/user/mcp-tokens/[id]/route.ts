@@ -7,7 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
-import { evictDelegationRedisKeys } from "@/lib/auth/delegation";
+import { evictDelegationRedisKeys } from "@/lib/auth/access/delegation";
 
 async function handleDELETE(
   _req: NextRequest,

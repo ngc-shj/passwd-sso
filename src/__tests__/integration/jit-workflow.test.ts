@@ -46,7 +46,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -80,7 +80,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/auth/auth-or-token", () => ({
+vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -104,7 +104,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 
 import { POST as createAccessRequest } from "@/app/api/tenant/access-requests/route";
 import { POST as approveAccessRequest } from "@/app/api/tenant/access-requests/[id]/approve/route";
-import { parseSaTokenScopes } from "@/lib/auth/service-account-token";
+import { parseSaTokenScopes } from "@/lib/auth/tokens/service-account-token";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { z } from "zod";
 import { MS_PER_HOUR } from "@/lib/constants/time";

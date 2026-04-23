@@ -34,7 +34,7 @@ function base64urlDecode(s: string): Uint8Array {
   return bytes;
 }
 
-import { hexDecode, hexEncode, toArrayBuffer } from "../crypto/crypto-utils";
+import { hexDecode, hexEncode, toArrayBuffer } from "../../crypto/crypto-utils";
 export { hexEncode };
 
 // ─── Option conversion ─────────────────────────────────────

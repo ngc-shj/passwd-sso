@@ -5,7 +5,7 @@ import { hexHash } from "@/lib/validations/common";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { assertOrigin } from "@/lib/auth/csrf";
+import { assertOrigin } from "@/lib/auth/session/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { logAuditAsync, teamAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { executeVaultReset } from "@/lib/vault/vault-reset";

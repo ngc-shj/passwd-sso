@@ -28,10 +28,10 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/auth/share-access-token", () => ({
+vi.mock("@/lib/auth/tokens/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyAccessToken,
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "1.2.3.4",
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

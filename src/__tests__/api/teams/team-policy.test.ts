@@ -52,7 +52,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
@@ -63,7 +63,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn(async (_p: unknown, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/auth/session-timeout", () => ({
+vi.mock("@/lib/auth/session/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: vi.fn(),
 }));
 vi.mock("@/lib/audit/audit", () => ({

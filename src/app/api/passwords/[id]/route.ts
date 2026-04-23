@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { updateE2EPasswordSchema } from "@/lib/validations";
 import { forbidden, notFound, rateLimited, validationError } from "@/lib/http/api-response";
-import { checkAuth } from "@/lib/auth/check-auth";
+import { checkAuth } from "@/lib/auth/session/check-auth";
 import { parseBody } from "@/lib/http/parse-body";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 

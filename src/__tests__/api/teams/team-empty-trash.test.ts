@@ -21,7 +21,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -53,7 +53,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { POST } from "@/app/api/teams/[teamId]/passwords/empty-trash/route";
-import { TeamAuthError } from "@/lib/auth/team-auth";
+import { TeamAuthError } from "@/lib/auth/access/team-auth";
 
 const TEAM_ID = "team-1";
 

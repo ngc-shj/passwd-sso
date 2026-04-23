@@ -6,7 +6,7 @@ import { createFolderSchema } from "@/lib/validations";
 import {
   requireTeamMember,
   requireTeamPermission,
-} from "@/lib/auth/team-auth";
+} from "@/lib/auth/access/team-auth";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseBody } from "@/lib/http/parse-body";
 import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder/folder-utils";

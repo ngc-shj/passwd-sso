@@ -1,7 +1,7 @@
 import type { NextRequest, NextResponse } from "next/server";
-import { validateScimToken, type ValidatedScimToken } from "@/lib/auth/scim-token";
+import { validateScimToken, type ValidatedScimToken } from "@/lib/auth/tokens/scim-token";
 import { scimError } from "@/lib/scim/response";
-import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";

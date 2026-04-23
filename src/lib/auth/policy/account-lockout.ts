@@ -16,7 +16,7 @@ import { logAuditAsync, logAuditInTx, extractRequestMeta } from "@/lib/audit/aud
 import { getLogger } from "@/lib/logger";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
-import { notifyAdminsOfLockout } from "@/lib/auth/lockout-admin-notify";
+import { notifyAdminsOfLockout } from "@/lib/auth/policy/lockout-admin-notify";
 import type { NextRequest } from "next/server";
 
 /** Observation window: reset counter if last failure was this long ago */

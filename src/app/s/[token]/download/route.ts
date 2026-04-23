@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken, decryptShareBinary } from "@/lib/crypto/crypto-server";
-import { verifyShareAccessToken } from "@/lib/auth/share-access-token";
+import { verifyShareAccessToken } from "@/lib/auth/tokens/share-access-token";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
 const downloadLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });

@@ -54,7 +54,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
-vi.mock("@/lib/auth/session-meta", () => ({
+vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
@@ -77,10 +77,10 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/notification", () => ({
   createNotification: mockCreateNotification,
 }));
-vi.mock("@/lib/auth/new-device-detection", () => ({
+vi.mock("@/lib/auth/policy/new-device-detection", () => ({
   checkNewDeviceAndNotify: vi.fn(),
 }));
-vi.mock("@/lib/auth/session-timeout", () => ({
+vi.mock("@/lib/auth/session/session-timeout", () => ({
   resolveEffectiveSessionTimeouts: mockResolveEffectiveSessionTimeouts,
 }));
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
@@ -11,10 +11,10 @@ import { createRateLimiter } from "@/lib/security/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { isValidCidr, extractClientIp } from "@/lib/auth/ip-access";
-import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/access-restriction";
-import { invalidateLockoutThresholdCache } from "@/lib/auth/account-lockout";
-import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session-timeout";
+import { isValidCidr, extractClientIp } from "@/lib/auth/policy/ip-access";
+import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/auth/policy/access-restriction";
+import { invalidateLockoutThresholdCache } from "@/lib/auth/policy/account-lockout";
+import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session/session-timeout";
 import {
   pinLengthSchema,
   MAX_CIDRS,

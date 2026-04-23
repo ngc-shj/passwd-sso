@@ -3,12 +3,12 @@ import { auth } from "@/auth";
 import {
   validateExtensionToken,
   hasScope,
-} from "@/lib/auth/extension-token";
-import { validateApiKey, hasApiKeyScope } from "@/lib/auth/api-key";
+} from "@/lib/auth/tokens/extension-token";
+import { validateApiKey, hasApiKeyScope } from "@/lib/auth/tokens/api-key";
 import {
   validateServiceAccountToken,
   hasSaTokenScope,
-} from "@/lib/auth/service-account-token";
+} from "@/lib/auth/tokens/service-account-token";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { API_KEY_PREFIX, type ApiKeyScope } from "@/lib/constants/auth/api-key";
 import { SA_TOKEN_PREFIX, type SaTokenScope } from "@/lib/constants/auth/service-account";

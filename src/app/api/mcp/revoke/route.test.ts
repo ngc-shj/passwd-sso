@@ -15,7 +15,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
   rateLimitKeyFromIp: vi.fn((ip: string) => ip),
 }));

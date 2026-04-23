@@ -11,7 +11,7 @@
  */
 
 import { NextResponse } from "next/server";
-import { API_ERROR } from "../http/api-error-codes";
+import { API_ERROR } from "../../http/api-error-codes";
 import { getAppOrigin } from "@/lib/url-helpers";
 
 const forbidden = (): NextResponse =>

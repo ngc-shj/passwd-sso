@@ -30,7 +30,7 @@ vi.mock("@/lib/prisma", () => ({
     directorySyncConfig: { findFirst: mockConfigFindFirst },
   },
 }));
-vi.mock("@/lib/auth/tenant-auth", () => ({
+vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
 }));
 vi.mock("@/lib/tenant-context", () => ({

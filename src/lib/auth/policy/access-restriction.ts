@@ -8,7 +8,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/auth/ip-access";
+import { isIpAllowed, isTailscaleIp, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { verifyTailscalePeer } from "@/lib/services/tailscale-client";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";

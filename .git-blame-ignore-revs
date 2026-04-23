@@ -34,3 +34,4 @@ ebb0466c414eabe6483d8d8765048e84c1602293  # Phase 6d — passwords/personal/
 4580237610ee5c2eaa45c457aa4808770d1a6748  # PR 5 — src/lib/ direct-file split into {http,url,ui,format,services}
 9e4d176e6ff95a3a93f0be3fc8596eb3d5909464  # PR 6 — src/components/settings/ split into {security,developer,account}
 50f4f23d0cf5e786e399f6a94c5828fa7066a0dc  # PR 7 — src/components/team/ split into {forms,management,security}
+f95467619c21434f061dfb375739c1e54305c944  # PR 8 — src/lib/auth/ split into {tokens,session,webauthn,policy,access}

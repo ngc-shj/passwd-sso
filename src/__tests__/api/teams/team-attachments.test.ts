@@ -28,7 +28,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
-vi.mock("@/lib/auth/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -66,7 +66,7 @@ vi.mock("@/lib/tenant-context", () => ({
 
 import { NextRequest } from "next/server";
 import { GET, POST } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/route";
-import { TeamAuthError } from "@/lib/auth/team-auth";
+import { TeamAuthError } from "@/lib/auth/access/team-auth";
 
 function makeParams(teamId: string, id: string) {
   return createParams({ teamId: teamId, id });

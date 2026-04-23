@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -74,7 +74,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
 vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/notification", () => ({
@@ -97,7 +97,7 @@ vi.mock("@/lib/constants/audit/notification", () => ({
 
 import { POST, GET } from "@/app/api/tenant/breakglass/route";
 import { DELETE } from "@/app/api/tenant/breakglass/[id]/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { GRANT_STATUS } from "@/lib/constants/integrations/breakglass";
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE } from "@/lib/constants/time";
 

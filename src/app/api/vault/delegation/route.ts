@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/csrf";
+import { assertOrigin } from "@/lib/auth/session/csrf";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
@@ -29,8 +29,8 @@ import {
   storeDelegationEntries,
   evictDelegationRedisKeys,
   revokeAllDelegationSessions,
-} from "@/lib/auth/delegation";
-import type { DelegationMetadata } from "@/lib/auth/delegation";
+} from "@/lib/auth/access/delegation";
+import type { DelegationMetadata } from "@/lib/auth/access/delegation";
 
 export const runtime = "nodejs";
 

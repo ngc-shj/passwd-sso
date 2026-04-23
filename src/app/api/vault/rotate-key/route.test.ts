@@ -56,8 +56,8 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
-vi.mock("@/lib/auth/delegation", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/access/delegation", () => ({
   revokeAllDelegationSessions: vi.fn(async () => 0),
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -142,7 +142,7 @@ describe("POST /api/vault/rotate-key", () => {
   });
 
   it("returns 403 when Origin header is invalid", async () => {
-    const { assertOrigin } = await import("@/lib/auth/csrf");
+    const { assertOrigin } = await import("@/lib/auth/session/csrf");
     vi.mocked(assertOrigin).mockReturnValueOnce(
       new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 })
     );
@@ -212,7 +212,7 @@ describe("POST /api/vault/rotate-key", () => {
       }),
     });
     // Verify delegation sessions are revoked after key rotation
-    const { revokeAllDelegationSessions } = await import("@/lib/auth/delegation");
+    const { revokeAllDelegationSessions } = await import("@/lib/auth/access/delegation");
     expect(revokeAllDelegationSessions).toHaveBeenCalledWith("user-1", "tenant-1", "KEY_ROTATION");
   });
 

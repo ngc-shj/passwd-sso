@@ -23,7 +23,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -60,7 +60,7 @@ vi.mock("@/lib/tenant-context", () => ({
 
 import { NextRequest } from "next/server";
 import { GET, DELETE } from "@/app/api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/route";
-import { TeamAuthError } from "@/lib/auth/team-auth";
+import { TeamAuthError } from "@/lib/auth/access/team-auth";
 
 function makeParams(teamId: string, id: string, attachmentId: string) {
   return createParams({ teamId: teamId, id, attachmentId });

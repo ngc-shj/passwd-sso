@@ -50,7 +50,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-vi.mock("@/lib/auth/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   verifyAuthentication: mockVerifyAuthentication,
   getRpOrigin: mockGetRpOrigin,
   base64urlToUint8Array: mockBase64urlToUint8Array,

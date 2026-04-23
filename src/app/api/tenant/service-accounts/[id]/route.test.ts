@@ -31,7 +31,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -74,7 +74,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 }));
 
 import { GET, PUT, DELETE } from "@/app/api/tenant/service-accounts/[id]/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const SA_ID = "sa-00000001";
