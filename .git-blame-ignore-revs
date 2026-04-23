@@ -14,3 +14,4 @@ dd6f84e8760c29268a9f814bee36dc8b5cf94236  # Phase 3-2 — move remaining audit m
 d29020df448935bc9dd13809982f08c7c82300cd  # Phase 4a — move security modules into src/lib/security/
 0087e6551e18b96302e26075b5f980b30610ad96  # Phase 4b — move vault modules into src/lib/vault/
 3a159c2cc9062c2decf6e357124879b46c43fe09  # Phase 4c — move team modules into src/lib/team/
+66c5c1dbd077bef1e97c295b8b737fc25f22fe29  # Phase 4d — remaining src/lib clusters into named subdirs
