@@ -14,7 +14,8 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const TARGET_FILE = "scripts/check-bypass-rls.mjs";
+// PR 2: check-bypass-rls.mjs moved from scripts/ to scripts/checks/.
+const TARGET_FILE = "scripts/checks/check-bypass-rls.mjs";
 
 /**
  * Parse ALLOWED_USAGE map from source text using a line-based regex parser.

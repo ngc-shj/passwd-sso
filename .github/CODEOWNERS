@@ -13,13 +13,10 @@
 
 # Check scripts — all under scripts/checks/ after PR 2.
 /scripts/checks/**                           @ngc-shj
-# Flat-file patterns (e.g. src/lib/auth.ts) — GitHub * does NOT cross /
-/src/lib/crypto*                             @ngc-shj
-/src/lib/auth*                               @ngc-shj
-# Directory patterns for after the refactor split (src/lib/auth/, etc.)
-# Both the flat-file and directory patterns are required because CODEOWNERS
-# * does not match across path separators, so /src/lib/auth* covers only
-# files directly in src/lib/, while /src/lib/auth/** covers subdirectory trees.
+# PR 9 (F25 Round 4): dead flat-file patterns /src/lib/crypto* and
+# /src/lib/auth* REMOVED — no files match them after PR #392 split
+# (all crypto/auth/audit code now under subdirs). /src/lib/{auth,crypto,audit}/**
+# rules below recursively cover them.
 /src/lib/auth/**                             @ngc-shj
 /src/lib/crypto/**                           @ngc-shj
 /src/lib/audit/**                            @ngc-shj

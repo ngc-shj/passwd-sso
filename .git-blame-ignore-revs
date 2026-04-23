@@ -27,3 +27,10 @@ ebb0466c414eabe6483d8d8765048e84c1602293  # Phase 6d — passwords/personal/
 192f20233a8062ce1276106abe13eacef46373ae  # Phase 6e — passwords/dialogs/
 480fcfd6a06fba4f77976f2ce15092fc9279edb4  # Phase 6f — passwords/detail/
 229c9c7aacdac2329e83ec0785d9f0489ede42d6  # Phase 6g — passwords/shared/
+
+# Second-level split — refactor-second-level-split (PR 1-9).
+6469de4f7d9b1b4acd74669e177274e1dd9b5947  # PR 2 — scripts reorg into scripts/checks/
+71415624309bf4cb4913f3a9cbbdcc8a3b2c0db3  # PR 4 — src/lib/constants/ split into 5 subdirs
+4580237610ee5c2eaa45c457aa4808770d1a6748  # PR 5 — src/lib/ direct-file split into {http,url,ui,format,services}
+9e4d176e6ff95a3a93f0be3fc8596eb3d5909464  # PR 6 — src/components/settings/ split into {security,developer,account}
+50f4f23d0cf5e786e399f6a94c5828fa7066a0dc  # PR 7 — src/components/team/ split into {forms,management,security}
