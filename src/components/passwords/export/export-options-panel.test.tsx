@@ -2,7 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
+import { ExportOptionsPanel } from "@/components/passwords/export/export-options-panel";
 
 function baseProps() {
   return {

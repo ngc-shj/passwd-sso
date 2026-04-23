@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { encryptExport } from "@/lib/crypto/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
-import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
+import { ExportOptionsPanel } from "@/components/passwords/export/export-options-panel";
 import { AlertTriangle, Download } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
