@@ -2,3 +2,5 @@
 # `git config blame.ignoreRevsFile .git-blame-ignore-revs`.
 # Append move-commit SHAs here as each refactor phase PR merges.
 # See docs/forensics.md for setup and usage.
+
+f4dac45748c2342f8c5c68bac0da4bd60c78f7f6  # Phase 1a — move token modules into src/lib/auth/
