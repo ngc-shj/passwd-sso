@@ -2,19 +2,19 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { randomBytes } from "node:crypto";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION } from "@/lib/constants/audit";
-import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/mcp";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
+import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { z } from "zod";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),

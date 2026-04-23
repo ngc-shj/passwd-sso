@@ -28,7 +28,7 @@ import {
   exportPrivateKey,
   encryptPrivateKey,
 } from "@/lib/crypto/crypto-emergency";
-import { eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface Grant {

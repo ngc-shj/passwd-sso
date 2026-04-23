@@ -1,16 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { checkAuth } from "@/lib/auth/check-auth";
+import { checkAuth } from "@/lib/auth/session/check-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { createTeamE2EPasswordSchema } from "@/lib/validations";
-import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { parseBody } from "@/lib/parse-body";
+import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { parseBody } from "@/lib/http/parse-body";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, TEAM_PERMISSION, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 

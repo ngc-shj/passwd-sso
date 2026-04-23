@@ -1,11 +1,11 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/auth/team-auth";
+import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team/team-policy";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   TEAM_PERMISSION,
   AUDIT_ACTION,
@@ -13,8 +13,8 @@ import {
 } from "@/lib/constants";
 import type { Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/http/api-response";
 import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";

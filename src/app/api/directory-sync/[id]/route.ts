@@ -8,9 +8,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -20,9 +20,9 @@ import {
   SYNC_INTERVAL_MAX,
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
-import { handleAuthError } from "@/lib/api-response";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
+import { handleAuthError } from "@/lib/http/api-response";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

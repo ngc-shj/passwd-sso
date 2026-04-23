@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { extractRequestMeta } from "@/lib/audit/audit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { AUDIT_ACTION, AUDIT_ACTION_GROUPS_PERSONAL, AUDIT_SCOPE } from "@/lib/constants";
 import {

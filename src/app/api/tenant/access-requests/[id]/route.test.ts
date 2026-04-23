@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -43,12 +43,12 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 
 import { GET } from "@/app/api/tenant/access-requests/[id]/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };

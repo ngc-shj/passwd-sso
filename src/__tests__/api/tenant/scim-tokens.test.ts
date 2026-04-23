@@ -30,7 +30,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({ createRateLimiter: vi.fn(() => ({ check: mockRateLimitCheck, clear: vi.fn() })) }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -63,13 +63,13 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { SCIM_MANAGE: "SCIM_MANAGE" },
 }));
 vi.mock("@/lib/scim/token-utils", () => ({
@@ -78,7 +78,7 @@ vi.mock("@/lib/scim/token-utils", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hash:${t}`,
 }));
-vi.mock("@/lib/api-response", () => ({
+vi.mock("@/lib/http/api-response", () => ({
   unauthorized: () => new Response(JSON.stringify({ error: "UNAUTHORIZED" }), { status: 401 }),
   errorResponse: (msg: string, status: number, extra?: unknown) =>
     new Response(JSON.stringify({ error: msg, ...extra }), { status }),

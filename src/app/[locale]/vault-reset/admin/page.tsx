@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

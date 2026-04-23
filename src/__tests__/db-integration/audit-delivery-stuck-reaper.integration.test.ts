@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { AUDIT_OUTBOX } from "@/lib/constants/audit";
+import { AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
 
 describe("audit-delivery stuck reaper", () => {

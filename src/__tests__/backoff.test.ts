@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeBackoffMs, withFullJitter } from "@/lib/backoff";
+import { computeBackoffMs, withFullJitter } from "@/lib/http/backoff";
 
 describe("computeBackoffMs", () => {
   it("returns baseMs (1000) for attempt 0", () => {

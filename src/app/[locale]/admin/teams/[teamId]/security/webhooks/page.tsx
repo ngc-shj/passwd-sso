@@ -2,7 +2,7 @@
 
 import { use } from "react";
 import { useLocale } from "next-intl";
-import { TeamWebhookCard } from "@/components/team/team-webhook-card";
+import { TeamWebhookCard } from "@/components/team/security/team-webhook-card";
 
 export default function TeamWebhooksPage({
   params,

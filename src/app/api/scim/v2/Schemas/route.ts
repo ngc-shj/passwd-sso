@@ -2,7 +2,7 @@ import type { NextRequest } from "next/server";
 import { scimResponse } from "@/lib/scim/response";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { prisma } from "@/lib/prisma";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 
 // GET /api/scim/v2/Schemas

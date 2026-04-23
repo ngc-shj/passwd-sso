@@ -45,7 +45,7 @@ vi.mock("@/components/passwords/dialogs/personal-password-edit-dialog-loader", (
   },
 }));
 
-vi.mock("@/components/team/team-edit-dialog-loader", () => ({
+vi.mock("@/components/team/management/team-edit-dialog-loader", () => ({
   TeamEditDialogLoader: (props: unknown) => {
     teamDialogProps(props);
     return <div data-testid="team-edit-dialog" />;

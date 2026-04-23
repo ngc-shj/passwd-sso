@@ -27,9 +27,9 @@ import {
 } from "@/components/ui/select";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
-import { SECURE_NOTE_TEMPLATES } from "@/lib/secure-note-templates";
+import { SECURE_NOTE_TEMPLATES } from "@/lib/format/secure-note-templates";
 import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { toTagPayload } from "@/components/passwords/entry/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/personal/use-personal-base-form-model";

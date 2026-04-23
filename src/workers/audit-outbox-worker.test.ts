@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, ACTOR_TYPE, AUDIT_ACTION, OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit/audit";
 
 // ─── Shared mock handles ──────────────────────────────────────────────────────
 
@@ -143,11 +143,11 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   getMasterKeyByVersion: vi.fn().mockReturnValue(Buffer.alloc(32)),
 }));
 
-vi.mock("@/lib/external-http", () => ({
+vi.mock("@/lib/http/external-http", () => ({
   sanitizeErrorForStorage: vi.fn((msg: string) => msg),
 }));
 
-vi.mock("@/lib/backoff", () => ({
+vi.mock("@/lib/http/backoff", () => ({
   computeBackoffMs: mockComputeBackoffMs,
   withFullJitter: mockWithFullJitter,
 }));

@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "sonner";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 
 interface ApiErrorShape {
   error?: unknown;

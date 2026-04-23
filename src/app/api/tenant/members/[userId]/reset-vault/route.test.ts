@@ -62,7 +62,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
 }));
@@ -78,7 +78,7 @@ vi.mock("@/lib/email/templates/admin-vault-reset", () => ({
 }));
 vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: mockServerAppUrl }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
-vi.mock("@/lib/auth/tenant-auth", () => ({
+vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   isTenantRoleAbove: mockIsTenantRoleAbove,
   TenantAuthError,

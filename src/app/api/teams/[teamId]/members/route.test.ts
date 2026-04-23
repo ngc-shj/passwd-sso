@@ -52,7 +52,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
-vi.mock("@/lib/auth/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,

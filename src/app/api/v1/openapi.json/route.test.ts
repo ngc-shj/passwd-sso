@@ -10,7 +10,7 @@ const { mockAuthOrToken, mockBuildOpenApiSpec } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("@/lib/auth/auth-or-token", () => ({
+vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 vi.mock("@/lib/openapi-spec", () => ({
@@ -23,7 +23,7 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 

@@ -11,15 +11,15 @@ import {
 } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { rateLimited, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import {
   AUDIT_TARGET_TYPE,
   AUDIT_ACTION,
   SEND_EXPIRY_MAP,
 } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 const sendTextLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 

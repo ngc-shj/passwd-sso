@@ -13,7 +13,7 @@ const { mockAuth, mockRequireTeamMember, mockEntryFindUnique, mockHistoryFindMan
 );
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/team-auth", () => {
+vi.mock("@/lib/auth/access/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -38,7 +38,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { GET } from "@/app/api/teams/[teamId]/passwords/[id]/history/route";
-import { TeamAuthError } from "@/lib/auth/team-auth";
+import { TeamAuthError } from "@/lib/auth/access/team-auth";
 
 describe("GET /api/teams/[teamId]/passwords/[id]/history", () => {
   beforeEach(() => vi.clearAllMocks());

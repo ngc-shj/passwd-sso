@@ -5,7 +5,7 @@ import { _resetKeyProvider, getKeyProvider } from "@/lib/key-provider";
 // request.headers when tests call handlers without arguments.
 // The dedicated with-request-log.test.ts tests the real implementation
 // via dynamic import and its own logger mock.
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: <H extends (...args: any[]) => unknown>(handler: H): H => handler,
 }));

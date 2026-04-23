@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID, randomBytes } from "node:crypto";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
-import { assertOrigin } from "@/lib/auth/csrf";
-import { authorizeWebAuthn } from "@/lib/auth/webauthn-authorize";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited } from "@/lib/http/api-response";
+import { assertOrigin } from "@/lib/auth/session/csrf";
+import { authorizeWebAuthn } from "@/lib/auth/webauthn/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit/audit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
 import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
-import { revokeAllExtensionTokensForUser } from "@/lib/auth/extension-token";
+import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 
 export const runtime = "nodejs";
 

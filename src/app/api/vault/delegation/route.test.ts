@@ -45,7 +45,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
-vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: mockAssertOrigin }));
+vi.mock("@/lib/auth/session/csrf", () => ({ assertOrigin: mockAssertOrigin }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
@@ -55,7 +55,7 @@ vi.mock("@/lib/audit/audit", () => ({
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({ extractClientIp: vi.fn(() => "127.0.0.1") }));
+vi.mock("@/lib/auth/policy/ip-access", () => ({ extractClientIp: vi.fn(() => "127.0.0.1") }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withBypassRls: mockWithBypassRls }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -65,8 +65,8 @@ vi.mock("@/lib/prisma", () => ({
     delegationSession: mockPrismaDelegationSession,
   },
 }));
-vi.mock("@/lib/auth/delegation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/delegation")>();
+vi.mock("@/lib/auth/access/delegation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/access/delegation")>();
   return {
     ...actual,
     storeDelegationEntries: mockStoreDelegationEntries,
@@ -74,7 +74,7 @@ vi.mock("@/lib/auth/delegation", async (importOriginal) => {
     revokeAllDelegationSessions: mockRevokeAllDelegationSessions,
   };
 });
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: unknown) => handler,
 }));
 vi.mock("@/lib/logger", () => ({

@@ -10,7 +10,7 @@ const { mockLogAudit } = vi.hoisted(() => ({
   mockLogAudit: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/delegation", () => ({
+vi.mock("@/lib/auth/access/delegation", () => ({
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,

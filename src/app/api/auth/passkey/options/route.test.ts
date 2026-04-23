@@ -26,15 +26,15 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 
-vi.mock("@/lib/auth/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateDiscoverableAuthOpts: mockGenerateDiscoverableAuthOpts,
 }));
 
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));

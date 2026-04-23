@@ -57,7 +57,12 @@ jobs:
         run: |
           set -euo pipefail
           git worktree add /tmp/main-wt main
-          if [ -f /tmp/main-wt/scripts/capture-test-counts.mjs ]; then
+          # PR 2 moved capture-test-counts.mjs to scripts/checks/; keep legacy
+          # path check for main-branch fallback until main merges this refactor.
+          if [ -f /tmp/main-wt/scripts/checks/capture-test-counts.mjs ]; then
+            (cd /tmp/main-wt && npm ci && node scripts/checks/capture-test-counts.mjs --record)
+            cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
+          elif [ -f /tmp/main-wt/scripts/capture-test-counts.mjs ]; then
             (cd /tmp/main-wt && npm ci && node scripts/capture-test-counts.mjs --record)
             cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
           else

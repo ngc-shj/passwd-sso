@@ -10,7 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useRouter } from "@/i18n/navigation";
 import { ArrowLeft, KeyRound, Loader2, Lock } from "lucide-react";
-import { eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
 import {
   decryptPrivateKey,
   importPrivateKey,

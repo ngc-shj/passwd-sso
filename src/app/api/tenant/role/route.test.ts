@@ -6,7 +6,7 @@ const { mockAuth, mockGetTenantMembership } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => ({
+vi.mock("@/lib/auth/access/tenant-auth", () => ({
   getTenantMembership: mockGetTenantMembership,
 }));
 

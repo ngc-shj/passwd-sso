@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ id: string }> };
 

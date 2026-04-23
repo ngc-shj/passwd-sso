@@ -1,6 +1,6 @@
 "use client";
 
-import { TenantPasskeyPolicyCard } from "@/components/settings/tenant-passkey-policy-card";
+import { TenantPasskeyPolicyCard } from "@/components/settings/security/tenant-passkey-policy-card";
 
 export default function PasskeyPolicyPage() {
   return <TenantPasskeyPolicyCard />;

@@ -18,7 +18,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import {
   ANONYMOUS_ACTOR_ID,
   SYSTEM_ACTOR_ID,

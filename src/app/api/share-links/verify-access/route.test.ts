@@ -36,7 +36,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
   verifyAccessPassword: mockVerifyAccessPassword,
 }));
-vi.mock("@/lib/auth/share-access-token", () => ({
+vi.mock("@/lib/auth/tokens/share-access-token", () => ({
   createShareAccessToken: mockCreateShareAccessToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -44,7 +44,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
     .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockTokenCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

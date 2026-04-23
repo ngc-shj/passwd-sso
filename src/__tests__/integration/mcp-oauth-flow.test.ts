@@ -76,7 +76,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -141,7 +141,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
-vi.mock("@/lib/auth/delegation", () => ({
+vi.mock("@/lib/auth/access/delegation", () => ({
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
@@ -155,7 +155,7 @@ import { POST as postToken } from "@/app/api/mcp/token/route";
 
 import { GET as getDiscovery } from "@/app/api/mcp/.well-known/oauth-authorization-server/route";
 import { handleMcpRequest } from "@/lib/mcp/server";
-import { MCP_SCOPE, type McpScope } from "@/lib/constants/mcp";
+import { MCP_SCOPE, type McpScope } from "@/lib/constants/auth/mcp";
 
 // ─── Shared fixtures ──────────────────────────────────────────
 

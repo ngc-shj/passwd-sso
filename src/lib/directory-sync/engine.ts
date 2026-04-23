@@ -16,7 +16,7 @@ import { logAuditAsync } from "@/lib/audit/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import { decryptCredentials } from "./credentials";
 import { sanitizeSyncError } from "./sanitize";

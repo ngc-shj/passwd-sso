@@ -1,0 +1,16 @@
+{
+  "phaseName": "refactor-second-level-split-phase-2-scripts-reorg",
+  "moves": [
+    { "from": "scripts/check-bypass-rls.mjs",                "to": "scripts/checks/check-bypass-rls.mjs" },
+    { "from": "scripts/check-crypto-domains.mjs",            "to": "scripts/checks/check-crypto-domains.mjs" },
+    { "from": "scripts/check-team-auth-rls.mjs",             "to": "scripts/checks/check-team-auth-rls.mjs" },
+    { "from": "scripts/check-migration-drift.mjs",           "to": "scripts/checks/check-migration-drift.mjs" },
+    { "from": "scripts/check-vitest-coverage-include.mjs",   "to": "scripts/checks/check-vitest-coverage-include.mjs" },
+    { "from": "scripts/check-dynamic-import-specifiers.mjs", "to": "scripts/checks/check-dynamic-import-specifiers.mjs" },
+    { "from": "scripts/check-mjs-imports.mjs",               "to": "scripts/checks/check-mjs-imports.mjs" },
+    { "from": "scripts/check-doc-paths.mjs",                 "to": "scripts/checks/check-doc-paths.mjs" },
+    { "from": "scripts/check-licenses.mjs",                  "to": "scripts/checks/check-licenses.mjs" },
+    { "from": "scripts/check-e2e-selectors.sh",              "to": "scripts/checks/check-e2e-selectors.sh" },
+    { "from": "scripts/capture-test-counts.mjs",             "to": "scripts/checks/capture-test-counts.mjs" }
+  ]
+}

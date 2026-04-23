@@ -36,7 +36,7 @@ vi.mock("@/components/ui/select", () => ({
   SelectItem: ({ children }: { children: React.ReactNode; value: string }) => <div>{children}</div>,
 }));
 
-vi.mock("@/lib/tag-tree", () => ({
+vi.mock("@/lib/format/tag-tree", () => ({
   buildTagTree: (tags: unknown[]) => (tags as Array<{ id: string; name: string; parentId: string | null }>).map((t) => ({ ...t, children: [] })),
   flattenTagTree: (tree: unknown[]) => (tree as Array<{ id: string; name: string; parentId: string | null }>).map((t) => ({ ...t, depth: 0 })),
 }));

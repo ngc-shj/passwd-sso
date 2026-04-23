@@ -27,7 +27,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -60,29 +60,29 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
-vi.mock("@/lib/auth/ip-access", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/auth/ip-access")>("@/lib/auth/ip-access");
+vi.mock("@/lib/auth/policy/ip-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/policy/ip-access")>("@/lib/auth/policy/ip-access");
   return { ...actual, extractClientIp: mockExtractClientIp };
 });
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));
-vi.mock("@/lib/auth/session-timeout", () => ({
+vi.mock("@/lib/auth/session/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
-vi.mock("@/lib/auth/account-lockout", () => ({
+vi.mock("@/lib/auth/policy/account-lockout", () => ({
   invalidateLockoutThresholdCache: vi.fn(),
 }));
 
 import { GET, PATCH } from "@/app/api/tenant/policy/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 const FULL_POLICY_RESPONSE = {
   maxConcurrentSessions: null,

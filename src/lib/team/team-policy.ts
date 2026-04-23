@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/prisma";
 import { withTeamTenantRls, resolveTeamTenantId } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { isIpAllowed, extractClientIp } from "@/lib/auth/ip-access";
+import { isIpAllowed, extractClientIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { ACTOR_TYPE } from "@/lib/constants/audit";
+import { ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { resolveAuditUserId } from "@/lib/constants/app";
 import type { NextRequest } from "next/server";
 

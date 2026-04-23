@@ -19,9 +19,9 @@ import { scimUserSchema } from "@/lib/scim/validations";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { isScimExternalMappingUniqueViolation } from "@/lib/scim/prisma-error";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
-import { TENANT_ROLE } from "@/lib/constants/tenant-role";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
 import {
   SCIM_PAGE_COUNT_MIN,
   SCIM_PAGE_COUNT_MAX,

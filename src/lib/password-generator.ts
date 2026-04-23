@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { AMBIGUOUS_CHARS, CHARSETS } from "./generator/generator-prefs";
-import { WORDLIST } from "./wordlist";
+import { WORDLIST } from "./format/wordlist";
 
 export interface GeneratorOptions {
   length: number;

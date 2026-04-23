@@ -2,7 +2,7 @@ import { z } from "zod";
 import {
   SA_TOKEN_SCOPES,
   MAX_SA_TOKEN_EXPIRY_DAYS,
-} from "@/lib/constants/service-account";
+} from "@/lib/constants/auth/service-account";
 import { NAME_MAX_LENGTH } from "./common";
 
 // ─── Service Account ──────────────────────────────────────

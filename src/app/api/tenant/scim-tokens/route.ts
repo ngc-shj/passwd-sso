@@ -3,17 +3,17 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
 import { generateScimToken } from "@/lib/scim/token-utils";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
-import { withRequestLog } from "@/lib/with-request-log";
-import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { handleAuthError, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,

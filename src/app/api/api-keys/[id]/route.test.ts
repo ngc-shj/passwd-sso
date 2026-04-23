@@ -15,7 +15,7 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/lib/auth/check-auth", () => ({
+vi.mock("@/lib/auth/session/check-auth", () => ({
   checkAuth: mockCheckAuth,
 }));
 vi.mock("@/lib/prisma", () => ({

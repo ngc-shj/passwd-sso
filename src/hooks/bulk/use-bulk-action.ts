@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { toast } from "sonner";
-import { apiPath } from "@/lib/constants/api-path";
+import { apiPath } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 

@@ -109,7 +109,7 @@ vi.mock("next-auth", () => ({
   default: mockNextAuth,
 }));
 
-vi.mock("@/lib/auth/auth-adapter", () => ({
+vi.mock("@/lib/auth/session/auth-adapter", () => ({
   createCustomAdapter: vi.fn(() => ({})),
 }));
 
@@ -117,7 +117,7 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 
-vi.mock("@/lib/auth/session-meta", () => ({
+vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 

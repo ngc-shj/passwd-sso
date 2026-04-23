@@ -29,12 +29,12 @@ run_step() {
 echo ""
 printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 
-run_step "Static: e2e-selectors"  bash scripts/check-e2e-selectors.sh
+run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
 run_step "Lint"                   npx eslint .
-run_step "Static: team-auth-rls"  node scripts/check-team-auth-rls.mjs
-run_step "Static: bypass-rls"     node scripts/check-bypass-rls.mjs
-run_step "Static: crypto-domains" node scripts/check-crypto-domains.mjs
-run_step "Static: migration-drift" node scripts/check-migration-drift.mjs
+run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
+run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
+run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
+run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
 
 if command -v gitleaks >/dev/null 2>&1; then
@@ -50,6 +50,26 @@ fi
 # Clear vitest cache to match CI's clean environment
 rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
 run_step "Test"                   npx vitest run
+
+# Integration tests on refactor branches touching auth/DB modules.
+# Round 4: T10 (regex covers pre- and post-PR-5 paths), T13 (DB reachability + 3s timeout),
+# T22 (CI via ci-integration.yml is authoritative; this local run is a preview).
+# Set PREPR_SKIP_INTEGRATION=1 to defer to CI.
+if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
+   git diff --name-only main...HEAD | \
+     grep -E '^src/lib/(prisma|redis|tenant-(context|rls)|auth/.+-token)\.ts$|^src/lib/(prisma|tenant|auth)/' \
+     > /dev/null; then
+  if [ "${PREPR_SKIP_INTEGRATION:-0}" = "1" ]; then
+    printf "${BOLD}▸ Integration tests${RESET}\n"
+    printf "  (skipped — PREPR_SKIP_INTEGRATION=1; CI ci-integration.yml is authoritative)\n\n"
+  elif node -e 'const{Pool}=require("pg");const p=new Pool({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:3000,statement_timeout:3000});p.query("select 1").then(()=>process.exit(0)).catch(()=>process.exit(1)).finally(()=>p.end())' 2>/dev/null; then
+    run_step "Integration tests"  npm run test:integration
+  else
+    printf "${BOLD}▸ Integration tests${RESET}\n"
+    printf "  (skipped — no Postgres reachable within 3s; start docker compose or set DATABASE_URL)\n\n"
+  fi
+fi
+
 run_step "Build"                  npx next build
 
 echo ""

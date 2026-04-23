@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
 // ─── Shared mock handles ─────────────────────────────────────────────────────

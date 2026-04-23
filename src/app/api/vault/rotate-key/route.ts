@@ -1,20 +1,20 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/csrf";
+import { assertOrigin } from "@/lib/auth/session/csrf";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
-import { revokeAllDelegationSessions } from "@/lib/auth/delegation";
+import { revokeAllDelegationSessions } from "@/lib/auth/access/delegation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { z } from "zod";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/api-response";
+import { errorResponse, rateLimited, unauthorized, validationError, zodValidationError } from "@/lib/http/api-response";
 import {
   hexIv,
   hexAuthTag,

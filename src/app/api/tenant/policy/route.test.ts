@@ -67,15 +67,15 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/auth/session-timeout", () => ({
+vi.mock("@/lib/auth/session/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
 
-vi.mock("@/lib/auth/account-lockout", () => ({
+vi.mock("@/lib/auth/policy/account-lockout", () => ({
   invalidateLockoutThresholdCache: mockInvalidateLockoutThresholdCache,
 }));
 
-vi.mock("@/lib/auth/tenant-auth", () => ({
+vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));
@@ -95,11 +95,11 @@ vi.mock("@/lib/constants", () => ({
   AUDIT_SCOPE: { TENANT: "TENANT" },
 }));
 
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
 
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   API_ERROR: {
     UNAUTHORIZED: "UNAUTHORIZED",
     RATE_LIMIT_EXCEEDED: "RATE_LIMIT_EXCEEDED",
@@ -108,7 +108,7 @@ vi.mock("@/lib/api-error-codes", () => ({
   },
 }));
 
-vi.mock("@/lib/api-response", () => ({
+vi.mock("@/lib/http/api-response", () => ({
   errorResponse: (error: string, status: number, extra?: Record<string, unknown>) => {
     const body = { error, ...extra };
     return new Response(JSON.stringify(body), {
@@ -134,17 +134,17 @@ vi.mock("@/lib/validations/common", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   isValidCidr: () => true,
   extractClientIp: mockExtractClientIp,
 }));
 
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateTenantPolicyCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));

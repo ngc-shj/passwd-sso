@@ -31,7 +31,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -56,7 +56,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth/auth-or-token", () => ({
+vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
@@ -73,18 +73,18 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
 import { GET, POST } from "@/app/api/tenant/access-requests/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };

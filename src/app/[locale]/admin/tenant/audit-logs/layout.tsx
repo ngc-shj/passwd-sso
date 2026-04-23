@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { ScrollText } from "lucide-react";
-import { SectionLayout } from "@/components/settings/section-layout";
+import { SectionLayout } from "@/components/settings/account/section-layout";
 
 export default function TenantAuditLogsLayout({
   children,

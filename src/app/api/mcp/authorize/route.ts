@@ -5,7 +5,7 @@ import { serverAppUrl } from "@/lib/url-helpers";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 
 const authorizeLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });
 

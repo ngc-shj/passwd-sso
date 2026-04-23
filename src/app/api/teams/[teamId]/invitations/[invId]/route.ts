@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { requireTeamPermission } from "@/lib/auth/access/team-auth";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string; invId: string }> };
 

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { validateV1Auth } from "@/lib/auth/v1-auth";
-import { withRequestLog } from "@/lib/with-request-log";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { validateV1Auth } from "@/lib/auth/session/v1-auth";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
-import { API_KEY_SCOPE } from "@/lib/constants/api-key";
-import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { API_KEY_SCOPE } from "@/lib/constants/auth/api-key";
+import { enforceAccessRestriction } from "@/lib/auth/policy/access-restriction";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 
 
 // GET /api/v1/vault/status — Check vault initialization status (API key or SA token)

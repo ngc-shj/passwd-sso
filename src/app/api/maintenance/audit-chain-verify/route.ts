@@ -9,16 +9,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { verifyAdminToken } from "@/lib/auth/admin-token";
+import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { TENANT_ROLE } from "@/lib/constants/tenant-role";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/api-response";
-import { parseQuery } from "@/lib/parse-body";
+import { TENANT_ROLE } from "@/lib/constants/auth/tenant-role";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseQuery } from "@/lib/http/parse-body";
 import {
   buildChainInput,
   computeCanonicalBytes,

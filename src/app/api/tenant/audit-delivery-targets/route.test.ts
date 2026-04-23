@@ -33,7 +33,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -70,10 +70,10 @@ vi.mock("@/lib/audit/audit", () => ({
     userAgent: "test",
   }),
 }));
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -83,7 +83,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/audit-delivery-targets/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 import { AUDIT_ACTION } from "@/lib/constants";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };

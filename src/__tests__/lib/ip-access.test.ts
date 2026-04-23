@@ -10,7 +10,7 @@ import {
   extractClientIp,
   rateLimitKeyFromIp,
   _resetTrustedProxyCache,
-} from "@/lib/auth/ip-access";
+} from "@/lib/auth/policy/ip-access";
 
 describe("normalizeIp", () => {
   it("strips IPv4-mapped IPv6 prefix", () => {

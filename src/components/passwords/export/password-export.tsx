@@ -21,7 +21,7 @@ import {
   type ExportProfile,
   formatExportContent as formatExportContentShared,
   formatExportDate,
-} from "@/lib/export-format-common";
+} from "@/lib/format/export-format-common";
 import { fetchApi } from "@/lib/url-helpers";
 
 function ExportPanelContent() {

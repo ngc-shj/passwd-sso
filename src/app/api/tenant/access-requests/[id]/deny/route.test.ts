@@ -23,7 +23,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -53,12 +53,12 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 
 import { POST } from "@/app/api/tenant/access-requests/[id]/deny/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const REQUEST_ID = "req-00000001";

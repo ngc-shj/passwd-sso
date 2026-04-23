@@ -24,7 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
 vi.mock("@/lib/audit/audit", () => ({

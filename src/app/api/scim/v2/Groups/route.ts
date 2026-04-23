@@ -11,7 +11,7 @@ import type { ScimGroupMemberInput, ScimGroupResource } from "@/lib/scim/seriali
 import { scimGroupSchema } from "@/lib/scim/validations";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { authorizeScim } from "@/lib/scim/with-scim-auth";
 
 const SCIM_GROUP_ROLES: TeamRole[] = [

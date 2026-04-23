@@ -2,7 +2,7 @@
 
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { getTagColorClass } from "@/lib/dynamic-styles";
+import { getTagColorClass } from "@/lib/ui/dynamic-styles";
 
 interface TagBadgeProps {
   name: string;

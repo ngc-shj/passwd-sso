@@ -1,6 +1,6 @@
 "use client";
 
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { ENTRY_DIALOG_FLAT_SECTION_CLASS } from "@/components/passwords/entry/entry-form-ui";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { createTeamLoginSubmitHandler } from "@/hooks/team/team-login-form-controller";

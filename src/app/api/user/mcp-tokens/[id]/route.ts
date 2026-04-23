@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { unauthorized, notFound, errorResponse } from "@/lib/api-response";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
+import { unauthorized, notFound, errorResponse } from "@/lib/http/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
-import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
-import { evictDelegationRedisKeys } from "@/lib/auth/delegation";
+import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
+import { evictDelegationRedisKeys } from "@/lib/auth/access/delegation";
 
 async function handleDELETE(
   _req: NextRequest,

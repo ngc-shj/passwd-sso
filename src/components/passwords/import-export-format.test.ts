@@ -6,7 +6,7 @@ import {
   formatExportCsv,
   formatExportJson,
   PERSONAL_EXPORT_OPTIONS,
-} from "@/lib/export-format-common";
+} from "@/lib/format/export-format-common";
 
 const sampleLoginEntry = {
   entryType: ENTRY_TYPE.LOGIN,

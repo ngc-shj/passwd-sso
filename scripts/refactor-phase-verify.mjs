@@ -57,8 +57,8 @@ const forceFlag = args.includes("--force");
 const verboseFlag = args.includes("--verbose");
 
 // Branch guard
-const branch = currentBranch();
-if (!forceFlag && !/^refactor\//.test(branch)) {
+const currentBranchName = currentBranch();
+if (!forceFlag && !/^refactor\//.test(currentBranchName)) {
   console.log("Not on refactor branch — skipping refactor-phase-verify.");
   process.exit(0);
 }
@@ -93,22 +93,60 @@ if (originSha !== expectedSha) {
   process.exit(1);
 }
 
+// Parallel-branch guard: fail if another refactor/* PR is open.
+function checkParallelRefactorBranches() {
+  try {
+    const output = execSync(
+      "gh pr list --state open --json headRefName --jq '.[].headRefName'",
+      { encoding: "utf8" }
+    );
+    const openBranches = output.split("\n").filter((b) => b.startsWith("refactor/"));
+    const currentBranch = currentBranchName;
+    const others = openBranches.filter((b) => b !== currentBranch);
+    if (others.length > 0) {
+      console.error(
+        `Parallel refactor branches detected (must be serialized):\n  ${others.join("\n  ")}\n` +
+          `Current: ${currentBranch}. Merge or close other refactor/* PRs first.`
+      );
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(
+      `Warning: could not check parallel refactor branches via \`gh pr list\`: ${err.message}`
+    );
+    console.warn(`  Proceeding anyway — verify manually that no other refactor/* PRs are open.`);
+    return true; // Don't block if gh is unavailable
+  }
+}
+
+if (!checkParallelRefactorBranches()) {
+  process.exit(1);
+}
+
 // Script definitions
 /** @type {Array<{ label: string; cmd: string[] }>} */
 const scripts = [
-  { label: "check-team-auth-rls",                cmd: ["node", "scripts/check-team-auth-rls.mjs"] },
-  { label: "check-bypass-rls",                   cmd: ["node", "scripts/check-bypass-rls.mjs"] },
-  { label: "check-crypto-domains",               cmd: ["node", "scripts/check-crypto-domains.mjs"] },
-  { label: "check-migration-drift",              cmd: ["node", "scripts/check-migration-drift.mjs"] },
+  { label: "check-team-auth-rls",                cmd: ["node", "scripts/checks/check-team-auth-rls.mjs"] },
+  { label: "check-bypass-rls",                   cmd: ["node", "scripts/checks/check-bypass-rls.mjs"] },
+  { label: "check-crypto-domains",               cmd: ["node", "scripts/checks/check-crypto-domains.mjs"] },
+  { label: "check-migration-drift",              cmd: ["node", "scripts/checks/check-migration-drift.mjs"] },
   { label: "verify-allowlist-rename-only",       cmd: ["node", "scripts/verify-allowlist-rename-only.mjs"] },
-  { label: "verify-move-only-diff",              cmd: ["node", "scripts/verify-move-only-diff.mjs"] },
-  { label: "check-vitest-coverage-include",      cmd: ["node", "scripts/check-vitest-coverage-include.mjs", "--enforce-rename-parity"] },
-  { label: "check-doc-paths",                    cmd: ["node", "scripts/check-doc-paths.mjs"] },
-  { label: "check-mjs-imports",                  cmd: ["node", "scripts/check-mjs-imports.mjs"] },
-  { label: "check-dynamic-import-specifiers (src/lib)",        cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/lib"] },
-  { label: "check-dynamic-import-specifiers (src/hooks)",      cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/hooks"] },
-  { label: "check-dynamic-import-specifiers (src/components/passwords)", cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/passwords"] },
-  { label: "capture-test-counts",                cmd: ["node", "scripts/capture-test-counts.mjs"] },
+  // Scope to src/** only: scripts/checks/* moves legitimately bump ROOT path
+  // derivation (+1 level) which verify-move-only-diff cannot distinguish from
+  // business-logic drift. Src code changes remain fully guarded.
+  { label: "verify-move-only-diff",              cmd: ["node", "scripts/verify-move-only-diff.mjs", "--glob", "src/**"] },
+  { label: "check-vitest-coverage-include",      cmd: ["node", "scripts/checks/check-vitest-coverage-include.mjs", "--enforce-rename-parity"] },
+  { label: "check-doc-paths",                    cmd: ["node", "scripts/checks/check-doc-paths.mjs"] },
+  { label: "check-mjs-imports",                  cmd: ["node", "scripts/checks/check-mjs-imports.mjs"] },
+  { label: "check-dynamic-import-specifiers (src/lib)",        cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/lib"] },
+  { label: "check-dynamic-import-specifiers (src/hooks)",      cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/hooks"] },
+  { label: "check-dynamic-import-specifiers (src/components/passwords)", cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/passwords"] },
+  { label: "check-dynamic-import-specifiers (src/components/settings)",  cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/settings"] },
+  { label: "check-dynamic-import-specifiers (src/components/team)",      cmd: ["node", "scripts/checks/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/team"] },
+  { label: "capture-test-counts",                cmd: ["node", "scripts/checks/capture-test-counts.mjs"] },
+  { label: "check-codeowners-drift",             cmd: ["node", "scripts/check-codeowners-drift.mjs"] },
+  { label: "check-blame-ignore-revs",            cmd: ["node", "scripts/check-blame-ignore-revs.mjs"] },
 ];
 
 console.log(`\n${"═".repeat(50)}`);

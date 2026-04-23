@@ -17,7 +17,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({ setup: mockSetup }),
 }));
 
-vi.mock("@/lib/ime-guard", () => ({
+vi.mock("@/lib/ui/ime-guard", () => ({
   preventIMESubmit: vi.fn(),
 }));
 

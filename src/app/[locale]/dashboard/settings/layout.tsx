@@ -14,7 +14,7 @@ import {
   Handshake,
   Plug,
 } from "lucide-react";
-import { SectionLayout } from "@/components/settings/section-layout";
+import { SectionLayout } from "@/components/settings/account/section-layout";
 import { useTranslations } from "next-intl";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {

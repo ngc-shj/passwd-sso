@@ -20,7 +20,7 @@ const {
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
-vi.mock("@/lib/auth/check-auth", () => ({
+vi.mock("@/lib/auth/session/check-auth", () => ({
   checkAuth: mockCheckAuth,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
@@ -51,8 +51,8 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/constants/api-key", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/constants/api-key")>();
+vi.mock("@/lib/constants/auth/api-key", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/constants/auth/api-key")>();
   return { ...actual };
 });
 

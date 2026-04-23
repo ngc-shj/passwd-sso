@@ -4,7 +4,7 @@ import {
   extractAadScopes,
   parseLedgerHkdfInfo,
   parseLedgerAadScopes,
-} from "../check-crypto-domains.mjs";
+} from "../checks/check-crypto-domains.mjs";
 
 describe("extractHkdfInfoStrings", () => {
   it("extracts HKDF info strings from source code", () => {

@@ -2,9 +2,9 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

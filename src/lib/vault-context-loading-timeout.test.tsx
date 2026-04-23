@@ -29,7 +29,7 @@ vi.mock("@/lib/constants", () => ({
   API_ERROR: {},
 }));
 
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   API_ERROR: {},
 }));
 

@@ -8,14 +8,14 @@ vi.mock("@/auth", () => ({
     POST: vi.fn(async (req: NextRequest) => new Response(req.url)),
   },
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: <T>(h: T) => h,
 }));
 vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/auth/session-meta", () => ({
+vi.mock("@/lib/auth/session/session-meta", () => ({
   sessionMetaStorage: { run: (_meta: unknown, fn: () => unknown) => fn() },
 }));
 

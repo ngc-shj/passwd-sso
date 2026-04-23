@@ -1,17 +1,17 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/auth/csrf";
+import { assertOrigin } from "@/lib/auth/session/csrf";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
-import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { errorResponse, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 

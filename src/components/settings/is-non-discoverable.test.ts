@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isNonDiscoverable } from "./passkey-credentials-card";
+import { isNonDiscoverable } from "./security/passkey-credentials-card";
 
 describe("isNonDiscoverable", () => {
   // credProps.rk available (discoverable is not null)

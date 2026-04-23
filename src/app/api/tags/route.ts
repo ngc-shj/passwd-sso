@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createTagSchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import {
@@ -12,8 +12,8 @@ import {
   buildTagTree,
   flattenTagTree,
   TagTreeError,
-} from "@/lib/tag-tree";
-import { withRequestLog } from "@/lib/with-request-log";
+} from "@/lib/format/tag-tree";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 // GET /api/tags - List user's tags with password count
 async function handleGET(req: NextRequest) {

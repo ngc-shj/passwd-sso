@@ -34,7 +34,7 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: vi.fn().mockResolvedValue({ allowed: true }) }),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 

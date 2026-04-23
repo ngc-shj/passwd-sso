@@ -53,11 +53,11 @@ import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { extractClientIp } from "@/lib/auth/ip-access";
-import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
+import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";
-import type { AuthResult } from "@/lib/auth/auth-or-token";
+import type { AuthResult } from "@/lib/auth/session/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
@@ -71,7 +71,7 @@ function truncateMetadata(metadata: Record<string, unknown> | undefined): Record
 }
 
 // Re-export from constants for backward compatibility
-export { OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit";
+export { OUTBOX_BYPASS_AUDIT_ACTIONS, WEBHOOK_DISPATCH_SUPPRESS } from "@/lib/constants/audit/audit";
 import { UUID_RE } from "@/lib/constants/app";
 
 export interface AuditLogParams {

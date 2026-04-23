@@ -11,7 +11,7 @@ vi.mock("next-intl/middleware", async () => {
   const { NextResponse: NR } = await import("next/server");
   return { default: () => () => new NR(null, { status: 200 }) };
 });
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   checkAccessRestrictionWithAudit: mockCheckAccessWithAudit,
 }));
 vi.mock("@/lib/tenant-context", () => ({

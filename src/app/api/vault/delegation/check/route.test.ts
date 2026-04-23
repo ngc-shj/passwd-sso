@@ -18,7 +18,7 @@ const {
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
-vi.mock("@/lib/auth/auth-or-token", () => ({
+vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
   hasUserId: (auth: { type: string }) => "userId" in auth,
 }));
@@ -39,10 +39,10 @@ vi.mock("@/lib/audit/audit", () => ({
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
 }));
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 vi.mock("@/lib/logger", () => ({

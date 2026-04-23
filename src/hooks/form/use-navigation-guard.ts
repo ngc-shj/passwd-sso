@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { resolveNavigationTarget } from "@/lib/client-navigation";
+import { resolveNavigationTarget } from "@/lib/url/client-navigation";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 
 /**

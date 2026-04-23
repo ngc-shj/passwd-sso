@@ -6,7 +6,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
+import { API_ERROR, type ApiErrorCode } from "@/lib/http/api-error-codes";
 import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import type { EntryType } from "@prisma/client";
 import { MS_PER_DAY } from "@/lib/constants/time";

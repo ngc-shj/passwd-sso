@@ -19,7 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { buildTagTree, flattenTagTree, type FlatTag } from "@/lib/tag-tree";
+import { buildTagTree, flattenTagTree, type FlatTag } from "@/lib/format/tag-tree";
 import { TAG_NAME_MAX_LENGTH } from "@/lib/validations";
 
 export interface TagDialogTag {

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import { SYMBOL_GROUP_KEYS } from "@/lib/generator/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-form-types";
 import type { useTeamPolicy } from "@/hooks/team/use-team-policy";
 import {
   applyPolicyToGeneratorSettings,

@@ -6,7 +6,7 @@ const { mockToastError, mockApiErrorToI18nKey } = vi.hoisted(() => ({
 }));
 
 vi.mock("sonner", () => ({ toast: { error: mockToastError } }));
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: mockApiErrorToI18nKey,
 }));
 

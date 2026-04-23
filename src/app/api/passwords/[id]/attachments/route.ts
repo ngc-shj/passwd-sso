@@ -10,13 +10,13 @@ import {
   FILENAME_MAX_LENGTH,
   isValidSendFilename,
 } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
+import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/http/api-response";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 type RouteContext = { params: Promise<{ id: string }> };

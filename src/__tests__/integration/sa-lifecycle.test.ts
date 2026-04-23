@@ -59,7 +59,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -107,7 +107,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 
@@ -123,12 +123,12 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 // parseSaTokenScopes run; their Prisma dependencies are intercepted via mocked prisma/withBypassRls.
 
 // passwords route uses authOrToken from @/lib/auth-or-token
-vi.mock("@/lib/auth/auth-or-token", () => ({
+vi.mock("@/lib/auth/session/auth-or-token", () => ({
   authOrToken: mockPasswordsAuthOrToken,
   hasUserId: (a: { userId?: string }) => "userId" in a,
 }));
 
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
@@ -146,8 +146,8 @@ import {
 import {
   validateServiceAccountToken,
   parseSaTokenScopes,
-} from "@/lib/auth/service-account-token";
-import { authOrToken } from "@/lib/auth/auth-or-token";
+} from "@/lib/auth/tokens/service-account-token";
+import { authOrToken } from "@/lib/auth/session/auth-or-token";
 
 // ─── Shared fixtures ─────────────────────────────────────────────────────────
 

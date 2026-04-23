@@ -6,13 +6,13 @@ import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, unauthorized, notFound } from "@/lib/http/api-response";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { parseBody } from "@/lib/parse-body";
-import { withRequestLog } from "@/lib/with-request-log";
+import { parseBody } from "@/lib/http/parse-body";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 // POST /api/emergency-access/reject — Reject an emergency access invitation
 async function handlePOST(req: NextRequest) {

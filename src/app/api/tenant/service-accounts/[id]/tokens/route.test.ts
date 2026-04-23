@@ -27,7 +27,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -60,7 +60,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/crypto/crypto-server", () => ({
@@ -68,7 +68,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/[id]/tokens/route";
-import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
+import { MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/auth/service-account";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 const SA_ID = "sa-00000001";

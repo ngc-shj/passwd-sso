@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
-import { preventIMESubmit } from "@/lib/ime-guard";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

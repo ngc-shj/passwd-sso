@@ -16,7 +16,7 @@ import {
   exportPrivateKey,
   encryptPrivateKey,
 } from "@/lib/crypto/crypto-emergency";
-import { API_ERROR, eaErrorToI18nKey } from "@/lib/api-error-codes";
+import { API_ERROR, eaErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
 
 export default function AcceptEmergencyInvitePage() {

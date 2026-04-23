@@ -2,18 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { checkAuth } from "@/lib/auth/check-auth";
+import { checkAuth } from "@/lib/auth/session/check-auth";
 import { createTeamE2ESchema } from "@/lib/validations";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, forbidden, handleAuthError, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, forbidden, handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_ROLE, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { resolveUserTenantIdFromClient, withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { getLogger } from "@/lib/logger";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 // GET /api/teams — List teams the user belongs to
 async function handleGET(req: NextRequest) {

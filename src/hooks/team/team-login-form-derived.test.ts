@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
-import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-form-types";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import { buildTeamLoginFormDerived } from "@/hooks/team/team-login-form-derived";

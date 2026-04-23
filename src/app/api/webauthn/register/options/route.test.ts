@@ -43,12 +43,12 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
 
-vi.mock("@/lib/auth/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn/webauthn-server", () => ({
   generateRegistrationOpts: mockGenerateRegistrationOpts,
   derivePrfSalt: mockDerivePrfSalt,
 }));
 
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));

@@ -36,7 +36,7 @@ const {
   mockRateLimiterCheck: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
+vi.mock("@/lib/auth/tokens/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -59,7 +59,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/auth/access-restriction", () => ({
+vi.mock("@/lib/auth/policy/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/logger", () => {

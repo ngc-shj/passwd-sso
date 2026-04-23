@@ -25,7 +25,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -59,7 +59,7 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({
@@ -67,8 +67,8 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 }));
 
 import { GET, POST } from "@/app/api/tenant/service-accounts/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
-import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/service-account";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
+import { MAX_SERVICE_ACCOUNTS_PER_TENANT } from "@/lib/constants/auth/service-account";
 
 const ACTOR = { tenantId: "tenant-1", role: "ADMIN" };
 

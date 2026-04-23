@@ -3,13 +3,13 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { getSessionToken } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
-import { rateLimited } from "@/lib/api-response";
-import { revokeAllExtensionTokensForUser } from "@/lib/auth/extension-token";
+import { rateLimited } from "@/lib/http/api-response";
+import { revokeAllExtensionTokensForUser } from "@/lib/auth/tokens/extension-token";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 

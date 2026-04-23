@@ -54,10 +54,6 @@ function ensureBool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
 }
 
-function ensureFiniteNonNeg(v: unknown, fallback: number): number {
-  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : fallback;
-}
-
 /**
  * Clamp a stored auto-lock value to the new 5-minute minimum.
  * Legacy extensions may have persisted 0 ("never") or 1-4 minutes; those

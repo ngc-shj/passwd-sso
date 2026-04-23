@@ -10,7 +10,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import type { EaStatusValue } from "@/lib/constants";
 import { API_PATH, EA_STATUS } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";

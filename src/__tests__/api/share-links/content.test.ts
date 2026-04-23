@@ -27,13 +27,13 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
-vi.mock("@/lib/auth/share-access-token", () => ({
+vi.mock("@/lib/auth/tokens/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyShareAccessToken,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: () => "1.2.3.4",
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

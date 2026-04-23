@@ -51,8 +51,8 @@ vi.mock("@/lib/audit/audit-logger", () => ({
     "accountSalt", "passphraseVerifierHmac",
   ]),
 }));
-vi.mock("@/lib/auth/service-account-token", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/auth/service-account-token")>();
+vi.mock("@/lib/auth/tokens/service-account-token", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/tokens/service-account-token")>();
   return {
     ...actual,
     validateServiceAccountToken: mockValidateServiceAccountToken,
@@ -63,7 +63,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 // ─── Imports after mocks ───────────────────────────────────────────────────────
 
 import { logAuditAsync, resolveActorType } from "@/lib/audit/audit";
-import type { AuthResult } from "@/lib/auth/auth-or-token";
+import type { AuthResult } from "@/lib/auth/session/auth-or-token";
 
 // ─── Scenario 5: SA action audit logging ──────────────────────────────────────
 
@@ -229,7 +229,7 @@ describe("Scenario 7: Tenant isolation — SA token from tenant-A rejected for t
       },
     });
 
-    const { validateServiceAccountToken } = await import("@/lib/auth/service-account-token");
+    const { validateServiceAccountToken } = await import("@/lib/auth/tokens/service-account-token");
     const { NextRequest } = await import("next/server");
     const req = new NextRequest("http://localhost/api/v1/passwords", {
       headers: { authorization: "Bearer sa_abc123" },
@@ -275,7 +275,7 @@ describe("Scenario 7: Tenant isolation — SA token from tenant-A rejected for t
     mockAuth.mockResolvedValue(null);
 
     // We test the auth result type and tenantId extraction pattern used in routes
-    const { validateServiceAccountToken } = await import("@/lib/auth/service-account-token");
+    const { validateServiceAccountToken } = await import("@/lib/auth/tokens/service-account-token");
     const { NextRequest } = await import("next/server");
 
     const req = new NextRequest("http://localhost/api/v1/passwords", {

@@ -5,10 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync } from "@/lib/audit/audit";
-import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
-import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
+import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import {
   MCP_CLIENT_ID_PREFIX,
   MCP_SCOPES,
@@ -16,9 +16,9 @@ import {
   MAX_UNCLAIMED_DCR_CLIENTS,
   DCR_RATE_LIMIT_WINDOW_MS,
   DCR_RATE_LIMIT_MAX,
-} from "@/lib/constants/mcp";
+} from "@/lib/constants/auth/mcp";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 const dcrRateLimiter = createRateLimiter({
   windowMs: DCR_RATE_LIMIT_WINDOW_MS,

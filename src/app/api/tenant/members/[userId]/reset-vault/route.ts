@@ -2,7 +2,7 @@ import { randomBytes, createHash } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { assertOrigin } from "@/lib/auth/csrf";
+import { assertOrigin } from "@/lib/auth/session/csrf";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
@@ -13,14 +13,14 @@ import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
   isTenantRoleAbove,
-} from "@/lib/auth/tenant-auth";
+} from "@/lib/auth/access/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
-import { withRequestLog } from "@/lib/with-request-log";
-import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
+import { NOTIFICATION_TYPE } from "@/lib/constants/audit/notification";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { forbidden, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MAX_PENDING_RESETS, VAULT_RESET_HISTORY_LIMIT } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
 

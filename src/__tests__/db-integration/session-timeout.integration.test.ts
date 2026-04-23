@@ -101,7 +101,7 @@ describe("session timeout — integration", () => {
 
     it("returns tenant values when user has no team policies", async () => {
       // Dynamic import so the resolver reads the freshly-regenerated Prisma client
-      const mod = await import("@/lib/auth/session-timeout");
+      const mod = await import("@/lib/auth/session/session-timeout");
       mod._internal.clear();
 
       const result = await mod.resolveEffectiveSessionTimeouts(userId, null);
@@ -111,7 +111,7 @@ describe("session timeout — integration", () => {
     });
 
     it("applies AAL3 clamp when sessionProvider === 'webauthn'", async () => {
-      const mod = await import("@/lib/auth/session-timeout");
+      const mod = await import("@/lib/auth/session/session-timeout");
       mod._internal.clear();
 
       const result = await mod.resolveEffectiveSessionTimeouts(userId, "webauthn");
@@ -130,7 +130,7 @@ describe("session timeout — integration", () => {
         sessionAbsoluteTimeoutMinutes: null,
       });
 
-      const mod = await import("@/lib/auth/session-timeout");
+      const mod = await import("@/lib/auth/session/session-timeout");
       mod._internal.clear();
 
       const result = await mod.resolveEffectiveSessionTimeouts(userId, null);

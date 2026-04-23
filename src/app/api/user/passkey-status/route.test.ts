@@ -16,7 +16,7 @@ const {
   mockUserFindUnique: vi.fn(),
 }));
 
-vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
@@ -30,7 +30,7 @@ vi.mock("@/lib/prisma", () => ({
     user: { findUnique: mockUserFindUnique },
   },
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 vi.mock("@/lib/logger", () => ({

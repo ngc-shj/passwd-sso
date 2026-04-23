@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => {
+vi.mock("@/lib/auth/access/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -51,10 +51,10 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/constants/tenant-permission", () => ({
+vi.mock("@/lib/constants/auth/tenant-permission", () => ({
   TENANT_PERMISSION: {
     AUDIT_LOG_VIEW: "tenant:auditLog:view",
   },
@@ -62,7 +62,7 @@ vi.mock("@/lib/constants/tenant-permission", () => ({
 
 import { GET } from "@/app/api/tenant/audit-logs/route";
 import { GET as GET_DOWNLOAD } from "@/app/api/tenant/audit-logs/download/route";
-import { TenantAuthError } from "@/lib/auth/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/access/tenant-auth";
 
 function makeLog(overrides: Record<string, unknown> = {}) {
   return {

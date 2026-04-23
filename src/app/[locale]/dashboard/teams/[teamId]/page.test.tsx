@@ -46,28 +46,28 @@ vi.mock("@/components/passwords/detail/password-card", () => ({
     </button>
   ),
 }));
-vi.mock("@/components/team/team-login-form", () => ({
+vi.mock("@/components/team/forms/team-login-form", () => ({
   TeamLoginForm: () => null,
 }));
-vi.mock("@/components/team/team-edit-dialog-loader", () => ({
+vi.mock("@/components/team/management/team-edit-dialog-loader", () => ({
   TeamEditDialogLoader: (props: unknown) => {
     teamEditDialogLoaderMock(props);
     return <div data-testid="team-edit-dialog-loader" />;
   },
 }));
-vi.mock("@/components/team/team-archived-list", () => ({
+vi.mock("@/components/team/management/team-archived-list", () => ({
   TeamArchivedList: (props: unknown) => {
     teamArchivedListMock(props);
     return null;
   },
 }));
-vi.mock("@/components/team/team-trash-list", () => ({
+vi.mock("@/components/team/management/team-trash-list", () => ({
   TeamTrashList: (props: unknown) => {
     teamTrashListMock(props);
     return null;
   },
 }));
-vi.mock("@/components/team/team-role-badge", () => ({
+vi.mock("@/components/team/management/team-role-badge", () => ({
   TeamRoleBadge: () => <span>ROLE</span>,
 }));
 vi.mock("@/components/ui/button", () => ({
@@ -154,10 +154,6 @@ vi.mock("@/components/passwords/entry/entry-list-header", () => ({
 
 vi.mock("@/components/passwords/entry/entry-sort-menu", () => ({
   EntrySortMenu: () => null,
-}));
-
-vi.mock("@/components/team/team-favorites-list", () => ({
-  TeamFavoritesList: () => null,
 }));
 
 vi.mock("@/lib/team/team-vault-context", () => ({

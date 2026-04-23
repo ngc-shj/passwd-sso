@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
-import { getTeamMembership, isTeamAdminRole } from "@/lib/auth/team-auth";
+import { getTeamMembership, isTeamAdminRole } from "@/lib/auth/access/team-auth";
 
 export default async function TeamAdminLayout({
   children,

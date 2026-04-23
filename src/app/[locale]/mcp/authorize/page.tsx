@@ -2,7 +2,7 @@ import { auth } from "@/auth";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { MCP_SCOPES } from "@/lib/constants/mcp";
+import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { getTranslations } from "next-intl/server";
 import { ConsentForm } from "./consent-form";
 

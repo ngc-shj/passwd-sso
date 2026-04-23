@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/auth/tenant-auth";
-import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
+import { requireTenantPermission } from "@/lib/auth/access/tenant-auth";
+import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { assertOrigin } from "@/lib/auth/csrf";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { assertOrigin } from "@/lib/auth/session/csrf";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import { AUDIT_ACTION, TENANT_ROLE } from "@/lib/constants";
 
 export const runtime = "nodejs";

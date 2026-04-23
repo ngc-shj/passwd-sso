@@ -14,20 +14,20 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyAdminToken } from "@/lib/auth/admin-token";
+import { verifyAdminToken } from "@/lib/auth/tokens/admin-token";
 import { prisma } from "@/lib/prisma";
-import { parseBody } from "@/lib/parse-body";
+import { parseBody } from "@/lib/http/parse-body";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
 } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
-import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
+import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited, unauthorized } from "@/lib/http/api-response";
 import { MASTER_KEY_VERSION_MIN, MASTER_KEY_VERSION_MAX } from "@/lib/validations/common.server";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 1 });

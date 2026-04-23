@@ -35,7 +35,7 @@ const {
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/auth/tenant-auth", () => ({
+vi.mock("@/lib/auth/access/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));
@@ -61,10 +61,10 @@ vi.mock("@/lib/audit/audit", () => ({
     userAgent: "test-agent",
   }),
 }));
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
 vi.mock("@/lib/webhook-dispatcher", () => ({

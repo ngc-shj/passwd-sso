@@ -1,9 +1,9 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { validateMcpToken } from "@/lib/mcp/oauth-server";
 import { handleMcpRequest } from "@/lib/mcp/server";
-import { extractClientIp } from "@/lib/auth/ip-access";
+import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { BASE_PATH } from "@/lib/url-helpers";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 
 async function handlePOST(req: NextRequest) {
   // Validate MCP access token

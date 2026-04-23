@@ -17,7 +17,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
-vi.mock("@/lib/tailscale-client", () => ({
+vi.mock("@/lib/services/tailscale-client", () => ({
   verifyTailscalePeer: mockVerifyTailscalePeer,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -35,7 +35,7 @@ import {
   wouldIpBeAllowed,
   invalidateTenantPolicyCache,
   _clearPolicyCache,
-} from "@/lib/auth/access-restriction";
+} from "@/lib/auth/policy/access-restriction";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestriction", () => {

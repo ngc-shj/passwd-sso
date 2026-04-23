@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { checkAuth } from "@/lib/auth/check-auth";
+import { checkAuth } from "@/lib/auth/session/check-auth";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
   requireTeamMember,
   hasTeamPermission,
-} from "@/lib/auth/team-auth";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { parseBody } from "@/lib/parse-body";
+} from "@/lib/auth/access/team-auth";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, forbidden, handleAuthError, notFound, unauthorized } from "@/lib/http/api-response";
 import * as teamPasswordService from "@/lib/services/team-password-service";
 import { TeamPasswordServiceError } from "@/lib/services/team-password-service";
 

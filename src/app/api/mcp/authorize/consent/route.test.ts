@@ -67,7 +67,7 @@ vi.mock("@/lib/audit/audit", () => ({
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
 }));
 
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: vi.fn().mockReturnValue(null),
 }));
 
@@ -150,7 +150,7 @@ describe("POST /api/mcp/authorize/consent", () => {
   });
 
   it("returns 403 when Origin header does not match host (CSRF check)", async () => {
-    const { assertOrigin } = await import("@/lib/auth/csrf");
+    const { assertOrigin } = await import("@/lib/auth/session/csrf");
     const mockAssertOrigin = vi.mocked(assertOrigin);
     const { NextResponse } = await import("next/server");
     mockAssertOrigin.mockReturnValueOnce(

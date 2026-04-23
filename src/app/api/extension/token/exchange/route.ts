@@ -25,19 +25,19 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import {
   errorResponse,
   rateLimited,
   unauthorized,
   zodValidationError,
-} from "@/lib/api-response";
-import { issueExtensionToken } from "@/lib/auth/extension-token";
+} from "@/lib/http/api-response";
+import { issueExtensionToken } from "@/lib/auth/tokens/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/policy/ip-access";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 

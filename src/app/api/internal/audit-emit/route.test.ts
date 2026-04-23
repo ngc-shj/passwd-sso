@@ -14,7 +14,7 @@ const {
   mockExtractRequestMeta: vi.fn().mockReturnValue({ ip: "10.0.0.1", userAgent: "TestAgent" }),
 }));
 
-vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/session/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));

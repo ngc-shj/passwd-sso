@@ -34,7 +34,7 @@ vi.mock("@/lib/prisma", () => ({
     teamPasswordEntryHistory: mockPrismaTeamPasswordEntryHistory,
   },
 }));
-vi.mock("@/lib/auth/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError,
 }));

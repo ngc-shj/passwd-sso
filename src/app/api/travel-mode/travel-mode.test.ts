@@ -23,7 +23,7 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
-vi.mock("@/lib/auth/account-lockout", () => ({
+vi.mock("@/lib/auth/policy/account-lockout", () => ({
   checkLockout: mockCheckLockout,
   recordFailure: mockRecordFailure,
 }));
@@ -38,7 +38,7 @@ vi.mock("@/lib/crypto/crypto-server", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/with-request-log", () => ({
+vi.mock("@/lib/http/with-request-log", () => ({
   withRequestLog: (fn: (...args: unknown[]) => unknown) => fn,
 }));
 vi.mock("@/lib/logger", () => ({

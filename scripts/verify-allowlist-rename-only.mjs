@@ -14,7 +14,13 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-const TARGET_FILE = "scripts/check-bypass-rls.mjs";
+// PR 2: check-bypass-rls.mjs moved from scripts/ to scripts/checks/.
+// TARGET_FILE is the post-PR-2 path. When this script runs on a PR
+// that is itself performing the move, the file exists at the new path
+// in the working tree but at the legacy path on main — see main-source
+// fallback logic below.
+const TARGET_FILE = "scripts/checks/check-bypass-rls.mjs";
+const LEGACY_TARGET_FILE = "scripts/check-bypass-rls.mjs";
 
 /**
  * Parse ALLOWED_USAGE map from source text using a line-based regex parser.
@@ -73,10 +79,10 @@ function modelsEqual(a, b) {
   return sa.every((v, i) => v === sb[i]);
 }
 
-// Check if the target file was changed vs main
+// Check if the target file was changed vs main (either at current or legacy path).
 let diff = "";
 try {
-  diff = execSync(`git diff main -- ${TARGET_FILE}`, { encoding: "utf8" });
+  diff = execSync(`git diff main -- ${TARGET_FILE} ${LEGACY_TARGET_FILE}`, { encoding: "utf8" });
 } catch {
   diff = "";
 }
@@ -86,13 +92,17 @@ if (!diff.trim()) {
   process.exit(0);
 }
 
-// Read main version
+// Read main version — try post-PR-2 path first, fall back to legacy path.
 let mainSource = "";
 try {
-  mainSource = execSync(`git show main:${TARGET_FILE}`, { encoding: "utf8" });
-} catch (e) {
-  console.error(`Could not read main:${TARGET_FILE}: ${String(e)}`);
-  process.exit(1);
+  mainSource = execSync(`git show main:${TARGET_FILE}`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+} catch {
+  try {
+    mainSource = execSync(`git show main:${LEGACY_TARGET_FILE}`, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
+  } catch (e2) {
+    console.error(`Could not read main:${TARGET_FILE} or main:${LEGACY_TARGET_FILE}: ${String(e2)}`);
+    process.exit(1);
+  }
 }
 
 // Read current working-tree version

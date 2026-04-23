@@ -1,0 +1,74 @@
+name: ci-integration
+
+# Round 4 S11/T12 fix: authoritative integration-test gate for auth/DB-touching PRs.
+# Runs `npm run test:integration` against a live Postgres service. Blocking this
+# job's result is set via repo branch-protection `required_status_checks` (not
+# declared in this file — verify post-merge via `gh api .../branches/main/protection`).
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/auth/**'
+      - 'src/lib/prisma.ts'
+      - 'src/lib/prisma/**'
+      - 'src/lib/redis.ts'
+      - 'src/lib/tenant-rls.ts'
+      - 'src/lib/tenant-context.ts'
+      - 'src/lib/tenant/**'
+      - 'prisma/schema.prisma'
+      - 'prisma/migrations/**'
+
+permissions:
+  # Round 4 S23 fix: principle of least privilege — only content read needed.
+  contents: read
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          # Round 4 S22: ephemeral service-container credential — scoped to CI runner
+          # localhost ONLY. DO NOT reuse in any real env.
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: passwd_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=5
+
+    env:
+      # Round 4 T19 fix: DATABASE_URL inline from service — no secrets.
+      # Fork PRs run unchanged (no secret access required).
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Round 4 T31 fix: defensive `prisma generate` in case postinstall
+      # doesn't run it (some npm configurations skip postinstall scripts).
+      - name: Generate Prisma Client
+        run: npx prisma generate
+
+      # Round 4 T23 fix: use `migrate deploy` (idempotent, non-interactive) —
+      # NOT `migrate dev` which is dev-only and may prompt on drift.
+      # Matches precedent at ci.yml:270,337,423.
+      - name: Apply database migrations
+        run: npx prisma migrate deploy
+
+      - name: Run integration tests
+        run: npm run test:integration

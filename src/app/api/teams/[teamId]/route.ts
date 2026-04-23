@@ -6,14 +6,14 @@ import {
   requireTeamMember,
   requireTeamPermission,
   TeamAuthError,
-} from "@/lib/auth/team-auth";
-import { parseBody } from "@/lib/parse-body";
+} from "@/lib/auth/access/team-auth";
+import { parseBody } from "@/lib/http/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, notFound, unauthorized } from "@/lib/http/api-response";
 
 type Params = { params: Promise<{ teamId: string }> };
 

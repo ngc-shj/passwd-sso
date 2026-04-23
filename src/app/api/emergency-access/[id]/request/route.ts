@@ -6,12 +6,12 @@ import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
-import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/api-response";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { errorResponse, rateLimited, notFound, unauthorized } from "@/lib/http/api-response";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
 const requestLimiter = createRateLimiter({ windowMs: MS_PER_HOUR, max: 3 });

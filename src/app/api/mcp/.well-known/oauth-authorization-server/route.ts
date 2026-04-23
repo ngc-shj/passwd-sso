@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { MCP_SCOPES } from "@/lib/constants/mcp";
+import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { serverAppUrl, getAppOrigin } from "@/lib/url-helpers";
 
 export async function GET() {

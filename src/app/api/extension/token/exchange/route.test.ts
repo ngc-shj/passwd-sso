@@ -74,7 +74,7 @@ vi.mock("@/lib/audit/audit", () => ({
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "1.2.3.4", userAgent: "test", acceptLanguage: null }),
 }));
-vi.mock("@/lib/auth/ip-access", () => ({
+vi.mock("@/lib/auth/policy/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

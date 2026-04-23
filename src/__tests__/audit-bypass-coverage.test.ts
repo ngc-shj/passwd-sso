@@ -12,7 +12,7 @@ import {
   TENANT_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   ACTOR_TYPE,
-} from "@/lib/constants/audit";
+} from "@/lib/constants/audit/audit";
 import { VALID_ACTOR_TYPES } from "@/lib/audit/audit-query";
 import {
   ANONYMOUS_ACTOR_ID,

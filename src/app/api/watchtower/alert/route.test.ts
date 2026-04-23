@@ -29,7 +29,7 @@ vi.mock("@/lib/security/rate-limit", () => ({
     clear: vi.fn(),
   })),
 }));
-vi.mock("@/lib/auth/csrf", () => ({
+vi.mock("@/lib/auth/session/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
 vi.mock("@/lib/audit/audit", () => ({
@@ -61,7 +61,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/auth/team-auth", () => ({
+vi.mock("@/lib/auth/access/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError: MockTeamAuthError,
 }));

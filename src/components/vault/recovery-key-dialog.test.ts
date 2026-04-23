@@ -29,7 +29,7 @@ vi.mock("@/lib/crypto/crypto-recovery", () => ({
   formatRecoveryKey: mockFormatRecoveryKey,
   wrapSecretKeyWithRecovery: mockWrapSecretKeyWithRecovery,
 }));
-vi.mock("@/lib/api-error-codes", () => ({
+vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: (code: string) => code,
 }));
 vi.mock("@/lib/constants", () => ({

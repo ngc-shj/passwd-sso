@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { z } from "zod/v4";
-import { handleAuthError, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { handleAuthError, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import { AUDIT_ACTION, IMPORT_FORMAT_VALUES } from "@/lib/constants";
-import { requireTeamPermission } from "@/lib/auth/team-auth";
+import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { TEAM_PERMISSION } from "@/lib/constants";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 
 const bodySchema = z.object({

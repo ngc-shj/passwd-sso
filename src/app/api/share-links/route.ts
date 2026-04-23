@@ -9,13 +9,13 @@ import {
   generateAccessPassword,
   hashAccessPassword,
 } from "@/lib/crypto/crypto-server";
-import { requireTeamPermission } from "@/lib/auth/team-auth";
+import { requireTeamPermission } from "@/lib/auth/access/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team/team-policy";
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
-import { parseBody } from "@/lib/parse-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/http/api-response";
+import { parseBody } from "@/lib/http/parse-body";
 import {
   TEAM_PERMISSION,
   AUDIT_TARGET_TYPE,
@@ -25,7 +25,7 @@ import {
 import type { EntryTypeValue } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { withRequestLog } from "@/lib/with-request-log";
+import { withRequestLog } from "@/lib/http/with-request-log";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 
 const shareLinkLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });

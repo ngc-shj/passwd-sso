@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
-import { apiErrorToI18nKey } from "@/lib/api-error-codes";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
 

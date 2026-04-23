@@ -29,7 +29,7 @@ import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
 import { usePersonalFolders } from "@/hooks/personal/use-personal-folders";
 import { usePersonalTags } from "@/hooks/personal/use-personal-tags";
 import { buildFolderPath } from "@/lib/folder/folder-path";
-import { buildTagPath } from "@/lib/tag-tree";
+import { buildTagPath } from "@/lib/format/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
 import { VAULT_DATA_CHANGED_EVENT, notifyVaultDataChanged } from "@/lib/events";
 import { isOverlayActive } from "@/components/extension/auto-extension-connect";

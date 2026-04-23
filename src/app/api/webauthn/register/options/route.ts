@@ -3,11 +3,11 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { API_ERROR } from "@/lib/api-error-codes";
-import { withRequestLog } from "@/lib/with-request-log";
-import { rateLimited } from "@/lib/api-response";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { withRequestLog } from "@/lib/http/with-request-log";
+import { rateLimited } from "@/lib/http/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { generateRegistrationOpts, derivePrfSalt } from "@/lib/auth/webauthn-server";
+import { generateRegistrationOpts, derivePrfSalt } from "@/lib/auth/webauthn/webauthn-server";
 
 export const runtime = "nodejs";
 

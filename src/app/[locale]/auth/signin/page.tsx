@@ -2,7 +2,7 @@ import { redirect } from "@/i18n/navigation";
 import { auth } from "@/auth";
 import { getTranslations, setRequestLocale } from "next-intl/server";
 import { APP_NAME } from "@/lib/constants";
-import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/auth/callback-url";
+import { resolveCallbackUrl, callbackUrlToHref } from "@/lib/auth/session/callback-url";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
@@ -13,7 +13,7 @@ import { SecurityKeySignInForm } from "@/components/auth/security-key-signin-for
 import { Shield, ChevronDown } from "lucide-react";
 import { AppIcon } from "@/components/ui/app-icon";
 import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
-import { parseAllowedGoogleDomains } from "@/lib/google-domain";
+import { parseAllowedGoogleDomains } from "@/lib/url/google-domain";
 
 export default async function SignInPage({
   params,

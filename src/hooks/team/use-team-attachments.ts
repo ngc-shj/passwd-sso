@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import type { TeamAttachmentMeta } from "@/components/team/team-attachment-section";
+import type { TeamAttachmentMeta } from "@/components/team/forms/team-attachment-section";
 
 export function useTeamAttachments(open: boolean, teamId: string, entryId?: string) {
   const [attachments, setAttachments] = useState<TeamAttachmentMeta[]>([]);

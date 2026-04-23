@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { AUDIT_ACTION, AUDIT_ACTION_GROUP } from "@/lib/constants/audit";
+import { AUDIT_ACTION, AUDIT_ACTION_GROUP } from "@/lib/constants/audit/audit";
 
 function readAuditLog(locale: string): Record<string, unknown> {
   return JSON.parse(
