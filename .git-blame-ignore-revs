@@ -4,3 +4,4 @@
 # See docs/forensics.md for setup and usage.
 
 f4dac45748c2342f8c5c68bac0da4bd60c78f7f6  # Phase 1a — move token modules into src/lib/auth/
+f0f0d0b1103defc2a9c41266047e6b617c368dec  # Phase 1b — move WebAuthn modules into src/lib/auth/
