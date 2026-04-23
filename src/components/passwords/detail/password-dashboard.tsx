@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, Fragment, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { SearchBar } from "@/components/layout/search-bar";
-import { PasswordList, type SortOption, type PasswordListHandle } from "@/components/passwords/password-list";
+import { PasswordList, type SortOption, type PasswordListHandle } from "@/components/passwords/detail/password-list";
 import { TrashList, type TrashListHandle } from "@/components/passwords/trash-list";
 import { PasswordNewDialog } from "@/components/passwords/dialogs/personal-password-new-dialog";
 import { EntryListHeader } from "@/components/passwords/entry/entry-list-header";

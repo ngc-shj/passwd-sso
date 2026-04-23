@@ -21,13 +21,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { TagBadge } from "@/components/tags/tag-badge";
-import { CopyButton } from "./copy-button";
-import { Favicon } from "./favicon";
+import { CopyButton } from "../copy-button";
+import { Favicon } from "../favicon";
 import {
   PasswordDetailInline,
   type InlineDetailData,
 } from "./password-detail-inline";
-import { PasswordEditDialogLoader } from "./dialogs/personal-password-edit-dialog-loader";
+import { PasswordEditDialogLoader } from "../dialogs/personal-password-edit-dialog-loader";
 import {
   User,
   Star,

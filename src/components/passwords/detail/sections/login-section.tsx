@@ -5,9 +5,9 @@ import { useTranslations, useLocale } from "next-intl";
 import { Eye, EyeOff, History, ChevronDown, ChevronRight } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { CopyButton } from "../copy-button";
-import { Favicon } from "../favicon";
-import { TOTPField } from "../totp-field";
+import { CopyButton } from "../../copy-button";
+import { Favicon } from "../../favicon";
+import { TOTPField } from "../../totp-field";
 import { useRevealTimeout, useRevealSet } from "@/hooks/vault/use-reveal-timeout";
 import type { RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";

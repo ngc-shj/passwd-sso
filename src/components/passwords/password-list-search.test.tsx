@@ -70,7 +70,7 @@ vi.mock("@/hooks/bulk/use-bulk-action", () => ({
 }));
 
 // Render each entry title as a simple div so we can assert which entries are visible
-vi.mock("@/components/passwords/password-card", () => ({
+vi.mock("@/components/passwords/detail/password-card", () => ({
   PasswordCard: ({ entry }: { entry: { title: string } }) => (
     <div data-testid="password-card">{entry.title}</div>
   ),
@@ -102,7 +102,7 @@ vi.mock("lucide-react", () => ({
   Archive: () => null,
 }));
 
-import { PasswordList } from "./password-list";
+import { PasswordList } from "./detail/password-list";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

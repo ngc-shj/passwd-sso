@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 describe("password-list bulk wiring", () => {
   const src = readFileSync(
-    join(process.cwd(), "src/components/passwords/password-list.tsx"),
+    join(process.cwd(), "src/components/passwords/detail/password-list.tsx"),
     "utf8"
   );
 

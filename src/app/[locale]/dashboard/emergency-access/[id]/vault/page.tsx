@@ -19,7 +19,7 @@ import {
 import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
-import { PasswordCard } from "@/components/passwords/password-card";
+import { PasswordCard } from "@/components/passwords/detail/password-card";
 import type { EntryCardData } from "@/types/entry-card";
 import type { InlineDetailData } from "@/types/entry";
 import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { PasswordDashboard } from "@/components/passwords/password-dashboard";
+import { PasswordDashboard } from "@/components/passwords/detail/password-dashboard";
 
 export default function DashboardPage() {
   const searchParams = useSearchParams();

@@ -39,7 +39,7 @@ vi.mock("sonner", () => ({
 }));
 
 // Stub child components to avoid deep dependency trees
-vi.mock("@/components/passwords/password-card", () => ({
+vi.mock("@/components/passwords/detail/password-card", () => ({
   PasswordCard: ({ onEditClick }: { onEditClick?: () => void }) => (
     <button data-testid="password-card" onClick={onEditClick}>
       password-card

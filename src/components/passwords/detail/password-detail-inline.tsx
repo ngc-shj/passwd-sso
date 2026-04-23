@@ -4,9 +4,9 @@ import { useState, useEffect } from "react";
 import { useTranslations, useLocale } from "next-intl";
 
 import { Button } from "@/components/ui/button";
-import { AttachmentSection, type AttachmentMeta } from "./entry/attachment-section";
+import { AttachmentSection, type AttachmentMeta } from "../entry/attachment-section";
 import { TeamAttachmentSection, type TeamAttachmentMeta } from "@/components/team/team-attachment-section";
-import { EntryHistorySection } from "./entry/entry-history-section";
+import { EntryHistorySection } from "../entry/entry-history-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
@@ -14,14 +14,14 @@ import { formatDateTime } from "@/lib/format/format-datetime";
 import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { Edit } from "lucide-react";
 
-import { SshKeySection } from "./detail-sections/ssh-key-section";
-import { BankAccountSection } from "./detail-sections/bank-account-section";
-import { SoftwareLicenseSection } from "./detail-sections/software-license-section";
-import { PasskeySection } from "./detail-sections/passkey-section";
-import { IdentitySection } from "./detail-sections/identity-section";
-import { CreditCardSection } from "./detail-sections/credit-card-section";
-import { SecureNoteSection } from "./detail-sections/secure-note-section";
-import { LoginSection } from "./detail-sections/login-section";
+import { SshKeySection } from "./sections/ssh-key-section";
+import { BankAccountSection } from "./sections/bank-account-section";
+import { SoftwareLicenseSection } from "./sections/software-license-section";
+import { PasskeySection } from "./sections/passkey-section";
+import { IdentitySection } from "./sections/identity-section";
+import { CreditCardSection } from "./sections/credit-card-section";
+import { SecureNoteSection } from "./sections/secure-note-section";
+import { LoginSection } from "./sections/login-section";
 
 // Re-export for backward compatibility
 export type { InlineDetailData } from "@/types/entry";
