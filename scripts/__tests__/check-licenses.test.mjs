@@ -4,7 +4,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCRIPT = resolve(__dirname, "..", "check-licenses.mjs");
+const SCRIPT = resolve(__dirname, "..", "checks", "check-licenses.mjs");
 const FIXTURES = resolve(__dirname, "fixtures");
 
 function run(args, { expectFail = false } = {}) {

@@ -52,7 +52,7 @@ jobs:
               - "e2e/**"
             ci:
               - ".github/workflows/ci.yml"
-              - "scripts/check-licenses.mjs"
+              - "scripts/checks/check-licenses.mjs"
 
   # ─── Version Drift Check ──────────────────────────────────
   version-check:

@@ -23,7 +23,8 @@ import { readdirSync, existsSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // ---------------------------------------------------------------------------
 // CLI args

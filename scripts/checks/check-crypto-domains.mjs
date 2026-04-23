@@ -14,7 +14,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+// PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
+const ROOT = new URL("../..", import.meta.url).pathname;
 
 // Files that match the crypto-* prefix but contain only non-cryptographic
 // helpers (no HKDF info, no AAD scopes). Adding to this list requires

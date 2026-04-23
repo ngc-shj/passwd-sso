@@ -29,12 +29,12 @@ run_step() {
 echo ""
 printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 
-run_step "Static: e2e-selectors"  bash scripts/check-e2e-selectors.sh
+run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
 run_step "Lint"                   npx eslint .
-run_step "Static: team-auth-rls"  node scripts/check-team-auth-rls.mjs
-run_step "Static: bypass-rls"     node scripts/check-bypass-rls.mjs
-run_step "Static: crypto-domains" node scripts/check-crypto-domains.mjs
-run_step "Static: migration-drift" node scripts/check-migration-drift.mjs
+run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
+run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
+run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
+run_step "Static: migration-drift" node scripts/checks/check-migration-drift.mjs
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
 
 if command -v gitleaks >/dev/null 2>&1; then

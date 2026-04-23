@@ -23,7 +23,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const { Project, SyntaxKind } = require("ts-morph");
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // ---------------------------------------------------------------------------
 // CLI args

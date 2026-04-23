@@ -62,7 +62,8 @@ function parseArgs(argv) {
 
 function loadAllowlist(allowlistPath) {
   const filePath =
-    allowlistPath || resolve(__dirname, "license-allowlist.json");
+    // PR 2: moved to scripts/checks/; license-allowlist.json stays at scripts/.
+    allowlistPath || resolve(__dirname, "..", "license-allowlist.json");
   let raw;
   try {
     raw = readFileSync(filePath, "utf8");

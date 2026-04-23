@@ -27,7 +27,8 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BASELINE_FILE = join(ROOT, ".refactor-test-count-baseline");
 
 // Vitest 4 uses numPendingTests (not numSkippedTests) for .skip/.todo tests.

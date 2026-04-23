@@ -6,26 +6,13 @@
 /scripts/verify-allowlist-rename-only.mjs    @ngc-shj
 /scripts/verify-move-only-diff.mjs           @ngc-shj
 /scripts/refactor-phase-verify.mjs           @ngc-shj
+/scripts/check-codeowners-drift.mjs          @ngc-shj
+/scripts/check-blame-ignore-revs.mjs         @ngc-shj
 # CI orchestrator (S9, Round 4).
 /scripts/pre-pr.sh                           @ngc-shj
 
-# Transitional glob — covers scripts/check-*.mjs at root until PR 2 moves them
-# into scripts/checks/. PR 2 DELETEs this transitional rule along with the
-# obsolete literal check-*.mjs rules below.
-/scripts/check-*.mjs                         @ngc-shj
-# Post-PR-2 glob — matches nothing yet (benign empty glob); active once
-# PR 2 moves the 7 check scripts into scripts/checks/.
+# Check scripts — all under scripts/checks/ after PR 2.
 /scripts/checks/**                           @ngc-shj
-
-# Obsolete literal rules — DELETED atomically with git mv in PR 2.
-# Kept here until PR 2 so current files at scripts/check-*.mjs retain coverage.
-/scripts/check-bypass-rls.mjs                @ngc-shj
-/scripts/check-crypto-domains.mjs            @ngc-shj
-/scripts/check-team-auth-rls.mjs             @ngc-shj
-/scripts/check-vitest-coverage-include.mjs   @ngc-shj
-/scripts/check-dynamic-import-specifiers.mjs @ngc-shj
-/scripts/check-mjs-imports.mjs               @ngc-shj
-/scripts/check-doc-paths.mjs                 @ngc-shj
 # Flat-file patterns (e.g. src/lib/auth.ts) — GitHub * does NOT cross /
 /src/lib/crypto*                             @ngc-shj
 /src/lib/auth*                               @ngc-shj
