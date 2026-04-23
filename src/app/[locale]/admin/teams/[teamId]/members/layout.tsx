@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Users } from "lucide-react";
-import { SectionLayout } from "@/components/settings/section-layout";
+import { SectionLayout } from "@/components/settings/account/section-layout";
 
 export default function TeamMembersLayout({ children }: { children: React.ReactNode }) {
   const t = useTranslations("AdminConsole");

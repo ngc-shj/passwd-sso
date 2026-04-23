@@ -8,7 +8,7 @@ import {
   Card,
   CardContent,
 } from "@/components/ui/card";
-import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,10 +32,10 @@ import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
-import { SectionLayout } from "@/components/settings/section-layout";
+import { SectionLayout } from "@/components/settings/account/section-layout";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
-import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
+import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
 
 interface TeamInfo {
   id: string;

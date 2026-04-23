@@ -2,8 +2,8 @@
 
 import { useTranslations } from "next-intl";
 import { Users } from "lucide-react";
-import { SectionLayout } from "@/components/settings/section-layout";
-import { TenantMembersCard } from "@/components/settings/tenant-members-card";
+import { SectionLayout } from "@/components/settings/account/section-layout";
+import { TenantMembersCard } from "@/components/settings/account/tenant-members-card";
 
 export default function TenantMembersPage() {
   const t = useTranslations("AdminConsole");

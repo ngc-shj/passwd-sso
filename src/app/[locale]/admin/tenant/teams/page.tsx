@@ -5,7 +5,7 @@ import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
@@ -14,7 +14,7 @@ import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { useTenantRole } from "@/hooks/use-tenant-role";
-import { SectionLayout } from "@/components/settings/section-layout";
+import { SectionLayout } from "@/components/settings/account/section-layout";
 
 interface TeamListItem {
   id: string;

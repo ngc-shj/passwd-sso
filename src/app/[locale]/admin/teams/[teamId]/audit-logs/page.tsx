@@ -14,8 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { SectionCardHeader } from "@/components/settings/section-card-header";
-import { SectionLayout } from "@/components/settings/section-layout";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
+import { SectionLayout } from "@/components/settings/account/section-layout";
 import { ScrollText } from "lucide-react";
 import {
   AUDIT_ACTION,

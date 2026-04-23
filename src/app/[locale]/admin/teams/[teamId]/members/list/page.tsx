@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { SectionCardHeader } from "@/components/settings/section-card-header";
+import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { Input } from "@/components/ui/input";
 import {
   Select,
