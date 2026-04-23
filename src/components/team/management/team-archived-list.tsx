@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
 import { PasswordCard } from "@/components/passwords/detail/password-card";
 import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
-import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
+import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

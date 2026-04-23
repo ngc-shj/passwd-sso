@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
+import type { TeamFolderItem } from "@/components/team/forms/team-entry-form-types";
 
 export function useTeamFolders(open: boolean, teamId: string) {
   const [folders, setFolders] = useState<TeamFolderItem[]>([]);

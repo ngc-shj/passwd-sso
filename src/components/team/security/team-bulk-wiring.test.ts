@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 describe("team-archived-list bulk wiring", () => {
   const src = readFileSync(
-    join(process.cwd(), "src/components/team/team-archived-list.tsx"),
+    join(process.cwd(), "src/components/team/management/team-archived-list.tsx"),
     "utf8"
   );
 
@@ -30,7 +30,7 @@ describe("team-archived-list bulk wiring", () => {
 
 describe("team-trash-list bulk wiring", () => {
   const src = readFileSync(
-    join(process.cwd(), "src/components/team/team-trash-list.tsx"),
+    join(process.cwd(), "src/components/team/management/team-trash-list.tsx"),
     "utf8"
   );
 

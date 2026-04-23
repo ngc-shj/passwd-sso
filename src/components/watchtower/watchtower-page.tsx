@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
-import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
+import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 import {
   useWatchtower,
   OLD_THRESHOLD_DAYS,

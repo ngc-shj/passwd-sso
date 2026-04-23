@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { BankAccountFields } from "@/components/entry-fields/bank-account-fields";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import { SshKeyFields } from "@/components/entry-fields/ssh-key-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/forms/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
@@ -14,14 +14,15 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
+import { parseSshPrivateKey } from "@/lib/format/ssh-key";
 
-export function TeamBankAccountForm({
+export function TeamSshKeyForm({
   teamId,
   open,
   onOpenChange,
@@ -31,7 +32,7 @@ export function TeamBankAccountForm({
   defaultFolderId,
   defaultTags,
 }: TeamEntryFormProps) {
-  const tba = useTranslations("BankAccountForm");
+  const tsk = useTranslations("SshKeyForm");
   const ttm = useTranslations("TravelMode");
   const base = useTeamBaseFormModel({
     teamId,
@@ -45,29 +46,61 @@ export function TeamBankAccountForm({
   });
 
   // Entry-specific state
-  const [bankName, setBankName] = useState(editData?.bankName ?? "");
-  const [accountType, setAccountType] = useState(editData?.accountType ?? "");
-  const [accountHolderName, setAccountHolderName] = useState(editData?.accountHolderName ?? "");
-  const [accountNumber, setAccountNumber] = useState(editData?.accountNumber ?? "");
-  const [showAccountNumber, setShowAccountNumber] = useState(false);
-  const [routingNumber, setRoutingNumber] = useState(editData?.routingNumber ?? "");
-  const [showRoutingNumber, setShowRoutingNumber] = useState(false);
-  const [swiftBic, setSwiftBic] = useState(editData?.swiftBic ?? "");
-  const [iban, setIban] = useState(editData?.iban ?? "");
-  const [branchName, setBranchName] = useState(editData?.branchName ?? "");
+  const [privateKey, setPrivateKey] = useState(editData?.privateKey ?? "");
+  const [showPrivateKey, setShowPrivateKey] = useState(false);
+  const [publicKey, setPublicKey] = useState(editData?.publicKey ?? "");
+  const [keyType, setKeyType] = useState(editData?.keyType ?? "");
+  const [keySize, setKeySize] = useState(editData?.keySize ?? 0);
+  const [fingerprint, setFingerprint] = useState(editData?.fingerprint ?? "");
+  const [passphrase, setPassphrase] = useState(editData?.passphrase ?? "");
+  const [showPassphrase, setShowPassphrase] = useState(false);
+  const [sshComment, setSshComment] = useState(editData?.sshComment ?? "");
+  const [privateKeyWarning, setPrivateKeyWarning] = useState("");
+
+  // Auto-parse SSH key and show warning on failure
+  const handlePrivateKeyChange = useCallback(async (pem: string) => {
+    setPrivateKey(pem);
+    if (!pem.trim()) {
+      setPublicKey("");
+      setKeyType("");
+      setKeySize(0);
+      setFingerprint("");
+      setPrivateKeyWarning("");
+      return;
+    }
+    try {
+      const parsed = await parseSshPrivateKey(pem);
+      if (parsed) {
+        setPublicKey(parsed.publicKey);
+        setKeyType(parsed.keyType);
+        setKeySize(parsed.keySize);
+        setFingerprint(parsed.fingerprint);
+        if (parsed.comment) setSshComment(parsed.comment);
+        setPrivateKeyWarning("");
+      } else {
+        setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
+      }
+    } catch {
+      setPrivateKeyWarning(tsk("privateKeyFormatWarning"));
+    }
+  }, [tsk]);
+
+  // Parse on initial load
+  useEffect(() => {
+    if (editData?.privateKey) {
+      void handlePrivateKeyChange(editData.privateKey);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const hasChanges = useEntryHasChanges(
     () => ({
       title: base.title,
       notes: base.notes,
-      bankName,
-      accountType,
-      accountHolderName,
-      accountNumber,
-      routingNumber,
-      swiftBic,
-      iban,
-      branchName,
+      privateKey,
+      publicKey,
+      passphrase,
+      sshComment,
       selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
       teamFolderId: base.teamFolderId,
       requireReprompt: base.requireReprompt,
@@ -77,14 +110,10 @@ export function TeamBankAccountForm({
     [
       base.title,
       base.notes,
-      bankName,
-      accountType,
-      accountHolderName,
-      accountNumber,
-      routingNumber,
-      swiftBic,
-      iban,
-      branchName,
+      privateKey,
+      publicKey,
+      passphrase,
+      sshComment,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -159,18 +188,17 @@ export function TeamBankAccountForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.BANK_ACCOUNT,
+      entryType: ENTRY_TYPE.SSH_KEY,
       title: base.title,
       notes: base.notes,
       tagNames,
-      bankName,
-      accountType,
-      accountHolderName,
-      accountNumber,
-      routingNumber,
-      swiftBic,
-      iban,
-      branchName,
+      privateKey: privateKey || undefined,
+      publicKey: publicKey || undefined,
+      keyType: keyType || undefined,
+      keySize: keySize || undefined,
+      fingerprint: fingerprint || undefined,
+      passphrase: passphrase || undefined,
+      sshComment: sshComment || undefined,
     });
   };
 
@@ -193,52 +221,43 @@ export function TeamBankAccountForm({
             />
           </div>
 
-          <BankAccountFields
+          <SshKeyFields
             idPrefix="team-"
-            bankName={bankName}
-            onBankNameChange={setBankName}
-            bankNamePlaceholder={tba("bankNamePlaceholder")}
-            accountType={accountType}
-            onAccountTypeChange={setAccountType}
-            accountTypePlaceholder={tba("accountTypePlaceholder")}
-            accountTypeCheckingLabel={tba("accountTypeChecking")}
-            accountTypeSavingsLabel={tba("accountTypeSavings")}
-            accountTypeOtherLabel={tba("accountTypeOther")}
-            accountHolderName={accountHolderName}
-            onAccountHolderNameChange={setAccountHolderName}
-            accountHolderNamePlaceholder={tba("accountHolderNamePlaceholder")}
-            accountNumber={accountNumber}
-            onAccountNumberChange={setAccountNumber}
-            accountNumberPlaceholder={tba("accountNumberPlaceholder")}
-            showAccountNumber={showAccountNumber}
-            onToggleAccountNumber={() => setShowAccountNumber(!showAccountNumber)}
-            routingNumber={routingNumber}
-            onRoutingNumberChange={setRoutingNumber}
-            routingNumberPlaceholder={tba("routingNumberPlaceholder")}
-            showRoutingNumber={showRoutingNumber}
-            onToggleRoutingNumber={() => setShowRoutingNumber(!showRoutingNumber)}
-            swiftBic={swiftBic}
-            onSwiftBicChange={setSwiftBic}
-            swiftBicPlaceholder={tba("swiftBicPlaceholder")}
-            iban={iban}
-            onIbanChange={setIban}
-            ibanPlaceholder={tba("ibanPlaceholder")}
-            branchName={branchName}
-            onBranchNameChange={setBranchName}
-            branchNamePlaceholder={tba("branchNamePlaceholder")}
+            privateKey={privateKey}
+            onPrivateKeyChange={handlePrivateKeyChange}
+            privateKeyPlaceholder={tsk("privateKeyPlaceholder")}
+            showPrivateKey={showPrivateKey}
+            onTogglePrivateKey={() => setShowPrivateKey(!showPrivateKey)}
+            publicKey={publicKey}
+            onPublicKeyChange={setPublicKey}
+            publicKeyPlaceholder={tsk("publicKeyPlaceholder")}
+            keyType={keyType}
+            fingerprint={fingerprint}
+            keySize={keySize}
+            passphrase={passphrase}
+            onPassphraseChange={setPassphrase}
+            passphrasePlaceholder={tsk("passphrasePlaceholder")}
+            showPassphrase={showPassphrase}
+            onTogglePassphrase={() => setShowPassphrase(!showPassphrase)}
+            comment={sshComment}
+            onCommentChange={setSshComment}
+            commentPlaceholder={tsk("commentPlaceholder")}
             notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
+            autoDetectedLabel={tsk("autoDetected")}
+            privateKeyWarning={privateKeyWarning}
             labels={{
-              bankName: tba("bankName"),
-              accountType: tba("accountType"),
-              accountHolderName: tba("accountHolderName"),
-              accountNumber: tba("accountNumber"),
-              routingNumber: tba("routingNumber"),
-              swiftBic: tba("swiftBic"),
-              iban: tba("iban"),
-              branchName: tba("branchName"),
+              privateKey: tsk("privateKey"),
+              publicKey: tsk("publicKey"),
+              keyType: tsk("keyType"),
+              keySize: tsk("keySize"),
+              fingerprint: tsk("fingerprint"),
+              passphrase: tsk("passphrase"),
+              comment: tsk("comment"),
+              show: tsk("show"),
+              hide: tsk("hide"),
             }}
           />
 

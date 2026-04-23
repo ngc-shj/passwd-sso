@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { TeamPolicySettings } from "@/components/team/team-policy-settings";
+import { TeamPolicySettings } from "@/components/team/security/team-policy-settings";
 
 export default function TeamPolicyPage({
   params,

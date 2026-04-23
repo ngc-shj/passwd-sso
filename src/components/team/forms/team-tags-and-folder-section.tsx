@@ -1,9 +1,9 @@
 "use client";
 
 import { EntryTagsAndFolderLayout } from "@/components/passwords/entry/entry-tags-and-folder-layout";
-import { TeamTagInput } from "@/components/team/team-tag-input";
-import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+import { TeamTagInput } from "@/components/team/forms/team-tag-input";
+import type { TeamFolderItem } from "@/components/team/forms/team-entry-form-types";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 
 interface TeamTagsAndFolderSectionProps {
   tagsTitle: string;

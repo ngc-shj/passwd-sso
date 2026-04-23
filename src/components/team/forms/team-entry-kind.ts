@@ -1,6 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { TeamEntryKind } from "@/components/team/team-entry-form-types";
+import type { TeamEntryKind } from "@/components/team/forms/team-entry-form-types";
 
 export interface TeamEntryKindState {
   entryKind: TeamEntryKind;

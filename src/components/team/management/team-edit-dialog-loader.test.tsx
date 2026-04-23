@@ -38,7 +38,7 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: (...args: unknown[]) => mockBuildTeamEntryAAD(...args),
 }));
 
-vi.mock("@/components/team/team-entry-dialog-shell", () => ({
+vi.mock("@/components/team/forms/team-entry-dialog-shell", () => ({
   TeamEntryDialogShell: ({
     title,
     children,
@@ -53,7 +53,7 @@ vi.mock("@/components/team/team-entry-dialog-shell", () => ({
   ),
 }));
 
-vi.mock("@/components/team/team-edit-dialog", () => ({
+vi.mock("@/components/team/management/team-edit-dialog", () => ({
   TeamEditDialog: ({
     teamId,
     editData,
@@ -76,7 +76,7 @@ vi.mock("@/components/team/team-edit-dialog", () => ({
   ),
 }));
 
-import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
+import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
 
 describe("TeamEditDialogLoader", () => {
   beforeEach(() => {

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { IdentityFields } from "@/components/entry-fields/identity-fields";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import { TeamTagsAndFolderSection } from "@/components/team/forms/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
@@ -14,7 +14,7 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { toISODateString } from "@/lib/format/format-datetime";
 import { ENTRY_TYPE } from "@/lib/constants";

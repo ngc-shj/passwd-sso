@@ -70,7 +70,7 @@ vi.mock("@/lib/team/team-vault-context", () => ({
   }),
 }));
 
-vi.mock("@/components/team/team-entry-copy", () => ({
+vi.mock("@/components/team/forms/team-entry-copy", () => ({
   buildTeamEntryCopy: () => ({
     dialogLabel: "dialog",
     titleLabel: "title",
@@ -81,7 +81,7 @@ vi.mock("@/components/team/team-entry-copy", () => ({
   }),
 }));
 
-vi.mock("@/components/team/team-entry-copy-data", () => ({
+vi.mock("@/components/team/forms/team-entry-copy-data", () => ({
   buildTeamEntryCopyData: () => ({}),
 }));
 

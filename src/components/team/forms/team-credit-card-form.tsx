@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { SoftwareLicenseFields } from "@/components/entry-fields/software-license-fields";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import { CreditCardFields } from "@/components/entry-fields/credit-card-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/forms/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
@@ -14,14 +14,17 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
+import { CARD_BRANDS } from "@/lib/ui/credit-card";
+import { handleTeamCardNumberChange } from "@/components/team/forms/team-login-submit";
+import { getTeamCardValidationState } from "@/components/team/forms/team-credit-card-validation";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 
-export function TeamSoftwareLicenseForm({
+export function TeamCreditCardForm({
   teamId,
   open,
   onOpenChange,
@@ -31,7 +34,7 @@ export function TeamSoftwareLicenseForm({
   defaultFolderId,
   defaultTags,
 }: TeamEntryFormProps) {
-  const tsl = useTranslations("SoftwareLicenseForm");
+  const tcc = useTranslations("CreditCardForm");
   const ttm = useTranslations("TravelMode");
   const base = useTeamBaseFormModel({
     teamId,
@@ -45,28 +48,56 @@ export function TeamSoftwareLicenseForm({
   });
 
   // Entry-specific state
-  const [softwareName, setSoftwareName] = useState(editData?.softwareName ?? "");
-  const [licenseKey, setLicenseKey] = useState(editData?.licenseKey ?? "");
-  const [showLicenseKey, setShowLicenseKey] = useState(false);
-  const [version, setVersion] = useState(editData?.version ?? "");
-  const [licensee, setLicensee] = useState(editData?.licensee ?? "");
-  const [email, setEmail] = useState(editData?.email ?? "");
-  const [purchaseDate, setPurchaseDate] = useState(editData?.purchaseDate ?? "");
-  const [expirationDate, setExpirationDate] = useState(editData?.expirationDate ?? "");
-  const [expiryError, setExpiryError] = useState<string | null>(null);
-  const [emailError, setEmailError] = useState<string | null>(null);
+  const [cardholderName, setCardholderName] = useState(editData?.cardholderName ?? "");
+  const [brand, setBrand] = useState(editData?.brand ?? "");
+  const [brandSource, setBrandSource] = useState<"auto" | "manual">(
+    editData?.brand ? "manual" : "auto",
+  );
+  const [cardNumber, setCardNumber] = useState(editData?.cardNumber ?? "");
+  const [showCardNumber, setShowCardNumber] = useState(false);
+  const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
+  const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
+  const [cvv, setCvv] = useState(editData?.cvv ?? "");
+  const [showCvv, setShowCvv] = useState(false);
+
+  // Card validation
+  const {
+    cardValidation,
+    lengthHint,
+    maxInputLength,
+    showLengthError,
+    showLuhnError,
+    cardNumberValid,
+    hasBrandHint,
+  } = getTeamCardValidationState(cardNumber, brand);
+
+  const detectedBrand = cardValidation.detectedBrand
+    ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
+    : undefined;
+
+  const effectiveHasBrandHint =
+    hasBrandHint && cardValidation.digits.length > 0;
+
+  const onCardNumberChange = (value: string) => {
+    handleTeamCardNumberChange({
+      value,
+      brand,
+      brandSource,
+      setCardNumber,
+      setBrand,
+    });
+  };
 
   const hasChanges = useEntryHasChanges(
     () => ({
       title: base.title,
       notes: base.notes,
-      softwareName,
-      licenseKey,
-      version,
-      licensee,
-      email,
-      purchaseDate,
-      expirationDate,
+      cardholderName,
+      brand,
+      cardNumber,
+      expiryMonth,
+      expiryYear,
+      cvv,
       selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
       teamFolderId: base.teamFolderId,
       requireReprompt: base.requireReprompt,
@@ -76,13 +107,12 @@ export function TeamSoftwareLicenseForm({
     [
       base.title,
       base.notes,
-      softwareName,
-      licenseKey,
-      version,
-      licensee,
-      email,
-      purchaseDate,
-      expirationDate,
+      cardholderName,
+      brand,
+      cardNumber,
+      expiryMonth,
+      expiryYear,
+      cvv,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -90,7 +120,7 @@ export function TeamSoftwareLicenseForm({
       base.expiresAt,
     ],
   );
-  const submitDisabled = !base.title.trim();
+  const submitDisabled = !base.title.trim() || !cardNumberValid;
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
@@ -151,35 +181,22 @@ export function TeamSoftwareLicenseForm({
     e.preventDefault();
     if (submitDisabled) return;
 
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setEmailError(tsl("invalidEmail"));
-      return;
-    }
-    setEmailError(null);
-
-    if (purchaseDate && expirationDate && purchaseDate >= expirationDate) {
-      setExpiryError(tsl("expirationBeforePurchase"));
-      return;
-    }
-    setExpiryError(null);
-
     const tagNames = base.selectedTags.map((tag) => ({
       name: tag.name,
       color: tag.color,
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
+      entryType: ENTRY_TYPE.CREDIT_CARD,
       title: base.title,
       notes: base.notes,
       tagNames,
-      softwareName,
-      licenseKey,
-      version,
-      licensee,
-      email,
-      purchaseDate,
-      expirationDate,
+      cardholderName,
+      cardNumber,
+      brand,
+      expiryMonth,
+      expiryYear,
+      cvv,
     });
   };
 
@@ -202,62 +219,55 @@ export function TeamSoftwareLicenseForm({
             />
           </div>
 
-          <SoftwareLicenseFields
+          <CreditCardFields
             idPrefix="team-"
-            softwareName={softwareName}
-            onSoftwareNameChange={setSoftwareName}
-            softwareNamePlaceholder={tsl("softwareNamePlaceholder")}
-            licenseKey={licenseKey}
-            onLicenseKeyChange={setLicenseKey}
-            licenseKeyPlaceholder={tsl("licenseKeyPlaceholder")}
-            showLicenseKey={showLicenseKey}
-            onToggleLicenseKey={() => setShowLicenseKey(!showLicenseKey)}
-            version={version}
-            onVersionChange={setVersion}
-            versionPlaceholder={tsl("versionPlaceholder")}
-            licensee={licensee}
-            onLicenseeChange={setLicensee}
-            licenseePlaceholder={tsl("licenseePlaceholder")}
-            purchaseDate={purchaseDate}
-            onPurchaseDateChange={(v) => {
-              setPurchaseDate(v);
-              setExpiryError(null);
+            cardholderName={cardholderName}
+            onCardholderNameChange={setCardholderName}
+            cardholderNamePlaceholder={tcc("cardholderNamePlaceholder")}
+            brand={brand}
+            onBrandChange={(v) => {
+              setBrand(v);
+              setBrandSource("manual");
             }}
-            expirationDate={expirationDate}
-            onExpirationDateChange={(v) => {
-              setExpirationDate(v);
-              setExpiryError(null);
-            }}
-            expiryError={expiryError}
+            brandPlaceholder={tcc("brandPlaceholder")}
+            brands={CARD_BRANDS}
+            cardNumber={cardNumber}
+            onCardNumberChange={onCardNumberChange}
+            cardNumberPlaceholder={tcc("cardNumberPlaceholder")}
+            showCardNumber={showCardNumber}
+            onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
+            maxInputLength={maxInputLength}
+            showLengthError={showLengthError}
+            showLuhnError={showLuhnError}
+            detectedBrand={detectedBrand}
+            hasBrandHint={effectiveHasBrandHint}
+            lengthHintGenericLabel={tcc("cardNumberLengthHintGeneric")}
+            lengthHintLabel={tcc("cardNumberLengthHint", { lengths: lengthHint })}
+            invalidLengthLabel={tcc("cardNumberInvalidLength", { lengths: lengthHint })}
+            invalidLuhnLabel={tcc("cardNumberInvalidLuhn")}
+            expiryMonth={expiryMonth}
+            onExpiryMonthChange={setExpiryMonth}
+            expiryYear={expiryYear}
+            onExpiryYearChange={setExpiryYear}
+            expiryMonthPlaceholder={tcc("expiryMonth")}
+            expiryYearPlaceholder={tcc("expiryYear")}
+            cvv={cvv}
+            onCvvChange={setCvv}
+            cvvPlaceholder={tcc("cvvPlaceholder")}
+            showCvv={showCvv}
+            onToggleCvv={() => setShowCvv(!showCvv)}
             notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
             labels={{
-              softwareName: tsl("softwareName"),
-              licenseKey: tsl("licenseKey"),
-              version: tsl("version"),
-              licensee: tsl("licensee"),
-              purchaseDate: tsl("purchaseDate"),
-              expirationDate: tsl("expirationDate"),
+              cardholderName: tcc("cardholderName"),
+              brand: tcc("brand"),
+              cardNumber: tcc("cardNumber"),
+              expiry: tcc("expiry"),
+              cvv: tcc("cvv"),
             }}
           />
-
-          <div className="space-y-2">
-            <Label htmlFor="team-email">{tsl("email")}</Label>
-            <Input
-              id="team-email"
-              type="email"
-              value={email}
-              onChange={(e) => {
-                setEmail(e.target.value);
-                setEmailError(null);
-              }}
-              placeholder={tsl("emailPlaceholder")}
-              autoComplete="off"
-            />
-            {emailError && <p className="text-destructive text-sm">{emailError}</p>}
-          </div>
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
           <EntryRepromptSection {...repromptSectionProps} />

@@ -257,11 +257,11 @@ vi.mock("@/components/passwords/shared/totp-field", () => ({
   TOTPField: () => null,
 }));
 
-vi.mock("@/components/team/team-tag-input", () => ({
+vi.mock("@/components/team/forms/team-tag-input", () => ({
   TeamTagInput: () => <div data-testid="team-tag-input" />,
 }));
 
-vi.mock("@/components/team/team-attachment-section", () => ({
+vi.mock("@/components/team/forms/team-attachment-section", () => ({
   TeamAttachmentSection: () => null,
 }));
 

@@ -4,8 +4,8 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { PasskeyFields } from "@/components/entry-fields/passkey-fields";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import { SoftwareLicenseFields } from "@/components/entry-fields/software-license-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/forms/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
@@ -14,14 +14,14 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 
-export function TeamPasskeyForm({
+export function TeamSoftwareLicenseForm({
   teamId,
   open,
   onOpenChange,
@@ -31,7 +31,7 @@ export function TeamPasskeyForm({
   defaultFolderId,
   defaultTags,
 }: TeamEntryFormProps) {
-  const tpk = useTranslations("PasskeyForm");
+  const tsl = useTranslations("SoftwareLicenseForm");
   const ttm = useTranslations("TravelMode");
   const base = useTeamBaseFormModel({
     teamId,
@@ -45,24 +45,28 @@ export function TeamPasskeyForm({
   });
 
   // Entry-specific state
-  const [relyingPartyId, setRelyingPartyId] = useState(editData?.relyingPartyId ?? "");
-  const [relyingPartyName, setRelyingPartyName] = useState(editData?.relyingPartyName ?? "");
-  const [username, setUsername] = useState(editData?.username ?? "");
-  const [credentialId, setCredentialId] = useState(editData?.credentialId ?? "");
-  const [showCredentialId, setShowCredentialId] = useState(false);
-  const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
-  const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
+  const [softwareName, setSoftwareName] = useState(editData?.softwareName ?? "");
+  const [licenseKey, setLicenseKey] = useState(editData?.licenseKey ?? "");
+  const [showLicenseKey, setShowLicenseKey] = useState(false);
+  const [version, setVersion] = useState(editData?.version ?? "");
+  const [licensee, setLicensee] = useState(editData?.licensee ?? "");
+  const [email, setEmail] = useState(editData?.email ?? "");
+  const [purchaseDate, setPurchaseDate] = useState(editData?.purchaseDate ?? "");
+  const [expirationDate, setExpirationDate] = useState(editData?.expirationDate ?? "");
+  const [expiryError, setExpiryError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
 
   const hasChanges = useEntryHasChanges(
     () => ({
       title: base.title,
       notes: base.notes,
-      relyingPartyId,
-      relyingPartyName,
-      username,
-      credentialId,
-      creationDate,
-      deviceInfo,
+      softwareName,
+      licenseKey,
+      version,
+      licensee,
+      email,
+      purchaseDate,
+      expirationDate,
       selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
       teamFolderId: base.teamFolderId,
       requireReprompt: base.requireReprompt,
@@ -72,12 +76,13 @@ export function TeamPasskeyForm({
     [
       base.title,
       base.notes,
-      relyingPartyId,
-      relyingPartyName,
-      username,
-      credentialId,
-      creationDate,
-      deviceInfo,
+      softwareName,
+      licenseKey,
+      version,
+      licensee,
+      email,
+      purchaseDate,
+      expirationDate,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -85,7 +90,7 @@ export function TeamPasskeyForm({
       base.expiresAt,
     ],
   );
-  const submitDisabled = !base.title.trim() || !relyingPartyId.trim();
+  const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
@@ -146,22 +151,35 @@ export function TeamPasskeyForm({
     e.preventDefault();
     if (submitDisabled) return;
 
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailError(tsl("invalidEmail"));
+      return;
+    }
+    setEmailError(null);
+
+    if (purchaseDate && expirationDate && purchaseDate >= expirationDate) {
+      setExpiryError(tsl("expirationBeforePurchase"));
+      return;
+    }
+    setExpiryError(null);
+
     const tagNames = base.selectedTags.map((tag) => ({
       name: tag.name,
       color: tag.color,
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.PASSKEY,
+      entryType: ENTRY_TYPE.SOFTWARE_LICENSE,
       title: base.title,
       notes: base.notes,
       tagNames,
-      relyingPartyId,
-      relyingPartyName,
-      username,
-      credentialId,
-      creationDate,
-      deviceInfo,
+      softwareName,
+      licenseKey,
+      version,
+      licensee,
+      email,
+      purchaseDate,
+      expirationDate,
     });
   };
 
@@ -184,40 +202,62 @@ export function TeamPasskeyForm({
             />
           </div>
 
-          <PasskeyFields
+          <SoftwareLicenseFields
             idPrefix="team-"
-            relyingPartyId={relyingPartyId}
-            onRelyingPartyIdChange={setRelyingPartyId}
-            relyingPartyIdPlaceholder={tpk("relyingPartyIdPlaceholder")}
-            relyingPartyName={relyingPartyName}
-            onRelyingPartyNameChange={setRelyingPartyName}
-            relyingPartyNamePlaceholder={tpk("relyingPartyNamePlaceholder")}
-            username={username}
-            onUsernameChange={setUsername}
-            usernamePlaceholder={tpk("usernamePlaceholder")}
-            credentialId={credentialId}
-            onCredentialIdChange={setCredentialId}
-            credentialIdPlaceholder={tpk("credentialIdPlaceholder")}
-            showCredentialId={showCredentialId}
-            onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
-            creationDate={creationDate}
-            onCreationDateChange={setCreationDate}
-            deviceInfo={deviceInfo}
-            onDeviceInfoChange={setDeviceInfo}
-            deviceInfoPlaceholder={tpk("deviceInfoPlaceholder")}
+            softwareName={softwareName}
+            onSoftwareNameChange={setSoftwareName}
+            softwareNamePlaceholder={tsl("softwareNamePlaceholder")}
+            licenseKey={licenseKey}
+            onLicenseKeyChange={setLicenseKey}
+            licenseKeyPlaceholder={tsl("licenseKeyPlaceholder")}
+            showLicenseKey={showLicenseKey}
+            onToggleLicenseKey={() => setShowLicenseKey(!showLicenseKey)}
+            version={version}
+            onVersionChange={setVersion}
+            versionPlaceholder={tsl("versionPlaceholder")}
+            licensee={licensee}
+            onLicenseeChange={setLicensee}
+            licenseePlaceholder={tsl("licenseePlaceholder")}
+            purchaseDate={purchaseDate}
+            onPurchaseDateChange={(v) => {
+              setPurchaseDate(v);
+              setExpiryError(null);
+            }}
+            expirationDate={expirationDate}
+            onExpirationDateChange={(v) => {
+              setExpirationDate(v);
+              setExpiryError(null);
+            }}
+            expiryError={expiryError}
             notesLabel={base.entryCopy.notesLabel}
             notes={base.notes}
             onNotesChange={base.setNotes}
             notesPlaceholder={base.entryCopy.notesPlaceholder}
             labels={{
-              relyingPartyId: tpk("relyingPartyId"),
-              relyingPartyName: tpk("relyingPartyName"),
-              username: tpk("username"),
-              credentialId: tpk("credentialId"),
-              creationDate: tpk("creationDate"),
-              deviceInfo: tpk("deviceInfo"),
+              softwareName: tsl("softwareName"),
+              licenseKey: tsl("licenseKey"),
+              version: tsl("version"),
+              licensee: tsl("licensee"),
+              purchaseDate: tsl("purchaseDate"),
+              expirationDate: tsl("expirationDate"),
             }}
           />
+
+          <div className="space-y-2">
+            <Label htmlFor="team-email">{tsl("email")}</Label>
+            <Input
+              id="team-email"
+              type="email"
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailError(null);
+              }}
+              placeholder={tsl("emailPlaceholder")}
+              autoComplete="off"
+            />
+            {emailError && <p className="text-destructive text-sm">{emailError}</p>}
+          </div>
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />
           <EntryRepromptSection {...repromptSectionProps} />

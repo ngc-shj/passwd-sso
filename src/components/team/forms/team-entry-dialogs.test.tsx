@@ -11,11 +11,11 @@ vi.mock("@/hooks/form/use-entry-form-translations", () => ({
   toTeamLoginFormTranslations: () => ({}),
 }));
 
-vi.mock("@/components/team/team-entry-copy-data", () => ({
+vi.mock("@/components/team/forms/team-entry-copy-data", () => ({
   buildTeamEntryCopyData: () => ({}),
 }));
 
-vi.mock("@/components/team/team-entry-copy", () => ({
+vi.mock("@/components/team/forms/team-entry-copy", () => ({
   buildTeamEntryCopy: ({
     isEdit,
     entryKind,
@@ -27,7 +27,7 @@ vi.mock("@/components/team/team-entry-copy", () => ({
   }),
 }));
 
-vi.mock("@/components/team/team-entry-dialog-shell", () => ({
+vi.mock("@/components/team/forms/team-entry-dialog-shell", () => ({
   TeamEntryDialogShell: ({
     title,
     children,
@@ -42,30 +42,30 @@ vi.mock("@/components/team/team-entry-dialog-shell", () => ({
   ),
 }));
 
-vi.mock("@/components/team/team-login-form", () => ({
+vi.mock("@/components/team/forms/team-login-form", () => ({
   TeamLoginForm: () => <div data-testid="team-login-form" />,
 }));
-vi.mock("@/components/team/team-secure-note-form", () => ({
+vi.mock("@/components/team/forms/team-secure-note-form", () => ({
   TeamSecureNoteForm: () => <div data-testid="team-secure-note-form" />,
 }));
-vi.mock("@/components/team/team-credit-card-form", () => ({
+vi.mock("@/components/team/forms/team-credit-card-form", () => ({
   TeamCreditCardForm: () => <div data-testid="team-credit-card-form" />,
 }));
-vi.mock("@/components/team/team-identity-form", () => ({
+vi.mock("@/components/team/forms/team-identity-form", () => ({
   TeamIdentityForm: () => <div data-testid="team-identity-form" />,
 }));
-vi.mock("@/components/team/team-passkey-form", () => ({
+vi.mock("@/components/team/forms/team-passkey-form", () => ({
   TeamPasskeyForm: () => <div data-testid="team-passkey-form" />,
 }));
-vi.mock("@/components/team/team-bank-account-form", () => ({
+vi.mock("@/components/team/forms/team-bank-account-form", () => ({
   TeamBankAccountForm: () => <div data-testid="team-bank-account-form" />,
 }));
-vi.mock("@/components/team/team-software-license-form", () => ({
+vi.mock("@/components/team/forms/team-software-license-form", () => ({
   TeamSoftwareLicenseForm: () => <div data-testid="team-software-license-form" />,
 }));
 
-import { TeamEditDialog } from "@/components/team/team-edit-dialog";
-import { TeamNewDialog } from "@/components/team/team-new-dialog";
+import { TeamEditDialog } from "@/components/team/management/team-edit-dialog";
+import { TeamNewDialog } from "@/components/team/management/team-new-dialog";
 
 describe("team entry dialogs", () => {
   it.each([

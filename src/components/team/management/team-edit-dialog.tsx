@@ -1,20 +1,20 @@
 "use client";
 
 import { ENTRY_TYPE } from "@/lib/constants";
-import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
-import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
-import { buildTeamEntryCopyData } from "@/components/team/team-entry-copy-data";
-import { TeamEntryDialogShell } from "@/components/team/team-entry-dialog-shell";
-import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
-import { TeamLoginForm } from "@/components/team/team-login-form";
-import { TeamSecureNoteForm } from "@/components/team/team-secure-note-form";
-import { TeamCreditCardForm } from "@/components/team/team-credit-card-form";
-import { TeamIdentityForm } from "@/components/team/team-identity-form";
-import { TeamPasskeyForm } from "@/components/team/team-passkey-form";
-import { TeamBankAccountForm } from "@/components/team/team-bank-account-form";
-import { TeamSoftwareLicenseForm } from "@/components/team/team-software-license-form";
-import { TeamSshKeyForm } from "@/components/team/team-ssh-key-form";
+import { getTeamEntryKindState } from "@/components/team/forms/team-entry-kind";
+import { buildTeamEntryCopy } from "@/components/team/forms/team-entry-copy";
+import { buildTeamEntryCopyData } from "@/components/team/forms/team-entry-copy-data";
+import { TeamEntryDialogShell } from "@/components/team/forms/team-entry-dialog-shell";
+import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-form-types";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
+import { TeamLoginForm } from "@/components/team/forms/team-login-form";
+import { TeamSecureNoteForm } from "@/components/team/forms/team-secure-note-form";
+import { TeamCreditCardForm } from "@/components/team/forms/team-credit-card-form";
+import { TeamIdentityForm } from "@/components/team/forms/team-identity-form";
+import { TeamPasskeyForm } from "@/components/team/forms/team-passkey-form";
+import { TeamBankAccountForm } from "@/components/team/forms/team-bank-account-form";
+import { TeamSoftwareLicenseForm } from "@/components/team/forms/team-software-license-form";
+import { TeamSshKeyForm } from "@/components/team/forms/team-ssh-key-form";
 import {
   toTeamLoginFormTranslations,
   useEntryFormTranslations,

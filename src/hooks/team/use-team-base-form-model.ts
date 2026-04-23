@@ -5,13 +5,13 @@ import { toast } from "sonner";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { type PolicyViolation } from "@/lib/security/password-policy-validation";
 import type { EntryTypeValue } from "@/lib/constants";
-import { getTeamEntryKindState } from "@/components/team/team-entry-kind";
-import { buildTeamEntryCopy } from "@/components/team/team-entry-copy";
-import { buildTeamEntryCopyData } from "@/components/team/team-entry-copy-data";
+import { getTeamEntryKindState } from "@/components/team/forms/team-entry-kind";
+import { buildTeamEntryCopy } from "@/components/team/forms/team-entry-copy";
+import { buildTeamEntryCopyData } from "@/components/team/forms/team-entry-copy-data";
 import type {
   TeamEntryFormEditData,
-} from "@/components/team/team-entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+} from "@/components/team/forms/team-entry-form-types";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import { useTeamAttachments } from "@/hooks/team/use-team-attachments";
 import { useTeamFolders } from "@/hooks/team/use-team-folders";
 import { useTeamPolicy } from "@/hooks/team/use-team-policy";
@@ -24,7 +24,7 @@ import {
   buildTeamEntryPayload,
   type BuildTeamEntryPayloadInput,
 } from "@/lib/team/team-entry-payload";
-import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
+import { executeTeamEntrySubmit } from "@/components/team/forms/team-entry-submit";
 import { extractTagIds } from "@/lib/vault/entry-form-helpers";
 
 export interface UseTeamBaseFormModelInput {

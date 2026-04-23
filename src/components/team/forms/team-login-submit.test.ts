@@ -5,11 +5,11 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   handleTeamCardNumberChange,
   submitTeamLogin,
-} from "@/components/team/team-login-submit";
+} from "@/components/team/forms/team-login-submit";
 
 const executeTeamEntrySubmitMock = vi.fn();
 
-vi.mock("@/components/team/team-entry-submit", () => ({
+vi.mock("@/components/team/forms/team-entry-submit", () => ({
   executeTeamEntrySubmit: (...args: unknown[]) => executeTeamEntrySubmitMock(...args),
 }));
 

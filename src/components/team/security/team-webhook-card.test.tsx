@@ -37,7 +37,7 @@ import {
   createWebhookCardTests,
   setupFetchWebhooks,
   createSampleWebhooks,
-} from "../__tests__/webhook-card-test-factory";
+} from "../../__tests__/webhook-card-test-factory";
 
 // Register shared UI component mocks
 setupWebhookCardMocks();

@@ -4,8 +4,15 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CreditCardFields } from "@/components/entry-fields/credit-card-fields";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/forms/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
@@ -14,17 +21,15 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
-import { CARD_BRANDS } from "@/lib/ui/credit-card";
-import { handleTeamCardNumberChange } from "@/components/team/team-login-submit";
-import { getTeamCardValidationState } from "@/components/team/team-credit-card-validation";
+import { SECURE_NOTE_TEMPLATES } from "@/lib/format/secure-note-templates";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 
-export function TeamCreditCardForm({
+export function TeamSecureNoteForm({
   teamId,
   open,
   onOpenChange,
@@ -34,7 +39,7 @@ export function TeamCreditCardForm({
   defaultFolderId,
   defaultTags,
 }: TeamEntryFormProps) {
-  const tcc = useTranslations("CreditCardForm");
+  const tSn = useTranslations("SecureNoteForm");
   const ttm = useTranslations("TravelMode");
   const base = useTeamBaseFormModel({
     teamId,
@@ -48,56 +53,13 @@ export function TeamCreditCardForm({
   });
 
   // Entry-specific state
-  const [cardholderName, setCardholderName] = useState(editData?.cardholderName ?? "");
-  const [brand, setBrand] = useState(editData?.brand ?? "");
-  const [brandSource, setBrandSource] = useState<"auto" | "manual">(
-    editData?.brand ? "manual" : "auto",
-  );
-  const [cardNumber, setCardNumber] = useState(editData?.cardNumber ?? "");
-  const [showCardNumber, setShowCardNumber] = useState(false);
-  const [expiryMonth, setExpiryMonth] = useState(editData?.expiryMonth ?? "");
-  const [expiryYear, setExpiryYear] = useState(editData?.expiryYear ?? "");
-  const [cvv, setCvv] = useState(editData?.cvv ?? "");
-  const [showCvv, setShowCvv] = useState(false);
-
-  // Card validation
-  const {
-    cardValidation,
-    lengthHint,
-    maxInputLength,
-    showLengthError,
-    showLuhnError,
-    cardNumberValid,
-    hasBrandHint,
-  } = getTeamCardValidationState(cardNumber, brand);
-
-  const detectedBrand = cardValidation.detectedBrand
-    ? tcc("cardNumberDetectedBrand", { brand: cardValidation.detectedBrand })
-    : undefined;
-
-  const effectiveHasBrandHint =
-    hasBrandHint && cardValidation.digits.length > 0;
-
-  const onCardNumberChange = (value: string) => {
-    handleTeamCardNumberChange({
-      value,
-      brand,
-      brandSource,
-      setCardNumber,
-      setBrand,
-    });
-  };
+  const [content, setContent] = useState(editData?.content ?? "");
 
   const hasChanges = useEntryHasChanges(
     () => ({
       title: base.title,
       notes: base.notes,
-      cardholderName,
-      brand,
-      cardNumber,
-      expiryMonth,
-      expiryYear,
-      cvv,
+      content,
       selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
       teamFolderId: base.teamFolderId,
       requireReprompt: base.requireReprompt,
@@ -107,12 +69,7 @@ export function TeamCreditCardForm({
     [
       base.title,
       base.notes,
-      cardholderName,
-      brand,
-      cardNumber,
-      expiryMonth,
-      expiryYear,
-      cvv,
+      content,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -120,7 +77,7 @@ export function TeamCreditCardForm({
       base.expiresAt,
     ],
   );
-  const submitDisabled = !base.title.trim() || !cardNumberValid;
+  const submitDisabled = !base.title.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
@@ -187,16 +144,11 @@ export function TeamCreditCardForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.CREDIT_CARD,
+      entryType: ENTRY_TYPE.SECURE_NOTE,
       title: base.title,
       notes: base.notes,
       tagNames,
-      cardholderName,
-      cardNumber,
-      brand,
-      expiryMonth,
-      expiryYear,
-      cvv,
+      content,
     });
   };
 
@@ -210,6 +162,39 @@ export function TeamCreditCardForm({
           onKeyDown={preventIMESubmit}
           className="space-y-5"
         >
+          {!base.isEdit && (
+            <div className="space-y-2">
+              <Label>{tSn("templateLabel")}</Label>
+              <Select
+                defaultValue="blank"
+                onValueChange={(templateId) => {
+                  const tmpl = SECURE_NOTE_TEMPLATES.find(
+                    (tp) => tp.id === templateId,
+                  );
+                  if (!tmpl) return;
+                  if (tmpl.id === "blank") {
+                    base.setTitle("");
+                    setContent("");
+                    return;
+                  }
+                  base.setTitle(tSn(tmpl.titleKey));
+                  setContent(tmpl.contentTemplate);
+                }}
+              >
+                <SelectTrigger className="w-full max-w-[300px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SECURE_NOTE_TEMPLATES.map((tmpl) => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      {tSn(tmpl.titleKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label>{base.entryCopy.titleLabel}</Label>
             <Input
@@ -219,54 +204,15 @@ export function TeamCreditCardForm({
             />
           </div>
 
-          <CreditCardFields
+          <SecureNoteFields
             idPrefix="team-"
-            cardholderName={cardholderName}
-            onCardholderNameChange={setCardholderName}
-            cardholderNamePlaceholder={tcc("cardholderNamePlaceholder")}
-            brand={brand}
-            onBrandChange={(v) => {
-              setBrand(v);
-              setBrandSource("manual");
-            }}
-            brandPlaceholder={tcc("brandPlaceholder")}
-            brands={CARD_BRANDS}
-            cardNumber={cardNumber}
-            onCardNumberChange={onCardNumberChange}
-            cardNumberPlaceholder={tcc("cardNumberPlaceholder")}
-            showCardNumber={showCardNumber}
-            onToggleCardNumber={() => setShowCardNumber(!showCardNumber)}
-            maxInputLength={maxInputLength}
-            showLengthError={showLengthError}
-            showLuhnError={showLuhnError}
-            detectedBrand={detectedBrand}
-            hasBrandHint={effectiveHasBrandHint}
-            lengthHintGenericLabel={tcc("cardNumberLengthHintGeneric")}
-            lengthHintLabel={tcc("cardNumberLengthHint", { lengths: lengthHint })}
-            invalidLengthLabel={tcc("cardNumberInvalidLength", { lengths: lengthHint })}
-            invalidLuhnLabel={tcc("cardNumberInvalidLuhn")}
-            expiryMonth={expiryMonth}
-            onExpiryMonthChange={setExpiryMonth}
-            expiryYear={expiryYear}
-            onExpiryYearChange={setExpiryYear}
-            expiryMonthPlaceholder={tcc("expiryMonth")}
-            expiryYearPlaceholder={tcc("expiryYear")}
-            cvv={cvv}
-            onCvvChange={setCvv}
-            cvvPlaceholder={tcc("cvvPlaceholder")}
-            showCvv={showCvv}
-            onToggleCvv={() => setShowCvv(!showCvv)}
-            notesLabel={base.entryCopy.notesLabel}
-            notes={base.notes}
-            onNotesChange={base.setNotes}
-            notesPlaceholder={base.entryCopy.notesPlaceholder}
-            labels={{
-              cardholderName: tcc("cardholderName"),
-              brand: tcc("brand"),
-              cardNumber: tcc("cardNumber"),
-              expiry: tcc("expiry"),
-              cvv: tcc("cvv"),
-            }}
+            content={content}
+            onContentChange={setContent}
+            contentLabel={tSn("content")}
+            contentPlaceholder={tSn("contentPlaceholder")}
+            editTabLabel={tSn("editTab")}
+            previewTabLabel={tSn("previewTab")}
+            markdownHint={tSn("markdownHint")}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />

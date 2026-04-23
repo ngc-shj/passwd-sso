@@ -5,8 +5,8 @@ import {
   useTeamBaseFormModel,
   type UseTeamBaseFormModelInput,
 } from "@/hooks/team/use-team-base-form-model";
-import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-form-types";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 
 const { mockPolicy, mockGetTeamKeyInfo, mockBuildTeamEntryCopy, stableTranslations, stableTranslationBundle } = vi.hoisted(() => {
   const identity = (key: string) => key;
@@ -74,11 +74,11 @@ vi.mock("@/lib/team/team-vault-context", () => ({
   }),
 }));
 
-vi.mock("@/components/team/team-entry-copy", () => ({
+vi.mock("@/components/team/forms/team-entry-copy", () => ({
   buildTeamEntryCopy: (arg: unknown) => mockBuildTeamEntryCopy(arg),
 }));
 
-vi.mock("@/components/team/team-entry-copy-data", () => ({
+vi.mock("@/components/team/forms/team-entry-copy-data", () => ({
   buildTeamEntryCopyData: () => ({}),
 }));
 

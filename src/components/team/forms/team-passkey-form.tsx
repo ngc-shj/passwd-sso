@@ -4,15 +4,8 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { SecureNoteFields } from "@/components/entry-fields/secure-note-fields";
-import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
+import { PasskeyFields } from "@/components/entry-fields/passkey-fields";
+import { TeamTagsAndFolderSection } from "@/components/team/forms/team-tags-and-folder-section";
 import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
 import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
@@ -21,15 +14,14 @@ import {
   EntryActionBar,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
 } from "@/components/passwords/entry/entry-form-ui";
-import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormProps } from "@/components/team/forms/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
-import { SECURE_NOTE_TEMPLATES } from "@/lib/format/secure-note-templates";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 
-export function TeamSecureNoteForm({
+export function TeamPasskeyForm({
   teamId,
   open,
   onOpenChange,
@@ -39,7 +31,7 @@ export function TeamSecureNoteForm({
   defaultFolderId,
   defaultTags,
 }: TeamEntryFormProps) {
-  const tSn = useTranslations("SecureNoteForm");
+  const tpk = useTranslations("PasskeyForm");
   const ttm = useTranslations("TravelMode");
   const base = useTeamBaseFormModel({
     teamId,
@@ -53,13 +45,24 @@ export function TeamSecureNoteForm({
   });
 
   // Entry-specific state
-  const [content, setContent] = useState(editData?.content ?? "");
+  const [relyingPartyId, setRelyingPartyId] = useState(editData?.relyingPartyId ?? "");
+  const [relyingPartyName, setRelyingPartyName] = useState(editData?.relyingPartyName ?? "");
+  const [username, setUsername] = useState(editData?.username ?? "");
+  const [credentialId, setCredentialId] = useState(editData?.credentialId ?? "");
+  const [showCredentialId, setShowCredentialId] = useState(false);
+  const [creationDate, setCreationDate] = useState(editData?.creationDate ?? "");
+  const [deviceInfo, setDeviceInfo] = useState(editData?.deviceInfo ?? "");
 
   const hasChanges = useEntryHasChanges(
     () => ({
       title: base.title,
       notes: base.notes,
-      content,
+      relyingPartyId,
+      relyingPartyName,
+      username,
+      credentialId,
+      creationDate,
+      deviceInfo,
       selectedTagIds: base.selectedTags.map((tag) => tag.id).sort(),
       teamFolderId: base.teamFolderId,
       requireReprompt: base.requireReprompt,
@@ -69,7 +72,12 @@ export function TeamSecureNoteForm({
     [
       base.title,
       base.notes,
-      content,
+      relyingPartyId,
+      relyingPartyName,
+      username,
+      credentialId,
+      creationDate,
+      deviceInfo,
       base.selectedTags,
       base.teamFolderId,
       base.requireReprompt,
@@ -77,7 +85,7 @@ export function TeamSecureNoteForm({
       base.expiresAt,
     ],
   );
-  const submitDisabled = !base.title.trim();
+  const submitDisabled = !base.title.trim() || !relyingPartyId.trim();
 
   const dialogSectionClass = ENTRY_DIALOG_FLAT_SECTION_CLASS;
 
@@ -144,11 +152,16 @@ export function TeamSecureNoteForm({
     }));
 
     await base.submitEntry({
-      entryType: ENTRY_TYPE.SECURE_NOTE,
+      entryType: ENTRY_TYPE.PASSKEY,
       title: base.title,
       notes: base.notes,
       tagNames,
-      content,
+      relyingPartyId,
+      relyingPartyName,
+      username,
+      credentialId,
+      creationDate,
+      deviceInfo,
     });
   };
 
@@ -162,39 +175,6 @@ export function TeamSecureNoteForm({
           onKeyDown={preventIMESubmit}
           className="space-y-5"
         >
-          {!base.isEdit && (
-            <div className="space-y-2">
-              <Label>{tSn("templateLabel")}</Label>
-              <Select
-                defaultValue="blank"
-                onValueChange={(templateId) => {
-                  const tmpl = SECURE_NOTE_TEMPLATES.find(
-                    (tp) => tp.id === templateId,
-                  );
-                  if (!tmpl) return;
-                  if (tmpl.id === "blank") {
-                    base.setTitle("");
-                    setContent("");
-                    return;
-                  }
-                  base.setTitle(tSn(tmpl.titleKey));
-                  setContent(tmpl.contentTemplate);
-                }}
-              >
-                <SelectTrigger className="w-full max-w-[300px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SECURE_NOTE_TEMPLATES.map((tmpl) => (
-                    <SelectItem key={tmpl.id} value={tmpl.id}>
-                      {tSn(tmpl.titleKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-
           <div className="space-y-2">
             <Label>{base.entryCopy.titleLabel}</Label>
             <Input
@@ -204,15 +184,39 @@ export function TeamSecureNoteForm({
             />
           </div>
 
-          <SecureNoteFields
+          <PasskeyFields
             idPrefix="team-"
-            content={content}
-            onContentChange={setContent}
-            contentLabel={tSn("content")}
-            contentPlaceholder={tSn("contentPlaceholder")}
-            editTabLabel={tSn("editTab")}
-            previewTabLabel={tSn("previewTab")}
-            markdownHint={tSn("markdownHint")}
+            relyingPartyId={relyingPartyId}
+            onRelyingPartyIdChange={setRelyingPartyId}
+            relyingPartyIdPlaceholder={tpk("relyingPartyIdPlaceholder")}
+            relyingPartyName={relyingPartyName}
+            onRelyingPartyNameChange={setRelyingPartyName}
+            relyingPartyNamePlaceholder={tpk("relyingPartyNamePlaceholder")}
+            username={username}
+            onUsernameChange={setUsername}
+            usernamePlaceholder={tpk("usernamePlaceholder")}
+            credentialId={credentialId}
+            onCredentialIdChange={setCredentialId}
+            credentialIdPlaceholder={tpk("credentialIdPlaceholder")}
+            showCredentialId={showCredentialId}
+            onToggleCredentialId={() => setShowCredentialId(!showCredentialId)}
+            creationDate={creationDate}
+            onCreationDateChange={setCreationDate}
+            deviceInfo={deviceInfo}
+            onDeviceInfoChange={setDeviceInfo}
+            deviceInfoPlaceholder={tpk("deviceInfoPlaceholder")}
+            notesLabel={base.entryCopy.notesLabel}
+            notes={base.notes}
+            onNotesChange={base.setNotes}
+            notesPlaceholder={base.entryCopy.notesPlaceholder}
+            labels={{
+              relyingPartyId: tpk("relyingPartyId"),
+              relyingPartyName: tpk("relyingPartyName"),
+              username: tpk("username"),
+              credentialId: tpk("credentialId"),
+              creationDate: tpk("creationDate"),
+              deviceInfo: tpk("deviceInfo"),
+            }}
           />
 
           <TeamTagsAndFolderSection {...tagsAndFolderProps} />

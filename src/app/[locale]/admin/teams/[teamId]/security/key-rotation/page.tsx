@@ -4,7 +4,7 @@ import { use } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
-import { TeamRotateKeyButton } from "@/components/team/team-rotate-key-button";
+import { TeamRotateKeyButton } from "@/components/team/security/team-rotate-key-button";
 import { KeyRound } from "lucide-react";
 
 export default function TeamKeyRotationPage({

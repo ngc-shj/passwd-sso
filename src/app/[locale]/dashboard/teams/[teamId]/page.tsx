@@ -9,11 +9,11 @@ import { EntryListHeader } from "@/components/passwords/entry/entry-list-header"
 import { EntrySortMenu } from "@/components/passwords/entry/entry-sort-menu";
 import { SearchBar } from "@/components/layout/search-bar";
 import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
-import { TeamNewDialog } from "@/components/team/team-new-dialog";
-import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
-import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/team-archived-list";
-import { TeamTrashList, type TeamTrashListHandle } from "@/components/team/team-trash-list";
-import { TeamRoleBadge } from "@/components/team/team-role-badge";
+import { TeamNewDialog } from "@/components/team/management/team-new-dialog";
+import { TeamEditDialogLoader } from "@/components/team/management/team-edit-dialog-loader";
+import { TeamArchivedList, type TeamArchivedListHandle } from "@/components/team/management/team-archived-list";
+import { TeamTrashList, type TeamTrashListHandle } from "@/components/team/management/team-trash-list";
+import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";

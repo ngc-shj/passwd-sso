@@ -1,4 +1,4 @@
-import { TeamExportPagePanel } from "@/components/team/team-export";
+import { TeamExportPagePanel } from "@/components/team/management/team-export";
 
 export default async function TeamExportPage({
   params,

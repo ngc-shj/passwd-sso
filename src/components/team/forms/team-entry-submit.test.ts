@@ -30,7 +30,7 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: () => new Uint8Array(0),
 }));
 
-import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
+import { executeTeamEntrySubmit } from "@/components/team/forms/team-entry-submit";
 
 const dummyKey = {} as CryptoKey;
 

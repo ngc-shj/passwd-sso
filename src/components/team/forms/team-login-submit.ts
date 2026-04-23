@@ -2,11 +2,11 @@ import { buildTeamEntryPayload } from "@/lib/team/team-entry-payload";
 import { validateTeamEntryBeforeSubmit } from "@/lib/team/team-entry-validation";
 import { extractTagIds } from "@/lib/vault/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/ui/credit-card";
-import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
+import { executeTeamEntrySubmit } from "@/components/team/forms/team-entry-submit";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
+import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-form-types";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 
 interface HandleTeamCardNumberChangeArgs {

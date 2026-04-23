@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import { createTeamLoginSubmitHandler } from "@/hooks/team/team-login-form-controller";
 
 function buildValues(overrides: Partial<{ title: string; username: string; password: string }> = {}) {

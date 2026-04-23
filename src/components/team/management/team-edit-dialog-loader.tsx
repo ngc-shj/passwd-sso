@@ -3,10 +3,10 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Loader2 } from "lucide-react";
-import { TeamEntryDialogShell } from "@/components/team/team-entry-dialog-shell";
-import { TeamEditDialog } from "@/components/team/team-edit-dialog";
-import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
-import type { TeamTagData } from "@/components/team/team-tag-input";
+import { TeamEntryDialogShell } from "@/components/team/forms/team-entry-dialog-shell";
+import { TeamEditDialog } from "@/components/team/management/team-edit-dialog";
+import type { TeamEntryFormEditData } from "@/components/team/forms/team-entry-form-types";
+import type { TeamTagData } from "@/components/team/forms/team-tag-input";
 import { apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
