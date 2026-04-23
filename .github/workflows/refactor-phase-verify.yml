@@ -48,12 +48,21 @@ jobs:
       # every time and never actually compares. We record on a worktree
       # checked out to main, then copy the baseline into HEAD so the main
       # verify run can compare.
+      #
+      # Bootstrap case: on the PR that first introduces capture-test-counts.mjs,
+      # main does not yet have the script. We skip seeding and fall back to
+      # the script's first-run behaviour; the gate becomes meaningful from
+      # the next refactor PR onward.
       - name: Seed test-count baseline from main
         run: |
           set -euo pipefail
           git worktree add /tmp/main-wt main
-          (cd /tmp/main-wt && npm ci && node scripts/capture-test-counts.mjs --record)
-          cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
+          if [ -f /tmp/main-wt/scripts/capture-test-counts.mjs ]; then
+            (cd /tmp/main-wt && npm ci && node scripts/capture-test-counts.mjs --record)
+            cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
+          else
+            echo "capture-test-counts.mjs not present on main — skipping baseline seed (bootstrap PR)."
+          fi
           git worktree remove --force /tmp/main-wt
 
       - name: refactor-phase-verify
