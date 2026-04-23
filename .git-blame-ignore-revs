@@ -21,3 +21,4 @@ b882c22ee228036f4007574d831aac00c52f039a  # Phase 5a — move sidebar hooks into
 ef03a4e577438196b17629723c9d0ddd6e655205  # Phase 5d — extend src/hooks/form/
 366a68eed466fbe94b918b2b0d9111507a06bfb0  # Phase 5e — vault/bulk hooks
 e793c5f29ecbb754f6d90999c910592ab00f4b92  # Phase 6a — passwords/import/
+aa5eff8a22b477cd848fe1fcfd3900bd009acc7d  # Phase 6b — passwords/export/
