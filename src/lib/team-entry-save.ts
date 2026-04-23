@@ -1,6 +1,6 @@
 import { buildTeamEntryAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { apiPath } from "@/lib/constants";
-import { buildEncryptedEntryBody, submitEntry } from "@/lib/entry-save-core";
+import { buildEncryptedEntryBody, submitEntry } from "@/lib/vault/entry-save-core";
 import type { EntryTypeValue } from "@/lib/constants";
 
 interface SaveTeamEntryParams {

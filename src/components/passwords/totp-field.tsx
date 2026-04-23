@@ -10,7 +10,7 @@ import { X, ShieldCheck, QrCode } from "lucide-react";
 import { TOTP_ALGORITHM } from "@/lib/constants";
 import { parseOtpauthUri } from "@/lib/qr-scanner-client";
 import { QRCaptureDialog } from "./qr-capture-dialog";
-import type { EntryTotp } from "@/lib/entry-form-types";
+import type { EntryTotp } from "@/lib/vault/entry-form-types";
 
 export type TOTPEntry = EntryTotp;
 

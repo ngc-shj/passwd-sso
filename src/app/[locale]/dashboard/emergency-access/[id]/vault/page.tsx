@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useParams } from "next/navigation";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { EntryCardData } from "@/types/entry-card";
 import type { InlineDetailData } from "@/types/entry";
-import type { EntryTagNameColor } from "@/lib/entry-form-types";
+import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";
 
 // No-op handler for read-only mode (stable reference across renders)
 const noop = () => {};

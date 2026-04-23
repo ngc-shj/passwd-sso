@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { savePersonalEntry } from "@/lib/vault/personal-entry-save";
 import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";

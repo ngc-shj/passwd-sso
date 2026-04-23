@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { toast } from "sonner";

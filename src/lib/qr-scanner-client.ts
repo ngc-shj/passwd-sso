@@ -6,7 +6,7 @@
  */
 
 import jsQR from "jsqr";
-import type { EntryTotp } from "@/lib/entry-form-types";
+import type { EntryTotp } from "@/lib/vault/entry-form-types";
 import { MAX_IMAGE_DIMENSION } from "@/lib/validations/common";
 
 /**

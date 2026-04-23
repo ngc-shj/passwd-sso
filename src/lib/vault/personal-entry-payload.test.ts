@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPasswordHistory, buildPersonalEntryPayload } from "@/lib/personal-entry-payload";
+import { buildPasswordHistory, buildPersonalEntryPayload } from "@/lib/vault/personal-entry-payload";
 
 describe("buildPasswordHistory", () => {
   it("prepends previous password when changed", () => {

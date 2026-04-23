@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import type { AttachmentMeta } from "./attachment-section";
@@ -13,7 +13,7 @@ import type {
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotp,
-} from "@/lib/entry-form-types";
+} from "@/lib/vault/entry-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 import type { TagData } from "@/components/tags/tag-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";

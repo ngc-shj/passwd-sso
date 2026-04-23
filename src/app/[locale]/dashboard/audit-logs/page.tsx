@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollText } from "lucide-react";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import {

@@ -5,7 +5,7 @@ import type {
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotpPortable,
-} from "@/lib/entry-form-types";
+} from "@/lib/vault/entry-form-types";
 
 export interface ExportEntry {
   entryType: EntryTypeValue;

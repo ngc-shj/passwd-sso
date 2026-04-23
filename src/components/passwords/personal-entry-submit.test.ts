@@ -7,7 +7,7 @@ const savePersonalEntryMock = vi.fn();
 const handlePersonalSaveFeedbackMock = vi.fn();
 const toastErrorMock = vi.fn();
 
-vi.mock("@/lib/personal-entry-save", () => ({
+vi.mock("@/lib/vault/personal-entry-save", () => ({
   savePersonalEntry: (...args: unknown[]) => savePersonalEntryMock(...args),
 }));
 

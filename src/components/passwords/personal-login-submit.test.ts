@@ -9,12 +9,12 @@ const buildPersonalEntryPayloadMock = vi.fn();
 const extractTagIdsMock = vi.fn();
 const executePersonalEntrySubmitMock = vi.fn();
 
-vi.mock("@/lib/personal-entry-payload", () => ({
+vi.mock("@/lib/vault/personal-entry-payload", () => ({
   buildPasswordHistory: (...args: unknown[]) => buildPasswordHistoryMock(...args),
   buildPersonalEntryPayload: (...args: unknown[]) => buildPersonalEntryPayloadMock(...args),
 }));
 
-vi.mock("@/lib/entry-form-helpers", () => ({
+vi.mock("@/lib/vault/entry-form-helpers", () => ({
   extractTagIds: (...args: unknown[]) => extractTagIdsMock(...args),
 }));
 

@@ -4,7 +4,7 @@ import type {
   EntryCustomField,
   EntryPasswordHistory,
   EntryTotp,
-} from "@/lib/entry-form-types";
+} from "@/lib/vault/entry-form-types";
 import type { EntryTypeValue } from "@/lib/constants";
 
 export interface PersonalPasswordEditData {

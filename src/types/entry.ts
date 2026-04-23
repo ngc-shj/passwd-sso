@@ -9,7 +9,7 @@ import type {
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotp,
-} from "@/lib/entry-form-types";
+} from "@/lib/vault/entry-form-types";
 import type { TOTPEntry } from "@/components/passwords/totp-field";
 
 /**

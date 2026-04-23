@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { scanImageForQR, parseOtpauthUri } from "@/lib/qr-scanner-client";
-import type { EntryTotp } from "@/lib/entry-form-types";
+import type { EntryTotp } from "@/lib/vault/entry-form-types";
 import { Camera, Upload, AlertTriangle } from "lucide-react";
 import { MAX_IMAGE_DIMENSION } from "@/lib/validations/common";
 

@@ -7,7 +7,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { EntrySortOption } from "@/lib/entry-sort";
+import type { EntrySortOption } from "@/lib/vault/entry-sort";
 import { ArrowUpDown } from "lucide-react";
 
 interface EntrySortMenuProps {

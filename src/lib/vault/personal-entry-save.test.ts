@@ -14,7 +14,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: vi.fn(async (value: string) => `enc:${value}`),
 }));
 
-import { savePersonalEntry } from "@/lib/personal-entry-save";
+import { savePersonalEntry } from "@/lib/vault/personal-entry-save";
 
 describe("savePersonalEntry", () => {
   beforeEach(() => {

@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import {
   encryptBinary,
   decryptBinary,

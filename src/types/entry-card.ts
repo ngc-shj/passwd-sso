@@ -1,5 +1,5 @@
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryTagNameColor } from "@/lib/entry-form-types";
+import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";
 
 /**
  * Display data for PasswordCard — groups the entry-specific

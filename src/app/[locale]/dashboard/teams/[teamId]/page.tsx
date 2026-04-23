@@ -26,8 +26,8 @@ import {
 import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archive, Trash2, Clock, Landmark, KeySquare, CheckSquare, FolderOpen, Tag, Terminal } from "lucide-react";
 import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
+import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { buildFolderPath } from "@/lib/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { FolderItem } from "@/components/folders/folder-tree";

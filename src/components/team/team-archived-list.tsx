@@ -13,11 +13,11 @@ import { useBulkAction } from "@/hooks/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import {
   compareEntriesWithFavorite,
   type EntrySortOption,
-} from "@/lib/entry-sort";
+} from "@/lib/vault/entry-sort";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";

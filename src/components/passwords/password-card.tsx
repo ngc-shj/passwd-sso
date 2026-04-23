@@ -52,7 +52,7 @@ import {
   KeySquare,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
@@ -64,7 +64,7 @@ import type {
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotp,
-} from "@/lib/entry-form-types";
+} from "@/lib/vault/entry-form-types";
 import { fetchApi } from "@/lib/url-helpers";
 import type { EntryCardData } from "@/types/entry-card";
 

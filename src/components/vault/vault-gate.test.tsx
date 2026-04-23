@@ -11,7 +11,7 @@ const { mockUseVault, mockUsePathname, mockVaultSetupWizard } = vi.hoisted(() =>
   mockVaultSetupWizard: vi.fn(),
 }));
 
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: mockUseVault,
 }));
 

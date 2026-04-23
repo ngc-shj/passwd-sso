@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { computePassphraseVerifier } from "@/lib/crypto/crypto-client";
 import {
   generateRecoveryKey,

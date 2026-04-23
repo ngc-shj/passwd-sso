@@ -25,7 +25,7 @@ import type { BulkSelectionHandle } from "@/hooks/use-bulk-selection";
 import {
   compareEntriesByDeletedAt,
   type EntrySortOption,
-} from "@/lib/entry-sort";
+} from "@/lib/vault/entry-sort";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";

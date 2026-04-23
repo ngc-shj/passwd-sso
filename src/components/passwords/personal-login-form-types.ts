@@ -1,5 +1,5 @@
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryPasswordHistory, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 
 export interface PersonalLoginFormInitialData {

@@ -11,7 +11,7 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 
-import { buildEncryptedEntryBody, submitEntry } from "@/lib/entry-save-core";
+import { buildEncryptedEntryBody, submitEntry } from "@/lib/vault/entry-save-core";
 
 describe("buildEncryptedEntryBody", () => {
   const baseParams = {

@@ -1,8 +1,8 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
-import { filterNonEmptyCustomFields, parseUrlHost } from "@/lib/entry-form-helpers";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import { filterNonEmptyCustomFields, parseUrlHost } from "@/lib/vault/entry-form-helpers";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 
 export interface BuildTeamEntryPayloadInput {
   entryType: EntryTypeValue;

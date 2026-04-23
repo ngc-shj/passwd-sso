@@ -2,14 +2,14 @@ import {
   filterNonEmptyCustomFields,
   parseUrlHost,
   toTagNameColor,
-} from "@/lib/entry-form-helpers";
+} from "@/lib/vault/entry-form-helpers";
 import { PASSWORD_HISTORY_SNIPPET_LENGTH } from "@/lib/validations/common.server";
 import type {
   EntryCustomField,
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotp,
-} from "@/lib/entry-form-types";
+} from "@/lib/vault/entry-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
 
 interface BuildPersonalEntryPayloadInput {

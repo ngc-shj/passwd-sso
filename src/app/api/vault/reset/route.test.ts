@@ -56,7 +56,7 @@ vi.mock("@/lib/audit/audit", () => ({
     acceptLanguage: null,
   }),
 }));
-vi.mock("@/lib/vault-reset", () => ({
+vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
 }));
 // executeVaultReset uses withBypassRls (not withUserTenantRls)

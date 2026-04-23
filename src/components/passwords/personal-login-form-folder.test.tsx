@@ -39,7 +39,7 @@ vi.mock("@/i18n/navigation", () => ({
   ),
 }));
 
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({
     encryptionKey: mockEncryptionKey,
     userId: "user-1",

@@ -1,7 +1,7 @@
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 import type { useTeamPolicy } from "@/hooks/use-team-policy";
 import { buildTeamLoginFormDerived } from "@/hooks/team-login-form-derived";

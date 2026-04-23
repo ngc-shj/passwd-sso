@@ -5,7 +5,7 @@ import { Header } from "./header";
 import { Sidebar } from "./sidebar";
 import { RecoveryKeyBanner } from "@/components/vault/recovery-key-banner";
 import { DelegationRevokeBanner } from "@/components/vault/delegation-revoke-banner";
-import { ActiveVaultProvider } from "@/lib/active-vault-context";
+import { ActiveVaultProvider } from "@/lib/vault/active-vault-context";
 import { TravelModeProvider } from "@/hooks/use-travel-mode";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {

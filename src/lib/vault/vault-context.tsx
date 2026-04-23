@@ -26,26 +26,26 @@ import {
   decryptBinary,
   encryptData,
   decryptData,
-} from "./crypto/crypto-client";
-import { TeamVaultProvider } from "./team-vault-context";
+} from "../crypto/crypto-client";
+import { TeamVaultProvider } from "../team-vault-context";
 import {
   generateECDHKeyPair,
   exportPublicKey,
   exportPrivateKey,
   deriveEcdhWrappingKey,
-} from "./crypto/crypto-team";
+} from "../crypto/crypto-team";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
-import { hexDecode, hexEncode } from "./crypto/crypto-utils";
+import { hexDecode, hexEncode } from "../crypto/crypto-utils";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
-} from "./auth/webauthn-client";
+} from "../auth/webauthn-client";
 import { AutoLockProvider } from "./auto-lock-context";
-import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "./emergency-access-context";
+import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access-context";
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {

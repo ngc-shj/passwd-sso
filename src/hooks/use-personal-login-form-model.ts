@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useRouter } from "@/i18n/navigation";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import {

@@ -8,7 +8,7 @@ import { TeamEditDialog } from "@/components/team/team-edit-dialog";
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import { apiPath } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { useTeamVault } from "@/lib/team-vault-context";

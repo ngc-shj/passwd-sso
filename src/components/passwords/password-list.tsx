@@ -2,15 +2,15 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
-import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
+import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";
 import type { EntryTypeValue } from "@/lib/constants";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import type { EntryTagNameColor } from "@/lib/entry-form-types";
+import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";
 import { Button } from "@/components/ui/button";
 import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-selection";
 import { useBulkAction } from "@/hooks/use-bulk-action";

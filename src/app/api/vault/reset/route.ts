@@ -10,7 +10,7 @@ import { parseBody } from "@/lib/parse-body";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
-import { executeVaultReset } from "@/lib/vault-reset";
+import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { z } from "zod/v4";
 
 export const runtime = "nodejs";

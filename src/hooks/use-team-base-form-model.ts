@@ -25,7 +25,7 @@ import {
   type BuildTeamEntryPayloadInput,
 } from "@/lib/team-entry-payload";
 import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
-import { extractTagIds } from "@/lib/entry-form-helpers";
+import { extractTagIds } from "@/lib/vault/entry-form-helpers";
 
 export interface UseTeamBaseFormModelInput {
   teamId: string;

@@ -16,7 +16,7 @@ import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
 import { TOTPField } from "@/components/passwords/totp-field";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Rows3, ShieldCheck, X } from "lucide-react";
 

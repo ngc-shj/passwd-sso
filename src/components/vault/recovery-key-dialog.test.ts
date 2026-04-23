@@ -43,7 +43,7 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 // Unused by generateRecoveryKeyFlow but required for module import
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({}),
 }));
 vi.mock("next-intl", () => ({

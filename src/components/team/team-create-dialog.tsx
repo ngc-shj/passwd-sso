@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Building2, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
-import { useVault, VaultUnlockError } from "@/lib/vault-context";
+import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { formatLockedUntil } from "@/components/vault/vault-lock-screen";

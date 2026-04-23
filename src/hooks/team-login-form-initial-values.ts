@@ -5,7 +5,7 @@ import {
   DEFAULT_SYMBOL_GROUPS,
 } from "@/lib/generator-prefs";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import type { SymbolGroupFlags } from "@/lib/generator-prefs";

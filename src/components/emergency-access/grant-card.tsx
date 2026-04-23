@@ -19,7 +19,7 @@ import {
 import { toast } from "sonner";
 import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2, Info } from "lucide-react";
 import { useRouter } from "@/i18n/navigation";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS, EA_STATUS, apiPath } from "@/lib/constants";
 import type { EaStatusValue } from "@/lib/constants";
 import {

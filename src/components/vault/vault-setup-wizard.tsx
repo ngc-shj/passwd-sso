@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

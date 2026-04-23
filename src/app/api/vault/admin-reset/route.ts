@@ -8,7 +8,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { getAppOrigin } from "@/lib/url-helpers";
 import { logAuditAsync, teamAuditBase, tenantAuditBase } from "@/lib/audit/audit";
-import { executeVaultReset } from "@/lib/vault-reset";
+import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";

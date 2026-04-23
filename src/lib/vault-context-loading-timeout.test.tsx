@@ -40,7 +40,7 @@ vi.mock("./webauthn-client", () => ({}));
 vi.mock("./team-vault-context", () => ({
   TeamVaultProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock("./auto-lock-context", () => ({
+vi.mock("./vault/auto-lock-context", () => ({
   AutoLockProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock("./emergency-access-context", () => ({
@@ -48,7 +48,7 @@ vi.mock("./emergency-access-context", () => ({
   confirmPendingEmergencyGrants: vi.fn(),
 }));
 
-import { VaultProvider, useVault } from "./vault-context";
+import { VaultProvider, useVault } from "./vault/vault-context";
 
 function VaultStatusDisplay() {
   const { status } = useVault();

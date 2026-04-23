@@ -1,0 +1,21 @@
+{
+  "phaseName": "phase-4b-vault",
+  "moves": [
+    { "from": "src/lib/vault-context.tsx",        "to": "src/lib/vault/vault-context.tsx" },
+    { "from": "src/lib/vault-reset.ts",           "to": "src/lib/vault/vault-reset.ts" },
+    { "from": "src/lib/vault-reset.test.ts",      "to": "src/lib/vault/vault-reset.test.ts" },
+    { "from": "src/lib/active-vault-context.tsx", "to": "src/lib/vault/active-vault-context.tsx" },
+    { "from": "src/lib/auto-lock-context.tsx",    "to": "src/lib/vault/auto-lock-context.tsx" },
+    { "from": "src/lib/personal-entry-payload.ts",      "to": "src/lib/vault/personal-entry-payload.ts" },
+    { "from": "src/lib/personal-entry-payload.test.ts", "to": "src/lib/vault/personal-entry-payload.test.ts" },
+    { "from": "src/lib/personal-entry-save.ts",      "to": "src/lib/vault/personal-entry-save.ts" },
+    { "from": "src/lib/personal-entry-save.test.ts", "to": "src/lib/vault/personal-entry-save.test.ts" },
+    { "from": "src/lib/entry-save-core.ts",      "to": "src/lib/vault/entry-save-core.ts" },
+    { "from": "src/lib/entry-save-core.test.ts", "to": "src/lib/vault/entry-save-core.test.ts" },
+    { "from": "src/lib/entry-form-helpers.ts",      "to": "src/lib/vault/entry-form-helpers.ts" },
+    { "from": "src/lib/entry-form-helpers.test.ts", "to": "src/lib/vault/entry-form-helpers.test.ts" },
+    { "from": "src/lib/entry-form-types.ts", "to": "src/lib/vault/entry-form-types.ts" },
+    { "from": "src/lib/entry-sort.ts",      "to": "src/lib/vault/entry-sort.ts" },
+    { "from": "src/lib/entry-sort.test.ts", "to": "src/lib/vault/entry-sort.test.ts" }
+  ]
+}

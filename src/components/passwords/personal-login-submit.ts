@@ -1,12 +1,12 @@
-import { extractTagIds } from "@/lib/entry-form-helpers";
+import { extractTagIds } from "@/lib/vault/entry-form-helpers";
 import {
   buildPasswordHistory,
   buildPersonalEntryPayload,
-} from "@/lib/personal-entry-payload";
+} from "@/lib/vault/personal-entry-payload";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { GeneratorSettings } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 import type { PasswordSubmitRouter } from "@/hooks/password-form-router";

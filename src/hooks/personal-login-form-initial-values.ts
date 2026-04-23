@@ -4,7 +4,7 @@ import {
   DEFAULT_GENERATOR_SETTINGS,
   type GeneratorSettings,
 } from "@/lib/generator-prefs";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 
 export interface PersonalLoginFormInitialValues {
   title: string;

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { useVault, VaultUnlockError } from "@/lib/vault-context";
+import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
