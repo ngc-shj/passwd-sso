@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 // Mock RepromptDialog to avoid heavy dependency chain (useVault, useTranslations, Radix)
-vi.mock("@/components/passwords/reprompt-dialog", () => ({
+vi.mock("@/components/passwords/dialogs/reprompt-dialog", () => ({
   RepromptDialog: () => null,
 }));
 

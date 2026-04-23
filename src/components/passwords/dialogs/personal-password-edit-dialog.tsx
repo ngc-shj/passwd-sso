@@ -1,16 +1,16 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { PersonalLoginForm } from "./personal/personal-login-form";
-import { SecureNoteForm } from "./personal/personal-secure-note-form";
-import { CreditCardForm } from "./personal/personal-credit-card-form";
-import { IdentityForm } from "./personal/personal-identity-form";
-import { PasskeyForm } from "./personal/personal-passkey-form";
-import { BankAccountForm } from "./personal/personal-bank-account-form";
-import { SoftwareLicenseForm } from "./personal/personal-software-license-form";
-import { SshKeyForm } from "./personal/personal-ssh-key-form";
-import { AttachmentSection, type AttachmentMeta } from "./entry/attachment-section";
-import { PersonalEntryDialogShell } from "./personal/personal-entry-dialog-shell";
+import { PersonalLoginForm } from "../personal/personal-login-form";
+import { SecureNoteForm } from "../personal/personal-secure-note-form";
+import { CreditCardForm } from "../personal/personal-credit-card-form";
+import { IdentityForm } from "../personal/personal-identity-form";
+import { PasskeyForm } from "../personal/personal-passkey-form";
+import { BankAccountForm } from "../personal/personal-bank-account-form";
+import { SoftwareLicenseForm } from "../personal/personal-software-license-form";
+import { SshKeyForm } from "../personal/personal-ssh-key-form";
+import { AttachmentSection, type AttachmentMeta } from "../entry/attachment-section";
+import { PersonalEntryDialogShell } from "../personal/personal-entry-dialog-shell";
 import type { PersonalPasswordEditData } from "./personal-password-edit-dialog-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 

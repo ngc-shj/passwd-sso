@@ -1,15 +1,15 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { PersonalLoginForm } from "./personal/personal-login-form";
-import { SecureNoteForm } from "./personal/personal-secure-note-form";
-import { CreditCardForm } from "./personal/personal-credit-card-form";
-import { IdentityForm } from "./personal/personal-identity-form";
-import { PasskeyForm } from "./personal/personal-passkey-form";
-import { BankAccountForm } from "./personal/personal-bank-account-form";
-import { SoftwareLicenseForm } from "./personal/personal-software-license-form";
-import { SshKeyForm } from "./personal/personal-ssh-key-form";
-import { PersonalEntryDialogShell } from "./personal/personal-entry-dialog-shell";
+import { PersonalLoginForm } from "../personal/personal-login-form";
+import { SecureNoteForm } from "../personal/personal-secure-note-form";
+import { CreditCardForm } from "../personal/personal-credit-card-form";
+import { IdentityForm } from "../personal/personal-identity-form";
+import { PasskeyForm } from "../personal/personal-passkey-form";
+import { BankAccountForm } from "../personal/personal-bank-account-form";
+import { SoftwareLicenseForm } from "../personal/personal-software-license-form";
+import { SshKeyForm } from "../personal/personal-ssh-key-form";
+import { PersonalEntryDialogShell } from "../personal/personal-entry-dialog-shell";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { TagData } from "@/components/tags/tag-input";

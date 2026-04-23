@@ -53,8 +53,8 @@ vi.mock("@/components/passwords/entry/attachment-section", () => ({
   AttachmentSection: () => <div data-testid="attachment-section" />,
 }));
 
-import { PasswordEditDialog } from "@/components/passwords/personal-password-edit-dialog";
-import { PasswordNewDialog } from "@/components/passwords/personal-password-new-dialog";
+import { PasswordEditDialog } from "@/components/passwords/dialogs/personal-password-edit-dialog";
+import { PasswordNewDialog } from "@/components/passwords/dialogs/personal-password-new-dialog";
 
 describe("personal entry dialogs", () => {
   it.each([

@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
-import type { AttachmentMeta } from "./entry/attachment-section";
+import type { AttachmentMeta } from "../entry/attachment-section";
 import { PasswordEditDialog } from "./personal-password-edit-dialog";
 import type { PersonalPasswordEditData } from "./personal-password-edit-dialog-types";
 import type {

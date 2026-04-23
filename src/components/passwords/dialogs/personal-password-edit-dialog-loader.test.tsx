@@ -41,7 +41,7 @@ vi.mock("@/components/ui/dialog", () => ({
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-vi.mock("@/components/passwords/personal-password-edit-dialog", () => ({
+vi.mock("@/components/passwords/dialogs/personal-password-edit-dialog", () => ({
   PasswordEditDialog: ({
     editData,
     attachments,
@@ -57,7 +57,7 @@ vi.mock("@/components/passwords/personal-password-edit-dialog", () => ({
   ),
 }));
 
-import { PasswordEditDialogLoader } from "@/components/passwords/personal-password-edit-dialog-loader";
+import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
 
 describe("PasswordEditDialogLoader", () => {
   beforeEach(() => {

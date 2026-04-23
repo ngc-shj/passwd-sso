@@ -27,7 +27,7 @@ import {
   PasswordDetailInline,
   type InlineDetailData,
 } from "./password-detail-inline";
-import { PasswordEditDialogLoader } from "./personal-password-edit-dialog-loader";
+import { PasswordEditDialogLoader } from "./dialogs/personal-password-edit-dialog-loader";
 import {
   User,
   Star,

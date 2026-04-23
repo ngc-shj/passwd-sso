@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, type ReactNode, createElement } from "react";
-import { RepromptDialog } from "@/components/passwords/reprompt-dialog";
+import { RepromptDialog } from "@/components/passwords/dialogs/reprompt-dialog";
 
 const CACHE_TTL_MS = 30_000; // 30 seconds
 

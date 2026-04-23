@@ -57,7 +57,7 @@ vi.mock("@/components/ui/label", () => ({
   ),
 }));
 
-import { RepromptDialog } from "./reprompt-dialog";
+import { RepromptDialog } from "./dialogs/reprompt-dialog";
 
 // ── Tests ──────────────────────────────────────────────────
 
