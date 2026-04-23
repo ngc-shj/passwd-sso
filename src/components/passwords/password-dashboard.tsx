@@ -6,8 +6,8 @@ import { SearchBar } from "@/components/layout/search-bar";
 import { PasswordList, type SortOption, type PasswordListHandle } from "@/components/passwords/password-list";
 import { TrashList, type TrashListHandle } from "@/components/passwords/trash-list";
 import { PasswordNewDialog } from "@/components/passwords/personal-password-new-dialog";
-import { EntryListHeader } from "@/components/passwords/entry-list-header";
-import { EntrySortMenu } from "@/components/passwords/entry-sort-menu";
+import { EntryListHeader } from "@/components/passwords/entry/entry-list-header";
+import { EntrySortMenu } from "@/components/passwords/entry/entry-sort-menu";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

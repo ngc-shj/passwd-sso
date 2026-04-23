@@ -49,7 +49,7 @@ vi.mock("@/components/passwords/personal-software-license-form", () => ({
 vi.mock("@/components/passwords/personal-ssh-key-form", () => ({
   SshKeyForm: () => <div data-testid="personal-ssh-key-form" />,
 }));
-vi.mock("@/components/passwords/attachment-section", () => ({
+vi.mock("@/components/passwords/entry/attachment-section", () => ({
   AttachmentSection: () => <div data-testid="attachment-section" />,
 }));
 

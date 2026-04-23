@@ -4,12 +4,12 @@ import { render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { FolderLike } from "@/components/passwords/folder-like";
-import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
+import { EntryTagsAndFolderLayout } from "@/components/passwords/entry/entry-tags-and-folder-layout";
 
 const tagsSectionMock = vi.fn();
 const folderSectionMock = vi.fn();
 
-vi.mock("@/components/passwords/entry-tags-section", () => ({
+vi.mock("@/components/passwords/entry/entry-tags-section", () => ({
   EntryTagsSection: (props: {
     title: string;
     hint: string;
@@ -21,7 +21,7 @@ vi.mock("@/components/passwords/entry-tags-section", () => ({
   },
 }));
 
-vi.mock("@/components/passwords/entry-folder-select-section", () => ({
+vi.mock("@/components/passwords/entry/entry-folder-select-section", () => ({
   EntryFolderSelectSection: (props: {
     folders: FolderLike[];
     value: string | null;

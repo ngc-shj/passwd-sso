@@ -1,16 +1,16 @@
 "use client";
 
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
-import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
-import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
-import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry/entry-tags-and-folder-section";
 import {
   EntryActionBar,
   EntrySectionCard,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
-} from "@/components/passwords/entry-form-ui";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+} from "@/components/passwords/entry/entry-form-ui";
+import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import { usePersonalLoginFormModel } from "@/hooks/personal/use-personal-login-form-model";

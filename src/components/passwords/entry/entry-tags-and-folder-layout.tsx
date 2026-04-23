@@ -1,9 +1,9 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { EntryFolderSelectSection } from "@/components/passwords/entry-folder-select-section";
+import { EntryFolderSelectSection } from "@/components/passwords/entry/entry-folder-select-section";
 import type { FolderLike } from "@/components/passwords/folder-like";
-import { EntryTagsSection } from "@/components/passwords/entry-tags-section";
+import { EntryTagsSection } from "@/components/passwords/entry/entry-tags-section";
 
 interface EntryTagsAndFolderLayoutProps {
   tagsTitle: string;

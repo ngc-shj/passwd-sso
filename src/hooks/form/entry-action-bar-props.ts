@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { EntryActionBar } from "@/components/passwords/entry-form-ui";
+import { EntryActionBar } from "@/components/passwords/entry/entry-form-ui";
 
 type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
 

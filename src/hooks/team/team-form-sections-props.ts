@@ -1,11 +1,11 @@
 "use client";
 
 import type { ComponentProps, Dispatch, SetStateAction } from "react";
-import { EntryActionBar } from "@/components/passwords/entry-form-ui";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
-import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
-import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+import { EntryActionBar } from "@/components/passwords/entry/entry-form-ui";
+import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";

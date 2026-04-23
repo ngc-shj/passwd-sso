@@ -3,7 +3,7 @@
 import { CalendarClock, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntrySectionCard } from "@/components/passwords/entry/entry-form-ui";
 
 interface EntryExpirationSectionProps {
   value: string | null;

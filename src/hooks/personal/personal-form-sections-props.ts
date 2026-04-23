@@ -1,12 +1,12 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { EntryActionBar } from "@/components/passwords/entry-form-ui";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
-import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
-import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
-import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
+import { EntryActionBar } from "@/components/passwords/entry/entry-form-ui";
+import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry/entry-tags-and-folder-section";
 import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 import { buildEntryActionBarProps } from "@/hooks/form/entry-action-bar-props";
 

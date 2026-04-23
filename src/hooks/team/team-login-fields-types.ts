@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
 import type { useTeamPolicy } from "@/hooks/team/use-team-policy";
 
 export type EntryLoginMainFieldsProps = ComponentProps<typeof EntryLoginMainFields>;

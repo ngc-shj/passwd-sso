@@ -1,6 +1,6 @@
 "use client";
 
-import { EntryTagsAndFolderLayout } from "@/components/passwords/entry-tags-and-folder-layout";
+import { EntryTagsAndFolderLayout } from "@/components/passwords/entry/entry-tags-and-folder-layout";
 import type { FolderLike } from "@/components/passwords/folder-like";
 import { TagInput, type TagData } from "@/components/tags/tag-input";
 

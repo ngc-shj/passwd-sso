@@ -9,7 +9,7 @@ import { PasskeyForm } from "./personal-passkey-form";
 import { BankAccountForm } from "./personal-bank-account-form";
 import { SoftwareLicenseForm } from "./personal-software-license-form";
 import { SshKeyForm } from "./personal-ssh-key-form";
-import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
+import { AttachmentSection, type AttachmentMeta } from "./entry/attachment-section";
 import { PersonalEntryDialogShell } from "./personal-entry-dialog-shell";
 import type { PersonalPasswordEditData } from "./personal-password-edit-dialog-types";
 import { ENTRY_TYPE } from "@/lib/constants";

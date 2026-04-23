@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntrySectionCard } from "@/components/passwords/entry/entry-form-ui";
 import { FolderOpen } from "lucide-react";
 import type { FolderLike } from "@/components/passwords/folder-like";
 

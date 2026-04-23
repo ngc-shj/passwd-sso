@@ -79,7 +79,7 @@ vi.mock("@/components/tags/tag-input", () => ({
   TagInput: () => <div data-testid="tag-input" />,
 }));
 
-vi.mock("@/components/passwords/entry-form-ui", () => ({
+vi.mock("@/components/passwords/entry/entry-form-ui", () => ({
   ENTRY_DIALOG_FLAT_SECTION_CLASS:
     "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent",
   ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS:

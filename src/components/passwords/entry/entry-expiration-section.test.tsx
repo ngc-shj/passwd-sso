@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
 
 describe("EntryExpirationSection", () => {
   it("renders title and description", () => {

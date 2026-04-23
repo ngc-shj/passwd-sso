@@ -14,14 +14,14 @@ import {
   EntryPrimaryCard,
   ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS,
   ENTRY_DIALOG_FLAT_SECTION_CLASS,
-} from "@/components/passwords/entry-form-ui";
-import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
-import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
-import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
-import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+} from "@/components/passwords/entry/entry-form-ui";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry/entry-tags-and-folder-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { toTagPayload } from "@/components/passwords/entry-form-tags";
+import { toTagPayload } from "@/components/passwords/entry/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/personal/use-personal-base-form-model";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";

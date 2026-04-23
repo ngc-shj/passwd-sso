@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 
 vi.mock("@/components/passwords/password-generator", () => ({

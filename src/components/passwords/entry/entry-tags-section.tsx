@@ -3,7 +3,7 @@
 import type { ReactNode } from "react";
 import { Tags } from "lucide-react";
 import { Label } from "@/components/ui/label";
-import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntrySectionCard } from "@/components/passwords/entry/entry-form-ui";
 
 interface EntryTagsSectionProps {
   title: string;

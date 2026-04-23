@@ -1,7 +1,7 @@
 "use client";
 
 import type { ComponentProps } from "react";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
+import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
 import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";
 import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 

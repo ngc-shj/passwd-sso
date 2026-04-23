@@ -4,9 +4,9 @@ import { useState, useEffect } from "react";
 import { useTranslations, useLocale } from "next-intl";
 
 import { Button } from "@/components/ui/button";
-import { AttachmentSection, type AttachmentMeta } from "./attachment-section";
+import { AttachmentSection, type AttachmentMeta } from "./entry/attachment-section";
 import { TeamAttachmentSection, type TeamAttachmentMeta } from "@/components/team/team-attachment-section";
-import { EntryHistorySection } from "./entry-history-section";
+import { EntryHistorySection } from "./entry/entry-history-section";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";

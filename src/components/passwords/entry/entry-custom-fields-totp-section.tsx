@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { EntrySectionCard } from "@/components/passwords/entry-form-ui";
+import { EntrySectionCard } from "@/components/passwords/entry/entry-form-ui";
 import { TOTPField } from "@/components/passwords/totp-field";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import type { CustomFieldType } from "@/lib/constants";

@@ -132,7 +132,7 @@ function renderPage() {
   );
 }
 
-vi.mock("@/components/passwords/entry-list-header", () => ({
+vi.mock("@/components/passwords/entry/entry-list-header", () => ({
   EntryListHeader: ({
     title,
     subtitle,
@@ -152,7 +152,7 @@ vi.mock("@/components/passwords/entry-list-header", () => ({
   ),
 }));
 
-vi.mock("@/components/passwords/entry-sort-menu", () => ({
+vi.mock("@/components/passwords/entry/entry-sort-menu", () => ({
   EntrySortMenu: () => null,
 }));
 

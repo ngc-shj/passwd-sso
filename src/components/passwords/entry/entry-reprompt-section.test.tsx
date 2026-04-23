@@ -2,7 +2,7 @@
 
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
 
 describe("EntryRepromptSection", () => {
   it("renders title/description and calls on change", () => {
