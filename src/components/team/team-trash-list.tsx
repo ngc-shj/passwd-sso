@@ -26,7 +26,7 @@ import {
   compareEntriesByDeletedAt,
   type EntrySortOption,
 } from "@/lib/vault/entry-sort";
-import { useTeamVault } from "@/lib/team-vault-context";
+import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";

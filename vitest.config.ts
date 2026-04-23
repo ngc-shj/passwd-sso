@@ -24,7 +24,7 @@ export default defineConfig({
         "src/lib/auth/team-auth.ts",
         "src/lib/crypto/crypto-server.ts",
         "src/lib/crypto/crypto-team.ts",
-        "src/lib/team-vault-core.tsx",
+        "src/lib/team/team-vault-core.tsx",
         "src/lib/password-generator.ts",
         "src/lib/email/**/*.ts",
         "src/lib/auth/auth-adapter.ts",

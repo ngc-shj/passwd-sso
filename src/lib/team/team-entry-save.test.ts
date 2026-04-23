@@ -13,7 +13,7 @@ vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: vi.fn(async (value: string) => `enc:${value}`),
 }));
 
-import { saveTeamEntry } from "@/lib/team-entry-save";
+import { saveTeamEntry } from "@/lib/team/team-entry-save";
 
 describe("saveTeamEntry", () => {
   beforeEach(() => {

@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { saveTeamEntry } from "@/lib/team-entry-save";
+import { saveTeamEntry } from "@/lib/team/team-entry-save";
 import {
   generateItemKey,
   wrapItemKey,

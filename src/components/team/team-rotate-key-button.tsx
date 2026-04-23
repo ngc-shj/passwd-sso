@@ -27,7 +27,7 @@ import {
 import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
-import { useTeamVault } from "@/lib/team-vault-core";
+import { useTeamVault } from "@/lib/team/team-vault-core";
 
 // ─── Types ────────────────────────────────────────────────────
 

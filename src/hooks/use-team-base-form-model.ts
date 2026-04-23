@@ -15,7 +15,7 @@ import type { TeamTagData } from "@/components/team/team-tag-input";
 import { useTeamAttachments } from "@/hooks/use-team-attachments";
 import { useTeamFolders } from "@/hooks/use-team-folders";
 import { useTeamPolicy } from "@/hooks/use-team-policy";
-import { useTeamVault } from "@/lib/team-vault-context";
+import { useTeamVault } from "@/lib/team/team-vault-context";
 import {
   useEntryFormTranslations,
   toTeamLoginFormTranslations,
@@ -23,7 +23,7 @@ import {
 import {
   buildTeamEntryPayload,
   type BuildTeamEntryPayloadInput,
-} from "@/lib/team-entry-payload";
+} from "@/lib/team/team-entry-payload";
 import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";
 import { extractTagIds } from "@/lib/vault/entry-form-helpers";
 

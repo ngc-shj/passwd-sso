@@ -46,7 +46,7 @@ const {
 // ─── vi.mock declarations ────────────────────────────────────
 
 vi.mock("@/lib/vault/vault-context", () => ({ useVault: mockUseVault }));
-vi.mock("@/lib/team-vault-context", () => ({ useTeamVaultOptional: mockUseTeamVaultOptional }));
+vi.mock("@/lib/team/team-vault-context", () => ({ useTeamVaultOptional: mockUseTeamVaultOptional }));
 
 vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,

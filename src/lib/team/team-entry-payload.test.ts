@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { buildTeamEntryPayload } from "@/lib/team-entry-payload";
+import { buildTeamEntryPayload } from "@/lib/team/team-entry-payload";
 
 describe("buildTeamEntryPayload", () => {
   it("builds login blobs with totp null and non-empty custom fields only", () => {

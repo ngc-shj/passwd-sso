@@ -4,7 +4,7 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
 
-vi.mock("@/lib/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getEntryDecryptionKey: vi.fn(),
   }),

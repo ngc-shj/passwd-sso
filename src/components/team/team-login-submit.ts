@@ -1,5 +1,5 @@
-import { buildTeamEntryPayload } from "@/lib/team-entry-payload";
-import { validateTeamEntryBeforeSubmit } from "@/lib/team-entry-validation";
+import { buildTeamEntryPayload } from "@/lib/team/team-entry-payload";
+import { validateTeamEntryBeforeSubmit } from "@/lib/team/team-entry-validation";
 import { extractTagIds } from "@/lib/vault/entry-form-helpers";
 import { detectCardBrand, formatCardNumber, normalizeCardBrand, normalizeCardNumber } from "@/lib/credit-card";
 import { executeTeamEntrySubmit } from "@/components/team/team-entry-submit";

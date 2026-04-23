@@ -59,7 +59,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/team-policy", () => ({
+vi.mock("@/lib/team/team-policy", () => ({
   assertPolicyAllowsSharing: vi.fn(),
   assertPolicySharePassword: vi.fn(),
   PolicyViolationError: class extends Error {},
@@ -483,8 +483,8 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({ teamId: "team-123", entryType: ENTRY_TYPE.LOGIN, tenantId: "tenant-1" });
 
-    const { assertPolicySharePassword } = await import("@/lib/team-policy");
-    const { PolicyViolationError: RealPVE } = await import("@/lib/team-policy");
+    const { assertPolicySharePassword } = await import("@/lib/team/team-policy");
+    const { PolicyViolationError: RealPVE } = await import("@/lib/team/team-policy");
     vi.mocked(assertPolicySharePassword).mockRejectedValueOnce(
       new RealPVE("Share password is required by team policy")
     );

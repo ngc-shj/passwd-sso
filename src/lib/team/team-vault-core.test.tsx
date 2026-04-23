@@ -38,7 +38,7 @@ import {
   TeamVaultProvider,
   useTeamVault,
   useTeamVaultOptional,
-} from "@/lib/team-vault-core";
+} from "@/lib/team/team-vault-core";
 
 describe("team-vault-core", () => {
   const originalCrypto = globalThis.crypto;

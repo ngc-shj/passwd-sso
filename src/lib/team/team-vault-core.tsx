@@ -15,8 +15,8 @@ import {
   unwrapItemKey,
   deriveItemEncryptionKey,
   type TeamKeyWrapContext,
-} from "./crypto/crypto-team";
-import { buildItemKeyWrapAAD } from "./crypto/crypto-aad";
+} from "../crypto/crypto-team";
+import { buildItemKeyWrapAAD } from "../crypto/crypto-aad";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { fetchApi } from "@/lib/url-helpers";

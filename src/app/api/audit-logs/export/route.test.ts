@@ -39,7 +39,7 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/team-policy", () => ({
+vi.mock("@/lib/team/team-policy", () => ({
   assertPolicyAllowsExport: vi.fn().mockResolvedValue(undefined),
   PolicyViolationError: class PolicyViolationError extends Error {
     constructor(message: string) { super(message); this.name = "PolicyViolationError"; }

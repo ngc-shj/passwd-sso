@@ -27,7 +27,7 @@ import {
   encryptData,
   decryptData,
 } from "../crypto/crypto-client";
-import { TeamVaultProvider } from "../team-vault-context";
+import { TeamVaultProvider } from "../team/team-vault-context";
 import {
   generateECDHKeyPair,
   exportPublicKey,

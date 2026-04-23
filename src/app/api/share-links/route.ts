@@ -10,7 +10,7 @@ import {
   hashAccessPassword,
 } from "@/lib/crypto/crypto-server";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
+import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team/team-policy";
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";

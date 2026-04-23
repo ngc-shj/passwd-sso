@@ -11,7 +11,7 @@ import { apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { decryptData } from "@/lib/crypto/crypto-client";
-import { useTeamVault } from "@/lib/team-vault-context";
+import { useTeamVault } from "@/lib/team/team-vault-context";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface TeamEditDialogLoaderProps {

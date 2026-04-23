@@ -31,7 +31,7 @@ import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/en
 import { buildFolderPath } from "@/lib/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { FolderItem } from "@/components/folders/folder-tree";
-import { useTeamVault } from "@/lib/team-vault-context";
+import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";

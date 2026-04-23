@@ -13,7 +13,7 @@ import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
 import { TEAM_PERMISSION, TEAM_ROLE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team-policy";
+import { withTeamIpRestriction, PolicyViolationError } from "@/lib/team/team-policy";
 import type { TeamRole } from "@prisma/client";
 import type { NextRequest } from "next/server";
 

@@ -55,7 +55,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/auth/access-restriction.ts", ["tenant"]],
-  ["src/lib/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
+  ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
   ["src/lib/auth/session-timeout.ts", ["user"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check

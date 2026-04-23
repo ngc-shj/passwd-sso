@@ -18,7 +18,7 @@ import {
   formatExportContent as formatExportContentShared,
   formatExportDate,
 } from "@/lib/export-format-common";
-import { useTeamVault } from "@/lib/team-vault-context";
+import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { buildFolderPath } from "@/lib/folder-path";

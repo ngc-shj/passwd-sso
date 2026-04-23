@@ -160,7 +160,7 @@ vi.mock("@/components/team/team-favorites-list", () => ({
   TeamFavoritesList: () => null,
 }));
 
-vi.mock("@/lib/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamEncryptionKey,
     getTeamKeyInfo: vi.fn().mockResolvedValue(null),

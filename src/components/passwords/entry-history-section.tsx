@@ -7,7 +7,7 @@ import { ChevronDown, ChevronRight, Eye, EyeOff, History, RotateCcw } from "luci
 import { Button } from "@/components/ui/button";
 import { apiPath } from "@/lib/constants";
 import { useVault } from "@/lib/vault/vault-context";
-import { useTeamVault } from "@/lib/team-vault-context";
+import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import {

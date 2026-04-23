@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { validateTeamEntryBeforeSubmit } from "@/lib/team-entry-validation";
+import { validateTeamEntryBeforeSubmit } from "@/lib/team/team-entry-validation";
 
 describe("validateTeamEntryBeforeSubmit", () => {
   it("validates passkey required fields", () => {

@@ -29,7 +29,7 @@ vi.mock("@/lib/ime-guard", () => ({
   preventIMESubmit: vi.fn(),
 }));
 
-vi.mock("@/lib/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
     getTeamEncryptionKey: vi.fn(),
@@ -52,7 +52,7 @@ vi.mock("@/lib/crypto/crypto-aad", () => ({
 }));
 
 // Mock save entry helper to skip encryption (this is a UI test, not a crypto test)
-vi.mock("@/lib/team-entry-save", () => ({
+vi.mock("@/lib/team/team-entry-save", () => ({
   saveTeamEntry: vi.fn(async (params: Record<string, unknown>) => {
     const teamId = params.teamId as string;
     const entryId = params.entryId as string | undefined;

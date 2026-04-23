@@ -64,7 +64,7 @@ vi.mock("@/hooks/use-team-folders", () => ({
   }),
 }));
 
-vi.mock("@/lib/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamKeyInfo: mockGetTeamKeyInfo,
   }),

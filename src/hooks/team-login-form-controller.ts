@@ -1,7 +1,7 @@
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { TeamTagData } from "@/components/team/team-tag-input";
-import type { BuildTeamEntryPayloadInput } from "@/lib/team-entry-payload";
+import type { BuildTeamEntryPayloadInput } from "@/lib/team/team-entry-payload";
 
 interface CreateTeamLoginSubmitHandlerArgs {
   submitDisabled: boolean;

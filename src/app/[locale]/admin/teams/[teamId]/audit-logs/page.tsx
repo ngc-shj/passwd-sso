@@ -26,7 +26,7 @@ import {
   type AuditActionValue,
 } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import { useTeamVaultOptional } from "@/lib/team-vault-core";
+import { useTeamVaultOptional } from "@/lib/team/team-vault-core";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";

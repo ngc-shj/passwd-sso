@@ -37,7 +37,7 @@ vi.mock("./crypto-client", () => ({}));
 vi.mock("./crypto-emergency", () => ({}));
 vi.mock("./crypto-team", () => ({}));
 vi.mock("./webauthn-client", () => ({}));
-vi.mock("./team-vault-context", () => ({
+vi.mock("./team/team-vault-context", () => ({
   TeamVaultProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock("./vault/auto-lock-context", () => ({

@@ -55,7 +55,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: mockExtractRequestMeta,
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/team-policy", () => ({
+vi.mock("@/lib/team/team-policy", () => ({
   assertPolicyAllowsExport: mockAssertPolicyAllowsExport,
   PolicyViolationError,
 }));

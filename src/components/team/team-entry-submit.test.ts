@@ -16,7 +16,7 @@ const { mockSaveTeamEntry } = vi.hoisted(() => ({
   mockSaveTeamEntry: vi.fn(),
 }));
 
-vi.mock("@/lib/team-entry-save", () => ({
+vi.mock("@/lib/team/team-entry-save", () => ({
   saveTeamEntry: mockSaveTeamEntry,
 }));
 

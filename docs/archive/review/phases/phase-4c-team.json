@@ -1,0 +1,16 @@
+{
+  "phaseName": "phase-4c-team",
+  "moves": [
+    { "from": "src/lib/team-entry-payload.ts",      "to": "src/lib/team/team-entry-payload.ts" },
+    { "from": "src/lib/team-entry-payload.test.ts", "to": "src/lib/team/team-entry-payload.test.ts" },
+    { "from": "src/lib/team-entry-save.ts",      "to": "src/lib/team/team-entry-save.ts" },
+    { "from": "src/lib/team-entry-save.test.ts", "to": "src/lib/team/team-entry-save.test.ts" },
+    { "from": "src/lib/team-entry-validation.ts",      "to": "src/lib/team/team-entry-validation.ts" },
+    { "from": "src/lib/team-entry-validation.test.ts", "to": "src/lib/team/team-entry-validation.test.ts" },
+    { "from": "src/lib/team-policy.ts",      "to": "src/lib/team/team-policy.ts" },
+    { "from": "src/lib/team-policy.test.ts", "to": "src/lib/team/team-policy.test.ts" },
+    { "from": "src/lib/team-vault-context.tsx", "to": "src/lib/team/team-vault-context.tsx" },
+    { "from": "src/lib/team-vault-core.tsx",      "to": "src/lib/team/team-vault-core.tsx" },
+    { "from": "src/lib/team-vault-core.test.tsx", "to": "src/lib/team/team-vault-core.test.tsx" }
+  ]
+}

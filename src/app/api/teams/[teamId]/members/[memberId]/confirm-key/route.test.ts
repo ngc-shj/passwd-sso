@@ -33,7 +33,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/team-policy", () => ({
+vi.mock("@/lib/team/team-policy", () => ({
   withTeamIpRestriction: vi.fn().mockResolvedValue(undefined),
   PolicyViolationError: class PolicyViolationError extends Error {
     constructor(message: string) { super(message); this.name = "PolicyViolationError"; }

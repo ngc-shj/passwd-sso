@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { logAuditAsync, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
-import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team-policy";
+import { assertPolicyAllowsExport, PolicyViolationError } from "@/lib/team/team-policy";
 import { z } from "zod/v4";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
