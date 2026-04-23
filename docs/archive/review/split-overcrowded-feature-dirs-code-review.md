@@ -156,6 +156,30 @@ Verify-only pass on commit `7384d1db`. All R1 Critical (C1) + Major (M1-M6) + Mi
 - npx next build → success.
 - node scripts/refactor-phase-verify.mjs → 13/13 scripts pass.
 
+---
+
+# Round 3 Review
+Date: 2026-04-23
+
+## Changes from Previous Round
+Verify-only pass on commit `5617b897`. All R2 fixes (F6 Major + S8/S9/F7/T5/T6/T7/T8 Minor) confirmed Resolved by independent combined review.
+
+## Round 3 Outcome
+**No new findings. Phase 1 kickoff unblocked.** Review loop converged after 3 rounds.
+
+## Final verification (post-R2)
+- npx eslint . → 0 warnings.
+- npx vitest run → 569 files / 7236 tests pass.
+- npx next build → success.
+- node scripts/refactor-phase-verify.mjs → 13/13 scripts pass.
+
+## Summary of code-review rounds
+| Round | Critical | Major | Minor | Resolved |
+|---|---|---|---|---|
+| R1 | 1 (C1) | 6 (M1-M6) | 7 (m1-m7) | 1C + 6M + 3m (m3/m4/m6/m7 deferred with Anti-Deferral justification) |
+| R2 | 0 | 1 (F6 regression) | 6 (S8, S9, F7, T5, T6, T7, T8) | All |
+| R3 | 0 | 0 | 0 | N/A — no new findings |
+
 ## Deferred (tracked, documented as out of scope for this patch)
 - **m3 (.mjs in check-dynamic-import-specifiers)** — scope gap acceptable for Phase 0; `.mjs` files in refactor scope do not use vi.mock / vi.importActual patterns. Anti-Deferral check: Out of scope (different feature). Justification: covered by check-mjs-imports.mjs which verifies all `.mjs` import targets resolve; the specifier-variant check (vi.mock etc.) is TS-test-file specific. TODO(split-overcrowded-feature-dirs): add `.mjs` dynamic-import specifier coverage if Phase 5+ introduces .mjs files with vi.mock.
 - **m4 (LEDGER_EXEMPT self-verify)** — low risk today. Worst case: `crypto-blob.ts` grows a HKDF string while on the exempt list (requires PR merge with no reviewer noticing). Likelihood: low (CODEOWNERS gates `/src/lib/crypto*`). Cost to fix: ~15 LOC. Acceptable risk given CODEOWNERS gate.
