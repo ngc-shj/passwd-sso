@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
 import { renderHook } from "@testing-library/react";
-import { useFormDirty } from "./form/use-form-dirty";
+import { useFormDirty } from "./use-form-dirty";
 
 describe("useFormDirty", () => {
   it("returns false while initial is null (loading)", () => {
