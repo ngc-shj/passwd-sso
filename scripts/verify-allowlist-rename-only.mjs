@@ -124,7 +124,10 @@ const modified = common.filter((k) => !modelsEqual(mainMap.get(k), currentMap.ge
 // Get renamed files from git diff
 let nameStatusOut = "";
 try {
-  nameStatusOut = execSync("git diff --name-status main...HEAD", { encoding: "utf8" });
+  // Use `-M main` (not `main...HEAD`) so uncommitted renames in the working
+  // tree are visible. On CI (no uncommitted state) this behaves identically
+  // to `main...HEAD`; locally it also catches pre-commit verification runs.
+  nameStatusOut = execSync("git diff --name-status -M main", { encoding: "utf8" });
 } catch {
   nameStatusOut = "";
 }

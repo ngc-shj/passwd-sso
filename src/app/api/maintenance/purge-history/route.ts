@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
-import { verifyAdminToken } from "@/lib/admin-token";
+import { verifyAdminToken } from "@/lib/auth/admin-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";

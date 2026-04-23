@@ -12,7 +12,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { SA_TOKEN_PREFIX, MAX_SA_TOKENS_PER_ACCOUNT } from "@/lib/constants/service-account";
-import { parseSaTokenScopes } from "@/lib/service-account-token";
+import { parseSaTokenScopes } from "@/lib/auth/service-account-token";
 import { randomBytes } from "node:crypto";
 
 type Params = { params: Promise<{ id: string }> };

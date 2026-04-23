@@ -11,10 +11,10 @@ const {
   mockHasSaTokenScope: vi.fn(),
 }));
 
-vi.mock("@/lib/api-key", () => ({
+vi.mock("@/lib/auth/api-key", () => ({
   validateApiKeyOnly: mockValidateApiKeyOnly,
 }));
-vi.mock("@/lib/service-account-token", () => ({
+vi.mock("@/lib/auth/service-account-token", () => ({
   validateServiceAccountToken: mockValidateServiceAccountToken,
   hasSaTokenScope: mockHasSaTokenScope,
 }));

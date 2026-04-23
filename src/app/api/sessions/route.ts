@@ -9,7 +9,7 @@ import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
 import { rateLimited } from "@/lib/api-response";
-import { revokeAllExtensionTokensForUser } from "@/lib/extension-token";
+import { revokeAllExtensionTokensForUser } from "@/lib/auth/extension-token";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 

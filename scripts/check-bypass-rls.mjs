@@ -27,8 +27,8 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/audit.ts", ["team", "user", "auditLog"]],
   ["src/lib/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit-user-lookup.ts", ["user"]],
-  ["src/lib/scim-token.ts", ["scimToken"]],
-  ["src/lib/extension-token.ts", ["extensionToken", "tenant"]],
+  ["src/lib/auth/scim-token.ts", ["scimToken"]],
+  ["src/lib/auth/extension-token.ts", ["extensionToken", "tenant"]],
   ["src/lib/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
@@ -48,7 +48,7 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/team-auth.ts", ["teamMember"]],
   ["src/lib/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
-  ["src/lib/api-key.ts", ["apiKey"]],
+  ["src/lib/auth/api-key.ts", ["apiKey"]],
   ["src/lib/webauthn-authorize.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
@@ -85,7 +85,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
-  ["src/lib/service-account-token.ts", ["serviceAccountToken"]],
+  ["src/lib/auth/service-account-token.ts", ["serviceAccountToken"]],
   ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],

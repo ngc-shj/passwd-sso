@@ -15,7 +15,7 @@ const {
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/lib/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
+vi.mock("@/lib/auth/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
 vi.mock("@/lib/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck }),

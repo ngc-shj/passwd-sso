@@ -31,7 +31,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/share-access-token", () => ({
+vi.mock("@/lib/auth/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyShareAccessToken,
 }));
 vi.mock("@/lib/crypto-server", () => ({

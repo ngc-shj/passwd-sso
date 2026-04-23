@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyAdminToken } from "@/lib/admin-token";
+import { verifyAdminToken } from "@/lib/auth/admin-token";
 import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import {

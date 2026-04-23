@@ -62,7 +62,7 @@ vi.mock("@/lib/constants", async (importOriginal) => ({
   AUDIT_SCOPE: { PERSONAL: "PERSONAL" },
 }));
 
-vi.mock("@/lib/extension-token", () => ({
+vi.mock("@/lib/auth/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
 }));
 

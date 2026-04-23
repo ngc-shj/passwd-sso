@@ -10,7 +10,7 @@ const { mockWithTenantRls } = vi.hoisted(() => ({
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/lib/scim-token", () => ({
+vi.mock("@/lib/auth/scim-token", () => ({
   validateScimToken: mockValidateScimToken,
 }));
 vi.mock("@/lib/scim/rate-limit", () => ({

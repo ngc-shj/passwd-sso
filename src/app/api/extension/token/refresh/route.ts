@@ -4,7 +4,7 @@ import { generateShareToken, hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/extension-token";
+import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/auth/extension-token";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";

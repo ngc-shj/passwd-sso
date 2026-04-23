@@ -36,7 +36,7 @@ vi.mock("@/lib/crypto-server", () => ({
   hashToken: mockHashToken,
   verifyAccessPassword: mockVerifyAccessPassword,
 }));
-vi.mock("@/lib/share-access-token", () => ({
+vi.mock("@/lib/auth/share-access-token", () => ({
   createShareAccessToken: mockCreateShareAccessToken,
 }));
 vi.mock("@/lib/rate-limit", () => ({

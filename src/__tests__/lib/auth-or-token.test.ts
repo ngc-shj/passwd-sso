@@ -16,15 +16,15 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/extension-token", () => ({
+vi.mock("@/lib/auth/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   hasScope: vi.fn().mockReturnValue(true),
 }));
-vi.mock("@/lib/api-key", () => ({
+vi.mock("@/lib/auth/api-key", () => ({
   validateApiKey: mockValidateApiKey,
   hasApiKeyScope: vi.fn().mockReturnValue(true),
 }));
-vi.mock("@/lib/service-account-token", () => ({
+vi.mock("@/lib/auth/service-account-token", () => ({
   validateServiceAccountToken: mockValidateServiceAccountToken,
   hasSaTokenScope: vi.fn().mockReturnValue(true),
 }));

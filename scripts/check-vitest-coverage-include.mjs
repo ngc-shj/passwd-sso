@@ -250,7 +250,9 @@ if (enforceRenameParity) {
   // Get git renames
   let nameStatusOut = "";
   try {
-    nameStatusOut = execSync("git diff --name-status main...HEAD", { encoding: "utf8" });
+    // Use `-M main` (not `main...HEAD`) so uncommitted renames in the working
+    // tree are visible to the pre-commit gate. Equivalent on CI.
+    nameStatusOut = execSync("git diff --name-status -M main", { encoding: "utf8" });
   } catch {
     nameStatusOut = "";
   }

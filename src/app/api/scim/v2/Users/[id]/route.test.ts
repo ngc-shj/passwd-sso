@@ -28,7 +28,7 @@ const {
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/lib/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
+vi.mock("@/lib/auth/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
 vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,

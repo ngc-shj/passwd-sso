@@ -146,7 +146,7 @@ import {
 import {
   validateServiceAccountToken,
   parseSaTokenScopes,
-} from "@/lib/service-account-token";
+} from "@/lib/auth/service-account-token";
 import { authOrToken } from "@/lib/auth-or-token";
 
 // ─── Shared fixtures ─────────────────────────────────────────────────────────

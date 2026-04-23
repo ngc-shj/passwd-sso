@@ -32,7 +32,7 @@ const {
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
-vi.mock("@/lib/extension-token", () => ({
+vi.mock("@/lib/auth/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
 }));

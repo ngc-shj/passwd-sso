@@ -168,7 +168,10 @@ function normalise(text) {
 // ---------------------------------------------------------------------------
 let nameStatusOut = "";
 try {
-  nameStatusOut = execSync("git diff --name-status main...HEAD", { encoding: "utf8" });
+  // Use `-M main` (not `main...HEAD`) so uncommitted renames in the working
+  // tree are visible to the pre-commit gate. Equivalent to `main...HEAD` on
+  // CI where there are no uncommitted changes.
+  nameStatusOut = execSync("git diff --name-status -M main", { encoding: "utf8" });
 } catch {
   nameStatusOut = "";
 }

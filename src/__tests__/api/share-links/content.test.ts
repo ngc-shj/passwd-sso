@@ -27,7 +27,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
-vi.mock("@/lib/share-access-token", () => ({
+vi.mock("@/lib/auth/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyShareAccessToken,
 }));
 vi.mock("@/lib/rate-limit", () => ({

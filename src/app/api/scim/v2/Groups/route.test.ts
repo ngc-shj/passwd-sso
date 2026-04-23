@@ -17,7 +17,7 @@ const {
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: string, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/lib/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
+vi.mock("@/lib/auth/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
 vi.mock("@/lib/audit", () => ({ logAuditAsync: vi.fn(), extractRequestMeta: () => ({ ip: null, userAgent: null }) }));
 vi.mock("@/lib/prisma", () => ({

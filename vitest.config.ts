@@ -28,7 +28,7 @@ export default defineConfig({
         "src/lib/password-generator.ts",
         "src/lib/email/**/*.ts",
         "src/lib/auth-adapter.ts",
-        "src/lib/scim-token.ts",
+        "src/lib/auth/scim-token.ts",
         "src/lib/scim/*.ts",
         "src/lib/webauthn-authorize.ts",
         "src/lib/webauthn-server.ts",
@@ -50,7 +50,7 @@ export default defineConfig({
         "src/lib/sentry-sanitize.ts",
         "src/lib/mcp/**/*.ts",
         "src/lib/password-policy-validation.ts",
-        "src/lib/extension-token.ts",
+        "src/lib/auth/extension-token.ts",
         "src/lib/inject-extension-bridge-code.ts",
       ],
       exclude: [

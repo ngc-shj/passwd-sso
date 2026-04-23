@@ -1,5 +1,5 @@
 import type { NextRequest, NextResponse } from "next/server";
-import { validateScimToken, type ValidatedScimToken } from "@/lib/scim-token";
+import { validateScimToken, type ValidatedScimToken } from "@/lib/auth/scim-token";
 import { scimError } from "@/lib/scim/response";
 import { enforceAccessRestriction } from "@/lib/access-restriction";
 import { checkScimRateLimit } from "@/lib/scim/rate-limit";

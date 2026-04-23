@@ -12,7 +12,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { isHttps } from "@/lib/url-helpers";
 import { PASSKEY_SESSION_MAX_AGE_SECONDS } from "@/lib/validations/common.server";
-import { revokeAllExtensionTokensForUser } from "@/lib/extension-token";
+import { revokeAllExtensionTokensForUser } from "@/lib/auth/extension-token";
 
 export const runtime = "nodejs";
 

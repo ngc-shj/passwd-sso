@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
-import { createShareAccessToken } from "@/lib/share-access-token";
+import { createShareAccessToken } from "@/lib/auth/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
