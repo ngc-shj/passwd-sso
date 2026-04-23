@@ -6,10 +6,10 @@ import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import {
   usePersonalLoginFormState,
-} from "@/hooks/use-personal-login-form-state";
+} from "@/hooks/personal/use-personal-login-form-state";
 import {
   buildPersonalLoginFormPresenter,
-} from "@/hooks/personal-login-form-presenter";
+} from "@/hooks/personal/personal-login-form-presenter";
 
 describe("buildPersonalLoginFormPresenter", () => {
   it("exposes entry values, derived state and login field props", () => {

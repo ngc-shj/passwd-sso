@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   selectPersonalEntryValues,
   usePersonalLoginFormState,
-} from "@/hooks/use-personal-login-form-state";
+} from "@/hooks/personal/use-personal-login-form-state";
 
 describe("usePersonalLoginFormState", () => {
   it("initializes defaults without initial data", () => {

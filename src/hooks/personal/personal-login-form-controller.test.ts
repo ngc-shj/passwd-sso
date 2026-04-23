@@ -5,7 +5,7 @@ import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import {
   buildPersonalLoginFormController,
-} from "@/hooks/personal-login-form-controller";
+} from "@/hooks/personal/personal-login-form-controller";
 
 const submitPersonalLoginFormMock = vi.fn();
 

@@ -3,19 +3,19 @@
 import { useMemo } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault/vault-context";
-import { usePersonalFolders } from "@/hooks/use-personal-folders";
+import { usePersonalFolders } from "@/hooks/personal/use-personal-folders";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
 import {
   buildPersonalLoginFormController,
-} from "@/hooks/personal-login-form-controller";
+} from "@/hooks/personal/personal-login-form-controller";
 import {
   buildPersonalLoginFormPresenter,
-} from "@/hooks/personal-login-form-presenter";
+} from "@/hooks/personal/personal-login-form-presenter";
 import {
   toPersonalLoginFormTranslations,
   useEntryFormTranslations,
 } from "@/hooks/use-entry-form-translations";
-import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
+import { usePersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { SYMBOL_GROUP_KEYS } from "@/lib/generator/generator-prefs";
 

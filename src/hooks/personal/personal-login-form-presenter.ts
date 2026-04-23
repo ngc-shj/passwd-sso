@@ -1,14 +1,14 @@
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import {
   buildPersonalLoginFormDerived,
-} from "@/hooks/personal-login-form-derived";
+} from "@/hooks/personal/personal-login-form-derived";
 import {
   buildPersonalLoginFieldsProps,
-} from "@/hooks/personal-login-fields-props";
-import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
+} from "@/hooks/personal/personal-login-fields-props";
+import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 import {
   selectPersonalEntryValues,
-} from "@/hooks/use-personal-login-form-state";
+} from "@/hooks/personal/use-personal-login-form-state";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { TagData } from "@/components/tags/tag-input";
 

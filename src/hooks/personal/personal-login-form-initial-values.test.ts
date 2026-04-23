@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
+import { buildPersonalLoginFormInitialValues } from "@/hooks/personal/personal-login-form-initial-values";
 
 describe("buildPersonalLoginFormInitialValues", () => {
   it("returns defaults when initial data is missing", () => {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import { buildPersonalLoginFieldTextProps } from "@/hooks/personal-login-fields-text-props";
+import { buildPersonalLoginFieldTextProps } from "@/hooks/personal/personal-login-fields-text-props";
 
 describe("buildPersonalLoginFieldTextProps", () => {
   it("maps all personal login labels from PasswordForm translator", () => {

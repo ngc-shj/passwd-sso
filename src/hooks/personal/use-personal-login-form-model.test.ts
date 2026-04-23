@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
+import { usePersonalLoginFormModel } from "@/hooks/personal/use-personal-login-form-model";
 
 const useRouterMock = vi.fn();
 const useVaultMock = vi.fn();
@@ -21,7 +21,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => useVaultMock(),
 }));
 
-vi.mock("@/hooks/use-personal-folders", () => ({
+vi.mock("@/hooks/personal/use-personal-folders", () => ({
   usePersonalFolders: () => usePersonalFoldersMock(),
 }));
 

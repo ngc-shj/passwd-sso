@@ -5,10 +5,10 @@ import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import {
   buildPersonalLoginFieldPropsFromState,
   buildPersonalLoginFieldsProps,
-} from "@/hooks/personal-login-fields-props";
-import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal-login-fields-callbacks";
-import { buildPersonalLoginFieldTextProps } from "@/hooks/personal-login-fields-text-props";
-import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
+} from "@/hooks/personal/personal-login-fields-props";
+import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal/personal-login-fields-callbacks";
+import { buildPersonalLoginFieldTextProps } from "@/hooks/personal/personal-login-fields-text-props";
+import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 
 describe("buildPersonalLoginFieldsProps", () => {
   it("builds complete login field props from state", () => {

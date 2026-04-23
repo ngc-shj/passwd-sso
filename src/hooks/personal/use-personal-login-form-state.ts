@@ -5,9 +5,9 @@ import type { PersonalLoginFormInitialData } from "@/components/passwords/person
 import type { TagData } from "@/components/tags/tag-input";
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import { usePersonalLoginFormUiState } from "@/hooks/use-personal-login-form-ui-state";
-import { usePersonalLoginFormValueState } from "@/hooks/use-personal-login-form-value-state";
-import { buildPersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
+import { usePersonalLoginFormUiState } from "@/hooks/personal/use-personal-login-form-ui-state";
+import { usePersonalLoginFormValueState } from "@/hooks/personal/use-personal-login-form-value-state";
+import { buildPersonalLoginFormInitialValues } from "@/hooks/personal/personal-login-form-initial-values";
 
 export interface PersonalLoginFormValues {
   showPassword: boolean;

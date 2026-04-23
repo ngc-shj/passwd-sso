@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { usePersonalLoginFormUiState } from "@/hooks/use-personal-login-form-ui-state";
+import { usePersonalLoginFormUiState } from "@/hooks/personal/use-personal-login-form-ui-state";
 
 describe("usePersonalLoginFormUiState", () => {
   it("initializes ui flags", () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
-} from "@/hooks/personal-login-form-derived";
+} from "@/hooks/personal/personal-login-form-derived";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 
 describe("personal-login-form-derived snapshot helpers", () => {

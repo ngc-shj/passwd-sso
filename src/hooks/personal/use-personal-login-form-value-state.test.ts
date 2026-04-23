@@ -2,8 +2,8 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { buildPersonalLoginFormInitialValues } from "@/hooks/personal-login-form-initial-values";
-import { usePersonalLoginFormValueState } from "@/hooks/use-personal-login-form-value-state";
+import { buildPersonalLoginFormInitialValues } from "@/hooks/personal/personal-login-form-initial-values";
+import { usePersonalLoginFormValueState } from "@/hooks/personal/use-personal-login-form-value-state";
 
 describe("usePersonalLoginFormValueState", () => {
   it("initializes with provided initial values", () => {

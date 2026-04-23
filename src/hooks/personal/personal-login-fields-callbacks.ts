@@ -4,7 +4,7 @@ import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type {
   PersonalLoginFormSetters,
   PersonalLoginFormValues,
-} from "@/hooks/use-personal-login-form-state";
+} from "@/hooks/personal/use-personal-login-form-state";
 
 export function buildPersonalLoginFieldCallbacks(
   values: PersonalLoginFormValues,

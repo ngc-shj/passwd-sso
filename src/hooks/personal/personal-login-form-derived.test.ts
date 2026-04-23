@@ -3,7 +3,7 @@ import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
-import { buildPersonalLoginFormDerived } from "@/hooks/personal-login-form-derived";
+import { buildPersonalLoginFormDerived } from "@/hooks/personal/personal-login-form-derived";
 
 describe("buildPersonalLoginFormDerived", () => {
   it("computes hasChanges=false when values match initial data", () => {

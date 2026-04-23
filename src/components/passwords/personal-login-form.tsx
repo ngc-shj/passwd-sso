@@ -13,8 +13,8 @@ import {
 import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
-import { usePersonalLoginFormModel } from "@/hooks/use-personal-login-form-model";
-import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
+import { usePersonalLoginFormModel } from "@/hooks/personal/use-personal-login-form-model";
+import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";
 import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
 import { ArrowLeft, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";

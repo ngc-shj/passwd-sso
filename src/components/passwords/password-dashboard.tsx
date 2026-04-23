@@ -26,8 +26,8 @@ import { Plus, KeyRound, FileText, CreditCard, IdCard, Fingerprint, Star, Archiv
 import type { EntryTypeValue } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
-import { usePersonalFolders } from "@/hooks/use-personal-folders";
-import { usePersonalTags } from "@/hooks/use-personal-tags";
+import { usePersonalFolders } from "@/hooks/personal/use-personal-folders";
+import { usePersonalTags } from "@/hooks/personal/use-personal-tags";
 import { buildFolderPath } from "@/lib/folder/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";

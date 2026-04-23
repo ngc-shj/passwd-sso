@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { usePersonalBaseFormModel } from "@/hooks/use-personal-base-form-model";
+import { usePersonalBaseFormModel } from "@/hooks/personal/use-personal-base-form-model";
 import type { TagData } from "@/components/tags/tag-input";
 
 /* ------------------------------------------------------------------ */
@@ -36,7 +36,7 @@ vi.mock("@/lib/vault/vault-context", () => ({
   useVault: mockUseVault,
 }));
 
-vi.mock("@/hooks/use-personal-folders", () => ({
+vi.mock("@/hooks/personal/use-personal-folders", () => ({
   usePersonalFolders: () => ({
     folders: mockFolders,
   }),

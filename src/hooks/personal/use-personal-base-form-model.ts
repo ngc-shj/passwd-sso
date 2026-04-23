@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault/vault-context";
-import { usePersonalFolders } from "@/hooks/use-personal-folders";
+import { usePersonalFolders } from "@/hooks/personal/use-personal-folders";
 import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 import { toTagIds } from "@/components/passwords/entry-form-tags";

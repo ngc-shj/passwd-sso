@@ -3,9 +3,9 @@ import {
   submitPersonalLoginForm,
 } from "@/components/passwords/personal-login-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
-import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";
+import type { PersonalLoginFormEntryValues } from "@/hooks/personal/use-personal-login-form-state";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
-import { buildPersonalLoginSubmitArgs } from "@/hooks/personal-login-form-submit-args";
+import { buildPersonalLoginSubmitArgs } from "@/hooks/personal/personal-login-form-submit-args";
 import type { PasswordFormRouter } from "@/hooks/password-form-router";
 
 export interface PersonalLoginFormControllerArgs {

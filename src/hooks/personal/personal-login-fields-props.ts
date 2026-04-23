@@ -1,12 +1,12 @@
 "use client";
 
-import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal-login-fields-callbacks";
-import { buildPersonalLoginFieldTextProps } from "@/hooks/personal-login-fields-text-props";
+import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal/personal-login-fields-callbacks";
+import { buildPersonalLoginFieldTextProps } from "@/hooks/personal/personal-login-fields-text-props";
 import type {
   EntryLoginMainFieldsProps,
   PersonalLoginFieldTextProps,
   BuildPersonalLoginFieldsPropsArgs,
-} from "@/hooks/personal-login-fields-types";
+} from "@/hooks/personal/personal-login-fields-types";
 
 type PersonalLoginFieldCallbacks = ReturnType<typeof buildPersonalLoginFieldCallbacks>;
 

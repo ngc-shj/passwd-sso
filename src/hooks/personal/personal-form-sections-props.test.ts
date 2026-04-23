@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildPersonalFormSectionsProps } from "@/hooks/personal-form-sections-props";
-import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
+import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";
+import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 
 describe("buildPersonalFormSectionsProps", () => {
   it("maps personal section props from state and copy", () => {
