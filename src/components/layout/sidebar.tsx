@@ -9,12 +9,12 @@ import { VisuallyHidden } from "radix-ui";
 import { FolderDialog } from "@/components/folders/folder-dialog";
 import { TagDialog } from "@/components/tags/tag-dialog";
 import { SidebarContent } from "@/components/layout/sidebar-content";
-import { useSidebarData } from "@/hooks/use-sidebar-data";
-import { useSidebarFolderCrud } from "@/hooks/use-sidebar-folder-crud";
-import { useSidebarTagCrud } from "@/hooks/use-sidebar-tag-crud";
-import { useSidebarNavigationState } from "@/hooks/use-sidebar-navigation-state";
-import { useSidebarSectionsState } from "@/hooks/use-sidebar-sections-state";
-import { useSidebarViewModel } from "@/hooks/use-sidebar-view-model";
+import { useSidebarData } from "@/hooks/sidebar/use-sidebar-data";
+import { useSidebarFolderCrud } from "@/hooks/sidebar/use-sidebar-folder-crud";
+import { useSidebarTagCrud } from "@/hooks/sidebar/use-sidebar-tag-crud";
+import { useSidebarNavigationState } from "@/hooks/sidebar/use-sidebar-navigation-state";
+import { useSidebarSectionsState } from "@/hooks/sidebar/use-sidebar-sections-state";
+import { useSidebarViewModel } from "@/hooks/sidebar/use-sidebar-view-model";
 import {
   AlertDialog,
   AlertDialogAction,

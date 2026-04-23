@@ -6,8 +6,8 @@ import type {
   SidebarFolderItem,
   SidebarTeamItem,
   SidebarTeamTagItem,
-} from "@/hooks/use-sidebar-data";
-import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
+} from "@/hooks/sidebar/use-sidebar-data";
+import type { SidebarSection } from "@/hooks/sidebar/use-sidebar-sections-state";
 import type { VaultContext } from "@/hooks/use-vault-context";
 
 interface UseSidebarViewModelParams {

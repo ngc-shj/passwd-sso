@@ -4,7 +4,7 @@ import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
+import type { SidebarTeamTagItem } from "@/hooks/sidebar/use-sidebar-data";
 import { type VaultContext } from "@/hooks/use-vault-context";
 import {
   Tag,

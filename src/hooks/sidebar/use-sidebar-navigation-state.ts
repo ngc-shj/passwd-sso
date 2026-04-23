@@ -9,7 +9,7 @@ import type {
   SidebarTeamItem,
   SidebarTeamTagGroup,
   SidebarTagItem,
-} from "@/hooks/use-sidebar-data";
+} from "@/hooks/sidebar/use-sidebar-data";
 import type { VaultContext } from "@/hooks/use-vault-context";
 
 interface UseSidebarNavigationStateParams {

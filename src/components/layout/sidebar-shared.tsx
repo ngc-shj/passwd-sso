@@ -14,7 +14,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getTagColorClass } from "@/lib/dynamic-styles";
-import type { SidebarTeamTagItem } from "@/hooks/use-sidebar-data";
+import type { SidebarTeamTagItem } from "@/hooks/sidebar/use-sidebar-data";
 import { ChevronDown, ChevronRight, FolderOpen, MoreVertical, Pencil, Trash2 } from "lucide-react";
 
 export interface SidebarFolderItem {

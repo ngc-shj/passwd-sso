@@ -2,9 +2,9 @@
 
 import { useState } from "react";
 import { API_PATH, apiPath } from "@/lib/constants";
-import { showSidebarCrudError } from "@/hooks/sidebar-crud-error";
+import { showSidebarCrudError } from "@/hooks/sidebar/sidebar-crud-error";
 import { fetchApi } from "@/lib/url-helpers";
-import type { SidebarFolderItem, SidebarTeamFolderGroup } from "@/hooks/use-sidebar-data";
+import type { SidebarFolderItem, SidebarTeamFolderGroup } from "@/hooks/sidebar/use-sidebar-data";
 
 interface UseSidebarFolderCrudParams {
   folders: SidebarFolderItem[];

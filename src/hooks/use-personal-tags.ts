@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import type { SidebarTagItem } from "@/hooks/use-sidebar-data";
+import type { SidebarTagItem } from "@/hooks/sidebar/use-sidebar-data";
 
 export function usePersonalTags() {
   const [tags, setTags] = useState<SidebarTagItem[]>([]);
