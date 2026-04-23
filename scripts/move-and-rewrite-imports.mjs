@@ -66,6 +66,11 @@ function validateMovePath(p, repoRoot) {
       `Move path contains unsafe characters: "${p}". Only [A-Za-z0-9_\\-./] are allowed.`
     );
   }
+  if (p.startsWith("/")) {
+    throw new CodemodConfigError(
+      `Move path must be repo-relative, not absolute: "${p}".`
+    );
+  }
   if (/(^|\/)\.\.($|\/)/.test(p) || p === "..") {
     throw new CodemodConfigError(
       `Move path contains ".." segment: "${p}".`

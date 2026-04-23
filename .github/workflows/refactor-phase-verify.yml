@@ -42,5 +42,19 @@ jobs:
 
       - run: npm ci
 
+      # Seed the test-count baseline from main BEFORE running the verifier.
+      # Without this, on fresh CI runners the baseline is absent, so
+      # capture-test-counts.mjs enters its "first-run — record + pass" branch
+      # every time and never actually compares. We record on a worktree
+      # checked out to main, then copy the baseline into HEAD so the main
+      # verify run can compare.
+      - name: Seed test-count baseline from main
+        run: |
+          set -euo pipefail
+          git worktree add /tmp/main-wt main
+          (cd /tmp/main-wt && npm ci && node scripts/capture-test-counts.mjs --record)
+          cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
+          git worktree remove --force /tmp/main-wt
+
       - name: refactor-phase-verify
         run: node scripts/refactor-phase-verify.mjs --force

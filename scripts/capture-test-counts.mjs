@@ -22,7 +22,7 @@
  */
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdtempSync, rmSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -53,50 +53,37 @@ function runVitest() {
   const tmpOutDir = mkdtempSync(join(tmpdir(), "refactor-test-counts-"));
   const outFile = join(tmpOutDir, "results.json");
   try {
-    execFileSync(
-      "npx",
-      ["vitest", "run", "--reporter=json", `--outputFile=${outFile}`],
-      { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"], encoding: "utf-8" }
-    );
-  } catch (err) {
-    // Vitest exits non-zero on test failures; we still want to read the JSON
-    // output to capture numFailedTests. Only rethrow if the output file is
-    // missing (which means vitest crashed before emitting JSON).
-    if (!existsSync(outFile)) {
-      rmSync(tmpOutDir, { recursive: true, force: true });
-      throw err;
+    try {
+      execFileSync(
+        "npx",
+        ["vitest", "run", "--reporter=json", `--outputFile=${outFile}`],
+        { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"], encoding: "utf-8" }
+      );
+    } catch (err) {
+      // Vitest exits non-zero on test failures; we still want to read the JSON
+      // to capture numFailedTests. Only rethrow if the output file is missing.
+      if (!existsSync(outFile)) throw err;
     }
-  }
-  let raw;
-  try {
-    raw = readFileSync(outFile, "utf-8");
-  } catch {
-    // Vitest 4 may emit a directory of JSON files under outputFile if called
-    // with --reporter=json via certain configs. Scan for a single .json child.
-    const entries = readdirSync(outFile, { withFileTypes: true }).filter((e) =>
-      e.isFile() && e.name.endsWith(".json")
-    );
-    if (entries.length !== 1) {
-      rmSync(tmpOutDir, { recursive: true, force: true });
-      throw new Error(`Unexpected vitest output structure at ${outFile}`);
+    // Vitest 4 writes a single JSON file to --outputFile. Surface ENOENT
+    // directly instead of a misleading "directory" fallback.
+    const raw = readFileSync(outFile, "utf-8");
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      throw new Error(`Vitest JSON output was not parseable: ${err.message}`);
     }
-    raw = readFileSync(join(outFile, entries[0].name), "utf-8");
-  }
-  rmSync(tmpOutDir, { recursive: true, force: true });
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (err) {
-    throw new Error(`Vitest JSON output was not parseable: ${err.message}`);
-  }
-  const metrics = {};
-  for (const k of METRIC_KEYS) {
-    if (typeof parsed[k] !== "number") {
-      throw new Error(`Vitest JSON missing metric: ${k}`);
+    const metrics = {};
+    for (const k of METRIC_KEYS) {
+      if (typeof parsed[k] !== "number") {
+        throw new Error(`Vitest JSON missing metric: ${k}`);
+      }
+      metrics[k] = parsed[k];
     }
-    metrics[k] = parsed[k];
+    return metrics;
+  } finally {
+    rmSync(tmpOutDir, { recursive: true, force: true });
   }
-  return metrics;
 }
 
 function loadBaseline() {

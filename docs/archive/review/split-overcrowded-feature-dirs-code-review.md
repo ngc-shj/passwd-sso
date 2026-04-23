@@ -108,7 +108,55 @@ None (all findings have evidence).
 - Action: Added duplicate-path detection in `parseAllowedUsage`. If same key appears twice, throws with explicit message. Caller wraps call in try/catch and exits 1 with clear error.
 - Modified file: scripts/verify-allowlist-rename-only.mjs:24-56, ~107-114
 
-### Deferred (tracked, documented as out of scope for this patch)
+---
+
+# Round 2 Review
+Date: 2026-04-23
+
+## Changes from Previous Round
+Verify-only pass on commit `7384d1db`. All R1 Critical (C1) + Major (M1-M6) + Minor (m1/m2/m5) fixes Resolved with one Partial (F6 below). Three deferred items remain deferred with tracked justifications. Two new Minor security findings (S8/S9), one new Major functionality regression (F6 — m2 fix missed one of three scripts), two new Minor functionality/robustness findings (F7 — fallback fragility; T7 — CI baseline ephemeral), plus T5/T6/T8.
+
+## Round 2 Findings Resolution Status
+
+### F6 Major: verify-move-only-diff.mjs missed in m2 C-status fix — Resolved
+- Action: Added `|| parts[0].startsWith("C")` to the rename-parsing loop, matching the sibling scripts. Inline comment references the R2 F6 finding.
+- Modified file: scripts/verify-move-only-diff.mjs:146-150
+
+### F7 Minor: verify-move-only-diff fallback fragile — Resolved (fail-closed)
+- Action: Removed the line-regex fallback entirely; `stripImportExportDeclarations` now throws on ts-morph parse failure with a clear error instructing the operator to fix the parse failure. Rationale: the fallback could not handle multi-line imports or dynamic-import specifier blanking (the very cases M1 and S8 fixes were designed to cover), so silently degrading to it would re-introduce false positives.
+- Modified file: scripts/verify-move-only-diff.mjs:~130-160
+
+### S8 Minor: dynamic import / require / vi.mock specifier blanking — Resolved
+- Action: `stripImportExportDeclarations` now also collects StringLiteral argument ranges of `CallExpression` where the callee is `ImportKeyword` (dynamic `import()`), `require`, or `vi.{mock,doMock,importActual,importOriginal}`. Also handles `typeof import("...")` type references via `ImportTypeNode → LiteralTypeNode → StringLiteral`. These ranges are blanked (not the whole call/type) so the surrounding logic remains intact and diffable.
+- Modified file: scripts/verify-move-only-diff.mjs:72-115
+
+### S9 Minor: SAFE_PATH_RE allowed absolute `/...` paths — Resolved
+- Action: Added an explicit leading-slash rejection to `validateMovePath`.
+- Modified file: scripts/move-and-rewrite-imports.mjs:69-73
+
+### T5 Minor: capture-test-counts dead dir-fallback — Resolved
+- Action: Removed the `readFileSync / readdirSync` fallback. Unused `readdirSync` import removed. Real ENOENT now surfaces directly.
+- Modified file: scripts/capture-test-counts.mjs:51-86
+
+### T6 Minor: tmp dir cleanup not in finally — Resolved
+- Action: Wrapped the runVitest body in `try { ... } finally { rmSync(...) }`.
+- Modified file: scripts/capture-test-counts.mjs:52-88
+
+### T7 Minor: CI baseline ephemeral → gate no-op — Resolved
+- Action: Added a new workflow step that creates a `git worktree` at `main`, runs `npm ci` + `capture-test-counts.mjs --record` in the worktree, copies the resulting baseline to the HEAD checkout, then removes the worktree. The subsequent `refactor-phase-verify.mjs` run compares HEAD against the baseline seeded from main. Baseline remains gitignored; CI re-seeds per run.
+- Modified file: .github/workflows/refactor-phase-verify.yml:40-54
+
+### T8 Minor: C1 regression test missed .tsx + longer-sibling cases — Resolved
+- Action: Added two new fixture tests: `.tsx variant: moving foo.tsx does not corrupt sibling foo-bar.tsx` (uses `vault-context.tsx` + `vault-context-extra.tsx`), and `longer sibling path with same prefix: moving audit.ts does not corrupt auditory-utils.ts`. The test count now invariant 7236 (was 7234).
+- Modified files: scripts/__tests__/move-and-rewrite-imports.test.mjs (added 2 `it` blocks in the "rewriteAllowlistFile — C1 regression" describe)
+
+## Round 2 Verification
+- npx eslint . → 0 warnings.
+- npx vitest run scripts/__tests__/move-and-rewrite-imports.test.mjs → 13 tests pass.
+- npx next build → success.
+- node scripts/refactor-phase-verify.mjs → 13/13 scripts pass.
+
+## Deferred (tracked, documented as out of scope for this patch)
 - **m3 (.mjs in check-dynamic-import-specifiers)** — scope gap acceptable for Phase 0; `.mjs` files in refactor scope do not use vi.mock / vi.importActual patterns. Anti-Deferral check: Out of scope (different feature). Justification: covered by check-mjs-imports.mjs which verifies all `.mjs` import targets resolve; the specifier-variant check (vi.mock etc.) is TS-test-file specific. TODO(split-overcrowded-feature-dirs): add `.mjs` dynamic-import specifier coverage if Phase 5+ introduces .mjs files with vi.mock.
 - **m4 (LEDGER_EXEMPT self-verify)** — low risk today. Worst case: `crypto-blob.ts` grows a HKDF string while on the exempt list (requires PR merge with no reviewer noticing). Likelihood: low (CODEOWNERS gates `/src/lib/crypto*`). Cost to fix: ~15 LOC. Acceptable risk given CODEOWNERS gate.
 - **m6 (CI replay gate)** — separate larger feature; not a Round-1 blocker. TODO(split-overcrowded-feature-dirs): add `scripts/refactor-phase-replay.mjs` before Phase 2 (crypto moves) begins.

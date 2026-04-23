@@ -371,4 +371,62 @@ describe("rewriteAllowlistFile — C1 regression", () => {
     expect(vitest).toContain('"src/lib/audit-outbox.ts"');
     expect(vitest).not.toContain("src/lib/audit/audit-outbox.ts");
   });
+
+  it(".tsx variant: moving foo.tsx does not corrupt sibling foo-bar.tsx", () => {
+    createFixture(tmpDir, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/lib/vault-context.tsx": `export const v = 1;\n`,
+      "src/lib/vault-context-extra.tsx": `export const e = 1;\n`,
+      "scripts/check-bypass-rls.mjs":
+        `const ALLOWED_USAGE = new Map([\n` +
+        `  ["src/lib/vault-context.tsx", ["foo"]],\n` +
+        `  ["src/lib/vault-context-extra.tsx", ["bar"]],\n` +
+        `]);\nexport { ALLOWED_USAGE };\n`,
+    });
+    mkdirSync(join(tmpDir, "src/lib/vault"), { recursive: true });
+    initGitRepo(tmpDir);
+
+    const configPath = writeConfig(tmpDir, {
+      phaseName: "test-tsx-variant",
+      moves: [{ from: "src/lib/vault-context.tsx", to: "src/lib/vault/vault-context.tsx" }],
+    });
+
+    const result = runCodemod(tmpDir, configPath);
+    expect(result.status, result.stderr).toBe(0);
+
+    const bypass = readFile(tmpDir, "scripts/check-bypass-rls.mjs");
+    expect(bypass).toContain('"src/lib/vault/vault-context.tsx"');
+    expect(bypass).toContain('"src/lib/vault-context-extra.tsx"');
+    expect(bypass).not.toContain("src/lib/vault/vault-context-extra.tsx");
+  });
+
+  it("longer sibling path with same prefix: moving audit.ts does not corrupt auditory-utils.ts", () => {
+    // Positive lookahead regression test: pre-fix, bare-variant substring
+    // replace would turn src/lib/auditory-utils into src/lib/audit/auditory-utils.
+    createFixture(tmpDir, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/lib/audit.ts": `export const a = 1;\n`,
+      "src/lib/auditory-utils.ts": `export const aud = 1;\n`,
+      "scripts/check-bypass-rls.mjs":
+        `const ALLOWED_USAGE = new Map([\n` +
+        `  ["src/lib/audit.ts", ["auditLog"]],\n` +
+        `  ["src/lib/auditory-utils.ts", ["misc"]],\n` +
+        `]);\nexport { ALLOWED_USAGE };\n`,
+    });
+    mkdirSync(join(tmpDir, "src/lib/audit"), { recursive: true });
+    initGitRepo(tmpDir);
+
+    const configPath = writeConfig(tmpDir, {
+      phaseName: "test-longer-sibling",
+      moves: [{ from: "src/lib/audit.ts", to: "src/lib/audit/audit.ts" }],
+    });
+
+    const result = runCodemod(tmpDir, configPath);
+    expect(result.status, result.stderr).toBe(0);
+
+    const bypass = readFile(tmpDir, "scripts/check-bypass-rls.mjs");
+    expect(bypass).toContain('"src/lib/audit/audit.ts"');
+    expect(bypass).toContain('"src/lib/auditory-utils.ts"');
+    expect(bypass).not.toContain("src/lib/audit/auditory-utils.ts");
+  });
 });

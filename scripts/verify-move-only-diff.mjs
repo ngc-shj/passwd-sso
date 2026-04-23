@@ -78,25 +78,75 @@ function stripImportExportDeclarations(content) {
       ranges.push([decl.getFullStart(), decl.getEnd()]);
     }
 
-    if (ranges.length === 0) {
+    // Also blank out the specifier argument of dynamic import(), require(),
+    // vi.mock(), vi.doMock(), vi.importActual(), vi.importOriginal() calls,
+    // AND typeof import(...) type references. The codemod rewrites these
+    // alongside static imports; including their rewritten specifier here
+    // would trigger false content-drift failures when a move also rewrites
+    // a dynamic specifier.
+    const SPEC_REWRITE_CALLEES = new Set([
+      "require",
+      "vi.mock",
+      "vi.doMock",
+      "vi.importActual",
+      "vi.importOriginal",
+    ]);
+    const specRanges = [];
+    for (const node of sf.getDescendants()) {
+      const kn = node.getKindName();
+      if (kn === "CallExpression") {
+        const expr = node.getExpression();
+        const args = node.getArguments();
+        if (!args[0] || args[0].getKindName() !== "StringLiteral") continue;
+        // Dynamic import("...") — expr is ImportKeyword
+        // require("..."), vi.mock("..."), etc. — expr is Identifier/PropertyAccess
+        if (
+          expr.getKindName() === "ImportKeyword" ||
+          SPEC_REWRITE_CALLEES.has(expr.getText())
+        ) {
+          specRanges.push([args[0].getStart(), args[0].getEnd()]);
+        }
+      } else if (kn === "ImportType") {
+        // typeof import("...") — ImportTypeNode holds a LiteralTypeNode → StringLiteral
+        const arg = node.getArgument?.();
+        if (arg && arg.getKindName?.() === "LiteralType") {
+          const lit = arg.getLiteral?.();
+          if (lit && lit.getKindName?.() === "StringLiteral") {
+            specRanges.push([lit.getStart(), lit.getEnd()]);
+          }
+        }
+      }
+    }
+
+    const allRanges = [...ranges, ...specRanges];
+    if (allRanges.length === 0) {
       return normalise(content);
     }
 
-    // Sort ranges and build body by stitching the gaps
-    ranges.sort((a, b) => a[0] - b[0]);
+    // Sort ranges and build body by stitching the gaps; for spec ranges we
+    // blank them in place (replace with empty string) so the surrounding
+    // syntax remains intact.
+    allRanges.sort((a, b) => a[0] - b[0]);
     let body = "";
     let cursor = 0;
-    for (const [start, end] of ranges) {
+    for (const [start, end] of allRanges) {
       if (start > cursor) body += content.slice(cursor, start);
       cursor = end;
     }
     body += content.slice(cursor);
     return normalise(body);
   } catch (err) {
-    process.stderr.write(
-      `[verify-move-only-diff] ts-morph parse failed, falling back to line-regex: ${err.message}\n`
+    // Fail-closed: the fallback line-regex does NOT handle multi-line imports
+    // or dynamic-import specifier blanking (the exact cases the AST strip
+    // targets). Accepting it here would silently re-introduce false content-
+    // drift errors that the M1 fix eliminated. Abort with a loud error so
+    // the operator investigates the parse failure instead of treating it as
+    // a best-effort degradation.
+    throw new Error(
+      `[verify-move-only-diff] ts-morph parse failed on content: ${err.message}. ` +
+      `Cannot fall back safely (line-regex does not handle multi-line imports / ` +
+      `dynamic-import specifiers). Fix the parse failure and re-run.`
     );
-    return stripImportExportLinesFallback(content);
   }
 }
 
@@ -109,25 +159,9 @@ function normalise(text) {
     .trim();
 }
 
-/** Fallback regex-based approach (original logic, minus the lone-} filter). */
-function stripImportExportLinesFallback(content) {
-  return content
-    .split("\n")
-    .filter((line) => {
-      const trimmed = line.trim();
-      if (trimmed === "") return false;
-      // Side-effect imports: import "..."; or import '...';
-      if (/^import\s+["'][^"']+["'];?\s*$/.test(trimmed)) return false;
-      // Static imports/exports with from
-      if (/^(import|export)\b/.test(trimmed) && /from\s+["'][^"']+["']/.test(trimmed)) return false;
-      // export * from or export { } from
-      if (/^export\s+(\*|\{[^}]*\})\s+from/.test(trimmed)) return false;
-      return true;
-    })
-    .map((line) => line.trimEnd())
-    .join("\n")
-    .trim();
-}
+// Fallback line-regex stripper was removed per R2 F7 — keeping it would have
+// silently degraded the M1 multi-line-import + dynamic-specifier coverage on
+// ts-morph parse failures. stripImportExportDeclarations now fails-closed.
 
 // ---------------------------------------------------------------------------
 // Get list of renamed files from git
@@ -140,10 +174,12 @@ try {
 }
 
 // Parse rename lines: R<similarity>\t<from>\t<to>
+// Accept both R (rename) and C (copy-rename under diff.renames=copies).
+// Missing C handling was the m2 fix regression flagged by Phase 3 R2 F6.
 const renames = [];
 for (const line of nameStatusOut.split("\n")) {
   const parts = line.split("\t");
-  if (parts.length === 3 && parts[0].startsWith("R")) {
+  if (parts.length === 3 && (parts[0].startsWith("R") || parts[0].startsWith("C"))) {
     renames.push({ from: parts[1], to: parts[2] });
   }
 }
