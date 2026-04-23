@@ -8,7 +8,7 @@ import {
   encryptShareData,
   generateAccessPassword,
   hashAccessPassword,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
 import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit";

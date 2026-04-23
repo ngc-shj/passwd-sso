@@ -137,7 +137,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 

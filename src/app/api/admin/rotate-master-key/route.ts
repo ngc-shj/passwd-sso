@@ -20,7 +20,7 @@ import { parseBody } from "@/lib/parse-body";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";

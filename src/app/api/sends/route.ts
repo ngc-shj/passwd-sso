@@ -8,7 +8,7 @@ import {
   encryptShareData,
   generateAccessPassword,
   hashAccessPassword,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";

@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { generateShareToken, hashToken } from "@/lib/crypto-server";
+import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/auth/csrf";

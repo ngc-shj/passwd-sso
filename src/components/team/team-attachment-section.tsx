@@ -30,8 +30,8 @@ import { useTeamVault } from "@/lib/team-vault-context";
 import {
   encryptBinary,
   decryptBinary,
-} from "@/lib/crypto-client";
-import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
+} from "@/lib/crypto/crypto-client";
+import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,

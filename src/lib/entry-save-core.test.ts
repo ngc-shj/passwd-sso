@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: vi.fn(async (value: string) => `enc:${value}`),
 }));
 
@@ -66,7 +66,7 @@ describe("buildEncryptedEntryBody", () => {
   });
 
   it("passes AAD to encryptData", async () => {
-    const { encryptData } = await import("@/lib/crypto-client");
+    const { encryptData } = await import("@/lib/crypto/crypto-client");
 
     const blobAAD = new Uint8Array([1, 2, 3]);
     const overviewAAD = new Uint8Array([4, 5, 6]);

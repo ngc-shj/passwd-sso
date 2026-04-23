@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { logAuditAsync } from "@/lib/audit";

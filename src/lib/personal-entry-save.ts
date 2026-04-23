@@ -1,4 +1,4 @@
-import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto-aad";
+import { buildPersonalEntryAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { buildEncryptedEntryBody, submitEntry } from "@/lib/entry-save-core";
 import type { EntryTypeValue } from "@/lib/constants";

@@ -27,9 +27,9 @@ import {
 } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { useTeamVaultOptional } from "@/lib/team-vault-core";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
-import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto-aad";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
+import { buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
 import { getActionLabel } from "@/lib/audit-action-label";
 import { getCommonTargetLabel } from "@/lib/audit-target-label";

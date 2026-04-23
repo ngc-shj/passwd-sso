@@ -5,7 +5,7 @@
  * Independent from the vault encryption — uses its own salt per export.
  */
 
-import { hexEncode, hexDecode } from "@/lib/crypto-client";
+import { hexEncode, hexDecode } from "@/lib/crypto/crypto-client";
 
 const PBKDF2_ITERATIONS = 600_000;
 const AES_KEY_LENGTH = 256;

@@ -54,7 +54,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 vi.mock("@/lib/scim/token-utils", () => ({

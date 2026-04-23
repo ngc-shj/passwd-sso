@@ -7,7 +7,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { getMasterKeyByVersion } from "@/lib/crypto-server";
+import { getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 const TOKEN_TTL_MS = 5 * MS_PER_MINUTE;

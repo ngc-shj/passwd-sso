@@ -15,11 +15,11 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => v),
   verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
 }));
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   VERIFIER_VERSION: 1,
 }));
 vi.mock("@/lib/tenant-context", () => ({

@@ -11,7 +11,7 @@ import {
 } from "./delegation";
 
 // Mock crypto-server — must mock before import
-vi.mock("@/lib/crypto-server", async () => {
+vi.mock("@/lib/crypto/crypto-server", async () => {
   const nodeCrypto = await import("node:crypto");
   const { createCipheriv, createDecipheriv, randomBytes } = nodeCrypto;
   const ALGORITHM = "aes-256-gcm";

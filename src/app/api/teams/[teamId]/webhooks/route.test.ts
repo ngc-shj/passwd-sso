@@ -61,7 +61,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   encryptServerData: mockEncryptServerData,
   getCurrentMasterKeyVersion: mockGetCurrentMasterKeyVersion,
   getMasterKeyByVersion: mockGetMasterKeyByVersion,

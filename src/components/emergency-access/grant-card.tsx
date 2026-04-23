@@ -27,7 +27,7 @@ import {
   exportPublicKey,
   exportPrivateKey,
   encryptPrivateKey,
-} from "@/lib/crypto-emergency";
+} from "@/lib/crypto/crypto-emergency";
 import { eaErrorToI18nKey } from "@/lib/api-error-codes";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 

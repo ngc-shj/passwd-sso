@@ -15,8 +15,8 @@ import {
   decryptServerData,
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
-} from "@/lib/crypto-server";
-import type { ServerEncryptedData } from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
+import type { ServerEncryptedData } from "@/lib/crypto/crypto-server";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
 

@@ -14,8 +14,8 @@ import {
 } from "@/components/ui/select";
 import { ScrollText } from "lucide-react";
 import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import {
   API_PATH,
   AUDIT_ACTION,

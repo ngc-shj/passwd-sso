@@ -4,8 +4,8 @@ import {
   generateItemKey,
   wrapItemKey,
   deriveItemEncryptionKey,
-} from "@/lib/crypto-team";
-import { buildItemKeyWrapAAD } from "@/lib/crypto-aad";
+} from "@/lib/crypto/crypto-team";
+import { buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";

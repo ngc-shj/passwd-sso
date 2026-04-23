@@ -43,7 +43,7 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "a".repeat(64),
   hashToken: () => "h".repeat(64),
 }));

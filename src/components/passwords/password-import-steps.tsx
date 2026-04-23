@@ -2,7 +2,7 @@
 
 import type { RefObject } from "react";
 import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
-import type { EncryptedExportFile } from "@/lib/export-crypto";
+import type { EncryptedExportFile } from "@/lib/crypto/export-crypto";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";

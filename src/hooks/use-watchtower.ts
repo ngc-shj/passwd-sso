@@ -3,9 +3,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useVault } from "@/lib/vault-context";
 import { useTeamVaultOptional } from "@/lib/team-vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto-aad";
-import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto-team";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD, buildTeamEntryAAD, buildItemKeyWrapAAD } from "@/lib/crypto/crypto-aad";
+import { unwrapItemKey, deriveItemEncryptionKey } from "@/lib/crypto/crypto-team";
 import { API_PATH, ENTRY_TYPE, LOCAL_STORAGE_KEY, apiPath } from "@/lib/constants";
 import { MS_PER_DAY, MS_PER_MINUTE } from "@/lib/constants/time";
 import { getCooldownState } from "@/lib/watchtower/state";

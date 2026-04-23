@@ -2,8 +2,8 @@ import { type NextRequest, NextResponse } from "next/server";
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import { auth } from "@/auth";
 import { assertOrigin } from "@/lib/auth/csrf";
-import { hmacVerifier } from "@/lib/crypto-server";
-import { VERIFIER_VERSION } from "@/lib/crypto-client";
+import { hmacVerifier } from "@/lib/crypto/crypto-server";
+import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { prisma } from "@/lib/prisma";
 import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
 import { revokeAllDelegationSessions } from "@/lib/auth/delegation";
@@ -27,7 +27,7 @@ import {
   ECDH_PRIVATE_KEY_CIPHERTEXT_MAX,
 } from "@/lib/validations/common";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

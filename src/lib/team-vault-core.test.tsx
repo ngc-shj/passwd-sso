@@ -22,7 +22,7 @@ const { mockBuildItemKeyWrapAAD } = vi.hoisted(() => ({
   mockBuildItemKeyWrapAAD: vi.fn(),
 }));
 
-vi.mock("@/lib/crypto-team", () => ({
+vi.mock("@/lib/crypto/crypto-team", () => ({
   unwrapTeamKey: (...args: unknown[]) => mockUnwrapTeamKey(...args),
   deriveTeamEncryptionKey: (...args: unknown[]) => mockDeriveTeamEncryptionKey(...args),
   createTeamKeyEscrow: (...args: unknown[]) => mockCreateTeamKeyEscrow(...args),
@@ -30,7 +30,7 @@ vi.mock("@/lib/crypto-team", () => ({
   deriveItemEncryptionKey: (...args: unknown[]) => mockDeriveItemEncryptionKey(...args),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: (...args: unknown[]) => mockBuildItemKeyWrapAAD(...args),
 }));
 

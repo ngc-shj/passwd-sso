@@ -75,7 +75,7 @@ vi.mock("@/lib/constants/tenant-permission", () => ({
 vi.mock("@/lib/scim/token-utils", () => ({
   generateScimToken: () => "plain-scim-token-value",
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hash:${t}`,
 }));
 vi.mock("@/lib/api-response", () => ({

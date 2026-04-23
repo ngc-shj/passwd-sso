@@ -16,7 +16,7 @@ import {
   aesGcmEncrypt,
   hexEncode,
 } from "./crypto";
-import { CRYPTO_CONSTANTS } from "../../src/lib/crypto-client";
+import { CRYPTO_CONSTANTS } from "../../src/lib/crypto/crypto-client";
 
 // ─── Fixed test vectors ─────────────────────────────────────────
 const PASSPHRASE = "TestPassphrase!2026";

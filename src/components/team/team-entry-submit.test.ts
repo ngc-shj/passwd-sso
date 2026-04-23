@@ -20,13 +20,13 @@ vi.mock("@/lib/team-entry-save", () => ({
   saveTeamEntry: mockSaveTeamEntry,
 }));
 
-vi.mock("@/lib/crypto-team", () => ({
+vi.mock("@/lib/crypto/crypto-team", () => ({
   generateItemKey: () => new Uint8Array(32),
   wrapItemKey: async () => ({ ciphertext: "ct", iv: "iv", authTag: "at" }),
   deriveItemEncryptionKey: async () => ({} as CryptoKey),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: () => new Uint8Array(0),
 }));
 

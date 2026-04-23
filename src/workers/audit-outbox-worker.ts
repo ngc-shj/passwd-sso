@@ -16,7 +16,7 @@ import {
 import { BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { NIL_UUID, SYSTEM_ACTOR_ID, UUID_RE } from "@/lib/constants/app";
 import { DELIVERERS, type TargetConfig, type DeliveryPayload } from "@/workers/audit-delivery";
-import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto-server";
+import { decryptServerData, getMasterKeyByVersion } from "@/lib/crypto/crypto-server";
 import { sanitizeErrorForStorage } from "@/lib/external-http";
 import { buildChainInput, computeCanonicalBytes, computeEventHash } from "@/lib/audit-chain";
 

@@ -93,7 +93,7 @@ All password data is encrypted **client-side** before reaching the server. The s
   - `encryptedOverview` — summary for list view (title, username, urlHost, tags)
   - Both have separate IV (12 bytes) and authTag (16 bytes), stored as hex strings
 - **Vault context:** `src/lib/vault-context.tsx` provides `encryptionKey` to components after unlock
-- **Crypto implementation:** `src/lib/crypto-client.ts` (Web Crypto API)
+- **Crypto implementation:** `src/lib/crypto/crypto-client.ts` (Web Crypto API)
 
 ### API Endpoints
 

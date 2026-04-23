@@ -48,7 +48,7 @@ vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAuditAsync,
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "a".repeat(64),
   hashToken: (t: string) => `hashed_${t}`,
 }));

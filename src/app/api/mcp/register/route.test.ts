@@ -59,7 +59,7 @@ vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: vi.fn((token: string) => `hashed:${token}`),
 }));
 

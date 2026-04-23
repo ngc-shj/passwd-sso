@@ -40,13 +40,13 @@ vi.mock("@/lib/team-vault-context", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-team", () => ({
+vi.mock("@/lib/crypto/crypto-team", () => ({
   generateItemKey: () => new Uint8Array(32),
   wrapItemKey: async () => ({ ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-at" }),
   deriveItemEncryptionKey: async () => ({} as CryptoKey),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: vi.fn().mockReturnValue("ik-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("team-aad"),
 }));

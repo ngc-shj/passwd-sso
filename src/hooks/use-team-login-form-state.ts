@@ -12,8 +12,8 @@ import {
 } from "@/hooks/team-login-form-initial-values";
 import { getPolicyViolations, checkPasswordReuse, type PolicyViolation } from "@/lib/password-policy-validation";
 import { useTeamVault } from "@/lib/team-vault-context";
-import { decryptData } from "@/lib/crypto-client";
-import { buildTeamEntryAAD } from "@/lib/crypto-aad";
+import { decryptData } from "@/lib/crypto/crypto-client";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 

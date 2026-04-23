@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { rejectEmergencyGrantSchema } from "@/lib/validations";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyGrantDeclinedEmail } from "@/lib/email/templates/emergency-access";

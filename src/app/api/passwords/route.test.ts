@@ -47,7 +47,7 @@ vi.mock("@/lib/prisma", () => ({
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
 }));
 vi.mock("@/lib/tenant-context", () => ({

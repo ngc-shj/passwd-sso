@@ -1,5 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import {
   createRefreshToken,
   exchangeCodeForToken,

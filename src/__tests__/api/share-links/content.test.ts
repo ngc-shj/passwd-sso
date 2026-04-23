@@ -24,7 +24,7 @@ vi.mock("@/lib/prisma", () => ({
     $executeRaw: mockExecuteRaw,
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
 vi.mock("@/lib/auth/share-access-token", () => ({

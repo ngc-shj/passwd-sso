@@ -5,7 +5,7 @@ import {
   isEncryptedExport,
   decryptExport,
   type EncryptedExportFile,
-} from "@/lib/export-crypto";
+} from "@/lib/crypto/export-crypto";
 import {
   parseCsv,
   parseJson,

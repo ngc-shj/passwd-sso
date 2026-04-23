@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { generateScimToken } from "@/lib/scim/token-utils";

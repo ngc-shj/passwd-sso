@@ -34,7 +34,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/auth/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyShareAccessToken,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
 vi.mock("@/lib/auth/ip-access", () => ({

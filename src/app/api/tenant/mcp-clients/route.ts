@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { randomBytes } from "node:crypto";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";

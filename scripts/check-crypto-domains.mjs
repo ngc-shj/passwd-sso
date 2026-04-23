@@ -20,7 +20,7 @@ const ROOT = new URL("..", import.meta.url).pathname;
 // helpers (no HKDF info, no AAD scopes). Adding to this list requires
 // documented justification — see docs/security/crypto-domain-ledger.md.
 const LEDGER_EXEMPT = new Set([
-  "src/lib/crypto-blob.ts", // field-name helpers only (toBlobColumns, toOverviewColumns); no HKDF/AAD
+  "src/lib/crypto/crypto-blob.ts", // field-name helpers only (toBlobColumns, toOverviewColumns); no HKDF/AAD
 ]);
 
 /**

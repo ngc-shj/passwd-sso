@@ -37,7 +37,7 @@ vi.mock("@/hooks/use-reprompt", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
@@ -48,7 +48,7 @@ vi.mock("@/lib/team-vault-context", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("test-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("test-team-aad"),
 }));

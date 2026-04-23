@@ -20,7 +20,7 @@ vi.mock("@/lib/rate-limit", () => ({
     .mockReturnValueOnce({ check: mockVerifyCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockResetCheck, clear: mockResetClear }),
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
   verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
 }));

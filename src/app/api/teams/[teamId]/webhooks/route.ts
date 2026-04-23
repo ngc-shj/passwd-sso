@@ -14,7 +14,7 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
   encryptServerData,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { randomBytes } from "node:crypto";
 import { assertOrigin } from "@/lib/auth/csrf";
 import { z } from "zod";

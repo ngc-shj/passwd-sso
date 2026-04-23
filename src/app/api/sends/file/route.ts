@@ -14,7 +14,7 @@ import {
   encryptShareBinary,
   generateAccessPassword,
   hashAccessPassword,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { logAuditAsync, personalAuditBase } from "@/lib/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";

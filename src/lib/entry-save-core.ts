@@ -1,4 +1,4 @@
-import { encryptData } from "@/lib/crypto-client";
+import { encryptData } from "@/lib/crypto/crypto-client";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface BuildEncryptedBodyParams {

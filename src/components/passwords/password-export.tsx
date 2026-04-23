@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { toast } from "sonner";
-import { encryptExport } from "@/lib/export-crypto";
+import { encryptExport } from "@/lib/crypto/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
 import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";

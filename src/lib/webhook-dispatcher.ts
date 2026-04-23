@@ -12,7 +12,7 @@ import { getLogger } from "@/lib/logger";
 import {
   getMasterKeyByVersion,
   decryptServerData,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { createHmac } from "node:crypto";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";

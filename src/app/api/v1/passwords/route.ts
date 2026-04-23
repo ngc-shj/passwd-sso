@@ -10,7 +10,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { ENTRY_TYPE_VALUES, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
 import type { EntryType } from "@prisma/client";

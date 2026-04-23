@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { RECOVERY_KEY_DATA_LENGTH } from "./validations/common";
+import { RECOVERY_KEY_DATA_LENGTH } from "../validations/common";
 import {
   generateRecoveryKey,
   formatRecoveryKey,

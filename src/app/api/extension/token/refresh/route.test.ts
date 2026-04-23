@@ -57,7 +57,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "new-token-plaintext",
   hashToken: () => "new-token-hash",
 }));

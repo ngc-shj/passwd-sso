@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { AAD_VERSION } from "@/lib/crypto-aad";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
 const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),

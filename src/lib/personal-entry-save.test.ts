@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { API_PATH, ENTRY_TYPE, apiPath } from "@/lib/constants";
-import { AAD_VERSION } from "@/lib/crypto-aad";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
 // fetchApi has a `typeof window` guard — bypass it so node-env tests work
 vi.mock("@/lib/url-helpers", () => ({
@@ -10,7 +10,7 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: vi.fn(async (value: string) => `enc:${value}`),
 }));
 

@@ -18,7 +18,7 @@ vi.mock("@/lib/prisma", () => ({
     $executeRaw: mockExecuteRaw,
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
   decryptShareBinary: mockDecryptShareBinary,
 }));

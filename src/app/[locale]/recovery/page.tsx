@@ -9,14 +9,14 @@ import {
   computeRecoveryVerifierHash,
   unwrapSecretKeyWithRecovery,
   wrapSecretKeyWithRecovery,
-} from "@/lib/crypto-recovery";
+} from "@/lib/crypto/crypto-recovery";
 import {
   deriveWrappingKey,
   wrapSecretKey,
   computePassphraseVerifier,
   generateAccountSalt,
   hexEncode,
-} from "@/lib/crypto-client";
+} from "@/lib/crypto/crypto-client";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";

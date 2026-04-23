@@ -23,7 +23,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: { create: mockCreate, findMany: mockFindMany },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "a".repeat(64),
   hashToken: () => "h".repeat(64),
   encryptShareData: () => ({

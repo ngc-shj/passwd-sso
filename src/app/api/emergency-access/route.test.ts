@@ -20,7 +20,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser },
 }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "mock-token-hex",
   hashToken: (t: string) => `hashed-${t}`,
 }));

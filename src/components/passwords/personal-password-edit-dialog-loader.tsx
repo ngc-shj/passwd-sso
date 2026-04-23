@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import type { AttachmentMeta } from "./attachment-section";
 import { PasswordEditDialog } from "./personal-password-edit-dialog";
 import type { PersonalPasswordEditData } from "./personal-password-edit-dialog-types";

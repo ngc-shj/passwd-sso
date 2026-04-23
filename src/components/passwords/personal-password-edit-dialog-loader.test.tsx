@@ -26,11 +26,11 @@ vi.mock("@/lib/vault-context", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: (...args: unknown[]) => mockDecryptData(...args),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: (...args: unknown[]) => mockBuildPersonalEntryAAD(...args),
 }));
 

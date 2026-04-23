@@ -53,11 +53,11 @@ vi.mock("@/lib/vault-context", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: mockEncryptData,
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: () => new Uint8Array(16),
   AAD_VERSION: 1,
 }));

@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { SCIM_TOKEN_PREFIX } from "@/lib/scim/token-utils";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";

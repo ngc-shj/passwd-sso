@@ -9,7 +9,7 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: vi.fn(async (value: string) => `enc:${value}`),
 }));
 

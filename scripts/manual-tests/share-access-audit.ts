@@ -24,7 +24,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { hashToken, hashAccessPassword, encryptShareData } from "@/lib/crypto-server";
+import { hashToken, hashAccessPassword, encryptShareData } from "@/lib/crypto/crypto-server";
 import { ANONYMOUS_ACTOR_ID } from "@/lib/constants/app";
 import { randomBytes } from "node:crypto";
 

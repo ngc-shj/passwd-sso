@@ -1,15 +1,15 @@
-import { encryptData } from "@/lib/crypto-client";
+import { encryptData } from "@/lib/crypto/crypto-client";
 import {
   buildPersonalEntryAAD,
   buildTeamEntryAAD,
   buildItemKeyWrapAAD,
   AAD_VERSION,
-} from "@/lib/crypto-aad";
+} from "@/lib/crypto/crypto-aad";
 import {
   generateItemKey,
   wrapItemKey,
   deriveItemEncryptionKey,
-} from "@/lib/crypto-team";
+} from "@/lib/crypto/crypto-team";
 import {
   buildPersonalImportBlobs,
   resolveEntryTagIds,

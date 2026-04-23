@@ -16,7 +16,7 @@ vi.mock("@/components/passwords/password-import-utils", () => ({
   parseKeePassXcXml: mockParseKeePassXcXml,
 }));
 
-vi.mock("@/lib/export-crypto", () => ({
+vi.mock("@/lib/crypto/export-crypto", () => ({
   isEncryptedExport: mockIsEncryptedExport,
   decryptExport: mockDecryptExport,
 }));

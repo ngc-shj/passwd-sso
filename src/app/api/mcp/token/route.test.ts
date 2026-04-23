@@ -22,7 +22,7 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
   createRefreshToken: mockCreateRefreshToken,
   exchangeRefreshToken: mockExchangeRefreshToken,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 vi.mock("@/lib/rate-limit", () => ({

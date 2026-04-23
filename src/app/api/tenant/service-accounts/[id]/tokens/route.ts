@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";

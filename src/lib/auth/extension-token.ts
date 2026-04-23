@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateShareToken, hashToken } from "@/lib/crypto-server";
+import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { randomUUID } from "node:crypto";

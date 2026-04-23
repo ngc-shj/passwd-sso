@@ -29,11 +29,11 @@ vi.mock("@/lib/url-helpers", () => ({
   withBasePath: (p: string) => p,
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("aad"),
 }));
 

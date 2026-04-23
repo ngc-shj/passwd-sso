@@ -22,7 +22,7 @@ import { useVault, VaultUnlockError } from "@/lib/vault-context";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
-import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto-team";
+import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
 import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH, NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 

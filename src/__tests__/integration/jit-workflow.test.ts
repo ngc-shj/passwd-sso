@@ -98,7 +98,7 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 

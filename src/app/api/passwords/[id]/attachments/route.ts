@@ -14,7 +14,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { AAD_VERSION } from "@/lib/crypto-aad";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
 import { createRateLimiter } from "@/lib/rate-limit";

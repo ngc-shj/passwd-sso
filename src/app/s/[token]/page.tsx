@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { hashToken, decryptShareData } from "@/lib/crypto-server";
+import { hashToken, decryptShareData } from "@/lib/crypto/crypto-server";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
 import { ShareSendView } from "@/components/share/share-send-view";

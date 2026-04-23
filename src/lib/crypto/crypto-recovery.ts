@@ -15,7 +15,7 @@
 
 import { hexEncode, hexDecode } from "./crypto-client";
 import { toArrayBuffer, textEncode } from "./crypto-utils";
-import { RECOVERY_KEY_DATA_LENGTH } from "./validations/common";
+import { RECOVERY_KEY_DATA_LENGTH } from "../validations/common";
 
 const HKDF_RECOVERY_WRAP_INFO = "passwd-sso-recovery-wrap-v1";
 const HKDF_RECOVERY_VERIFIER_INFO = "passwd-sso-recovery-verifier-v1";

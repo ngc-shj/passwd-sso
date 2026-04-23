@@ -53,8 +53,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { ShareDialog } from "@/components/share/share-dialog";
 import { ENTRY_TYPE, apiPath } from "@/lib/constants";
 import { MS_PER_DAY } from "@/lib/constants/time";

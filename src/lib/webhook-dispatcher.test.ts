@@ -52,7 +52,7 @@ vi.mock("@/lib/audit-logger", async () => {
     ...actual,
   };
 });
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
   decryptServerData: mockDecryptServerData,
 }));

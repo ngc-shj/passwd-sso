@@ -21,10 +21,10 @@ const {
   mockFetch: vi.fn(),
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   computePassphraseVerifier: mockComputePassphraseVerifier,
 }));
-vi.mock("@/lib/crypto-recovery", () => ({
+vi.mock("@/lib/crypto/crypto-recovery", () => ({
   generateRecoveryKey: mockGenerateRecoveryKey,
   formatRecoveryKey: mockFormatRecoveryKey,
   wrapSecretKeyWithRecovery: mockWrapSecretKeyWithRecovery,

@@ -48,17 +48,17 @@ const {
 vi.mock("@/lib/vault-context", () => ({ useVault: mockUseVault }));
 vi.mock("@/lib/team-vault-context", () => ({ useTeamVaultOptional: mockUseTeamVaultOptional }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: mockBuildPersonalEntryAAD,
   buildTeamEntryAAD: mockBuildTeamEntryAAD,
   buildItemKeyWrapAAD: mockBuildItemKeyWrapAAD,
 }));
 
-vi.mock("@/lib/crypto-team", () => ({
+vi.mock("@/lib/crypto/crypto-team", () => ({
   unwrapItemKey: mockUnwrapItemKey,
   deriveItemEncryptionKey: mockDeriveItemEncryptionKey,
 }));

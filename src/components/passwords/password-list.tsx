@@ -3,8 +3,8 @@
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/entry-sort";
 import { PasswordCard } from "./password-card";
 import { Archive, KeyRound, Loader2, Star } from "lucide-react";

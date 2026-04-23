@@ -14,7 +14,7 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
   encryptServerData,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { AuditDeliveryTargetKind } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";

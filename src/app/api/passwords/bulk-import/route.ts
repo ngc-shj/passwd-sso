@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { logAuditAsync, logAuditBulkAsync, personalAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 

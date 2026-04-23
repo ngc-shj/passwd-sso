@@ -9,8 +9,8 @@ import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-ty
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import { apiPath } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
-import { buildTeamEntryAAD } from "@/lib/crypto-aad";
-import { decryptData } from "@/lib/crypto-client";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { decryptData } from "@/lib/crypto/crypto-client";
 import { useTeamVault } from "@/lib/team-vault-context";
 import { fetchApi } from "@/lib/url-helpers";
 

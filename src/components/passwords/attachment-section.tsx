@@ -30,8 +30,8 @@ import {
   encryptBinary,
   decryptBinary,
   type EncryptedBinary,
-} from "@/lib/crypto-client";
-import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto-aad";
+} from "@/lib/crypto/crypto-client";
+import { buildAttachmentAAD, AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { apiPath } from "@/lib/constants";
 import {
   ALLOWED_EXTENSIONS,

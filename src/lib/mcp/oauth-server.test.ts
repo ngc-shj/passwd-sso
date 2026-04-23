@@ -17,7 +17,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: vi.fn(async (_prisma, fn) => fn()),
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: vi.fn((token: string) => `hashed:${token}`),
 }));
 

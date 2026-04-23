@@ -8,7 +8,7 @@ import { checkAuth } from "@/lib/auth/check-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/rate-limit";
 

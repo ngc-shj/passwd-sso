@@ -14,11 +14,11 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   encryptData: mockEncryptData,
 }));
 
-vi.mock("@/lib/crypto-team", () => ({
+vi.mock("@/lib/crypto/crypto-team", () => ({
   generateItemKey: () => new Uint8Array(32),
   wrapItemKey: async () => ({ ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-at" }),
   deriveItemEncryptionKey: async () => ({} as CryptoKey),

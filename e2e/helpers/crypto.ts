@@ -13,7 +13,7 @@ import {
   pbkdf2Sync,
   randomBytes,
 } from "node:crypto";
-import { CRYPTO_CONSTANTS } from "../../src/lib/crypto-client";
+import { CRYPTO_CONSTANTS } from "../../src/lib/crypto/crypto-client";
 
 export interface EncryptedData {
   ciphertext: string; // hex

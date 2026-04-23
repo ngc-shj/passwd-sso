@@ -15,9 +15,9 @@ import {
   decryptPrivateKey,
   importPrivateKey,
   unwrapSecretKeyAsGrantee,
-} from "@/lib/crypto-emergency";
-import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+} from "@/lib/crypto/crypto-emergency";
+import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
 import { PasswordCard } from "@/components/passwords/password-card";
 import type { EntryCardData } from "@/types/entry-card";

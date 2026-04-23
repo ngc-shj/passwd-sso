@@ -12,7 +12,7 @@ import {
   encryptServerData,
   decryptServerData,
   type ServerEncryptedData,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { getKeyProviderSync } from "@/lib/key-provider";
 
 /**

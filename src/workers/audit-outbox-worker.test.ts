@@ -138,7 +138,7 @@ vi.mock("@/workers/audit-delivery", () => ({
   DELIVERERS: {},
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptServerData: vi.fn().mockReturnValue("{}"),
   getMasterKeyByVersion: vi.fn().mockReturnValue(Buffer.alloc(32)),
 }));

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { verifyShareAccessSchema } from "@/lib/validations";
-import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
+import { hashToken, verifyAccessPassword } from "@/lib/crypto/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";

@@ -32,7 +32,7 @@ vi.mock("@/lib/audit", () => ({
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   verifyPassphraseVerifier: mockVerifyPassphraseVerifier,
 }));
 vi.mock("@/lib/tenant-context", () => ({
