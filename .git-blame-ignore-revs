@@ -12,3 +12,4 @@ ea94152862b9e4df212409e8de119213c4d750ae  # Phase 1d-2 — move remaining core a
 b0808235ed619c1556c609913418edbbbabec489  # Phase 3-1 — move audit.ts into src/lib/audit/
 dd6f84e8760c29268a9f814bee36dc8b5cf94236  # Phase 3-2 — move remaining audit modules into src/lib/audit/
 d29020df448935bc9dd13809982f08c7c82300cd  # Phase 4a — move security modules into src/lib/security/
+0087e6551e18b96302e26075b5f980b30610ad96  # Phase 4b — move vault modules into src/lib/vault/
