@@ -90,21 +90,41 @@ function stripImportExportDeclarations(content) {
       "vi.doMock",
       "vi.importActual",
       "vi.importOriginal",
+      // Codemod gap (handled by manual edit in some PRs; Round 4/T10):
+      "vi.unmock",
     ]);
     const specRanges = [];
+    // Path-literal heuristic (Round 4 codemod-gap edits):
+    // Strip any StringLiteral whose text starts with "src/" or "scripts/"
+    // AND contains a "/" — these are path references that move with renames
+    // (e.g., readFileSync(join(cwd(), "src/components/..."))). Scoped to
+    // test files via call-context: only stripped when nested inside a
+    // CallExpression argument (not a free-floating literal).
+    const isPathLiteral = (text) =>
+      /^(src|scripts|e2e)\/[a-z0-9_/.-]+\.(ts|tsx|mjs|js)$/i.test(text);
     for (const node of sf.getDescendants()) {
       const kn = node.getKindName();
       if (kn === "CallExpression") {
         const expr = node.getExpression();
         const args = node.getArguments();
-        if (!args[0] || args[0].getKindName() !== "StringLiteral") continue;
-        // Dynamic import("...") — expr is ImportKeyword
-        // require("..."), vi.mock("..."), etc. — expr is Identifier/PropertyAccess
-        if (
-          expr.getKindName() === "ImportKeyword" ||
-          SPEC_REWRITE_CALLEES.has(expr.getText())
-        ) {
-          specRanges.push([args[0].getStart(), args[0].getEnd()]);
+        // Primary specifier strip: first-arg string literal to tracked callees.
+        if (args[0] && args[0].getKindName() === "StringLiteral") {
+          if (
+            expr.getKindName() === "ImportKeyword" ||
+            SPEC_REWRITE_CALLEES.has(expr.getText())
+          ) {
+            specRanges.push([args[0].getStart(), args[0].getEnd()]);
+          }
+        }
+        // Path-literal heuristic: ANY StringLiteral arg that looks like a
+        // repo-relative path to a source file. Catches `join(cwd(), "src/...")`.
+        for (const arg of args) {
+          if (arg.getKindName() === "StringLiteral") {
+            const raw = arg.getText().replace(/^["']|["']$/g, "");
+            if (isPathLiteral(raw)) {
+              specRanges.push([arg.getStart(), arg.getEnd()]);
+            }
+          }
         }
       } else if (kn === "ImportType") {
         // typeof import("...") — ImportTypeNode holds a LiteralTypeNode → StringLiteral

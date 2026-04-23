@@ -142,18 +142,23 @@ fi
 
 printf "${BOLD}▸ Checking deleted exports/components referenced in E2E${RESET}\n"
 
-# Extract names from removed "export function/class/const" lines
+# Extract names from removed "export function/class/const" lines.
+# Use grep -oE so only the matched substring (not the full line) is kept —
+# otherwise `export type { X }` style lines fail sed substitution and leak
+# stray tokens like `{`, `}`, `from` into the identifier list.
 removed_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
   | grep -E '^\-.*export (function|class|const|interface|type) ' \
   | grep -v '^\-\-\-' \
-  | sed -E 's/.*export (function|class|const|interface|type) ([A-Za-z0-9_]+).*/\2/' \
+  | grep -oE 'export (function|class|const|interface|type) [A-Za-z0-9_]+' \
+  | awk '{print $NF}' \
   | sort -u || true)
 
 # Check if added lines re-introduce the same export (renamed, not deleted)
 added_exports=$(git diff "${BASE}...HEAD" -- 'src/**/*.tsx' 'src/**/*.ts' \
   | grep -E '^\+.*export (function|class|const|interface|type) ' \
   | grep -v '^\+\+\+' \
-  | sed -E 's/.*export (function|class|const|interface|type) ([A-Za-z0-9_]+).*/\2/' \
+  | grep -oE 'export (function|class|const|interface|type) [A-Za-z0-9_]+' \
+  | awk '{print $NF}' \
   | sort -u || true)
 
 for name in $removed_exports; do

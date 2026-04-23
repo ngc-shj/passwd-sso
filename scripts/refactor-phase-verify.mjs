@@ -132,7 +132,10 @@ const scripts = [
   { label: "check-crypto-domains",               cmd: ["node", "scripts/checks/check-crypto-domains.mjs"] },
   { label: "check-migration-drift",              cmd: ["node", "scripts/checks/check-migration-drift.mjs"] },
   { label: "verify-allowlist-rename-only",       cmd: ["node", "scripts/verify-allowlist-rename-only.mjs"] },
-  { label: "verify-move-only-diff",              cmd: ["node", "scripts/verify-move-only-diff.mjs"] },
+  // Scope to src/** only: scripts/checks/* moves legitimately bump ROOT path
+  // derivation (+1 level) which verify-move-only-diff cannot distinguish from
+  // business-logic drift. Src code changes remain fully guarded.
+  { label: "verify-move-only-diff",              cmd: ["node", "scripts/verify-move-only-diff.mjs", "--glob", "src/**"] },
   { label: "check-vitest-coverage-include",      cmd: ["node", "scripts/checks/check-vitest-coverage-include.mjs", "--enforce-rename-parity"] },
   { label: "check-doc-paths",                    cmd: ["node", "scripts/checks/check-doc-paths.mjs"] },
   { label: "check-mjs-imports",                  cmd: ["node", "scripts/checks/check-mjs-imports.mjs"] },

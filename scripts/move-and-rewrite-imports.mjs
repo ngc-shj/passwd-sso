@@ -893,8 +893,9 @@ async function main() {
   executeMoves(config.moves, repoRoot, dryRun);
 
   // 6. Allowlist string rewrites (these are plain text, run after saveSync)
-  rewriteAllowlistFile(resolve(repoRoot, "scripts/check-bypass-rls.mjs"), aliasMap, repoRoot, dryRun, "check-bypass-rls.mjs");
-  rewriteAllowlistFile(resolve(repoRoot, "scripts/check-crypto-domains.mjs"), aliasMap, repoRoot, dryRun, "check-crypto-domains.mjs");
+  // PR 2: check-bypass-rls.mjs and check-crypto-domains.mjs moved to scripts/checks/.
+  rewriteAllowlistFile(resolve(repoRoot, "scripts/checks/check-bypass-rls.mjs"), aliasMap, repoRoot, dryRun, "check-bypass-rls.mjs");
+  rewriteAllowlistFile(resolve(repoRoot, "scripts/checks/check-crypto-domains.mjs"), aliasMap, repoRoot, dryRun, "check-crypto-domains.mjs");
   rewriteAllowlistFile(resolve(repoRoot, "vitest.config.ts"), aliasMap, repoRoot, dryRun, "vitest.config.ts");
 
   // 7. YAML string rewrites (.github/workflows/*.yml)

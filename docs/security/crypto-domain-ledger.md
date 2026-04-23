@@ -2,7 +2,7 @@
 
 This document is the single source of truth for all cryptographic domain
 separations used in passwd-sso. It is automatically verified by
-`scripts/check-crypto-domains.mjs` in CI.
+`scripts/checks/check-crypto-domains.mjs` in CI.
 
 Last verified: 2026-03-07
 

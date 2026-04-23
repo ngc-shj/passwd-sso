@@ -337,7 +337,7 @@ describe("rewriteAllowlistFile — C1 regression", () => {
       "tsconfig.json": FIXTURE_TSCONFIG,
       "src/lib/audit.ts": `export const audit = 1;\n`,
       "src/lib/audit-outbox.ts": `export const outbox = 1;\n`,
-      "scripts/check-bypass-rls.mjs":
+      "scripts/checks/check-bypass-rls.mjs":
         `const ALLOWED_USAGE = new Map([\n` +
         `  ["src/lib/audit.ts", ["auditLog"]],\n` +
         `  ["src/lib/audit-outbox.ts", ["auditOutbox"]],\n` +
@@ -359,7 +359,7 @@ describe("rewriteAllowlistFile — C1 regression", () => {
     const result = runCodemod(tmpDir, configPath);
     expect(result.status, result.stderr).toBe(0);
 
-    const bypass = readFile(tmpDir, "scripts/check-bypass-rls.mjs");
+    const bypass = readFile(tmpDir, "scripts/checks/check-bypass-rls.mjs");
     // audit.ts rewritten to subdir path
     expect(bypass).toContain('"src/lib/audit/audit.ts"');
     // audit-outbox.ts MUST be untouched — this is the C1 regression
@@ -377,7 +377,7 @@ describe("rewriteAllowlistFile — C1 regression", () => {
       "tsconfig.json": FIXTURE_TSCONFIG,
       "src/lib/vault-context.tsx": `export const v = 1;\n`,
       "src/lib/vault-context-extra.tsx": `export const e = 1;\n`,
-      "scripts/check-bypass-rls.mjs":
+      "scripts/checks/check-bypass-rls.mjs":
         `const ALLOWED_USAGE = new Map([\n` +
         `  ["src/lib/vault-context.tsx", ["foo"]],\n` +
         `  ["src/lib/vault-context-extra.tsx", ["bar"]],\n` +
@@ -394,7 +394,7 @@ describe("rewriteAllowlistFile — C1 regression", () => {
     const result = runCodemod(tmpDir, configPath);
     expect(result.status, result.stderr).toBe(0);
 
-    const bypass = readFile(tmpDir, "scripts/check-bypass-rls.mjs");
+    const bypass = readFile(tmpDir, "scripts/checks/check-bypass-rls.mjs");
     expect(bypass).toContain('"src/lib/vault/vault-context.tsx"');
     expect(bypass).toContain('"src/lib/vault-context-extra.tsx"');
     expect(bypass).not.toContain("src/lib/vault/vault-context-extra.tsx");
@@ -407,7 +407,7 @@ describe("rewriteAllowlistFile — C1 regression", () => {
       "tsconfig.json": FIXTURE_TSCONFIG,
       "src/lib/audit.ts": `export const a = 1;\n`,
       "src/lib/auditory-utils.ts": `export const aud = 1;\n`,
-      "scripts/check-bypass-rls.mjs":
+      "scripts/checks/check-bypass-rls.mjs":
         `const ALLOWED_USAGE = new Map([\n` +
         `  ["src/lib/audit.ts", ["auditLog"]],\n` +
         `  ["src/lib/auditory-utils.ts", ["misc"]],\n` +
@@ -424,7 +424,7 @@ describe("rewriteAllowlistFile — C1 regression", () => {
     const result = runCodemod(tmpDir, configPath);
     expect(result.status, result.stderr).toBe(0);
 
-    const bypass = readFile(tmpDir, "scripts/check-bypass-rls.mjs");
+    const bypass = readFile(tmpDir, "scripts/checks/check-bypass-rls.mjs");
     expect(bypass).toContain('"src/lib/audit/audit.ts"');
     expect(bypass).toContain('"src/lib/auditory-utils.ts"');
     expect(bypass).not.toContain("src/lib/audit/auditory-utils.ts");

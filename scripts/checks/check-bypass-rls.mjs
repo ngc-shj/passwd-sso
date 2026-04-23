@@ -22,14 +22,14 @@ const SCAN_RADIUS = 10;
 const ALLOWED_USAGE = new Map([
   ["src/lib/tenant-rls.ts", ["*"]], // definition
   ["src/lib/tenant-context.ts", ["tenantMember", "team"]],
-  ["src/lib/auth/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
+  ["src/lib/auth/session/auth-adapter.ts", ["session", "user", "tenant", "account", "tenantMember"]],
   ["src/auth.ts", ["*"]], // session callbacks: tenant, user, membership, vault reset ($transaction)
   ["src/lib/audit/audit.ts", ["team", "user", "auditLog"]],
   ["src/lib/audit/audit-outbox.ts", ["auditOutbox"]],
   ["src/lib/audit/audit-user-lookup.ts", ["user"]],
-  ["src/lib/auth/scim-token.ts", ["scimToken"]],
-  ["src/lib/auth/extension-token.ts", ["extensionToken", "tenant"]],
-  ["src/lib/auth/maintenance-auth.ts", ["tenantMember"]],
+  ["src/lib/auth/tokens/scim-token.ts", ["scimToken"]],
+  ["src/lib/auth/tokens/extension-token.ts", ["extensionToken", "tenant"]],
+  ["src/lib/auth/access/maintenance-auth.ts", ["tenantMember"]],
   ["src/app/api/extension/bridge-code/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/extension/token/exchange/route.ts", ["extensionBridgeCode"]],
   ["src/app/api/admin/rotate-master-key/route.ts", ["user", "passwordShare"]],
@@ -38,26 +38,26 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   ["src/app/api/teams/[teamId]/members/route.ts", ["tenantMember"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
-  ["src/lib/auth/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
-  ["src/lib/auth/lockout-admin-notify.ts", ["user", "tenantMember"]],
-  ["src/lib/auth/new-device-detection.ts", ["session", "user"]],
+  ["src/lib/auth/policy/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
+  ["src/lib/auth/policy/lockout-admin-notify.ts", ["user", "tenantMember"]],
+  ["src/lib/auth/policy/new-device-detection.ts", ["session", "user"]],
   ["src/lib/notification.ts", ["user", "notification"]],
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
-  ["src/lib/auth/tenant-auth.ts", ["tenantMember"]],
+  ["src/lib/auth/access/tenant-auth.ts", ["tenantMember"]],
   // Admin console: cross-tenant team membership query for scope selector
-  ["src/lib/auth/team-auth.ts", ["teamMember"]],
+  ["src/lib/auth/access/team-auth.ts", ["teamMember"]],
   ["src/lib/vault/vault-reset.ts", ["*"]], // vault wipe: deletes across many tables in $transaction
   ["src/app/api/vault/admin-reset/route.ts", ["adminVaultReset"]],
-  ["src/lib/auth/api-key.ts", ["apiKey"]],
-  ["src/lib/auth/webauthn-authorize.ts", ["webAuthnCredential"]],
+  ["src/lib/auth/tokens/api-key.ts", ["apiKey"]],
+  ["src/lib/auth/webauthn/webauthn-authorize.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
-  ["src/lib/auth/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
+  ["src/lib/auth/session/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
-  ["src/lib/auth/access-restriction.ts", ["tenant"]],
+  ["src/lib/auth/policy/access-restriction.ts", ["tenant"]],
   ["src/lib/team/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
-  ["src/lib/auth/session-timeout.ts", ["user"]],
+  ["src/lib/auth/session/session-timeout.ts", ["user"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check
   ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)
@@ -85,7 +85,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/emergency-access/[id]/vault/route.ts", ["emergencyAccessGrant"]],
   ["src/app/api/emergency-access/[id]/vault/entries/route.ts", ["emergencyAccessGrant", "passwordEntry"]],
   // Machine Identity: SA token validation + MCP Gateway operate cross-tenant by design
-  ["src/lib/auth/service-account-token.ts", ["serviceAccountToken"]],
+  ["src/lib/auth/tokens/service-account-token.ts", ["serviceAccountToken"]],
   ["src/lib/mcp/oauth-server.ts", ["mcpAuthorizationCode", "mcpAccessToken", "mcpRefreshToken"]],
   ["src/app/api/mcp/authorize/route.ts", ["mcpClient", "user"]],
   ["src/app/api/mcp/register/route.ts", ["mcpClient"]],
@@ -96,7 +96,7 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/tenant/access-requests/route.ts", ["serviceAccount", "accessRequest"]],
   ["src/app/api/tenant/access-requests/[id]/approve/route.ts", ["tenant"]],
   // Delegated Decryption: cross-tenant session lookup + delegation CRUD
-  ["src/lib/auth/delegation.ts", ["delegationSession"]],
+  ["src/lib/auth/access/delegation.ts", ["delegationSession"]],
   ["src/app/api/vault/delegation/route.ts", ["mcpAccessToken", "tenant", "passwordEntry", "delegationSession"]],
   ["src/app/api/vault/delegation/check/route.ts", ["delegationSession"]],
   // MCP Connections: user's own token listing + revocation (userId + tenantId in WHERE)

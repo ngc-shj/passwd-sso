@@ -264,8 +264,8 @@ Evidence:
 Status: `PASS`
 Evidence:
 - Migration applies `ALTER TABLE ... FORCE ROW LEVEL SECURITY` to all 39 tables.
-- `scripts/check-bypass-rls.mjs` CI guard enforces allowlist (25 files) for `withBypassRls` usage.
-- `scripts/check-team-auth-rls.mjs` CI guard prevents nested team-auth under RLS wrappers.
+- `scripts/checks/check-bypass-rls.mjs` CI guard enforces allowlist (25 files) for `withBypassRls` usage.
+- `scripts/checks/check-team-auth-rls.mjs` CI guard prevents nested team-auth under RLS wrappers.
 
 2. Tenant context is set via session-local variable
 Status: `PASS`
@@ -297,7 +297,7 @@ Evidence:
 - `src/lib/auth-adapter.ts` sets `isBootstrap: true` on bootstrap tenant creation.
 
 ### Notes / residual risk
-- `withBypassRls` is used in 25 files (allowlisted in `scripts/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
+- `withBypassRls` is used in 25 files (allowlisted in `scripts/checks/check-bypass-rls.mjs`). Each bypasses RLS intentionally for cross-tenant operations (audit writes, tenant resolution, admin key rotation, passkey sign-in, etc.).
 - `tenants` table itself has no RLS (intentional: it is the tenant resolution entry point).
 - Bootstrap tenant migration assumes single-user tenants. Multi-user bootstrap tenants are not supported.
 
