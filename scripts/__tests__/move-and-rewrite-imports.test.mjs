@@ -298,3 +298,77 @@ describe("re-export rewrite", () => {
     expect(content).not.toContain('@/lib/foo"');
   });
 });
+
+describe("vi.importActual and typeof import rewrite", () => {
+  it("rewrites vi.importActual and typeof import type arguments together", () => {
+    createFixture(tmpDir, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/lib/source.ts": `export const source = 1;\n`,
+      "src/__tests__/foo.test.ts":
+        `import { vi } from "vitest";\n` +
+        `const actual = await vi.importActual<typeof import("@/lib/source")>("@/lib/source");\n` +
+        `type S = typeof import("@/lib/source");\n` +
+        `const orig = vi.importOriginal<typeof import("@/lib/source")>();\n`,
+    });
+    mkdirSync(join(tmpDir, "src/lib/new"), { recursive: true });
+    initGitRepo(tmpDir);
+
+    const configPath = writeConfig(tmpDir, {
+      phaseName: "test-vi-importactual",
+      moves: [{ from: "src/lib/source.ts", to: "src/lib/new/source.ts" }],
+    });
+
+    const result = runCodemod(tmpDir, configPath);
+    expect(result.status, result.stderr).toBe(0);
+
+    const content = readFile(tmpDir, "src/__tests__/foo.test.ts");
+    // All four sites rewritten: two typeof import args + one importActual arg + one standalone typeof
+    expect(content).not.toContain('"@/lib/source"');
+    const newRefs = (content.match(/@\/lib\/new\/source/g) ?? []).length;
+    expect(newRefs).toBe(4);
+  });
+});
+
+describe("rewriteAllowlistFile — C1 regression", () => {
+  it("rewrites only the exact moved path, not prefix-overlapping siblings", () => {
+    // Simulates plan's allowlist + vitest.config.ts: ALL entries include
+    // .ts/.tsx suffix, so the anchored regex must match only the exact path.
+    createFixture(tmpDir, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/lib/audit.ts": `export const audit = 1;\n`,
+      "src/lib/audit-outbox.ts": `export const outbox = 1;\n`,
+      "scripts/check-bypass-rls.mjs":
+        `const ALLOWED_USAGE = new Map([\n` +
+        `  ["src/lib/audit.ts", ["auditLog"]],\n` +
+        `  ["src/lib/audit-outbox.ts", ["auditOutbox"]],\n` +
+        `]);\nexport { ALLOWED_USAGE };\n`,
+      "vitest.config.ts":
+        `export default {\n  test: {\n    coverage: {\n` +
+        `      include: ["src/lib/audit.ts", "src/lib/audit-outbox.ts"],\n` +
+        `      thresholds: { "src/lib/audit.ts": { lines: 80 } },\n` +
+        `    }\n  }\n};\n`,
+    });
+    mkdirSync(join(tmpDir, "src/lib/audit"), { recursive: true });
+    initGitRepo(tmpDir);
+
+    const configPath = writeConfig(tmpDir, {
+      phaseName: "test-allowlist-regression",
+      moves: [{ from: "src/lib/audit.ts", to: "src/lib/audit/audit.ts" }],
+    });
+
+    const result = runCodemod(tmpDir, configPath);
+    expect(result.status, result.stderr).toBe(0);
+
+    const bypass = readFile(tmpDir, "scripts/check-bypass-rls.mjs");
+    // audit.ts rewritten to subdir path
+    expect(bypass).toContain('"src/lib/audit/audit.ts"');
+    // audit-outbox.ts MUST be untouched — this is the C1 regression
+    expect(bypass).toContain('"src/lib/audit-outbox.ts"');
+    expect(bypass).not.toContain("src/lib/audit/audit-outbox.ts");
+
+    const vitest = readFile(tmpDir, "vitest.config.ts");
+    expect(vitest).toContain('"src/lib/audit/audit.ts"');
+    expect(vitest).toContain('"src/lib/audit-outbox.ts"');
+    expect(vitest).not.toContain("src/lib/audit/audit-outbox.ts");
+  });
+});

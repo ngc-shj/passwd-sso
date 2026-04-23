@@ -34,6 +34,11 @@ function parseAllowedUsage(source) {
 
   // Match entries: ["some/path.ts", ["model1", "model2"]]
   const entryRe = /\[\s*"([^"]+)"\s*,\s*(\[[^\]]*\])\s*\]/g;
+  // Duplicate-key detection: a malicious edit could add a second entry with
+  // the same path but different models. new Map() silently keeps the LAST one,
+  // bypassing model-set change detection. Fail loudly if any key appears twice.
+  const seen = new Set();
+  const duplicates = [];
   let match;
   while ((match = entryRe.exec(mapBody)) !== null) {
     const filePath = match[1];
@@ -44,7 +49,19 @@ function parseAllowedUsage(source) {
     while ((m = modelRe.exec(modelsRaw)) !== null) {
       models.push(m[1]);
     }
+    if (seen.has(filePath)) {
+      duplicates.push(filePath);
+    } else {
+      seen.add(filePath);
+    }
     result.set(filePath, models);
+  }
+  if (duplicates.length > 0) {
+    throw new Error(
+      `Duplicate path(s) in ALLOWED_USAGE: ${duplicates.join(", ")}. ` +
+      `new Map() silently keeps the last duplicate, which could hide a model-set change. ` +
+      `Reject and fail.`
+    );
   }
   return result;
 }
@@ -87,8 +104,14 @@ try {
   process.exit(1);
 }
 
-const mainMap = parseAllowedUsage(mainSource);
-const currentMap = parseAllowedUsage(currentSource);
+let mainMap, currentMap;
+try {
+  mainMap = parseAllowedUsage(mainSource);
+  currentMap = parseAllowedUsage(currentSource);
+} catch (e) {
+  console.error(`[verify-allowlist-rename-only] ${e.message}`);
+  process.exit(1);
+}
 
 const mainKeys = new Set(mainMap.keys());
 const currentKeys = new Set(currentMap.keys());
@@ -107,10 +130,11 @@ try {
 }
 
 // Parse rename lines: R<similarity>\t<from>\t<to>
+// Accept both R (rename) and C (copy-rename under diff.renames=copies).
 const renames = new Map();
 for (const line of nameStatusOut.split("\n")) {
   const parts = line.split("\t");
-  if (parts.length === 3 && parts[0].startsWith("R")) {
+  if (parts.length === 3 && (parts[0].startsWith("R") || parts[0].startsWith("C"))) {
     renames.set(parts[1], parts[2]);
   }
 }

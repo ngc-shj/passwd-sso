@@ -117,15 +117,23 @@ function extractImports(source) {
 // Try to resolve a specifier relative to a file directory
 // Returns true if the file can be found (trying common extensions)
 // ---------------------------------------------------------------------------
-const EXTENSIONS = ["", ".mjs", ".js", ".ts", ".tsx", ".json"];
+// .ts/.tsx are intentionally excluded: .mjs files should not import TypeScript
+// sources directly. A specifier with an explicit .ts/.tsx suffix is accepted
+// via the isExplicitTs check in resolveRelative/resolveAlias below.
+const EXTENSIONS = ["", ".mjs", ".js", ".json"];
+const TS_EXTENSIONS = [".ts", ".tsx"];
 
 function resolveRelative(specifier, fileDir) {
   const base = resolve(fileDir, specifier);
-  for (const ext of EXTENSIONS) {
+  // When the specifier already carries an explicit .ts/.tsx suffix, check those too.
+  const exts = /\.(ts|tsx)$/.test(specifier)
+    ? [...EXTENSIONS, ...TS_EXTENSIONS]
+    : EXTENSIONS;
+  for (const ext of exts) {
     if (existsSync(base + ext)) return true;
   }
   // Try as directory index
-  for (const ext of EXTENSIONS) {
+  for (const ext of exts) {
     if (existsSync(join(base, `index${ext}`))) return true;
   }
   return false;
@@ -135,10 +143,14 @@ function resolveAlias(specifier) {
   // @/ -> src/
   const rel = specifier.slice(2); // remove "@/"
   const base = resolve(ROOT, "src", rel);
-  for (const ext of EXTENSIONS) {
+  // When the specifier already carries an explicit .ts/.tsx suffix, check those too.
+  const exts = /\.(ts|tsx)$/.test(specifier)
+    ? [...EXTENSIONS, ...TS_EXTENSIONS]
+    : EXTENSIONS;
+  for (const ext of exts) {
     if (existsSync(base + ext)) return true;
   }
-  for (const ext of EXTENSIONS) {
+  for (const ext of exts) {
     if (existsSync(join(base, `index${ext}`))) return true;
   }
   return false;

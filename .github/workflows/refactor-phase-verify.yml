@@ -1,0 +1,46 @@
+name: Refactor Phase Verify
+
+# Runs the refactor orchestrator (scripts/refactor-phase-verify.mjs) on every
+# push to refactor/* branches and in merge_group events. Complements the
+# pre-pr.sh local gate by enforcing the phase checks server-side.
+#
+# See docs/archive/review/split-overcrowded-feature-dirs-plan.md §Phase 0
+# prerequisites for why this workflow exists.
+
+on:
+  push:
+    branches:
+      - "refactor/**"
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refactor-phase-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify refactor phase
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 is required because refactor-phase-verify.mjs and its
+          # downstream scripts (verify-move-only-diff, verify-allowlist-rename-only,
+          # check-vitest-coverage-include --enforce-rename-parity) call
+          # `git diff main...HEAD` and `git show main:<path>`.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: refactor-phase-verify
+        run: node scripts/refactor-phase-verify.mjs --force

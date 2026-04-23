@@ -105,6 +105,7 @@ const scripts = [
   { label: "check-dynamic-import-specifiers (src/lib)",        cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/lib"] },
   { label: "check-dynamic-import-specifiers (src/hooks)",      cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/hooks"] },
   { label: "check-dynamic-import-specifiers (src/components/passwords)", cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/passwords"] },
+  { label: "capture-test-counts",                cmd: ["node", "scripts/capture-test-counts.mjs"] },
 ];
 
 console.log(`\n${"═".repeat(50)}`);

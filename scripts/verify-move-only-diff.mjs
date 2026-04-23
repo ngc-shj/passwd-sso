@@ -17,6 +17,10 @@ import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const { Project } = require("ts-morph");
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -49,10 +53,64 @@ function globToRegex(pattern) {
 }
 
 // ---------------------------------------------------------------------------
-// Strip import/export lines and normalize for comparison
+// Strip import/export declarations and normalize for comparison
 // ---------------------------------------------------------------------------
 
-function stripImportExportLines(content) {
+/**
+ * AST-based stripping: removes all top-level ImportDeclaration and
+ * ExportDeclaration nodes from source text using ts-morph, then normalises
+ * (collapse blank lines, trim trailing whitespace).
+ *
+ * Falls back to the line-regex approach if ts-morph fails to parse the source,
+ * printing a warning to stderr so the caller is never silently misled.
+ */
+function stripImportExportDeclarations(content) {
+  try {
+    const project = new Project({ useInMemoryFileSystem: true });
+    const sf = project.createSourceFile("__strip__.ts", content, { overwrite: true });
+
+    // Collect text ranges for all top-level import/export declarations
+    const ranges = [];
+    for (const decl of sf.getImportDeclarations()) {
+      ranges.push([decl.getFullStart(), decl.getEnd()]);
+    }
+    for (const decl of sf.getExportDeclarations()) {
+      ranges.push([decl.getFullStart(), decl.getEnd()]);
+    }
+
+    if (ranges.length === 0) {
+      return normalise(content);
+    }
+
+    // Sort ranges and build body by stitching the gaps
+    ranges.sort((a, b) => a[0] - b[0]);
+    let body = "";
+    let cursor = 0;
+    for (const [start, end] of ranges) {
+      if (start > cursor) body += content.slice(cursor, start);
+      cursor = end;
+    }
+    body += content.slice(cursor);
+    return normalise(body);
+  } catch (err) {
+    process.stderr.write(
+      `[verify-move-only-diff] ts-morph parse failed, falling back to line-regex: ${err.message}\n`
+    );
+    return stripImportExportLinesFallback(content);
+  }
+}
+
+function normalise(text) {
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => line.trimEnd())
+    .join("\n")
+    .trim();
+}
+
+/** Fallback regex-based approach (original logic, minus the lone-} filter). */
+function stripImportExportLinesFallback(content) {
   return content
     .split("\n")
     .filter((line) => {
@@ -64,8 +122,6 @@ function stripImportExportLines(content) {
       if (/^(import|export)\b/.test(trimmed) && /from\s+["'][^"']+["']/.test(trimmed)) return false;
       // export * from or export { } from
       if (/^export\s+(\*|\{[^}]*\})\s+from/.test(trimmed)) return false;
-      // Closing brace-only lines (often belong to import/export groups)
-      if (/^\}\s*;?\s*$/.test(trimmed)) return false;
       return true;
     })
     .map((line) => line.trimEnd())
@@ -129,8 +185,8 @@ for (const { from, to } of filtered) {
     continue;
   }
 
-  const preStripped = stripImportExportLines(preCont);
-  const postStripped = stripImportExportLines(postCont);
+  const preStripped = stripImportExportDeclarations(preCont);
+  const postStripped = stripImportExportDeclarations(postCont);
 
   if (preStripped !== postStripped) {
     drifts.push({ from, to, preStripped, postStripped });

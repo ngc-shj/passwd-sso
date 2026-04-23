@@ -38,7 +38,7 @@ Each can be grouped later when a sibling joins. Grouping is out of scope for thi
 - E2E test set remains green (Playwright).
 - No change to exported symbols, function signatures, module-level side effects.
 - No change to externally observable routes, API endpoints, DB schema.
-- **Test count invariant**: `npx vitest run --reporter=json` pre-move counts == post-move counts. All four metrics MUST match: `numTotalTests`, `numPassedTests`, `numSkippedTests`, `numFailedTests`. Any divergence means a test was lost, newly skipped, or newly failing — all block merge.
+- **Test count invariant**: `npx vitest run --reporter=json` pre-move counts == post-move counts. Metrics asserted by `scripts/capture-test-counts.mjs`: `numTotalTests`, `numPassedTests`, `numPendingTests` (vitest 4 skip/todo-pending), `numFailedTests`, `numTodoTests`. Any divergence means a test was lost, newly skipped, or newly failing — all block merge. Baseline stored at `.refactor-test-count-baseline` (gitignored).
 
 ### Non-functional
 
@@ -273,7 +273,7 @@ Every per-subdir PR follows this exact sequence:
    - Stray-reference post-check greps (zero matches).
 4. **Update CLAUDE.md path references** for moved files in the SAME commit.
 5. **Run full test gate:**
-   - `npx vitest run --reporter=json | jq '{numTotalTests, numPassedTests, numSkippedTests, numFailedTests}'` + assert all four metrics match pre-move values (test-count invariant, expanded per T10).
+   - `node scripts/capture-test-counts.mjs --verify` — runs `npx vitest run --reporter=json --outputFile=...` under the hood, asserts numTotalTests / numPassedTests / numPendingTests / numFailedTests / numTodoTests match `.refactor-test-count-baseline` (test-count invariant).
    - `npm run test:integration` (required for Phase 3 audit and Phase 4 security/vault/team).
    - `npm run test:coverage` (required for Phase 1 auth-or-token, Phase 2 crypto-server/crypto-team; the npm script exists in `package.json`, verified).
    - `npx next build`.

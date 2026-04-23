@@ -7,8 +7,8 @@
  *   node scripts/move-and-rewrite-imports.mjs --config path/to/phase-config.json [--dry-run]
  */
 
-import { execSync } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { execFileSync, execSync } from "node:child_process";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { resolve, relative, dirname, basename } from "node:path";
 import { createRequire } from "node:module";
 
@@ -58,6 +58,27 @@ function parseArgs(argv) {
 // Config loading
 // ---------------------------------------------------------------------------
 
+const SAFE_PATH_RE = /^[A-Za-z0-9_\-./]+$/;
+
+function validateMovePath(p, repoRoot) {
+  if (!SAFE_PATH_RE.test(p)) {
+    throw new CodemodConfigError(
+      `Move path contains unsafe characters: "${p}". Only [A-Za-z0-9_\\-./] are allowed.`
+    );
+  }
+  if (/(^|\/)\.\.($|\/)/.test(p) || p === "..") {
+    throw new CodemodConfigError(
+      `Move path contains ".." segment: "${p}".`
+    );
+  }
+  const abs = resolve(repoRoot, p);
+  if (!abs.startsWith(resolve(repoRoot) + "/") && abs !== resolve(repoRoot)) {
+    throw new CodemodConfigError(
+      `Move path escapes repository root: "${p}" resolves to "${abs}".`
+    );
+  }
+}
+
 function loadConfig(configPath) {
   const abs = resolve(configPath);
   if (!existsSync(abs)) {
@@ -76,10 +97,14 @@ function loadConfig(configPath) {
   if (!Array.isArray(parsed.moves)) {
     throw new CodemodConfigError('Config must have a "moves" array');
   }
+  // Validate paths at config-load time using process.cwd() as repo root
+  const repoRoot = process.cwd();
   for (const move of parsed.moves) {
     if (typeof move.from !== "string" || typeof move.to !== "string") {
       throw new CodemodConfigError('Each move must have "from" and "to" string fields');
     }
+    validateMovePath(move.from, repoRoot);
+    validateMovePath(move.to, repoRoot);
   }
   return parsed;
 }
@@ -238,11 +263,11 @@ function executeMoves(moves, repoRoot, dryRun) {
     const to = move.to;
     console.log(`[move] ${from} -> ${to}`);
     if (!dryRun) {
-      // Ensure target directory exists
+      // Ensure target directory exists (no shell interpolation)
       const toAbs = resolve(repoRoot, to);
       const toDir = dirname(toAbs);
-      execSync(`mkdir -p "${toDir}"`, { cwd: repoRoot });
-      execSync(`git mv "${from}" "${to}"`, { cwd: repoRoot, encoding: "utf-8" });
+      mkdirSync(toDir, { recursive: true });
+      execFileSync("git", ["mv", from, to], { cwd: repoRoot, encoding: "utf-8" });
     }
     counts.moves++;
   }
@@ -530,6 +555,17 @@ function rewriteYamlFile(filePath, aliasMap, repoRoot, dryRun) {
 // Allowlist string rewrites (check-bypass-rls.mjs, check-crypto-domains.mjs, vitest.config.ts)
 // ---------------------------------------------------------------------------
 
+/**
+ * Delimiter-anchored regex: match `needle` only when followed by a non-path
+ * character (quote, whitespace, closing bracket/brace/paren, comma) or
+ * end-of-line. This prevents substring matches like src/lib/audit matching
+ * into src/lib/audit-outbox.ts.
+ */
+function buildAnchoredReplaceRegex(needle) {
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(escaped + `(?=[\"'\`\\s)},\\]]|$)`, "g");
+}
+
 function rewriteAllowlistFile(filePath, aliasMap, _repoRoot, dryRun, _tag) {
   if (!existsSync(filePath)) return;
   let content = readFileSync(filePath, "utf-8");
@@ -538,16 +574,19 @@ function rewriteAllowlistFile(filePath, aliasMap, _repoRoot, dryRun, _tag) {
   for (const [fromAlias, toAlias] of aliasMap) {
     const fromPath = "src/" + fromAlias.slice(2);
     const toPath = "src/" + toAlias.slice(2);
-    // Match path in string context (with or without .ts extension)
+    // Only use extension-explicit variants to avoid substring corruption.
+    // E.g. "src/lib/audit.ts" must NOT match "src/lib/audit-outbox.ts".
     const variants = [
       [fromPath + ".ts", toPath + ".ts"],
       [fromPath + ".tsx", toPath + ".tsx"],
-      [fromPath, toPath],
     ];
     for (const [from, to] of variants) {
-      if (content.includes(from)) {
+      const re = buildAnchoredReplaceRegex(from);
+      if (re.test(content)) {
         console.log(`[allowlist ${basename(filePath)}] ${from} -> ${to}`);
-        content = content.replaceAll(from, to);
+        // Reset lastIndex after test()
+        re.lastIndex = 0;
+        content = content.replace(re, to);
         changed = true;
         counts.allowlist++;
       }

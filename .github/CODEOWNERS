@@ -12,8 +12,16 @@
 /scripts/check-mjs-imports.mjs               @ngc-shj
 /scripts/check-doc-paths.mjs                 @ngc-shj
 /scripts/refactor-phase-verify.mjs           @ngc-shj
+# Flat-file patterns (e.g. src/lib/auth.ts) — GitHub * does NOT cross /
 /src/lib/crypto*                             @ngc-shj
 /src/lib/auth*                               @ngc-shj
+# Directory patterns for after the refactor split (src/lib/auth/, etc.)
+# Both the flat-file and directory patterns are required because CODEOWNERS
+# * does not match across path separators, so /src/lib/auth* covers only
+# files directly in src/lib/, while /src/lib/auth/** covers subdirectory trees.
+/src/lib/auth/**                             @ngc-shj
+/src/lib/crypto/**                           @ngc-shj
+/src/lib/audit/**                            @ngc-shj
 /src/lib/tenant-rls.ts                       @ngc-shj
 /.github/workflows/                          @ngc-shj
 /.github/CODEOWNERS                          @ngc-shj

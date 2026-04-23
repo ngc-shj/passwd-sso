@@ -257,7 +257,8 @@ if (enforceRenameParity) {
   const renames = new Map();
   for (const line of nameStatusOut.split("\n")) {
     const parts = line.split("\t");
-    if (parts.length === 3 && parts[0].startsWith("R")) {
+    // Accept both R (rename) and C (copy-rename under diff.renames=copies)
+    if (parts.length === 3 && (parts[0].startsWith("R") || parts[0].startsWith("C"))) {
       renames.set(parts[1], parts[2]);
     }
   }
