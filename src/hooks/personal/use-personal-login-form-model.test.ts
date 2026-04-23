@@ -25,7 +25,7 @@ vi.mock("@/hooks/personal/use-personal-folders", () => ({
   usePersonalFolders: () => usePersonalFoldersMock(),
 }));
 
-vi.mock("@/components/passwords/personal-login-submit", () => ({
+vi.mock("@/components/passwords/personal/personal-login-submit", () => ({
   submitPersonalLoginForm: (...args: unknown[]) => submitPersonalLoginFormMock(...args),
 }));
 

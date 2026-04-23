@@ -42,7 +42,7 @@ vi.mock("@/hooks/personal/use-personal-folders", () => ({
   }),
 }));
 
-vi.mock("@/components/passwords/personal-entry-submit", () => ({
+vi.mock("@/components/passwords/personal/personal-entry-submit", () => ({
   executePersonalEntrySubmit: mockExecutePersonalEntrySubmit,
 }));
 

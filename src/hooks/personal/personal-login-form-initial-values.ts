@@ -1,4 +1,4 @@
-import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
+import type { PersonalLoginFormInitialData } from "@/components/passwords/personal/personal-login-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import {
   DEFAULT_GENERATOR_SETTINGS,

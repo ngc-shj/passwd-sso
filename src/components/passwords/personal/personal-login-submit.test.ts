@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import { submitPersonalLoginForm } from "@/components/passwords/personal-login-submit";
+import { submitPersonalLoginForm } from "@/components/passwords/personal/personal-login-submit";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 
 const buildPasswordHistoryMock = vi.fn();
@@ -18,7 +18,7 @@ vi.mock("@/lib/vault/entry-form-helpers", () => ({
   extractTagIds: (...args: unknown[]) => extractTagIdsMock(...args),
 }));
 
-vi.mock("@/components/passwords/personal-entry-submit", () => ({
+vi.mock("@/components/passwords/personal/personal-entry-submit", () => ({
   executePersonalEntrySubmit: (...args: unknown[]) => executePersonalEntrySubmitMock(...args),
 }));
 

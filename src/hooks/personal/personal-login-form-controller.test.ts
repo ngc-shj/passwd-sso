@@ -9,7 +9,7 @@ import {
 
 const submitPersonalLoginFormMock = vi.fn();
 
-vi.mock("@/components/passwords/personal-login-submit", () => ({
+vi.mock("@/components/passwords/personal/personal-login-submit", () => ({
   submitPersonalLoginForm: (...args: unknown[]) => submitPersonalLoginFormMock(...args),
 }));
 

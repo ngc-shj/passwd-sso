@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault/vault-context";
 import { usePersonalFolders } from "@/hooks/personal/use-personal-folders";
-import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal/personal-login-form-types";
 import {
   buildPersonalLoginFormController,
 } from "@/hooks/personal/personal-login-form-controller";

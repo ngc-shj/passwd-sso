@@ -1,7 +1,7 @@
-import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal/personal-login-form-types";
 import {
   submitPersonalLoginForm,
-} from "@/components/passwords/personal-login-submit";
+} from "@/components/passwords/personal/personal-login-submit";
 import { createFormNavigationHandlers } from "@/components/passwords/form-navigation";
 import type { PersonalLoginFormEntryValues } from "@/hooks/personal/use-personal-login-form-state";
 import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";

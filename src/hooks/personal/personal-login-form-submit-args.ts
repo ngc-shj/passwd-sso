@@ -1,7 +1,7 @@
 "use client";
 
-import type { SubmitPersonalLoginFormArgs } from "@/components/passwords/personal-login-submit";
-import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
+import type { SubmitPersonalLoginFormArgs } from "@/components/passwords/personal/personal-login-submit";
+import type { PersonalLoginFormProps } from "@/components/passwords/personal/personal-login-form-types";
 import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/personal/use-personal-login-form-state";
 import type { PasswordFormRouter } from "@/hooks/form/password-form-router";

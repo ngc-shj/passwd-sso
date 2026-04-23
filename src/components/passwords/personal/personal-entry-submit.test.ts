@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import { executePersonalEntrySubmit } from "@/components/passwords/personal-entry-submit";
+import { executePersonalEntrySubmit } from "@/components/passwords/personal/personal-entry-submit";
 
 const savePersonalEntryMock = vi.fn();
 const handlePersonalSaveFeedbackMock = vi.fn();
@@ -11,7 +11,7 @@ vi.mock("@/lib/vault/personal-entry-save", () => ({
   savePersonalEntry: (...args: unknown[]) => savePersonalEntryMock(...args),
 }));
 
-vi.mock("@/components/passwords/personal-save-feedback", () => ({
+vi.mock("@/components/passwords/personal/personal-save-feedback", () => ({
   handlePersonalSaveFeedback: (...args: unknown[]) => handlePersonalSaveFeedbackMock(...args),
 }));
 

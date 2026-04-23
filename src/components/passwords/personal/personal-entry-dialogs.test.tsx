@@ -10,7 +10,7 @@ vi.mock("next-intl", () => ({
   useTranslations: (ns: string) => (key: string) => `${ns}:${key}`,
 }));
 
-vi.mock("@/components/passwords/personal-entry-dialog-shell", () => ({
+vi.mock("@/components/passwords/personal/personal-entry-dialog-shell", () => ({
   PersonalEntryDialogShell: ({
     title,
     children,
@@ -25,28 +25,28 @@ vi.mock("@/components/passwords/personal-entry-dialog-shell", () => ({
   ),
 }));
 
-vi.mock("@/components/passwords/personal-login-form", () => ({
+vi.mock("@/components/passwords/personal/personal-login-form", () => ({
   PersonalLoginForm: () => <div data-testid="personal-login-form" />,
 }));
-vi.mock("@/components/passwords/personal-secure-note-form", () => ({
+vi.mock("@/components/passwords/personal/personal-secure-note-form", () => ({
   SecureNoteForm: () => <div data-testid="personal-secure-note-form" />,
 }));
-vi.mock("@/components/passwords/personal-credit-card-form", () => ({
+vi.mock("@/components/passwords/personal/personal-credit-card-form", () => ({
   CreditCardForm: () => <div data-testid="personal-credit-card-form" />,
 }));
-vi.mock("@/components/passwords/personal-identity-form", () => ({
+vi.mock("@/components/passwords/personal/personal-identity-form", () => ({
   IdentityForm: () => <div data-testid="personal-identity-form" />,
 }));
-vi.mock("@/components/passwords/personal-passkey-form", () => ({
+vi.mock("@/components/passwords/personal/personal-passkey-form", () => ({
   PasskeyForm: () => <div data-testid="personal-passkey-form" />,
 }));
-vi.mock("@/components/passwords/personal-bank-account-form", () => ({
+vi.mock("@/components/passwords/personal/personal-bank-account-form", () => ({
   BankAccountForm: () => <div data-testid="personal-bank-account-form" />,
 }));
-vi.mock("@/components/passwords/personal-software-license-form", () => ({
+vi.mock("@/components/passwords/personal/personal-software-license-form", () => ({
   SoftwareLicenseForm: () => <div data-testid="personal-software-license-form" />,
 }));
-vi.mock("@/components/passwords/personal-ssh-key-form", () => ({
+vi.mock("@/components/passwords/personal/personal-ssh-key-form", () => ({
   SshKeyForm: () => <div data-testid="personal-ssh-key-form" />,
 }));
 vi.mock("@/components/passwords/entry/attachment-section", () => ({
