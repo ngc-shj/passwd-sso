@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildTeamLoginFieldCallbacks } from "@/hooks/team-login-fields-callbacks";
+import { buildTeamLoginFieldCallbacks } from "@/hooks/team/team-login-fields-callbacks";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 

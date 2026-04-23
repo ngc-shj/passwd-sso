@@ -37,7 +37,7 @@ import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { useBulkSelection } from "@/hooks/use-bulk-selection";
 import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
 import { useBulkAction } from "@/hooks/use-bulk-action";
-import { useTeamEntryMutations } from "@/hooks/use-team-entry-mutations";
+import { useTeamEntryMutations } from "@/hooks/team/use-team-entry-mutations";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
 

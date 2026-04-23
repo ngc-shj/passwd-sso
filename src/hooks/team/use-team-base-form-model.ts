@@ -12,9 +12,9 @@ import type {
   TeamEntryFormEditData,
 } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
-import { useTeamAttachments } from "@/hooks/use-team-attachments";
-import { useTeamFolders } from "@/hooks/use-team-folders";
-import { useTeamPolicy } from "@/hooks/use-team-policy";
+import { useTeamAttachments } from "@/hooks/team/use-team-attachments";
+import { useTeamFolders } from "@/hooks/team/use-team-folders";
+import { useTeamPolicy } from "@/hooks/team/use-team-policy";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import {
   useEntryFormTranslations,

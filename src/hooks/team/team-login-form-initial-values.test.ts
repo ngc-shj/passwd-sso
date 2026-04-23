@@ -3,7 +3,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import {
   applyPolicyToGeneratorSettings,
   buildTeamLoginFormInitialValues,
-} from "@/hooks/team-login-form-initial-values";
+} from "@/hooks/team/team-login-form-initial-values";
 
 describe("buildTeamLoginFormInitialValues", () => {
   it("returns safe defaults when edit data is absent", () => {

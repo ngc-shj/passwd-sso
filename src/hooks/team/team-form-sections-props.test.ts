@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 
 describe("buildTeamFormSectionsProps", () => {
   it("maps tags/folders and action bar props", () => {

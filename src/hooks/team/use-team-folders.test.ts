@@ -2,39 +2,40 @@
 
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useTeamAttachments } from "@/hooks/use-team-attachments";
+import { useTeamFolders } from "@/hooks/team/use-team-folders";
 
-describe("useTeamAttachments", () => {
+describe("useTeamFolders", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("does not fetch when entry id is missing", () => {
+  it("does not fetch when dialog is closed", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       json: async () => [],
     } as Response);
 
-    const { result } = renderHook(() => useTeamAttachments(true, "team-1"));
+    const { result } = renderHook(() => useTeamFolders(false, "team-1"));
 
-    expect(result.current.attachments).toEqual([]);
+    expect(result.current.folders).toEqual([]);
     expect(result.current.fetchError).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("fetches attachments when open and entry id exists", async () => {
+  it("fetches folders when open", async () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
-      json: async () => [{ id: "a1", filename: "f.txt", sizeBytes: 1, contentType: "text/plain", createdAt: "2026-01-01" }],
+      json: async () => [{ id: "f1", name: "Work", parentId: null }],
     } as Response);
 
-    const { result } = renderHook(() => useTeamAttachments(true, "team-1", "entry-1"));
+    const { result } = renderHook(() => useTeamFolders(true, "team-1"));
 
     await waitFor(() => {
-      expect(result.current.attachments).toHaveLength(1);
+      expect(result.current.folders).toEqual([{ id: "f1", name: "Work", parentId: null }]);
     });
     expect(result.current.fetchError).toBeNull();
-    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/team-1/passwords/entry-1/attachments");
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/teams/team-1/folders");
   });
 
   it("sets fetchError on non-ok response", async () => {
@@ -43,22 +44,22 @@ describe("useTeamAttachments", () => {
       status: 500,
     } as Response);
 
-    const { result } = renderHook(() => useTeamAttachments(true, "team-1", "entry-1"));
+    const { result } = renderHook(() => useTeamFolders(true, "team-1"));
 
     await waitFor(() => {
       expect(result.current.fetchError).toContain("500");
     });
-    expect(result.current.attachments).toEqual([]);
+    expect(result.current.folders).toEqual([]);
   });
 
   it("sets fetchError on network error", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network error"));
 
-    const { result } = renderHook(() => useTeamAttachments(true, "team-1", "entry-1"));
+    const { result } = renderHook(() => useTeamFolders(true, "team-1"));
 
     await waitFor(() => {
       expect(result.current.fetchError).toContain("network error");
     });
-    expect(result.current.attachments).toEqual([]);
+    expect(result.current.folders).toEqual([]);
   });
 });

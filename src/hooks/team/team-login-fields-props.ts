@@ -1,10 +1,10 @@
 "use client";
 
-import { buildTeamLoginFieldCallbacks } from "@/hooks/team-login-fields-callbacks";
+import { buildTeamLoginFieldCallbacks } from "@/hooks/team/team-login-fields-callbacks";
 import type {
   EntryLoginMainFieldsProps,
   TeamLoginFieldTextProps,
-} from "@/hooks/team-login-fields-types";
+} from "@/hooks/team/team-login-fields-types";
 
 type TeamLoginFieldCallbacks = ReturnType<typeof buildTeamLoginFieldCallbacks>;
 

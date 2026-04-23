@@ -7,7 +7,7 @@ import {
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 import type { SymbolGroupFlags } from "@/lib/generator/generator-prefs";
 
 export interface TeamLoginFormInitialValues {

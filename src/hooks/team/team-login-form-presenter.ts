@@ -3,10 +3,10 @@ import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import type { useTeamPolicy } from "@/hooks/use-team-policy";
-import { buildTeamLoginFormDerived } from "@/hooks/team-login-form-derived";
-import { buildTeamLoginFieldsProps } from "@/hooks/team-login-fields-props";
-import { buildTeamLoginFieldTextProps } from "@/hooks/team-login-fields-text-props";
+import type { useTeamPolicy } from "@/hooks/team/use-team-policy";
+import { buildTeamLoginFormDerived } from "@/hooks/team/team-login-form-derived";
+import { buildTeamLoginFieldsProps } from "@/hooks/team/team-login-fields-props";
+import { buildTeamLoginFieldTextProps } from "@/hooks/team/team-login-fields-text-props";
 
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
 

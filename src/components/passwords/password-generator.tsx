@@ -20,7 +20,7 @@ import {
   buildEffectiveCharset,
 } from "@/lib/generator/generator-prefs";
 import { API_PATH } from "@/lib/constants";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";

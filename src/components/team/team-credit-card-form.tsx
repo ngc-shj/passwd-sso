@@ -20,8 +20,8 @@ import { CARD_BRANDS } from "@/lib/credit-card";
 import { handleTeamCardNumberChange } from "@/components/team/team-login-submit";
 import { getTeamCardValidationState } from "@/components/team/team-credit-card-validation";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
-import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
+import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 export function TeamCreditCardForm({

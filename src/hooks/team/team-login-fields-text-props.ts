@@ -1,8 +1,8 @@
 "use client";
 
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import type { useTeamPolicy } from "@/hooks/use-team-policy";
-import type { TeamLoginFieldTextProps } from "@/hooks/team-login-fields-types";
+import type { useTeamPolicy } from "@/hooks/team/use-team-policy";
+import type { TeamLoginFieldTextProps } from "@/hooks/team/team-login-fields-types";
 
 type TeamPolicy = ReturnType<typeof useTeamPolicy>["policy"];
 

@@ -3,9 +3,9 @@ import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import {
   buildTeamLoginFieldsProps,
-} from "@/hooks/team-login-fields-props";
-import type { TeamLoginFieldTextProps } from "@/hooks/team-login-fields-types";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+} from "@/hooks/team/team-login-fields-props";
+import type { TeamLoginFieldTextProps } from "@/hooks/team/team-login-fields-types";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 
 const fakePolicy: TeamPolicyClient = {
   minPasswordLength: 12,

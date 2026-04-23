@@ -4,8 +4,8 @@ import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
-import { buildTeamLoginFormPresenter } from "@/hooks/team-login-form-presenter";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
+import { buildTeamLoginFormPresenter } from "@/hooks/team/team-login-form-presenter";
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                           */

@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PasswordGenerator } from "@/components/passwords/password-generator";
 import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 
 interface EntryLoginMainFieldsProps {
   idPrefix?: string;

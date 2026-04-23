@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import { buildTeamLoginFieldTextProps } from "@/hooks/team-login-fields-text-props";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import { buildTeamLoginFieldTextProps } from "@/hooks/team/team-login-fields-text-props";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 
 const fakePolicy: TeamPolicyClient = {
   minPasswordLength: 12,

@@ -2,11 +2,11 @@
 
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { ENTRY_DIALOG_FLAT_SECTION_CLASS } from "@/components/passwords/entry-form-ui";
-import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
-import { createTeamLoginSubmitHandler } from "@/hooks/team-login-form-controller";
-import { buildTeamLoginFormPresenter } from "@/hooks/team-login-form-presenter";
-import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
-import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
+import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
+import { createTeamLoginSubmitHandler } from "@/hooks/team/team-login-form-controller";
+import { buildTeamLoginFormPresenter } from "@/hooks/team/team-login-form-presenter";
+import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
+import { useTeamLoginFormState } from "@/hooks/team/use-team-login-form-state";
 
 type TeamLoginFormModelInput = Pick<
   TeamEntryFormProps,

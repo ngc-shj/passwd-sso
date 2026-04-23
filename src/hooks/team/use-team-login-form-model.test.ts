@@ -2,7 +2,7 @@
 
 import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useTeamLoginFormModel } from "@/hooks/use-team-login-form-model";
+import { useTeamLoginFormModel } from "@/hooks/team/use-team-login-form-model";
 
 const {
   mockPolicy,
@@ -47,18 +47,18 @@ vi.mock("@/hooks/use-entry-form-translations", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-team-policy", () => ({
+vi.mock("@/hooks/team/use-team-policy", () => ({
   useTeamPolicy: () => ({ policy: mockPolicy }),
 }));
 
-vi.mock("@/hooks/use-team-attachments", () => ({
+vi.mock("@/hooks/team/use-team-attachments", () => ({
   useTeamAttachments: () => ({
     attachments: [],
     setAttachments: vi.fn(),
   }),
 }));
 
-vi.mock("@/hooks/use-team-folders", () => ({
+vi.mock("@/hooks/team/use-team-folders", () => ({
   useTeamFolders: () => ({
     folders: [],
   }),

@@ -12,7 +12,7 @@ import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { EntryActionBar } from "@/components/passwords/entry-form-ui";
-import { useTeamLoginFormModel } from "@/hooks/use-team-login-form-model";
+import { useTeamLoginFormModel } from "@/hooks/team/use-team-login-form-model";
 
 export function TeamLoginForm({
   teamId,

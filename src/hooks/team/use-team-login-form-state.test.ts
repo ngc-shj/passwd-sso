@@ -2,7 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { useTeamLoginFormState } from "@/hooks/use-team-login-form-state";
+import { useTeamLoginFormState } from "@/hooks/team/use-team-login-form-state";
 
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
@@ -11,12 +11,12 @@ vi.mock("@/lib/team/team-vault-context", () => ({
 }));
 import {
   applyPolicyToGeneratorSettings,
-} from "@/hooks/team-login-form-initial-values";
+} from "@/hooks/team/team-login-form-initial-values";
 import {
   DEFAULT_GENERATOR_SETTINGS,
   DEFAULT_SYMBOL_GROUPS,
 } from "@/lib/generator/generator-prefs";
-import type { TeamPolicyClient } from "@/hooks/use-team-policy";
+import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 
 const NO_POLICY: TeamPolicyClient = {
   minPasswordLength: 0,

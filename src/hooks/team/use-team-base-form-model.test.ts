@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   useTeamBaseFormModel,
   type UseTeamBaseFormModelInput,
-} from "@/hooks/use-team-base-form-model";
+} from "@/hooks/team/use-team-base-form-model";
 import type { TeamEntryFormEditData } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 
@@ -51,18 +51,18 @@ vi.mock("@/hooks/use-entry-form-translations", () => ({
   toTeamLoginFormTranslations: () => stableTranslations,
 }));
 
-vi.mock("@/hooks/use-team-policy", () => ({
+vi.mock("@/hooks/team/use-team-policy", () => ({
   useTeamPolicy: () => ({ policy: mockPolicy }),
 }));
 
-vi.mock("@/hooks/use-team-attachments", () => ({
+vi.mock("@/hooks/team/use-team-attachments", () => ({
   useTeamAttachments: () => ({
     attachments: [],
     setAttachments: vi.fn(),
   }),
 }));
 
-vi.mock("@/hooks/use-team-folders", () => ({
+vi.mock("@/hooks/team/use-team-folders", () => ({
   useTeamFolders: () => ({
     folders: [],
   }),

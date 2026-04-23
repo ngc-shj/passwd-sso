@@ -17,8 +17,8 @@ import {
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { ENTRY_TYPE } from "@/lib/constants";
-import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
-import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";
+import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
+import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
 import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
 
 export function TeamPasskeyForm({

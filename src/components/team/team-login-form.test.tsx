@@ -106,7 +106,7 @@ vi.mock("@/lib/credit-card", () => ({
   normalizeCardNumber: vi.fn((v: string) => v.replace(/\D/g, "")),
 }));
 
-vi.mock("@/hooks/use-team-policy", () => ({
+vi.mock("@/hooks/team/use-team-policy", () => ({
   useTeamPolicy: () => ({
     policy: {
       minPasswordLength: 0,
@@ -127,7 +127,7 @@ vi.mock("@/hooks/use-team-policy", () => ({
 // Mock the entire hook to cut the crypto-client / crypto-aad dependency chain.
 // The hook's internal logic (policy validation, history decrypt) is tested in
 // use-team-login-form-state.test.ts — here we only test UI behaviour.
-vi.mock("@/hooks/use-team-login-form-state", () => ({
+vi.mock("@/hooks/team/use-team-login-form-state", () => ({
   useTeamLoginFormState: vi.fn(({ editData }: { editData?: { username?: string; password?: string; url?: string } | null }) => ({
     username: editData?.username ?? "",
     setUsername: vi.fn(),
