@@ -4,7 +4,7 @@ import { auth } from "@/auth";
 import { parseBody } from "@/lib/parse-body";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
@@ -13,7 +13,7 @@ import {
   verifyAuthentication,
   getRpOrigin,
   base64urlToUint8Array,
-} from "@/lib/webauthn-server";
+} from "@/lib/auth/webauthn-server";
 import type { AuthenticatorDevice } from "@simplewebauthn/types";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 

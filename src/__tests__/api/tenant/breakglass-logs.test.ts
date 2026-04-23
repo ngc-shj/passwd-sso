@@ -23,7 +23,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -50,7 +50,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: mockExtractRequestMeta,
 }));
 vi.mock("@/lib/with-request-log", () => ({

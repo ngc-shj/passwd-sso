@@ -6,10 +6,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { withRequestLog } from "@/lib/with-request-log";
 import { resolveUserTenantId } from "@/lib/tenant-context";
-import { revokeDelegationSession } from "@/lib/delegation";
+import { revokeDelegationSession } from "@/lib/auth/delegation";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 

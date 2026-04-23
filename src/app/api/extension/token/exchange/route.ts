@@ -23,8 +23,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { hashToken } from "@/lib/crypto/crypto-server";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import {
   errorResponse,
@@ -32,10 +32,10 @@ import {
   unauthorized,
   zodValidationError,
 } from "@/lib/api-response";
-import { issueExtensionToken } from "@/lib/extension-token";
+import { issueExtensionToken } from "@/lib/auth/extension-token";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_ACTION } from "@/lib/constants";

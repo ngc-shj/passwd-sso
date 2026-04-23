@@ -4,7 +4,7 @@ import {
   computeCanonicalBytes,
   computeEventHash,
   type ChainInput,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 
 describe("audit-chain", () => {
   describe("buildChainInput", () => {

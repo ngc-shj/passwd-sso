@@ -23,7 +23,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -45,12 +45,12 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/folder-utils", () => ({
+vi.mock("@/lib/folder/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
   checkCircularReference: vi.fn().mockResolvedValue(false),
@@ -60,7 +60,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { PUT, DELETE } from "@/app/api/teams/[teamId]/folders/[id]/route";
-import { TeamAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/auth/team-auth";
 
 describe("PUT /api/teams/[teamId]/folders/[id]", () => {
   beforeEach(() => vi.clearAllMocks());

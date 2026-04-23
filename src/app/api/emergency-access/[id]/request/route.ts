@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { canTransition } from "@/lib/emergency-access-state";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { canTransition } from "@/lib/emergency-access/emergency-access-state";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { sendEmail } from "@/lib/email";
 import { emergencyAccessRequestedEmail } from "@/lib/email/templates/emergency-access";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { EA_STATUS, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { resolveUserLocale } from "@/lib/locale";

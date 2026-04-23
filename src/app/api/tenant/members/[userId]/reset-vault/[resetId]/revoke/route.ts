@@ -2,17 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { assertOrigin } from "@/lib/csrf";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { assertOrigin } from "@/lib/auth/csrf";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createNotification } from "@/lib/notification";
 import { sendEmail } from "@/lib/email";
 import { adminVaultResetRevokedEmail } from "@/lib/email/templates/admin-vault-reset-revoked";
 import { resolveUserLocale } from "@/lib/locale";
 import {
   requireTenantPermission,
-} from "@/lib/tenant-auth";
+} from "@/lib/auth/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { notificationTitle, notificationBody } from "@/lib/notification-messages";
+import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";

@@ -1,0 +1,20 @@
+{
+  "phaseName": "phase-1c-session-lockout-device",
+  "moves": [
+    { "from": "src/lib/session-timeout.ts",      "to": "src/lib/auth/session-timeout.ts" },
+    { "from": "src/lib/session-timeout.test.ts", "to": "src/lib/auth/session-timeout.test.ts" },
+    { "from": "src/lib/session-meta.ts",         "to": "src/lib/auth/session-meta.ts" },
+    { "from": "src/lib/session-meta.test.ts",    "to": "src/lib/auth/session-meta.test.ts" },
+    { "from": "src/lib/user-session-invalidation.ts",      "to": "src/lib/auth/user-session-invalidation.ts" },
+    { "from": "src/lib/user-session-invalidation.test.ts", "to": "src/lib/auth/user-session-invalidation.test.ts" },
+    { "from": "src/lib/account-lockout.ts",      "to": "src/lib/auth/account-lockout.ts" },
+    { "from": "src/lib/account-lockout.test.ts", "to": "src/lib/auth/account-lockout.test.ts" },
+    { "from": "src/lib/lockout-admin-notify.ts",      "to": "src/lib/auth/lockout-admin-notify.ts" },
+    { "from": "src/lib/lockout-admin-notify.test.ts", "to": "src/lib/auth/lockout-admin-notify.test.ts" },
+    { "from": "src/lib/new-device-detection.ts",      "to": "src/lib/auth/new-device-detection.ts" },
+    { "from": "src/lib/new-device-detection.test.ts", "to": "src/lib/auth/new-device-detection.test.ts" },
+    { "from": "src/lib/travel-mode.ts",          "to": "src/lib/auth/travel-mode.ts" },
+    { "from": "src/lib/travel-mode.test.ts",     "to": "src/lib/auth/travel-mode.test.ts" },
+    { "from": "src/lib/ip-access.ts",            "to": "src/lib/auth/ip-access.ts" }
+  ]
+}

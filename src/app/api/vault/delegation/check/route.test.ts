@@ -18,7 +18,7 @@ const {
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
   hasUserId: (auth: { type: string }) => "userId" in auth,
 }));
@@ -30,19 +30,19 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: vi.fn(() => "127.0.0.1"),
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 vi.mock("@/lib/logger", () => ({

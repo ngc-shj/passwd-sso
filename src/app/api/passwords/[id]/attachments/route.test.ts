@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { AAD_VERSION } from "@/lib/crypto-aad";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 
 const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTenantRls, mockRateLimitCheck } = vi.hoisted(() => ({
   mockAuth: vi.fn(),
@@ -17,7 +17,7 @@ const { mockAuth, mockPrismaPasswordEntry, mockPrismaAttachment, mockWithUserTen
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/prisma", () => ({

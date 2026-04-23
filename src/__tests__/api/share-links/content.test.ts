@@ -24,16 +24,16 @@ vi.mock("@/lib/prisma", () => ({
     $executeRaw: mockExecuteRaw,
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
-vi.mock("@/lib/share-access-token", () => ({
+vi.mock("@/lib/auth/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyShareAccessToken,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: () => "1.2.3.4",
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

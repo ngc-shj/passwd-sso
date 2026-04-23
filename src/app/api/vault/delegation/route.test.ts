@@ -45,17 +45,17 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: mockAssertOrigin }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: mockAssertOrigin }));
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: null, acceptLanguage: null }),
 }));
-vi.mock("@/lib/ip-access", () => ({ extractClientIp: vi.fn(() => "127.0.0.1") }));
+vi.mock("@/lib/auth/ip-access", () => ({ extractClientIp: vi.fn(() => "127.0.0.1") }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withBypassRls: mockWithBypassRls }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
@@ -65,8 +65,8 @@ vi.mock("@/lib/prisma", () => ({
     delegationSession: mockPrismaDelegationSession,
   },
 }));
-vi.mock("@/lib/delegation", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/delegation")>();
+vi.mock("@/lib/auth/delegation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/auth/delegation")>();
   return {
     ...actual,
     storeDelegationEntries: mockStoreDelegationEntries,

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { ENTRY_TYPE, CUSTOM_FIELD_TYPE } from "@/lib/constants";
 import {
   Eye,
@@ -20,7 +20,7 @@ import {
   KeySquare,
   Terminal,
 } from "lucide-react";
-import { formatDateTime, formatDate } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
 
 function isSafeHref(url: string): boolean {

@@ -11,7 +11,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { ChevronDown } from "lucide-react";
 import type { AuditActionValue } from "@/lib/constants";
-import type { ActionGroupDef } from "@/hooks/use-audit-logs";
+import type { ActionGroupDef } from "@/hooks/vault/use-audit-logs";
 
 interface AuditActionFilterProps {
   actionGroups: readonly ActionGroupDef[];

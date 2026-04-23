@@ -24,22 +24,22 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
 }));
-vi.mock("@/lib/vault-reset", () => ({
+vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn((_prisma: unknown, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),

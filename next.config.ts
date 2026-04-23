@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 import { execSync } from "node:child_process";
 import createNextIntlPlugin from "next-intl/plugin";
 import { withSentryConfig } from "@sentry/nextjs";
-import { PERMISSIONS_POLICY } from "./src/lib/security-headers";
+import { PERMISSIONS_POLICY } from "./src/lib/security/security-headers";
 
 // Build metadata for reproducible build tracking
 function getGitSha(): string {

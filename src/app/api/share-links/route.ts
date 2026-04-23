@@ -8,11 +8,11 @@ import {
   encryptShareData,
   generateAccessPassword,
   hashAccessPassword,
-} from "@/lib/crypto-server";
-import { requireTeamPermission } from "@/lib/team-auth";
-import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team-policy";
-import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit";
-import { createRateLimiter } from "@/lib/rate-limit";
+} from "@/lib/crypto/crypto-server";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
+import { assertPolicyAllowsSharing, assertPolicySharePassword, PolicyViolationError } from "@/lib/team/team-policy";
+import { logAuditInTx, personalAuditBase, teamAuditBase } from "@/lib/audit/audit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, notFound, rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";

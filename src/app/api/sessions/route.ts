@@ -1,15 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "./helpers";
 import { withUserTenantRls, resolveUserTenantId } from "@/lib/tenant-context";
 import { rateLimited } from "@/lib/api-response";
-import { revokeAllExtensionTokensForUser } from "@/lib/extension-token";
+import { revokeAllExtensionTokensForUser } from "@/lib/auth/extension-token";
 
 const revokeAllLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 

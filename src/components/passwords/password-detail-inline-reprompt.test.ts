@@ -11,19 +11,19 @@ import { resolve } from "node:path";
 
 const SRC_PATH = resolve(
   __dirname,
-  "password-detail-inline.tsx",
+  "detail/password-detail-inline.tsx",
 );
 const source = readFileSync(SRC_PATH, "utf-8");
 
 const LOGIN_SECTION_PATH = resolve(
   __dirname,
-  "detail-sections/login-section.tsx",
+  "detail/sections/login-section.tsx",
 );
 const loginSource = readFileSync(LOGIN_SECTION_PATH, "utf-8");
 
 describe("PasswordDetailInline reprompt guards", () => {
   it("imports useReprompt hook", () => {
-    expect(source).toContain('import { useReprompt } from "@/hooks/use-reprompt"');
+    expect(source).toContain('import { useReprompt } from "@/hooks/vault/use-reprompt"');
   });
 
   it("calls useReprompt()", () => {

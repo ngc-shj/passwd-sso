@@ -1,14 +1,14 @@
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { hashToken, decryptShareData } from "@/lib/crypto-server";
+import { hashToken, decryptShareData } from "@/lib/crypto/crypto-server";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareE2EEntryView } from "@/components/share/share-e2e-entry-view";
 import { ShareSendView } from "@/components/share/share-send-view";
 import { ShareError } from "@/components/share/share-error";
 import { ShareProtectedContent } from "@/components/share/share-protected-content";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
 
 const sharePageLimiter = createRateLimiter({ windowMs: 60_000, max: 20 });

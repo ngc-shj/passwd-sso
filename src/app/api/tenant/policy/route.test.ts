@@ -43,7 +43,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockPolicyLimiterCheck }),
 }));
 
@@ -67,15 +67,15 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/session-timeout", () => ({
+vi.mock("@/lib/auth/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
 
-vi.mock("@/lib/account-lockout", () => ({
+vi.mock("@/lib/auth/account-lockout", () => ({
   invalidateLockoutThresholdCache: mockInvalidateLockoutThresholdCache,
 }));
 
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));
@@ -84,7 +84,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null, acceptLanguage: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
@@ -139,12 +139,12 @@ vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   isValidCidr: () => true,
   extractClientIp: mockExtractClientIp,
 }));
 
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateTenantPolicyCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));

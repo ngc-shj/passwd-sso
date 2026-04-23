@@ -15,19 +15,19 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn()
     .mockReturnValueOnce({ check: mockVerifyCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockResetCheck, clear: mockResetClear }),
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn((v: string) => `hmac_${v}`),
   verifyPassphraseVerifier: vi.fn((client: string, stored: string) => client === stored),
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

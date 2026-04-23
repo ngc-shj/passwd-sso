@@ -1,5 +1,5 @@
-import { buildGeneratorSummary } from "@/lib/generator-summary";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import { buildGeneratorSummary } from "@/lib/generator/generator-summary";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 
 export interface LoginFormDerivedArgs {
   scope: "personal" | "team";

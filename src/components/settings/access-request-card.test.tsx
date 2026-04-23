@@ -31,7 +31,7 @@ vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
 }));
 
-vi.mock("@/lib/format-datetime", () => ({
+vi.mock("@/lib/format/format-datetime", () => ({
   formatDateTime: (date: string) => date,
 }));
 
@@ -39,7 +39,7 @@ vi.mock("@/lib/constants/service-account", () => ({
   SA_TOKEN_SCOPES: ["passwords:read", "passwords:write", "passwords:list"],
 }));
 
-vi.mock("@/components/passwords/copy-button", () => ({
+vi.mock("@/components/passwords/shared/copy-button", () => ({
   CopyButton: ({ getValue }: { getValue: () => string }) => (
     <button data-testid="copy-button" data-value={getValue()}>
       Copy

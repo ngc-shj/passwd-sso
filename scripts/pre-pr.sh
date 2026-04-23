@@ -36,6 +36,17 @@ run_step "Static: bypass-rls"     node scripts/check-bypass-rls.mjs
 run_step "Static: crypto-domains" node scripts/check-crypto-domains.mjs
 run_step "Static: migration-drift" node scripts/check-migration-drift.mjs
 run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*" | grep -q .; then echo "Residual logAudit() calls found:"; grep -rn "logAudit(" src/ --include="*.ts" --include="*.tsx" | grep -v "logAuditAsync\|logAuditInTx" | grep -v "\.test\." | grep -v "^\s*//" | grep -v "^\s*\*"; exit 1; fi'
+
+if command -v gitleaks >/dev/null 2>&1; then
+  run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
+else
+  printf "${BOLD}▸ Secret scan (gitleaks)${RESET}\n"
+  printf "  (skipped — gitleaks not installed; install with: brew install gitleaks OR see https://github.com/gitleaks/gitleaks)\n\n"
+fi
+
+if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/"; then
+  run_step "Refactor phase verify" node scripts/refactor-phase-verify.mjs
+fi
 # Clear vitest cache to match CI's clean environment
 rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
 run_step "Test"                   npx vitest run

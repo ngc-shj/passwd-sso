@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -40,7 +40,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
@@ -50,7 +50,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { POST } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/restore/route";
-import { TeamAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/auth/team-auth";
 
 describe("POST /api/teams/[teamId]/passwords/[id]/history/[historyId]/restore", () => {
   beforeEach(() => vi.clearAllMocks());

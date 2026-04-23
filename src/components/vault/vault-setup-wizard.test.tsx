@@ -13,7 +13,7 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({ setup: mockSetup }),
 }));
 

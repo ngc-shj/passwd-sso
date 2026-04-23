@@ -1,0 +1,9 @@
+{
+  "phaseName": "phase-1d-1-tenant-team-auth",
+  "moves": [
+    { "from": "src/lib/tenant-auth.ts",      "to": "src/lib/auth/tenant-auth.ts" },
+    { "from": "src/lib/tenant-auth.test.ts", "to": "src/lib/auth/tenant-auth.test.ts" },
+    { "from": "src/lib/team-auth.ts",        "to": "src/lib/auth/team-auth.ts" },
+    { "from": "src/lib/team-auth.test.ts",   "to": "src/lib/auth/team-auth.test.ts" }
+  ]
+}

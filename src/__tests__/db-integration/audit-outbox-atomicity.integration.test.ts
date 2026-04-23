@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit-outbox";
+import { enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
 describe("audit-outbox atomicity (F1)", () => {
   let ctx: TestContext;

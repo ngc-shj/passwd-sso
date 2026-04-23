@@ -1,14 +1,14 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import type { ServerEncryptedData } from "@/lib/crypto-server";
+import type { ServerEncryptedData } from "@/lib/crypto/crypto-server";
 
 // Mock crypto-server before importing the module under test
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   encryptServerData: vi.fn(),
   decryptServerData: vi.fn(),
 }));
 
 import { encryptCredentials, decryptCredentials } from "./credentials";
-import { encryptServerData, decryptServerData } from "@/lib/crypto-server";
+import { encryptServerData, decryptServerData } from "@/lib/crypto/crypto-server";
 
 const mockEncrypt = encryptServerData as ReturnType<typeof vi.fn>;
 const mockDecrypt = decryptServerData as ReturnType<typeof vi.fn>;

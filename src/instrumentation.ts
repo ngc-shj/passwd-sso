@@ -29,7 +29,7 @@ export async function onRequestError(
   if (!dsn) return;
 
   // Sanitize the error before sending to Sentry (consistent with withRequestLog)
-  const { sanitizeErrorForSentry } = await import("@/lib/sentry-sanitize");
+  const { sanitizeErrorForSentry } = await import("@/lib/security/sentry-sanitize");
   const [err, request, context] = args;
   const sanitizedErr = err instanceof Error ? sanitizeErrorForSentry(err) : err;
   const { captureRequestError } = await import("@sentry/nextjs");

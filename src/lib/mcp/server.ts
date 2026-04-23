@@ -8,7 +8,7 @@
  * Rate limiting: per client_id using Redis.
  */
 
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,

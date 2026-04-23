@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { hashToken } from "@/lib/crypto/crypto-server";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { generateScimToken } from "@/lib/scim/token-utils";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
@@ -14,7 +14,7 @@ import { z } from "zod";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, rateLimited, unauthorized } from "@/lib/api-response";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
   SCIM_TOKEN_EXPIRY_MIN_DAYS,
   SCIM_TOKEN_EXPIRY_MAX_DAYS,

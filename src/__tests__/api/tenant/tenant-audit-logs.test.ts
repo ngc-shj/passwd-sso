@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -41,14 +41,14 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
     scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test",
   }),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/with-request-log", () => ({
@@ -62,7 +62,7 @@ vi.mock("@/lib/constants/tenant-permission", () => ({
 
 import { GET } from "@/app/api/tenant/audit-logs/route";
 import { GET as GET_DOWNLOAD } from "@/app/api/tenant/audit-logs/download/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 
 function makeLog(overrides: Record<string, unknown> = {}) {
   return {

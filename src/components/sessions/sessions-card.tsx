@@ -20,7 +20,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { API_PATH, apiPath } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface SessionItem {

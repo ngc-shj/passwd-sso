@@ -29,16 +29,16 @@ vi.mock("@/lib/redis", () => ({
   validateRedisConfig: vi.fn(),
 }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 
-vi.mock("@/lib/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn-server", () => ({
   generateAuthenticationOpts: mockGenerateAuthenticationOpts,
   derivePrfSalt: () => "a".repeat(64),
 }));
 
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

@@ -20,16 +20,16 @@ vi.mock("@/lib/prisma", () => ({
   prisma: { emergencyAccessGrant: mockPrismaGrant, user: mockPrismaUser },
 }));
 vi.mock("@/lib/email", () => ({ sendEmail: mockSendEmail }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "mock-token-hex",
   hashToken: (t: string) => `hashed-${t}`,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: null, userAgent: null }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck }),
 }));
 vi.mock("@/lib/tenant-context", () => ({

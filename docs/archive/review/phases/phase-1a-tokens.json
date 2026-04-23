@@ -1,0 +1,16 @@
+{
+  "phaseName": "phase-1a-tokens",
+  "moves": [
+    { "from": "src/lib/api-key.ts",              "to": "src/lib/auth/api-key.ts" },
+    { "from": "src/lib/api-key.test.ts",         "to": "src/lib/auth/api-key.test.ts" },
+    { "from": "src/lib/extension-token.ts",      "to": "src/lib/auth/extension-token.ts" },
+    { "from": "src/lib/extension-token.test.ts", "to": "src/lib/auth/extension-token.test.ts" },
+    { "from": "src/lib/scim-token.ts",           "to": "src/lib/auth/scim-token.ts" },
+    { "from": "src/lib/scim-token.test.ts",      "to": "src/lib/auth/scim-token.test.ts" },
+    { "from": "src/lib/service-account-token.ts",      "to": "src/lib/auth/service-account-token.ts" },
+    { "from": "src/lib/service-account-token.test.ts", "to": "src/lib/auth/service-account-token.test.ts" },
+    { "from": "src/lib/share-access-token.ts",      "to": "src/lib/auth/share-access-token.ts" },
+    { "from": "src/lib/share-access-token.test.ts", "to": "src/lib/auth/share-access-token.test.ts" },
+    { "from": "src/lib/admin-token.ts", "to": "src/lib/auth/admin-token.ts" }
+  ]
+}

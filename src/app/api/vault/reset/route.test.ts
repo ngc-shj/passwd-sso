@@ -39,13 +39,13 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: (_req: unknown, userId: string) => ({
@@ -56,7 +56,7 @@ vi.mock("@/lib/audit", () => ({
     acceptLanguage: null,
   }),
 }));
-vi.mock("@/lib/vault-reset", () => ({
+vi.mock("@/lib/vault/vault-reset", () => ({
   executeVaultReset: mockExecuteVaultReset,
 }));
 // executeVaultReset uses withBypassRls (not withUserTenantRls)

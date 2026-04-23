@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/tenant-auth";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import {
   TENANT_PERMISSION,
   AUDIT_ACTION,

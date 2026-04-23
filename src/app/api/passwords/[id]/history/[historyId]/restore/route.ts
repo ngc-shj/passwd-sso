@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, forbidden, notFound, unauthorized } from "@/lib/api-response";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, AUDIT_METADATA_KEY } from "@/lib/constants";

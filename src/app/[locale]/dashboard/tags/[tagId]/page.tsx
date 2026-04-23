@@ -1,7 +1,7 @@
 "use client";
 
 import { use } from "react";
-import { PasswordDashboard } from "@/components/passwords/password-dashboard";
+import { PasswordDashboard } from "@/components/passwords/detail/password-dashboard";
 
 export default function TagPage({
   params,

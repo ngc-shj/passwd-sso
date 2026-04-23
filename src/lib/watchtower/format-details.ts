@@ -1,4 +1,4 @@
-import { formatDate } from "@/lib/format-datetime";
+import { formatDate } from "@/lib/format/format-datetime";
 
 type Translator = (key: string, params: Record<string, string | number>) => string;
 

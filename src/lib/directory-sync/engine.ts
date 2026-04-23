@@ -12,7 +12,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { logAuditAsync } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit/audit";
 import { dispatchTenantWebhook } from "@/lib/webhook-dispatcher";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE, TENANT_ROLE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";

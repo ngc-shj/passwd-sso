@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { extractClientIpFromHeaders, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { CSP_REPORT_RATE_MAX, RATE_WINDOW_MS } from "@/lib/validations/common.server";
 
 export const runtime = "nodejs";

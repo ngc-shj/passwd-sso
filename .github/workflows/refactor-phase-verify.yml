@@ -1,0 +1,69 @@
+name: Refactor Phase Verify
+
+# Runs the refactor orchestrator (scripts/refactor-phase-verify.mjs) on every
+# push to refactor/* branches and in merge_group events. Complements the
+# pre-pr.sh local gate by enforcing the phase checks server-side.
+#
+# See docs/archive/review/split-overcrowded-feature-dirs-plan.md §Phase 0
+# prerequisites for why this workflow exists.
+
+on:
+  push:
+    branches:
+      - "refactor/**"
+  merge_group:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: refactor-phase-verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify refactor phase
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 is required because refactor-phase-verify.mjs and its
+          # downstream scripts (verify-move-only-diff, verify-allowlist-rename-only,
+          # check-vitest-coverage-include --enforce-rename-parity) call
+          # `git diff main...HEAD` and `git show main:<path>`.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+          cache: "npm"
+
+      - run: npm ci
+
+      # Seed the test-count baseline from main BEFORE running the verifier.
+      # Without this, on fresh CI runners the baseline is absent, so
+      # capture-test-counts.mjs enters its "first-run — record + pass" branch
+      # every time and never actually compares. We record on a worktree
+      # checked out to main, then copy the baseline into HEAD so the main
+      # verify run can compare.
+      #
+      # Bootstrap case: on the PR that first introduces capture-test-counts.mjs,
+      # main does not yet have the script. We skip seeding and fall back to
+      # the script's first-run behaviour; the gate becomes meaningful from
+      # the next refactor PR onward.
+      - name: Seed test-count baseline from main
+        run: |
+          set -euo pipefail
+          git worktree add /tmp/main-wt main
+          if [ -f /tmp/main-wt/scripts/capture-test-counts.mjs ]; then
+            (cd /tmp/main-wt && npm ci && node scripts/capture-test-counts.mjs --record)
+            cp /tmp/main-wt/.refactor-test-count-baseline .refactor-test-count-baseline
+          else
+            echo "capture-test-counts.mjs not present on main — skipping baseline seed (bootstrap PR)."
+          fi
+          git worktree remove --force /tmp/main-wt
+
+      - name: refactor-phase-verify
+        run: node scripts/refactor-phase-verify.mjs --force

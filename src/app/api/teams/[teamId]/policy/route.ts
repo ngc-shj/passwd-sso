@@ -6,14 +6,14 @@ import {
   requireTeamMember,
   requireTeamPermission,
   TeamAuthError,
-} from "@/lib/team-auth";
+} from "@/lib/auth/team-auth";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
-import { invalidateSessionTimeoutCacheForTenant } from "@/lib/session-timeout";
+import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session-timeout";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 

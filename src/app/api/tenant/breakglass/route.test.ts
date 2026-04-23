@@ -43,7 +43,7 @@ const {
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));
@@ -62,7 +62,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withTenantRls: mockWithTenantRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test-agent" }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
@@ -73,13 +73,13 @@ vi.mock("@/lib/audit", () => ({
     userAgent: "test-agent",
   }),
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
 }));
 vi.mock("@/lib/notification", () => ({

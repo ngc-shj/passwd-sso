@@ -19,7 +19,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -45,17 +45,17 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
 import { GET, PATCH } from "@/app/api/teams/[teamId]/passwords/[id]/history/[historyId]/route";
-import { TeamAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/auth/team-auth";
 
 const VALID_IV = "a".repeat(24);
 const VALID_AUTH_TAG = "b".repeat(32);

@@ -9,8 +9,8 @@ process.env.WEBAUTHN_PRF_SECRET = "c".repeat(64);
 process.env.DIRECTORY_SYNC_MASTER_KEY = "d".repeat(64);
 
 const { getKeyProvider, getKeyProviderSync, _resetKeyProvider } = await import("../../src/lib/key-provider/index.ts");
-const { sanitizeErrorForSentry } = await import("../../src/lib/sentry-sanitize.ts");
-const { mapPrismaError } = await import("../../src/lib/prisma-error.ts");
+const { sanitizeErrorForSentry } = await import("../../src/lib/security/sentry-sanitize.ts");
+const { mapPrismaError } = await import("../../src/lib/prisma/prisma-error.ts");
 const { Prisma } = await import("@prisma/client");
 
 describe("smoke: key provider + error tracking", () => {

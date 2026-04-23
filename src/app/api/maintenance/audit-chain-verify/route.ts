@@ -9,9 +9,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { verifyAdminToken } from "@/lib/admin-token";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { verifyAdminToken } from "@/lib/auth/admin-token";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";
@@ -23,7 +23,7 @@ import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });

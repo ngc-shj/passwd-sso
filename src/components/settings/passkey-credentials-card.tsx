@@ -27,8 +27,8 @@ import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
-import { formatDateTime } from "@/lib/format-datetime";
-import { useVault } from "@/lib/vault-context";
+import { formatDateTime } from "@/lib/format/format-datetime";
+import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import {
   isWebAuthnSupported,
@@ -36,7 +36,7 @@ import {
   startPasskeyAuthentication,
   wrapSecretKeyWithPrf,
   generateDefaultNickname,
-} from "@/lib/webauthn-client";
+} from "@/lib/auth/webauthn-client";
 
 interface Credential {
   id: string;

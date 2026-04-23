@@ -13,7 +13,7 @@
 
 import { type NextRequest } from "next/server";
 import logger, { requestContext } from "@/lib/logger";
-import { sanitizeErrorForSentry } from "@/lib/sentry-sanitize";
+import { sanitizeErrorForSentry } from "@/lib/security/sentry-sanitize";
 
 // Route handlers have varying signatures:
 //   (request: NextRequest) => Promise<Response>                    — static routes

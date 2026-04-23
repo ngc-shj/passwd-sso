@@ -14,7 +14,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 vi.mock("@/lib/tailscale-client", () => ({
@@ -35,7 +35,7 @@ import {
   wouldIpBeAllowed,
   invalidateTenantPolicyCache,
   _clearPolicyCache,
-} from "@/lib/access-restriction";
+} from "@/lib/auth/access-restriction";
 import { NextRequest } from "next/server";
 
 describe("checkAccessRestriction", () => {

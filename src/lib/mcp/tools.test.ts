@@ -10,13 +10,13 @@ const { mockLogAudit } = vi.hoisted(() => ({
   mockLogAudit: vi.fn(),
 }));
 
-vi.mock("@/lib/delegation", () => ({
+vi.mock("@/lib/auth/delegation", () => ({
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,
 }));
 
-vi.mock("@/lib/audit", () => ({ logAuditAsync: mockLogAudit }));
+vi.mock("@/lib/audit/audit", () => ({ logAuditAsync: mockLogAudit }));
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {},

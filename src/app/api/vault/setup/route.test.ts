@@ -17,10 +17,10 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn().mockReturnValue("a".repeat(64)),
 }));
 vi.mock("@/lib/logger", () => ({
@@ -28,7 +28,7 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

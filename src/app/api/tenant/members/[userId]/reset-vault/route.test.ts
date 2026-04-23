@@ -62,11 +62,11 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({ check: mockRateLimiterCheck })),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
@@ -78,7 +78,7 @@ vi.mock("@/lib/email/templates/admin-vault-reset", () => ({
 }));
 vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: mockServerAppUrl }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: mockResolveUserLocale }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   isTenantRoleAbove: mockIsTenantRoleAbove,
   TenantAuthError,
@@ -87,7 +87,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
   withBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/notification-messages", () => ({
+vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: mockNotificationTitle,
   notificationBody: mockNotificationBody,
 }));

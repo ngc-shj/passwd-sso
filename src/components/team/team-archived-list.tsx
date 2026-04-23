@@ -2,25 +2,25 @@
 
 import { useEffect, useState, useCallback, forwardRef } from "react";
 import { useTranslations } from "next-intl";
-import { PasswordCard } from "@/components/passwords/password-card";
-import type { InlineDetailData } from "@/components/passwords/password-detail-inline";
+import { PasswordCard } from "@/components/passwords/detail/password-card";
+import type { InlineDetailData } from "@/components/passwords/detail/password-detail-inline";
 import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
 import { Archive, RotateCcw, Trash2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useBulkSelection } from "@/hooks/use-bulk-selection";
-import { useBulkAction } from "@/hooks/use-bulk-action";
+import { useBulkSelection } from "@/hooks/bulk/use-bulk-selection";
+import { useBulkAction } from "@/hooks/bulk/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import type { EntryCustomField, EntryTotp } from "@/lib/entry-form-types";
+import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import {
   compareEntriesWithFavorite,
   type EntrySortOption,
-} from "@/lib/entry-sort";
-import { useTeamVault } from "@/lib/team-vault-context";
-import { decryptData } from "@/lib/crypto-client";
-import { buildTeamEntryAAD } from "@/lib/crypto-aad";
+} from "@/lib/vault/entry-sort";
+import { useTeamVault } from "@/lib/team/team-vault-context";
+import { decryptData } from "@/lib/crypto/crypto-client";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 

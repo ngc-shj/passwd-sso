@@ -28,8 +28,8 @@ import {
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { TAILNET_NAME_MAX_LENGTH, MAX_CIDRS } from "@/lib/validations";
-import { useFormDirty } from "@/hooks/use-form-dirty";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 const CIDR_REGEX = /^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/;

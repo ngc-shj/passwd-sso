@@ -14,7 +14,7 @@ import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 
 describe("audit-chain tamper detection", () => {
   let ctx: TestContext;

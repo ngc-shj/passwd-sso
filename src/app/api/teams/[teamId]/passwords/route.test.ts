@@ -30,7 +30,7 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamPasswordEntry, mockPrismaTeamFold
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamPasswordEntry: mockPrismaTeamPasswordEntry,
@@ -39,7 +39,7 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: mockAuditLogCreate },
   },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
@@ -49,7 +49,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({}),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),

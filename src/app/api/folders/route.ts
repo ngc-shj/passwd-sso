@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { createFolderSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
 
 function getPersonalParent(userId: string, id: string): Promise<ParentNode | null> {

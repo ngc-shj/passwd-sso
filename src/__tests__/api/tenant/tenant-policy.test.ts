@@ -27,7 +27,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -52,12 +52,12 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/with-request-log", () => ({
@@ -66,23 +66,23 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/constants/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
-vi.mock("@/lib/ip-access", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/ip-access")>("@/lib/ip-access");
+vi.mock("@/lib/auth/ip-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/ip-access")>("@/lib/auth/ip-access");
   return { ...actual, extractClientIp: mockExtractClientIp };
 });
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));
-vi.mock("@/lib/session-timeout", () => ({
+vi.mock("@/lib/auth/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
-vi.mock("@/lib/account-lockout", () => ({
+vi.mock("@/lib/auth/account-lockout", () => ({
   invalidateLockoutThresholdCache: vi.fn(),
 }));
 
 import { GET, PATCH } from "@/app/api/tenant/policy/route";
-import { TenantAuthError } from "@/lib/tenant-auth";
+import { TenantAuthError } from "@/lib/auth/tenant-auth";
 
 const FULL_POLICY_RESPONSE = {
   maxConcurrentSessions: null,

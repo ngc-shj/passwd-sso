@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "node:crypto";
-import { checkAuth } from "@/lib/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { hashToken } from "@/lib/crypto/crypto-server";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { apiKeyCreateSchema } from "@/lib/validations";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import {

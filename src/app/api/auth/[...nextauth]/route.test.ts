@@ -11,11 +11,11 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: <T>(h: T) => h,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/session-meta", () => ({
+vi.mock("@/lib/auth/session-meta", () => ({
   sessionMetaStorage: { run: (_meta: unknown, fn: () => unknown) => fn() },
 }));
 

@@ -1,0 +1,19 @@
+{
+  "phaseName": "phase-5a-hooks-sidebar",
+  "moves": [
+    { "from": "src/hooks/sidebar-crud-error.ts",      "to": "src/hooks/sidebar/sidebar-crud-error.ts" },
+    { "from": "src/hooks/sidebar-crud-error.test.ts", "to": "src/hooks/sidebar/sidebar-crud-error.test.ts" },
+    { "from": "src/hooks/use-sidebar-data.ts",        "to": "src/hooks/sidebar/use-sidebar-data.ts" },
+    { "from": "src/hooks/use-sidebar-data.test.ts",   "to": "src/hooks/sidebar/use-sidebar-data.test.ts" },
+    { "from": "src/hooks/use-sidebar-folder-crud.ts",      "to": "src/hooks/sidebar/use-sidebar-folder-crud.ts" },
+    { "from": "src/hooks/use-sidebar-folder-crud.test.ts", "to": "src/hooks/sidebar/use-sidebar-folder-crud.test.ts" },
+    { "from": "src/hooks/use-sidebar-navigation-state.ts",      "to": "src/hooks/sidebar/use-sidebar-navigation-state.ts" },
+    { "from": "src/hooks/use-sidebar-navigation-state.test.ts", "to": "src/hooks/sidebar/use-sidebar-navigation-state.test.ts" },
+    { "from": "src/hooks/use-sidebar-sections-state.ts",      "to": "src/hooks/sidebar/use-sidebar-sections-state.ts" },
+    { "from": "src/hooks/use-sidebar-sections-state.test.ts", "to": "src/hooks/sidebar/use-sidebar-sections-state.test.ts" },
+    { "from": "src/hooks/use-sidebar-tag-crud.ts",      "to": "src/hooks/sidebar/use-sidebar-tag-crud.ts" },
+    { "from": "src/hooks/use-sidebar-tag-crud.test.ts", "to": "src/hooks/sidebar/use-sidebar-tag-crud.test.ts" },
+    { "from": "src/hooks/use-sidebar-view-model.ts",      "to": "src/hooks/sidebar/use-sidebar-view-model.ts" },
+    { "from": "src/hooks/use-sidebar-view-model.test.ts", "to": "src/hooks/sidebar/use-sidebar-view-model.test.ts" }
+  ]
+}

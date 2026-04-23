@@ -15,8 +15,8 @@ const {
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/prisma", () => ({

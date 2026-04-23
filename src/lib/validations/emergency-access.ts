@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto-emergency";
+import { SUPPORTED_WRAP_VERSIONS } from "@/lib/crypto/crypto-emergency";
 import {
   HEX_IV_LENGTH,
   HEX_AUTH_TAG_LENGTH,

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { generateShareToken, hashToken } from "@/lib/crypto-server";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { generateShareToken, hashToken } from "@/lib/crypto/crypto-server";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/extension-token";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { validateExtensionToken, revokeExtensionTokenFamily } from "@/lib/auth/extension-token";
+import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";

@@ -59,7 +59,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -97,13 +97,13 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
@@ -115,7 +115,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
@@ -123,12 +123,12 @@ vi.mock("@/lib/crypto-server", () => ({
 // parseSaTokenScopes run; their Prisma dependencies are intercepted via mocked prisma/withBypassRls.
 
 // passwords route uses authOrToken from @/lib/auth-or-token
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockPasswordsAuthOrToken,
   hasUserId: (a: { userId?: string }) => "userId" in a,
 }));
 
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 
@@ -146,8 +146,8 @@ import {
 import {
   validateServiceAccountToken,
   parseSaTokenScopes,
-} from "@/lib/service-account-token";
-import { authOrToken } from "@/lib/auth-or-token";
+} from "@/lib/auth/service-account-token";
+import { authOrToken } from "@/lib/auth/auth-or-token";
 
 // ─── Shared fixtures ─────────────────────────────────────────────────────────
 

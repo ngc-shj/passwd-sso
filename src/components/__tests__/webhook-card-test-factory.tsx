@@ -110,11 +110,11 @@ export function setupWebhookCardMocks() {
   // mockFetch / mockToast work correctly. Registering them here would
   // replace the hoisted fn references and break those assertions.
 
-  vi.mock("@/lib/format-datetime", () => ({
+  vi.mock("@/lib/format/format-datetime", () => ({
     formatDateTime: (date: string) => date,
   }));
 
-  vi.mock("@/components/passwords/copy-button", () => ({
+  vi.mock("@/components/passwords/shared/copy-button", () => ({
     CopyButton: ({ getValue }: { getValue: () => string }) => (
       <button data-testid="copy-button" data-value={getValue()}>
         Copy

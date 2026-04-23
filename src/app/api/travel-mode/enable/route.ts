@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { unauthorized } from "@/lib/api-response";

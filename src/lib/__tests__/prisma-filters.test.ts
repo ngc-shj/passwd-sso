@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 
 describe("ACTIVE_ENTRY_WHERE", () => {
   it("excludes soft-deleted entries", () => {

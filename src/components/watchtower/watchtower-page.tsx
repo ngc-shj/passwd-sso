@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { PasswordEditDialogLoader } from "@/components/passwords/personal-password-edit-dialog-loader";
+import { PasswordEditDialogLoader } from "@/components/passwords/dialogs/personal-password-edit-dialog-loader";
 import { TeamEditDialogLoader } from "@/components/team/team-edit-dialog-loader";
 import {
   useWatchtower,
@@ -35,7 +35,7 @@ import {
   calculateTotalIssues,
   getWatchtowerVisibility,
 } from "@/lib/watchtower/state";
-import { useNavigationGuard } from "@/hooks/use-navigation-guard";
+import { useNavigationGuard } from "@/hooks/form/use-navigation-guard";
 import {
   formatBreachDetails,
   formatWeakDetails,

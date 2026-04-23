@@ -44,7 +44,7 @@ vi.mock("@/lib/prisma", () => ({
     auditLog: { create: vi.fn().mockResolvedValue({}) },
   },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   isRoleAbove: mockIsRoleAbove,
   TeamAuthError,
@@ -52,13 +52,13 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/user-session-invalidation", () => ({
+vi.mock("@/lib/auth/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
 vi.mock("@/lib/logger", () => ({
   getLogger: () => mockLogger,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),

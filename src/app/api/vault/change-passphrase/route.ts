@@ -1,11 +1,11 @@
 import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto-server";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { VERIFIER_VERSION } from "@/lib/crypto-client";
+import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
 import { withUserTenantRls } from "@/lib/tenant-context";

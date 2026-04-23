@@ -38,7 +38,7 @@ vi.mock("@/hooks/use-watchtower", () => ({
   useWatchtower: (...args: unknown[]) => mockUseWatchtower(...args),
 }));
 
-vi.mock("@/components/passwords/personal-password-edit-dialog-loader", () => ({
+vi.mock("@/components/passwords/dialogs/personal-password-edit-dialog-loader", () => ({
   PasswordEditDialogLoader: (props: unknown) => {
     personalDialogProps(props);
     return <div data-testid="personal-edit-dialog" />;

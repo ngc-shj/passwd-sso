@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { encryptExport } from "@/lib/export-crypto";
+import { encryptExport } from "@/lib/crypto/export-crypto";
 import { PagePane } from "@/components/layout/page-pane";
 import { PageTitleCard } from "@/components/layout/page-title-card";
-import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
+import { ExportOptionsPanel } from "@/components/passwords/export/export-options-panel";
 import { AlertTriangle, Download } from "lucide-react";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { ENTRY_TYPE } from "@/lib/constants";
@@ -18,10 +18,10 @@ import {
   formatExportContent as formatExportContentShared,
   formatExportDate,
 } from "@/lib/export-format-common";
-import { useTeamVault } from "@/lib/team-vault-context";
-import { decryptData } from "@/lib/crypto-client";
-import { buildTeamEntryAAD } from "@/lib/crypto-aad";
-import { buildFolderPath } from "@/lib/folder-path";
+import { useTeamVault } from "@/lib/team/team-vault-context";
+import { decryptData } from "@/lib/crypto/crypto-client";
+import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
+import { buildFolderPath } from "@/lib/folder/folder-path";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { fetchApi } from "@/lib/url-helpers";
 

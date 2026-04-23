@@ -20,10 +20,10 @@ const {
   mockRateLimitCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
 
-vi.mock("@/lib/check-auth", () => ({
+vi.mock("@/lib/auth/check-auth", () => ({
   checkAuth: mockCheckAuth,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn().mockReturnValue({ check: mockRateLimitCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -32,7 +32,7 @@ vi.mock("@/lib/prisma", () => ({
     user: mockPrismaUser,
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -46,7 +46,7 @@ vi.mock("@/lib/logger", () => {
     requestContext: { run: (_s: unknown, fn: () => unknown) => fn(), getStore: () => undefined },
   };
 });
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({}),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

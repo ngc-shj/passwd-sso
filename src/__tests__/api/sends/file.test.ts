@@ -21,7 +21,7 @@ vi.mock("@/lib/prisma", () => ({
     user: { findUnique: mockUserFindUnique },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "a".repeat(64),
   hashToken: () => "h".repeat(64),
   encryptShareData: () => ({
@@ -37,10 +37,10 @@ vi.mock("@/lib/crypto-server", () => ({
     masterKeyVersion: 1,
   }),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

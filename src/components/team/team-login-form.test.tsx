@@ -29,7 +29,7 @@ vi.mock("@/lib/ime-guard", () => ({
   preventIMESubmit: vi.fn(),
 }));
 
-vi.mock("@/lib/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamKeyInfo: vi.fn().mockResolvedValue({ key: {} as CryptoKey, keyVersion: 1 }),
     getTeamEncryptionKey: vi.fn(),
@@ -40,19 +40,19 @@ vi.mock("@/lib/team-vault-context", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-team", () => ({
+vi.mock("@/lib/crypto/crypto-team", () => ({
   generateItemKey: () => new Uint8Array(32),
   wrapItemKey: async () => ({ ciphertext: "ik-ct", iv: "ik-iv", authTag: "ik-at" }),
   deriveItemEncryptionKey: async () => ({} as CryptoKey),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildItemKeyWrapAAD: vi.fn().mockReturnValue("ik-aad"),
   buildTeamEntryAAD: vi.fn().mockReturnValue("team-aad"),
 }));
 
 // Mock save entry helper to skip encryption (this is a UI test, not a crypto test)
-vi.mock("@/lib/team-entry-save", () => ({
+vi.mock("@/lib/team/team-entry-save", () => ({
   saveTeamEntry: vi.fn(async (params: Record<string, unknown>) => {
     const teamId = params.teamId as string;
     const entryId = params.entryId as string | undefined;
@@ -72,7 +72,7 @@ vi.mock("@/lib/team-entry-save", () => ({
   }),
 }));
 
-vi.mock("@/lib/generator-prefs", () => ({
+vi.mock("@/lib/generator/generator-prefs", () => ({
   DEFAULT_GENERATOR_SETTINGS: {
     mode: "password",
     length: 16,
@@ -106,7 +106,7 @@ vi.mock("@/lib/credit-card", () => ({
   normalizeCardNumber: vi.fn((v: string) => v.replace(/\D/g, "")),
 }));
 
-vi.mock("@/hooks/use-team-policy", () => ({
+vi.mock("@/hooks/team/use-team-policy", () => ({
   useTeamPolicy: () => ({
     policy: {
       minPasswordLength: 0,
@@ -127,7 +127,7 @@ vi.mock("@/hooks/use-team-policy", () => ({
 // Mock the entire hook to cut the crypto-client / crypto-aad dependency chain.
 // The hook's internal logic (policy validation, history decrypt) is tested in
 // use-team-login-form-state.test.ts — here we only test UI behaviour.
-vi.mock("@/hooks/use-team-login-form-state", () => ({
+vi.mock("@/hooks/team/use-team-login-form-state", () => ({
   useTeamLoginFormState: vi.fn(({ editData }: { editData?: { username?: string; password?: string; url?: string } | null }) => ({
     username: editData?.username ?? "",
     setUsername: vi.fn(),
@@ -249,11 +249,11 @@ vi.mock("@/components/ui/select", () => ({
   SelectValue: () => null,
 }));
 
-vi.mock("@/components/passwords/password-generator", () => ({
+vi.mock("@/components/passwords/shared/password-generator", () => ({
   PasswordGenerator: () => null,
 }));
 
-vi.mock("@/components/passwords/totp-field", () => ({
+vi.mock("@/components/passwords/shared/totp-field", () => ({
   TOTPField: () => null,
 }));
 
@@ -265,7 +265,7 @@ vi.mock("@/components/team/team-attachment-section", () => ({
   TeamAttachmentSection: () => null,
 }));
 
-vi.mock("@/components/passwords/entry-form-ui", () => ({
+vi.mock("@/components/passwords/entry/entry-form-ui", () => ({
   ENTRY_DIALOG_FLAT_SECTION_CLASS:
     "!rounded-none !border-0 !bg-transparent !px-1 !py-2 !shadow-none hover:!bg-transparent",
   ENTRY_DIALOG_FLAT_PRIMARY_CARD_CLASS:

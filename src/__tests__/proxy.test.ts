@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest, NextResponse } from "next/server";
-import { PERMISSIONS_POLICY } from "../lib/security-headers";
+import { PERMISSIONS_POLICY } from "../lib/security/security-headers";
 
 const { mockCheckAccessWithAudit, mockResolveUserTenantId } = vi.hoisted(() => ({
   mockCheckAccessWithAudit: vi.fn().mockResolvedValue({ allowed: true }),
@@ -11,7 +11,7 @@ vi.mock("next-intl/middleware", async () => {
   const { NextResponse: NR } = await import("next/server");
   return { default: () => () => new NR(null, { status: 200 }) };
 });
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   checkAccessRestrictionWithAudit: mockCheckAccessWithAudit,
 }));
 vi.mock("@/lib/tenant-context", () => ({

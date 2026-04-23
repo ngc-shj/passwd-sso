@@ -1,6 +1,6 @@
 "use client";
 
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { VaultSetupWizard } from "./vault-setup-wizard";
 import { VaultLockScreen } from "./vault-lock-screen";

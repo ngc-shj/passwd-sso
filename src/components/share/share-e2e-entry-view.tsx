@@ -6,7 +6,7 @@ import { Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { ShareEntryView } from "@/components/share/share-entry-view";
 import { ShareError } from "@/components/share/share-error";
-import { hexDecode, toArrayBuffer } from "@/lib/crypto-utils";
+import { hexDecode, toArrayBuffer } from "@/lib/crypto/crypto-utils";
 
 interface ShareE2EEntryViewProps {
   encryptedData: string; // hex ciphertext

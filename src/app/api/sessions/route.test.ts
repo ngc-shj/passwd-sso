@@ -21,10 +21,10 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { session: mockPrismaSession, user: mockPrismaUser },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
@@ -33,7 +33,7 @@ vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
   resolveUserTenantId: vi.fn().mockResolvedValue("tenant-1"),
 }));
-vi.mock("@/lib/extension-token", () => ({
+vi.mock("@/lib/auth/extension-token", () => ({
   revokeAllExtensionTokensForUser: vi.fn().mockResolvedValue({ rowsRevoked: 0, familiesRevoked: 0 }),
 }));
 vi.mock("@/lib/logger", () => ({

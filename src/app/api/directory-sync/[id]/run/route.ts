@@ -11,12 +11,12 @@ import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { runDirectorySync } from "@/lib/directory-sync/engine";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { errorResponse, rateLimited, zodValidationError, handleAuthError } from "@/lib/api-response";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 
 type RouteContext = { params: Promise<{ id: string }> };

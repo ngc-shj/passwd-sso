@@ -31,17 +31,17 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/share-access-token", () => ({
+vi.mock("@/lib/auth/share-access-token", () => ({
   verifyShareAccessToken: mockVerifyShareAccessToken,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockContentLimiterCheck }),
 }));
 vi.mock("@/lib/logger", () => ({

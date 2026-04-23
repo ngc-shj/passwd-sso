@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildOpenApiSpec } from "@/lib/openapi-spec";
-import { authOrToken } from "@/lib/auth-or-token";
+import { authOrToken } from "@/lib/auth/auth-or-token";
 import { withRequestLog } from "@/lib/with-request-log";
 
 // GET /api/v1/openapi.json — OpenAPI 3.1 specification

@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { decryptShareData } from "@/lib/crypto-server";
-import { verifyShareAccessToken } from "@/lib/share-access-token";
+import { decryptShareData } from "@/lib/crypto/crypto-server";
+import { verifyShareAccessToken } from "@/lib/auth/share-access-token";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized, notFound } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";

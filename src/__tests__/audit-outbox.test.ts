@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants/audit";
-import type { AuditOutboxPayload } from "@/lib/audit-outbox";
+import type { AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
 // ─── Shared mock handles ─────────────────────────────────────────────────────
 
@@ -44,7 +44,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   BYPASS_PURPOSE: { AUDIT_WRITE: "audit_write" },
 }));
 
-import { enqueueAuditInTx, enqueueAudit } from "@/lib/audit-outbox";
+import { enqueueAuditInTx, enqueueAudit } from "@/lib/audit/audit-outbox";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -26,11 +26,11 @@ const {
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: null, userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: null, userAgent: null, acceptLanguage: null }),
@@ -39,7 +39,7 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/team-policy", () => ({
+vi.mock("@/lib/team/team-policy", () => ({
   assertPolicyAllowsExport: vi.fn().mockResolvedValue(undefined),
   PolicyViolationError: class PolicyViolationError extends Error {
     constructor(message: string) { super(message); this.name = "PolicyViolationError"; }

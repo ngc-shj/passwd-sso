@@ -36,7 +36,7 @@ const {
   mockRateLimiterCheck: vi.fn(),
 }));
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
+vi.mock("@/lib/auth/service-account-token", () => ({ validateServiceAccountToken: mockValidateSaToken, hasSaTokenScope: vi.fn().mockReturnValue(true) }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     passwordEntry: mockPrismaPasswordEntry,
@@ -47,7 +47,7 @@ vi.mock("@/lib/prisma", () => ({
     extensionToken: { findUnique: mockExtTokenFindUnique, update: mockExtTokenUpdate },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: (t: string) => `hashed_${t}`,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -56,10 +56,10 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/logger", () => {
@@ -71,8 +71,8 @@ vi.mock("@/lib/logger", () => {
     getLogger: () => child,
   };
 });
-vi.mock("@/lib/audit", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/audit")>();
+vi.mock("@/lib/audit/audit", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit/audit")>();
   return {
     ...actual,
     logAuditAsync: mockLogAudit,

@@ -39,20 +39,20 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/audit")>("@/lib/audit");
+vi.mock("@/lib/audit/audit", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/audit/audit")>("@/lib/audit/audit");
   return {
     ...actual,
     logAuditAsync: mockLogAudit,
   };
 });
-vi.mock("@/lib/audit-logger", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/audit-logger")>("@/lib/audit-logger");
+vi.mock("@/lib/audit/audit-logger", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/audit/audit-logger")>("@/lib/audit/audit-logger");
   return {
     ...actual,
   };
 });
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   getMasterKeyByVersion: mockGetMasterKeyByVersion,
   decryptServerData: mockDecryptServerData,
 }));

@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/tenant-auth";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
-import { assertOrigin } from "@/lib/csrf";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { parseBody } from "@/lib/parse-body";
 import {
   TENANT_PERMISSION,

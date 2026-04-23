@@ -124,8 +124,8 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
-vi.mock("@/lib/audit-logger", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
+vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit/audit-logger")>();
   return {
     ...actual,
     deadLetterLogger: { warn: mockDeadLetterWarn },
@@ -138,7 +138,7 @@ vi.mock("@/workers/audit-delivery", () => ({
   DELIVERERS: {},
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   decryptServerData: vi.fn().mockReturnValue("{}"),
   getMasterKeyByVersion: vi.fn().mockReturnValue(Buffer.alloc(32)),
 }));

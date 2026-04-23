@@ -9,7 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Select,
   SelectContent,
@@ -32,7 +32,7 @@ import { ChevronDown, Loader2, Plus, Key } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
-import { formatDate } from "@/lib/format-datetime";
+import { formatDate } from "@/lib/format/format-datetime";
 import { API_KEY_SCOPE, API_KEY_SCOPES, MAX_API_KEYS_PER_USER, type ApiKeyScope } from "@/lib/constants/api-key";
 
 interface ApiKeyEntry {

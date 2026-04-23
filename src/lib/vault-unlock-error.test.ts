@@ -8,7 +8,7 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 
-import { VaultUnlockError, notifyUnlockFailure } from "./vault-context";
+import { VaultUnlockError, notifyUnlockFailure } from "./vault/vault-context";
 
 describe("VaultUnlockError", () => {
   it("stores code and lockedUntil", () => {

@@ -109,15 +109,15 @@ vi.mock("next-auth", () => ({
   default: mockNextAuth,
 }));
 
-vi.mock("@/lib/auth-adapter", () => ({
+vi.mock("@/lib/auth/auth-adapter", () => ({
   createCustomAdapter: vi.fn(() => ({})),
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 
-vi.mock("@/lib/session-meta", () => ({
+vi.mock("@/lib/auth/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 
@@ -129,12 +129,12 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/tenant-claim", () => ({
+vi.mock("@/lib/tenant/tenant-claim", () => ({
   extractTenantClaimValue: mockExtractTenantClaimValue,
   slugifyTenant: mockSlugifyTenant,
 }));
 
-vi.mock("@/lib/tenant-claim-storage", () => ({
+vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimGetStore },
 }));
 

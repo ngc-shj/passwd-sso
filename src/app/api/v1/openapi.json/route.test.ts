@@ -10,7 +10,7 @@ const { mockAuthOrToken, mockBuildOpenApiSpec } = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 vi.mock("@/lib/openapi-spec", () => ({

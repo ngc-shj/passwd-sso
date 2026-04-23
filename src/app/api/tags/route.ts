@@ -6,7 +6,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import {
   validateParentChain,
   buildTagTree,

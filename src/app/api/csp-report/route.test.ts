@@ -14,7 +14,7 @@ vi.mock("@/lib/logger", () => {
   };
 });
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),

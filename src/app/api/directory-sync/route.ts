@@ -11,7 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { encryptCredentials } from "@/lib/directory-sync/credentials";
 import {
@@ -21,7 +21,7 @@ import {
   SYNC_INTERVAL_DEFAULT,
   NAME_MAX_LENGTH,
 } from "@/lib/validations/common";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { handleAuthError } from "@/lib/api-response";
 

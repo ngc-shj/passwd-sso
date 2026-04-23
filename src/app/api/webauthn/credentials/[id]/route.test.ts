@@ -36,7 +36,7 @@ vi.mock("@/lib/with-request-log", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   withRequestLog: (fn: any) => fn,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

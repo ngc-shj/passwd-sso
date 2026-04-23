@@ -5,12 +5,12 @@ import { createTeamTagSchema } from "@/lib/validations";
 import {
   requireTeamMember,
   requireTeamPermission,
-} from "@/lib/team-auth";
+} from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import {
   validateParentChain,
   buildTagTree,

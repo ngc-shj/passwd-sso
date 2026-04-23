@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateFolderSchema } from "@/lib/validations";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import {
@@ -12,7 +12,7 @@ import {
   validateFolderDepth,
   checkCircularReference,
   type ParentNode,
-} from "@/lib/folder-utils";
+} from "@/lib/folder/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";

@@ -76,7 +76,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -120,7 +120,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({
@@ -133,15 +133,15 @@ vi.mock("@/lib/audit", () => ({
   }),
 }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
-vi.mock("@/lib/delegation", () => ({
+vi.mock("@/lib/auth/delegation", () => ({
   findActiveDelegationSession: mockFindActiveDelegationSession,
   fetchDelegationEntry: mockFetchDelegationEntry,
   getDelegatedEntryIdsForSession: mockGetDelegatedEntryIdsForSession,

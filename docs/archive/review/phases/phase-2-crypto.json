@@ -1,0 +1,22 @@
+{
+  "phaseName": "phase-2-crypto",
+  "moves": [
+    { "from": "src/lib/crypto-aad.ts",       "to": "src/lib/crypto/crypto-aad.ts" },
+    { "from": "src/lib/crypto-aad.test.ts",  "to": "src/lib/crypto/crypto-aad.test.ts" },
+    { "from": "src/lib/crypto-blob.ts",      "to": "src/lib/crypto/crypto-blob.ts" },
+    { "from": "src/lib/crypto-client.ts",      "to": "src/lib/crypto/crypto-client.ts" },
+    { "from": "src/lib/crypto-client.test.ts", "to": "src/lib/crypto/crypto-client.test.ts" },
+    { "from": "src/lib/crypto-emergency.ts",      "to": "src/lib/crypto/crypto-emergency.ts" },
+    { "from": "src/lib/crypto-emergency.test.ts", "to": "src/lib/crypto/crypto-emergency.test.ts" },
+    { "from": "src/lib/crypto-recovery.ts",      "to": "src/lib/crypto/crypto-recovery.ts" },
+    { "from": "src/lib/crypto-recovery.test.ts", "to": "src/lib/crypto/crypto-recovery.test.ts" },
+    { "from": "src/lib/crypto-server.ts",      "to": "src/lib/crypto/crypto-server.ts" },
+    { "from": "src/lib/crypto-server.test.ts", "to": "src/lib/crypto/crypto-server.test.ts" },
+    { "from": "src/lib/crypto-team.ts",      "to": "src/lib/crypto/crypto-team.ts" },
+    { "from": "src/lib/crypto-team.test.ts", "to": "src/lib/crypto/crypto-team.test.ts" },
+    { "from": "src/lib/crypto-utils.ts",      "to": "src/lib/crypto/crypto-utils.ts" },
+    { "from": "src/lib/crypto-utils.test.ts", "to": "src/lib/crypto/crypto-utils.test.ts" },
+    { "from": "src/lib/export-crypto.ts",      "to": "src/lib/crypto/export-crypto.ts" },
+    { "from": "src/lib/export-crypto.test.ts", "to": "src/lib/crypto/export-crypto.test.ts" }
+  ]
+}

@@ -17,7 +17,7 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({
     encryptionKey: mockEncryptionKey,
     userId: "user-1",
@@ -29,11 +29,11 @@ vi.mock("@/lib/url-helpers", () => ({
   withBasePath: (p: string) => p,
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: mockDecryptData,
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildPersonalEntryAAD: vi.fn().mockReturnValue("aad"),
 }));
 
@@ -41,15 +41,15 @@ vi.mock("@/hooks/use-travel-mode", () => ({
   useTravelMode: () => ({ active: false }),
 }));
 
-vi.mock("@/lib/travel-mode", () => ({
+vi.mock("@/lib/auth/travel-mode", () => ({
   filterTravelSafe: (entries: unknown[]) => entries,
 }));
 
-vi.mock("@/lib/entry-sort", () => ({
+vi.mock("@/lib/vault/entry-sort", () => ({
   compareEntriesWithFavorite: () => 0,
 }));
 
-vi.mock("@/hooks/use-bulk-selection", () => ({
+vi.mock("@/hooks/bulk/use-bulk-selection", () => ({
   useBulkSelection: () => ({
     selectedIds: new Set<string>(),
     atLimit: false,
@@ -58,7 +58,7 @@ vi.mock("@/hooks/use-bulk-selection", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-bulk-action", () => ({
+vi.mock("@/hooks/bulk/use-bulk-action", () => ({
   useBulkAction: () => ({
     dialogOpen: false,
     setDialogOpen: vi.fn(),
@@ -70,7 +70,7 @@ vi.mock("@/hooks/use-bulk-action", () => ({
 }));
 
 // Render each entry title as a simple div so we can assert which entries are visible
-vi.mock("@/components/passwords/password-card", () => ({
+vi.mock("@/components/passwords/detail/password-card", () => ({
   PasswordCard: ({ entry }: { entry: { title: string } }) => (
     <div data-testid="password-card">{entry.title}</div>
   ),
@@ -102,7 +102,7 @@ vi.mock("lucide-react", () => ({
   Archive: () => null,
 }));
 
-import { PasswordList } from "./password-list";
+import { PasswordList } from "./detail/password-list";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

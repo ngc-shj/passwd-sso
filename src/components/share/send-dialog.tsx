@@ -39,7 +39,7 @@ import { toast } from "sonner";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { SEND_MAX_FILE_SIZE, SEND_MAX_TEXT_LENGTH, MAX_VIEWS_MIN, MAX_VIEWS_MAX, SEND_NAME_MAX_LENGTH } from "@/lib/validations";
-import { formatFileSize } from "@/lib/format-file-size";
+import { formatFileSize } from "@/lib/format/format-file-size";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 
 interface SendDialogProps {

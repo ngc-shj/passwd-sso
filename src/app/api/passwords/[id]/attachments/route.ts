@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import {
   ALLOWED_EXTENSIONS,
   ALLOWED_CONTENT_TYPES,
@@ -14,10 +14,10 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { withRequestLog } from "@/lib/with-request-log";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { AAD_VERSION } from "@/lib/crypto-aad";
+import { AAD_VERSION } from "@/lib/crypto/crypto-aad";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { errorResponse, forbidden, notFound, unauthorized, rateLimited } from "@/lib/api-response";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

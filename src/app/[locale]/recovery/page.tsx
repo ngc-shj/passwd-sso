@@ -2,21 +2,21 @@
 
 import { useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import {
   parseRecoveryKey,
   computeRecoveryVerifierHash,
   unwrapSecretKeyWithRecovery,
   wrapSecretKeyWithRecovery,
-} from "@/lib/crypto-recovery";
+} from "@/lib/crypto/crypto-recovery";
 import {
   deriveWrappingKey,
   wrapSecretKey,
   computePassphraseVerifier,
   generateAccountSalt,
   hexEncode,
-} from "@/lib/crypto-client";
+} from "@/lib/crypto/crypto-client";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { API_PATH } from "@/lib/constants";
 import { Button } from "@/components/ui/button";

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, use } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS, API_PATH, TEAM_ROLE } from "@/lib/constants";
 import { Button } from "@/components/ui/button";
 import { Building2, CheckCircle2, XCircle, Loader2, Lock, RefreshCw } from "lucide-react";

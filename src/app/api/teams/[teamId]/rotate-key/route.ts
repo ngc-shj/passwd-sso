@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/team-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
@@ -12,7 +12,7 @@ import { teamMemberKeySchema } from "@/lib/validations";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import {
   encryptedFieldSchema,
   TEAM_KEY_VERSION_MIN,

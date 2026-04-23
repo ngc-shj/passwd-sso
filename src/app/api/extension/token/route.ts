@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";
-import { issueExtensionToken, validateExtensionToken } from "@/lib/extension-token";
-import { enforceAccessRestriction } from "@/lib/access-restriction";
+import { issueExtensionToken, validateExtensionToken } from "@/lib/auth/extension-token";
+import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { EXTENSION_TOKEN_DEFAULT_SCOPES } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";

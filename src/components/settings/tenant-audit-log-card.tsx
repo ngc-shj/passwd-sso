@@ -27,8 +27,8 @@ import {
   API_PATH,
 } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import { formatUserName } from "@/lib/format-user";
-import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
+import { formatUserName } from "@/lib/format/format-user";
+import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
 import { AuditActionFilter } from "@/components/audit/audit-action-filter";
 import { AuditDateFilter } from "@/components/audit/audit-date-filter";
 import { AuditDownloadButton } from "@/components/audit/audit-download-button";

@@ -10,13 +10,13 @@ import {
   TagsSection,
   VaultManagementSection,
 } from "@/components/layout/sidebar-sections";
-import type { SidebarSection } from "@/hooks/use-sidebar-sections-state";
+import type { SidebarSection } from "@/hooks/sidebar/use-sidebar-sections-state";
 import type {
   SidebarFolderItem,
   SidebarTeamItem,
   SidebarTeamTagItem,
-} from "@/hooks/use-sidebar-data";
-import type { VaultContext } from "@/hooks/use-vault-context";
+} from "@/hooks/sidebar/use-sidebar-data";
+import type { VaultContext } from "@/hooks/vault/use-vault-context";
 import { TEAM_ROLE } from "@/lib/constants";
 
 export interface SidebarContentProps {

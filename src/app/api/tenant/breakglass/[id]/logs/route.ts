@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { withRequestLog } from "@/lib/with-request-log";
-import { extractRequestMeta } from "@/lib/audit";
+import { extractRequestMeta } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";
 import { USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
@@ -17,9 +17,9 @@ import {
   buildAuditLogActionFilter,
   paginateResult,
   isValidCursorId,
-} from "@/lib/audit-query";
+} from "@/lib/audit/audit-query";
 import type { Prisma } from "@prisma/client";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

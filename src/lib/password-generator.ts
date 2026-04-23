@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { AMBIGUOUS_CHARS, CHARSETS } from "./generator-prefs";
+import { AMBIGUOUS_CHARS, CHARSETS } from "./generator/generator-prefs";
 import { WORDLIST } from "./wordlist";
 
 export interface GeneratorOptions {

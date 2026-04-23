@@ -10,7 +10,7 @@
 
 import { randomBytes, createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/prisma";
-import { hashToken } from "@/lib/crypto-server";
+import { hashToken } from "@/lib/crypto/crypto-server";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { getLogger } from "@/lib/logger";
 import {

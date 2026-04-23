@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTeamPermission } from "@/lib/team-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import {
@@ -14,9 +14,9 @@ import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
   encryptServerData,
-} from "@/lib/crypto-server";
+} from "@/lib/crypto/crypto-server";
 import { randomBytes } from "node:crypto";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { z } from "zod";
 import { TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS } from "@/lib/constants";
 import { withRequestLog } from "@/lib/with-request-log";

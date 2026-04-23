@@ -42,10 +42,10 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/emergency-access-server", () => ({
+vi.mock("@/lib/emergency-access/emergency-access-server", () => ({
   markGrantsStaleForOwner: mockMarkStale,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/logger", () => ({
@@ -56,11 +56,11 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
-vi.mock("@/lib/delegation", () => ({
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/delegation", () => ({
   revokeAllDelegationSessions: vi.fn(async () => 0),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn(() => ({})),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
@@ -142,7 +142,7 @@ describe("POST /api/vault/rotate-key", () => {
   });
 
   it("returns 403 when Origin header is invalid", async () => {
-    const { assertOrigin } = await import("@/lib/csrf");
+    const { assertOrigin } = await import("@/lib/auth/csrf");
     vi.mocked(assertOrigin).mockReturnValueOnce(
       new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 })
     );
@@ -212,7 +212,7 @@ describe("POST /api/vault/rotate-key", () => {
       }),
     });
     // Verify delegation sessions are revoked after key rotation
-    const { revokeAllDelegationSessions } = await import("@/lib/delegation");
+    const { revokeAllDelegationSessions } = await import("@/lib/auth/delegation");
     expect(revokeAllDelegationSessions).toHaveBeenCalledWith("user-1", "tenant-1", "KEY_ROTATION");
   });
 

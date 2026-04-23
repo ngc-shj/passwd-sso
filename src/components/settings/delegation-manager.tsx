@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { API_PATH, apiPath } from "@/lib/constants/api-path";
 import { fetchApi } from "@/lib/url-helpers";
 import { VAULT_STATUS } from "@/lib/constants";

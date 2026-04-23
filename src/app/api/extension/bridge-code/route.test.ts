@@ -43,11 +43,11 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "a".repeat(64),
   hashToken: () => "h".repeat(64),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 vi.mock("@/lib/redis", () => ({
@@ -61,7 +61,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({
   ...((await importOriginal()) as Record<string, unknown>),
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "1.2.3.4", userAgent: "test" }),
   personalAuditBase: (_req: unknown, userId: string) => ({
@@ -71,10 +71,10 @@ vi.mock("@/lib/audit", () => ({
     userAgent: "test",
   }),
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: mockAssertOrigin,
 }));
 

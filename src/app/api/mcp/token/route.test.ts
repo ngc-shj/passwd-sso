@@ -22,13 +22,13 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
   createRefreshToken: mockCreateRefreshToken,
   exchangeRefreshToken: mockExchangeRefreshToken,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn().mockReturnValue({ ip: "127.0.0.1", userAgent: "test-agent" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

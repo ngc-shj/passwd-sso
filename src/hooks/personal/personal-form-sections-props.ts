@@ -1,0 +1,139 @@
+"use client";
+
+import type { ComponentProps } from "react";
+import { EntryActionBar } from "@/components/passwords/entry/entry-form-ui";
+import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
+import { EntryTagsAndFolderSection } from "@/components/passwords/entry/entry-tags-and-folder-section";
+import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
+import { buildEntryActionBarProps } from "@/hooks/form/entry-action-bar-props";
+
+type EntryTagsAndFolderSectionProps = ComponentProps<typeof EntryTagsAndFolderSection>;
+type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;
+type EntryRepromptSectionProps = ComponentProps<typeof EntryRepromptSection>;
+type EntryTravelSafeSectionProps = ComponentProps<typeof EntryTravelSafeSection>;
+type EntryExpirationSectionProps = ComponentProps<typeof EntryExpirationSection>;
+type EntryActionBarProps = ComponentProps<typeof EntryActionBar>;
+
+interface UsePersonalFormSectionsPropsArgs {
+  tagsTitle: string;
+  tagsHint: string;
+  folders: EntryTagsAndFolderSectionProps["folders"];
+  sectionCardClass: string;
+  repromptTitle: string;
+  repromptDescription: string;
+  travelSafeTitle: string;
+  travelSafeDescription: string;
+  expirationTitle: string;
+  expirationDescription: string;
+  hasChanges: boolean;
+  submitting: boolean;
+  submitDisabled?: boolean;
+  saveLabel: string;
+  cancelLabel: string;
+  statusUnsavedLabel: string;
+  statusSavedLabel: string;
+  onCancel: () => void;
+  values: Pick<
+    PersonalLoginFormState["values"],
+    "selectedTags" | "folderId" | "customFields" | "totp" | "showTotpInput" | "requireReprompt" | "travelSafe" | "expiresAt"
+  >;
+  setters: Pick<
+    PersonalLoginFormState["setters"],
+    | "setSelectedTags"
+    | "setFolderId"
+    | "setCustomFields"
+    | "setTotp"
+    | "setShowTotpInput"
+    | "setRequireReprompt"
+    | "setTravelSafe"
+    | "setExpiresAt"
+  >;
+}
+
+interface PersonalFormSectionsPropsResult {
+  tagsAndFolderProps: EntryTagsAndFolderSectionProps;
+  customFieldsTotpProps: EntryCustomFieldsTotpSectionProps;
+  repromptSectionProps: EntryRepromptSectionProps;
+  travelSafeSectionProps: EntryTravelSafeSectionProps;
+  expirationSectionProps: EntryExpirationSectionProps;
+  actionBarProps: EntryActionBarProps;
+}
+
+export function buildPersonalFormSectionsProps({
+  tagsTitle,
+  tagsHint,
+  folders,
+  sectionCardClass,
+  repromptTitle,
+  repromptDescription,
+  travelSafeTitle,
+  travelSafeDescription,
+  expirationTitle,
+  expirationDescription,
+  hasChanges,
+  submitting,
+  submitDisabled,
+  saveLabel,
+  cancelLabel,
+  statusUnsavedLabel,
+  statusSavedLabel,
+  onCancel,
+  values,
+  setters,
+}: UsePersonalFormSectionsPropsArgs): PersonalFormSectionsPropsResult {
+  return {
+    tagsAndFolderProps: {
+      tagsTitle,
+      tagsHint,
+      selectedTags: values.selectedTags,
+      onTagsChange: setters.setSelectedTags,
+      folders,
+      folderId: values.folderId,
+      onFolderChange: setters.setFolderId,
+      sectionCardClass,
+    },
+    customFieldsTotpProps: {
+      customFields: values.customFields,
+      setCustomFields: setters.setCustomFields,
+      totp: values.totp,
+      onTotpChange: setters.setTotp,
+      showTotpInput: values.showTotpInput,
+      setShowTotpInput: setters.setShowTotpInput,
+      sectionCardClass,
+    },
+    repromptSectionProps: {
+      checked: values.requireReprompt,
+      onCheckedChange: setters.setRequireReprompt,
+      title: repromptTitle,
+      description: repromptDescription,
+      sectionCardClass,
+    },
+    travelSafeSectionProps: {
+      checked: values.travelSafe,
+      onCheckedChange: setters.setTravelSafe,
+      title: travelSafeTitle,
+      description: travelSafeDescription,
+      sectionCardClass,
+    },
+    expirationSectionProps: {
+      value: values.expiresAt,
+      onChange: setters.setExpiresAt,
+      title: expirationTitle,
+      description: expirationDescription,
+      sectionCardClass,
+    },
+    actionBarProps: buildEntryActionBarProps({
+      hasChanges,
+      submitting,
+      submitDisabled,
+      saveLabel,
+      cancelLabel,
+      statusUnsavedLabel,
+      statusSavedLabel,
+      onCancel,
+    }),
+  };
+}

@@ -6,7 +6,7 @@ describe("audit log target labels", () => {
   it("uses parentAction and bulk trash/archive/unarchive/restore meta in shared target label helper", () => {
     // Personal and team pages delegate bulk/trash actions to getCommonTargetLabel
     const sharedHelper = readFileSync(
-      join(process.cwd(), "src/lib/audit-target-label.ts"),
+      join(process.cwd(), "src/lib/audit/audit-target-label.ts"),
       "utf8"
     );
 
@@ -25,7 +25,7 @@ describe("audit log target labels", () => {
   it("has i18n fallback when action key translation is missing", () => {
     // The canonical actionLabel fallback implementation lives in use-audit-logs.ts
     const hook = readFileSync(
-      join(process.cwd(), "src/hooks/use-audit-logs.ts"),
+      join(process.cwd(), "src/hooks/vault/use-audit-logs.ts"),
       "utf8"
     );
 

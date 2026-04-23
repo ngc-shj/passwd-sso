@@ -2,17 +2,17 @@
 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EntryLoginMainFields } from "@/components/passwords/entry-login-main-fields";
-import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry-custom-fields-totp-section";
-import { EntryRepromptSection } from "@/components/passwords/entry-reprompt-section";
-import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe-section";
-import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
+import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
+import { EntryCustomFieldsTotpSection } from "@/components/passwords/entry/entry-custom-fields-totp-section";
+import { EntryRepromptSection } from "@/components/passwords/entry/entry-reprompt-section";
+import { EntryTravelSafeSection } from "@/components/passwords/entry/entry-travel-safe-section";
+import { EntryExpirationSection } from "@/components/passwords/entry/entry-expiration-section";
 import { TeamAttachmentSection } from "./team-attachment-section";
 import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder-section";
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { EntryActionBar } from "@/components/passwords/entry-form-ui";
-import { useTeamLoginFormModel } from "@/hooks/use-team-login-form-model";
+import { EntryActionBar } from "@/components/passwords/entry/entry-form-ui";
+import { useTeamLoginFormModel } from "@/hooks/team/use-team-login-form-model";
 
 export function TeamLoginForm({
   teamId,

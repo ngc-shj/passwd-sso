@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { withRequestLog } from "@/lib/with-request-log";

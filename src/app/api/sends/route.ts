@@ -8,9 +8,9 @@ import {
   encryptShareData,
   generateAccessPassword,
   hashAccessPassword,
-} from "@/lib/crypto-server";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
-import { createRateLimiter } from "@/lib/rate-limit";
+} from "@/lib/crypto/crypto-server";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import {

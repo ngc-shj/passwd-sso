@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -40,10 +40,10 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
-import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface ServiceAccount {

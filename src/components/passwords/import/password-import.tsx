@@ -1,0 +1,211 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useTranslations } from "next-intl";
+import { useVault } from "@/lib/vault/vault-context";
+import { useTeamVaultOptional } from "@/lib/team/team-vault-context";
+import { PagePane } from "@/components/layout/page-pane";
+import { PageTitleCard } from "@/components/layout/page-title-card";
+import { Upload } from "lucide-react";
+import { API_PATH } from "@/lib/constants";
+import { apiPath } from "@/lib/constants/api-path";
+import {
+  ImportActions,
+  ImportDecryptStep,
+  ImportDoneStep,
+  ImportFileSelectStep,
+  ImportPreviewStep,
+} from "@/components/passwords/import/password-import-steps";
+import { useImportFileFlow } from "@/components/passwords/import/use-import-file-flow";
+import { useImportExecution } from "@/components/passwords/import/use-import-execution";
+import { useNavigationGuard } from "@/hooks/form/use-navigation-guard";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+
+// ─── Component ──────────────────────────────────────────────
+
+interface ImportPanelContentProps {
+  onComplete: () => void;
+  teamId?: string;
+}
+
+function ImportPanelContent({ onComplete, teamId: scopedTeamId }: ImportPanelContentProps) {
+  const t = useTranslations("Import");
+  const { encryptionKey, userId } = useVault();
+  const teamVault = useTeamVaultOptional();
+  const isTeamImport = Boolean(scopedTeamId);
+  const tagsPath = scopedTeamId ? apiPath.teamTags(scopedTeamId) : API_PATH.TAGS;
+  const foldersPath = scopedTeamId ? apiPath.teamFolders(scopedTeamId) : API_PATH.FOLDERS;
+
+  // Resolve team encryption key for team imports
+  const [teamEncryptionKey, setTeamEncryptionKey] = useState<CryptoKey | undefined>();
+  const [teamKeyVersion, setTeamKeyVersion] = useState<number | undefined>();
+  useEffect(() => {
+    if (!isTeamImport || !scopedTeamId || !teamVault) return;
+    teamVault.getTeamKeyInfo(scopedTeamId).then((info) => {
+      if (info) {
+        setTeamEncryptionKey(info.key);
+        setTeamKeyVersion(info.keyVersion);
+      }
+    });
+  }, [isTeamImport, scopedTeamId, teamVault]);
+
+  const {
+    fileRef,
+    entries,
+    format,
+    dragOver,
+    encryptedFile,
+    decryptPassword,
+    decrypting,
+    decryptError,
+    sourceFilename,
+    encryptedInput,
+    setDragOver,
+    setDecryptPasswordAndClearError,
+    handleFileChange,
+    handleDrop,
+    handleDecrypt,
+    reset: resetFileFlow,
+  } = useImportFileFlow();
+  const {
+    importing,
+    progress,
+    done,
+    result,
+    resetExecution,
+    runImport,
+  } = useImportExecution({
+    t,
+    onComplete,
+    isTeamImport,
+    tagsPath,
+    foldersPath,
+    sourceFilename,
+    encryptedInput,
+    userId: userId ?? undefined,
+    encryptionKey: encryptionKey ?? undefined,
+    teamEncryptionKey,
+    teamKeyVersion,
+    teamId: scopedTeamId,
+  });
+
+  // Guard during: encrypted file decryption input, preview with parsed entries, active import.
+  // Once done === true, data is already server-side so no guard needed.
+  const isDirty = importing || encryptedFile !== null || (entries.length > 0 && !done);
+  const guard = useNavigationGuard(isDirty);
+
+  const reset = () => {
+    resetExecution();
+    resetFileFlow();
+  };
+
+  const content = (
+    <>
+      {done ? (
+        <ImportDoneStep t={t} successCount={result.success} onReset={reset} />
+      ) : encryptedFile ? (
+        <ImportDecryptStep
+          t={t}
+          decryptPassword={decryptPassword}
+          decryptError={decryptError}
+          decrypting={decrypting}
+          onReset={reset}
+          onDecrypt={() => handleDecrypt(t("decryptionFailed"))}
+          onDecryptPasswordChange={setDecryptPasswordAndClearError}
+          encryptedFile={encryptedFile}
+        />
+      ) : entries.length === 0 ? (
+        <ImportFileSelectStep
+          t={t}
+          dragOver={dragOver}
+          fileRef={fileRef}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onFileChange={handleFileChange}
+        />
+      ) : (
+        <ImportPreviewStep
+          t={t}
+          entries={entries}
+          format={format}
+          importing={importing}
+          progress={progress}
+        />
+      )}
+
+      {!done && entries.length > 0 && (
+        <ImportActions
+          t={t}
+          importing={importing}
+          entriesCount={entries.length}
+          onReset={reset}
+          onImport={() => runImport(entries)}
+        />
+      )}
+    </>
+  );
+
+  return (
+    <>
+      <AlertDialog open={guard.dialogOpen} onOpenChange={guard.cancelLeave}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("leaveTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>{t("leaveConfirm")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("leaveStay")}</AlertDialogCancel>
+            <AlertDialogAction onClick={guard.confirmLeave}>
+              {t("leaveNow")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      {content}
+    </>
+  );
+}
+
+interface ImportPagePanelProps {
+  onComplete: () => void;
+  teamId?: string;
+}
+
+export function ImportPagePanel({ onComplete, teamId }: ImportPagePanelProps) {
+  const t = useTranslations("Import");
+  return (
+    <PagePane
+      header={
+        <PageTitleCard
+          icon={<Upload className="h-5 w-5" />}
+          title={t("title")}
+          description={t("description")}
+        />
+      }
+    >
+      <ImportPanelContent onComplete={onComplete} teamId={teamId} />
+    </PagePane>
+  );
+}
+
+interface TeamImportPagePanelProps {
+  teamId?: string;
+  onComplete: () => void;
+}
+
+export function TeamImportPagePanel({ teamId, onComplete }: TeamImportPagePanelProps) {
+  return <ImportPagePanel onComplete={onComplete} teamId={teamId} />;
+}

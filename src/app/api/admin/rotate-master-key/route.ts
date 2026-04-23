@@ -14,15 +14,15 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { verifyAdminToken } from "@/lib/admin-token";
+import { verifyAdminToken } from "@/lib/auth/admin-token";
 import { prisma } from "@/lib/prisma";
 import { parseBody } from "@/lib/parse-body";
 import {
   getCurrentMasterKeyVersion,
   getMasterKeyByVersion,
-} from "@/lib/crypto-server";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
+} from "@/lib/crypto/crypto-server";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { SYSTEM_ACTOR_ID } from "@/lib/constants/app";

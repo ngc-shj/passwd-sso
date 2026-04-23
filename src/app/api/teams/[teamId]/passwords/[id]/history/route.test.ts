@@ -17,7 +17,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -39,7 +39,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { GET } from "./route";
-import { TeamAuthError } from "@/lib/team-auth";
+import { TeamAuthError } from "@/lib/auth/team-auth";
 
 const TEAM_ID = "team-1";
 const ENTRY_ID = "entry-1";

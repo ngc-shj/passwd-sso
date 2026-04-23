@@ -39,7 +39,7 @@ vi.mock("sonner", () => ({
 }));
 
 // Stub child components to avoid deep dependency trees
-vi.mock("@/components/passwords/password-card", () => ({
+vi.mock("@/components/passwords/detail/password-card", () => ({
   PasswordCard: ({ onEditClick }: { onEditClick?: () => void }) => (
     <button data-testid="password-card" onClick={onEditClick}>
       password-card
@@ -132,7 +132,7 @@ function renderPage() {
   );
 }
 
-vi.mock("@/components/passwords/entry-list-header", () => ({
+vi.mock("@/components/passwords/entry/entry-list-header", () => ({
   EntryListHeader: ({
     title,
     subtitle,
@@ -152,7 +152,7 @@ vi.mock("@/components/passwords/entry-list-header", () => ({
   ),
 }));
 
-vi.mock("@/components/passwords/entry-sort-menu", () => ({
+vi.mock("@/components/passwords/entry/entry-sort-menu", () => ({
   EntrySortMenu: () => null,
 }));
 
@@ -160,7 +160,7 @@ vi.mock("@/components/team/team-favorites-list", () => ({
   TeamFavoritesList: () => null,
 }));
 
-vi.mock("@/lib/team-vault-context", () => ({
+vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamEncryptionKey,
     getTeamKeyInfo: vi.fn().mockResolvedValue(null),
@@ -170,11 +170,11 @@ vi.mock("@/lib/team-vault-context", () => ({
   }),
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   decryptData: (...args: unknown[]) => mockDecryptData(...args),
 }));
 
-vi.mock("@/lib/crypto-aad", () => ({
+vi.mock("@/lib/crypto/crypto-aad", () => ({
   buildTeamEntryAAD: vi.fn().mockReturnValue(new Uint8Array()),
 }));
 

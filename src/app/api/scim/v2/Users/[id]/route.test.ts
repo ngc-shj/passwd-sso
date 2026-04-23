@@ -28,9 +28,9 @@ const {
   mockLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-vi.mock("@/lib/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
+vi.mock("@/lib/auth/scim-token", () => ({ validateScimToken: mockValidateScimToken }));
 vi.mock("@/lib/scim/rate-limit", () => ({ checkScimRateLimit: mockCheckScimRateLimit }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: null, userAgent: null, acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: null, userAgent: null, acceptLanguage: null }),
@@ -46,10 +46,10 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
-vi.mock("@/lib/user-session-invalidation", () => ({
+vi.mock("@/lib/auth/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: vi.fn().mockResolvedValue(null),
 }));
 vi.mock("@/lib/logger", () => ({

@@ -38,8 +38,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, apiPath, ENTRY_TYPE } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format-datetime";
-import { formatFileSize } from "@/lib/format-file-size";
+import { formatDateTime } from "@/lib/format/format-datetime";
+import { formatFileSize } from "@/lib/format/format-file-size";
 import { SendDialog } from "@/components/share/send-dialog";
 import { fetchApi } from "@/lib/url-helpers";
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z, type ZodError } from "zod";
 import { API_ERROR, type ApiErrorCode } from "@/lib/api-error-codes";
-import { mapPrismaError } from "@/lib/prisma-error";
+import { mapPrismaError } from "@/lib/prisma/prisma-error";
 
 // Avoid importing TeamAuthError/TenantAuthError directly to prevent circular
 // dependencies — both classes share the same { message: ApiErrorCode, status: number }

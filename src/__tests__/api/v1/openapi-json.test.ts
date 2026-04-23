@@ -6,7 +6,7 @@ const mockBuildOpenApiSpec = vi.hoisted(() =>
   vi.fn(() => ({ openapi: "3.1.0", info: { title: "test", version: "1.0" } }))
 );
 
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
 

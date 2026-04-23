@@ -35,7 +35,7 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
@@ -43,13 +43,13 @@ vi.mock("@/lib/redis", () => ({
   getRedis: mockGetRedis,
 }));
 
-vi.mock("@/lib/webauthn-server", () => ({
+vi.mock("@/lib/auth/webauthn-server", () => ({
   verifyRegistration: mockVerifyRegistration,
   uint8ArrayToBase64url: mockUint8ArrayToBase64url,
   getRpOrigin: mockGetRpOrigin,
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: null, userAgent: null, acceptLanguage: null }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

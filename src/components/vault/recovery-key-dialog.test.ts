@@ -21,10 +21,10 @@ const {
   mockFetch: vi.fn(),
 }));
 
-vi.mock("@/lib/crypto-client", () => ({
+vi.mock("@/lib/crypto/crypto-client", () => ({
   computePassphraseVerifier: mockComputePassphraseVerifier,
 }));
-vi.mock("@/lib/crypto-recovery", () => ({
+vi.mock("@/lib/crypto/crypto-recovery", () => ({
   generateRecoveryKey: mockGenerateRecoveryKey,
   formatRecoveryKey: mockFormatRecoveryKey,
   wrapSecretKeyWithRecovery: mockWrapSecretKeyWithRecovery,
@@ -43,7 +43,7 @@ vi.mock("@/lib/url-helpers", () => ({
   BASE_PATH: "",
 }));
 // Unused by generateRecoveryKeyFlow but required for module import
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: () => ({}),
 }));
 vi.mock("next-intl", () => ({

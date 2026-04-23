@@ -32,23 +32,23 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
   verifyAccessPassword: mockVerifyAccessPassword,
 }));
-vi.mock("@/lib/share-access-token", () => ({
+vi.mock("@/lib/auth/share-access-token", () => ({
   createShareAccessToken: mockCreateShareAccessToken,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn()
     .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockTokenCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
   rateLimitKeyFromIp: (ip: string) => ip,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "Test", acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "Test", acceptLanguage: null }),

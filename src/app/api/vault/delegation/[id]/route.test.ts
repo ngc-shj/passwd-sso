@@ -14,8 +14,8 @@ const {
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/tenant-context", () => ({ resolveUserTenantId: mockResolveUserTenantId }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: mockAssertOrigin }));
-vi.mock("@/lib/delegation", () => ({
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: mockAssertOrigin }));
+vi.mock("@/lib/auth/delegation", () => ({
   revokeDelegationSession: mockRevokeDelegationSession,
 }));
 vi.mock("@/lib/with-request-log", () => ({

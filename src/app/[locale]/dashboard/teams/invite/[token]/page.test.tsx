@@ -25,7 +25,7 @@ vi.mock("@/i18n/navigation", () => ({
   useRouter: () => ({ push: mockRouterPush }),
 }));
 
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: mockUseVault,
 }));
 

@@ -40,7 +40,7 @@ import {
   SHARE_PERMISSION_VALUES,
   applySharePermissions,
 } from "@/lib/constants/share-permission";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
 import { safeRecord } from "@/lib/safe-keys";

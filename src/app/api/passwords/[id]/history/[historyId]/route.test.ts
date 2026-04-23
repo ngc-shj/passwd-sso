@@ -26,12 +26,12 @@ vi.mock("@/lib/prisma", () => ({
     passwordEntryHistory: mockPrismaPasswordEntryHistory,
   },
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: () => Promise.resolve({ allowed: true }) }),
 }));
 vi.mock("@/lib/tenant-context", () => ({

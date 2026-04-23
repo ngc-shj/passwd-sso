@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { TeamImportPagePanel } from "@/components/passwords/password-import";
+import { TeamImportPagePanel } from "@/components/passwords/import/password-import";
 import { notifyVaultDataChanged } from "@/lib/events";
 
 export default function TeamImportPage() {

@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
-import { checkAuth } from "@/lib/check-auth";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
+import { checkAuth } from "@/lib/auth/check-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
 import { updateTeamE2EPasswordSchema } from "@/lib/validations";
 import {
   requireTeamPermission,
   requireTeamMember,
   hasTeamPermission,
-} from "@/lib/team-auth";
+} from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION, EXTENSION_TOKEN_SCOPE } from "@/lib/constants";

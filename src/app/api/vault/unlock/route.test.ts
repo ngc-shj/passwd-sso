@@ -28,10 +28,10 @@ vi.mock("@/lib/prisma", () => ({
     vaultKey: mockPrismaVaultKey,
   },
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => mockRateLimiter,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hmacVerifier: vi.fn().mockReturnValue("a".repeat(64)),
 }));
 vi.mock("@/lib/logger", () => ({
@@ -39,7 +39,7 @@ vi.mock("@/lib/logger", () => ({
   requestContext: { run: (_l: unknown, fn: () => unknown) => fn() },
   getLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("@/lib/account-lockout", () => ({
+vi.mock("@/lib/auth/account-lockout", () => ({
   checkLockout: mockCheckLockout,
   recordFailure: mockRecordFailure,
   resetLockout: mockResetLockout,
@@ -47,7 +47,7 @@ vi.mock("@/lib/account-lockout", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
 
 import { POST } from "./route";
 
@@ -82,7 +82,7 @@ describe("POST /api/vault/unlock", () => {
   });
 
   it("returns 403 when Origin header is invalid", async () => {
-    const { assertOrigin } = await import("@/lib/csrf");
+    const { assertOrigin } = await import("@/lib/auth/csrf");
     vi.mocked(assertOrigin).mockReturnValueOnce(
       new Response(JSON.stringify({ error: "INVALID_ORIGIN" }), { status: 403 })
     );

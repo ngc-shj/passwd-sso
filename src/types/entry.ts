@@ -9,8 +9,8 @@ import type {
   EntryPasswordHistory,
   EntryTagNameColor,
   EntryTotp,
-} from "@/lib/entry-form-types";
-import type { TOTPEntry } from "@/components/passwords/totp-field";
+} from "@/lib/vault/entry-form-types";
+import type { TOTPEntry } from "@/components/passwords/shared/totp-field";
 
 /**
  * Detail view data for a single entry (after decryption).

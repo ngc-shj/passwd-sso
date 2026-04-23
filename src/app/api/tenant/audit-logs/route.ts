@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { requireTenantPermission } from "@/lib/tenant-auth";
+import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM, AUDIT_SCOPE, mergeActionGroups } from "@/lib/constants";
@@ -16,8 +16,8 @@ import {
   buildAuditLogActionFilter,
   paginateResult,
   isValidCursorId,
-} from "@/lib/audit-query";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+} from "@/lib/audit/audit-query";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 
 const MERGED_ACTION_GROUPS = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
 

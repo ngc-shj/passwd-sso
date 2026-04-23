@@ -92,8 +92,8 @@ All password data is encrypted **client-side** before reaching the server. The s
   - `encryptedBlob` — full entry data (title, username, password, url, notes, tags, generatorSettings)
   - `encryptedOverview` — summary for list view (title, username, urlHost, tags)
   - Both have separate IV (12 bytes) and authTag (16 bytes), stored as hex strings
-- **Vault context:** `src/lib/vault-context.tsx` provides `encryptionKey` to components after unlock
-- **Crypto implementation:** `src/lib/crypto-client.ts` (Web Crypto API)
+- **Vault context:** `src/lib/vault/vault-context.tsx` provides `encryptionKey` to components after unlock
+- **Crypto implementation:** `src/lib/crypto/crypto-client.ts` (Web Crypto API)
 
 ### API Endpoints
 
@@ -396,7 +396,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 ### Password Generator
 
 - Settings stored per-entry in encrypted blob (not per-user DB column or localStorage)
-- Symbol groups defined in `src/lib/generator-prefs.ts` (6 groups with individual toggles)
+- Symbol groups defined in `src/lib/generator/generator-prefs.ts` (6 groups with individual toggles)
 - Server-side generation uses `node:crypto` randomBytes in `src/lib/password-generator.ts`
 
 ### Docker Services

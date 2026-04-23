@@ -20,26 +20,26 @@ describe("createAuditLogger", () => {
 
   it("is disabled when AUDIT_LOG_FORWARD is not set", async () => {
     delete process.env.AUDIT_LOG_FORWARD;
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const logger = createAuditLogger();
     expect(logger.isLevelEnabled("info")).toBe(false);
   });
 
   it("is disabled when AUDIT_LOG_FORWARD is 'false'", async () => {
     process.env.AUDIT_LOG_FORWARD = "false";
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const logger = createAuditLogger();
     expect(logger.isLevelEnabled("info")).toBe(false);
   });
 
   it("is enabled when AUDIT_LOG_FORWARD is 'true'", async () => {
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const logger = createAuditLogger({ enabled: true });
     expect(logger.isLevelEnabled("info")).toBe(true);
   });
 
   it("does not write to sink when disabled", async () => {
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const { chunks, stream } = createSink();
 
     const logger = createAuditLogger({ enabled: false, destination: stream });
@@ -51,7 +51,7 @@ describe("createAuditLogger", () => {
   });
 
   it("writes to sink when enabled", async () => {
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const { chunks, stream } = createSink();
 
     const logger = createAuditLogger({ enabled: true, destination: stream });
@@ -63,7 +63,7 @@ describe("createAuditLogger", () => {
   });
 
   it("includes _logType, _app, _version in base fields", async () => {
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const { chunks, stream } = createSink();
 
     const logger = createAuditLogger({
@@ -87,7 +87,7 @@ describe("createAuditLogger", () => {
   });
 
   it("redacts sensitive fields in audit.metadata", async () => {
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const { chunks, stream } = createSink();
 
     const logger = createAuditLogger({ enabled: true, destination: stream });
@@ -126,7 +126,7 @@ describe("createAuditLogger", () => {
   });
 
   it("uses custom appName when provided", async () => {
-    const { createAuditLogger } = await import("@/lib/audit-logger");
+    const { createAuditLogger } = await import("@/lib/audit/audit-logger");
     const { chunks, stream } = createSink();
 
     const logger = createAuditLogger({
@@ -148,7 +148,7 @@ describe("createAuditLogger", () => {
 
 describe("METADATA_BLOCKLIST", () => {
   it("contains expected sensitive keys", async () => {
-    const { METADATA_BLOCKLIST } = await import("@/lib/audit-logger");
+    const { METADATA_BLOCKLIST } = await import("@/lib/audit/audit-logger");
 
     const expectedKeys = [
       "password",
@@ -176,7 +176,7 @@ describe("METADATA_BLOCKLIST", () => {
   });
 
   it("does not contain normal audit fields", async () => {
-    const { METADATA_BLOCKLIST } = await import("@/lib/audit-logger");
+    const { METADATA_BLOCKLIST } = await import("@/lib/audit/audit-logger");
 
     const safeKeys = [
       "filename",

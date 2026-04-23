@@ -4,12 +4,12 @@ import { auth } from "@/auth";
 import { parseBody } from "@/lib/parse-body";
 import { prisma } from "@/lib/prisma";
 import { getRedis } from "@/lib/redis";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withRequestLog } from "@/lib/with-request-log";
 import { rateLimited } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import {
   PIN_LENGTH_MIN,
@@ -23,7 +23,7 @@ import {
   verifyRegistration,
   uint8ArrayToBase64url,
   getRpOrigin,
-} from "@/lib/webauthn-server";
+} from "@/lib/auth/webauthn-server";
 import { parseDeviceFromUserAgent } from "@/lib/parse-user-agent";
 import { sendEmail } from "@/lib/email";
 import { passkeyRegisteredEmail } from "@/lib/email/templates/passkey-registered";

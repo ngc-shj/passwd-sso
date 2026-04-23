@@ -1,19 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { createE2EPasswordSchema } from "@/lib/validations";
 import { rateLimited, validationError } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { checkAuth } from "@/lib/check-auth";
+import { checkAuth } from "@/lib/auth/check-auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import type { EntryType } from "@prisma/client";
 import { ENTRY_TYPE_VALUES, EXTENSION_TOKEN_SCOPE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
-import { toBlobColumns, toOverviewColumns } from "@/lib/crypto-blob";
+import { toBlobColumns, toOverviewColumns } from "@/lib/crypto/crypto-blob";
 import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
 import { MS_PER_DAY } from "@/lib/constants/time";
 

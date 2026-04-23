@@ -81,7 +81,7 @@ vi.mock("@/lib/dynamic-styles", () => ({
   getTagColorClass: () => "",
 }));
 
-vi.mock("@/hooks/use-vault-context", () => ({
+vi.mock("@/hooks/vault/use-vault-context", () => ({
   useVaultContext: (teams: unknown[]) => mockUseVaultContext(teams),
   useTeamVaultContext: (teams: unknown[]) => mockUseVaultContext(teams),
 }));

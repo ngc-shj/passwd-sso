@@ -20,8 +20,8 @@ import { apiPath, GRANT_STATUS } from "@/lib/constants";
 import type { GrantStatus } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { DISPLAY_REASON_PREVIEW } from "@/lib/validations/common";
-import { formatDateTime } from "@/lib/format-datetime";
-import { formatUserName } from "@/lib/format-user";
+import { formatDateTime } from "@/lib/format/format-datetime";
+import { formatUserName } from "@/lib/format/format-user";
 import { toast } from "sonner";
 import { BreakGlassPersonalLogViewer } from "./breakglass-personal-log-viewer";
 

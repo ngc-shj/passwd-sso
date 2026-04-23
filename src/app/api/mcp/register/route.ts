@@ -3,10 +3,10 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { hashToken } from "@/lib/crypto-server";
-import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
-import { logAuditAsync } from "@/lib/audit";
+import { hashToken } from "@/lib/crypto/crypto-server";
+import { createRateLimiter } from "@/lib/security/rate-limit";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
+import { logAuditAsync } from "@/lib/audit/audit";
 import { AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit-target";
 import {

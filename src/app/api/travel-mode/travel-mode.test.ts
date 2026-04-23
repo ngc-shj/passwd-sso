@@ -23,16 +23,16 @@ vi.mock("@/auth", () => ({ auth: mockAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: { user: mockPrismaUser },
 }));
-vi.mock("@/lib/account-lockout", () => ({
+vi.mock("@/lib/auth/account-lockout", () => ({
   checkLockout: mockCheckLockout,
   recordFailure: mockRecordFailure,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   verifyPassphraseVerifier: mockVerifyPassphraseVerifier,
 }));
 vi.mock("@/lib/tenant-context", () => ({

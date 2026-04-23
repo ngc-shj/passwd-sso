@@ -3,13 +3,13 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault } from "@/lib/vault-context";
-import { computePassphraseVerifier } from "@/lib/crypto-client";
+import { useVault } from "@/lib/vault/vault-context";
+import { computePassphraseVerifier } from "@/lib/crypto/crypto-client";
 import {
   generateRecoveryKey,
   formatRecoveryKey,
   wrapSecretKeyWithRecovery,
-} from "@/lib/crypto-recovery";
+} from "@/lib/crypto/crypto-recovery";
 import { apiErrorToI18nKey } from "@/lib/api-error-codes";
 import { preventIMESubmit } from "@/lib/ime-guard";
 import { API_PATH } from "@/lib/constants";

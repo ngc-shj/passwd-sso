@@ -6,12 +6,12 @@ import {
   requireTeamMember,
   requireTeamPermission,
   TeamAuthError,
-} from "@/lib/team-auth";
+} from "@/lib/auth/team-auth";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
 

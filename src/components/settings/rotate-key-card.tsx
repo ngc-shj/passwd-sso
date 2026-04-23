@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { RotateKeyDialog } from "@/components/vault/rotate-key-dialog";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 
 export function RotateKeyCard() {

@@ -23,16 +23,16 @@ const { mockAuth, mockCheck, mockCreateNotification, mockLogAudit, mockSendEmail
 });
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockCheck,
     clear: vi.fn(),
   })),
 }));
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn(() => null),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
@@ -61,13 +61,13 @@ vi.mock("@/lib/prisma", () => ({
     },
   },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError: MockTeamAuthError,
 }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: vi.fn(() => "en") }));
 vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: vi.fn(() => "http://localhost") }));
-vi.mock("@/lib/notification-messages", () => ({
+vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: vi.fn(() => "Alert"),
   notificationBody: vi.fn(() => "Body"),
 }));

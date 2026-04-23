@@ -27,7 +27,7 @@ const { mockAuth, mockCheckAuth, mockPrismaTeamMember, mockPrismaTeam, mockWithU
   };
 });
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/check-auth", () => ({ checkAuth: mockCheckAuth }));
+vi.mock("@/lib/auth/check-auth", () => ({ checkAuth: mockCheckAuth }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     teamMember: mockPrismaTeamMember,
@@ -44,7 +44,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
 vi.mock("@/lib/logger", () => ({
   getLogger: mockGetLogger,
 }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError: MockTenantAuthError,
 }));

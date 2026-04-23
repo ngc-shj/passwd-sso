@@ -30,7 +30,7 @@ vi.mock("@/lib/prisma", () => ({
     directorySyncConfig: { findFirst: mockConfigFindFirst },
   },
 }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
 }));
 vi.mock("@/lib/tenant-context", () => ({
@@ -39,7 +39,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (handler: (...args: unknown[]) => unknown) => handler,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
@@ -57,7 +57,7 @@ vi.mock("@/lib/webhook-dispatcher", () => ({
 vi.mock("@/lib/directory-sync/engine", () => ({
   runDirectorySync: mockRunDirectorySync,
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),

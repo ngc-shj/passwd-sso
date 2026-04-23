@@ -8,18 +8,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth } from "@/auth";
-import { assertOrigin } from "@/lib/csrf";
+import { assertOrigin } from "@/lib/auth/csrf";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { resolveUserTenantId } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { MCP_SCOPE } from "@/lib/constants/mcp";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, unauthorized, rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import {
   DELEGATION_DEFAULT_TTL_SEC,
@@ -29,8 +29,8 @@ import {
   storeDelegationEntries,
   evictDelegationRedisKeys,
   revokeAllDelegationSessions,
-} from "@/lib/delegation";
-import type { DelegationMetadata } from "@/lib/delegation";
+} from "@/lib/auth/delegation";
+import type { DelegationMetadata } from "@/lib/auth/delegation";
 
 export const runtime = "nodejs";
 

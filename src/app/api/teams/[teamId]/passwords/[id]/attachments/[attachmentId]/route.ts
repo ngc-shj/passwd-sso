@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, teamAuditBase } from "@/lib/audit";
-import { requireTeamPermission } from "@/lib/team-auth";
+import { logAuditAsync, teamAuditBase } from "@/lib/audit/audit";
+import { requireTeamPermission } from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { getAttachmentBlobStore } from "@/lib/blob-store";
 import { AUDIT_TARGET_TYPE, TEAM_PERMISSION, AUDIT_ACTION } from "@/lib/constants";

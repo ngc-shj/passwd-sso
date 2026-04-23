@@ -31,7 +31,7 @@ vi.mock("@/lib/prisma", () => ({
     adminVaultReset: mockPrismaAdminVaultReset,
   },
 }));
-vi.mock("@/lib/tenant-auth", () => ({
+vi.mock("@/lib/auth/tenant-auth", () => ({
   requireTenantPermission: mockRequireTenantPermission,
   TenantAuthError,
 }));

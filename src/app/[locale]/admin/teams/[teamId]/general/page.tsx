@@ -24,7 +24,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { Link } from "@/i18n/navigation";
 import { Loader2, ShieldAlert, Settings2 } from "lucide-react";
 import { toast } from "sonner";
@@ -33,8 +33,8 @@ import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
 import { SectionLayout } from "@/components/settings/section-layout";
-import { useFormDirty } from "@/hooks/use-form-dirty";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface TeamInfo {

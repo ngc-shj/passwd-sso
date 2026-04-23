@@ -13,9 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ScrollText } from "lucide-react";
-import { useVault } from "@/lib/vault-context";
-import { decryptData, type EncryptedData } from "@/lib/crypto-client";
-import { buildPersonalEntryAAD } from "@/lib/crypto-aad";
+import { useVault } from "@/lib/vault/vault-context";
+import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD } from "@/lib/crypto/crypto-aad";
 import {
   API_PATH,
   AUDIT_ACTION,
@@ -25,11 +25,11 @@ import {
   AUDIT_TARGET_TYPE,
   type AuditActionValue,
 } from "@/lib/constants";
-import { formatUserName } from "@/lib/format-user";
+import { formatUserName } from "@/lib/format/format-user";
 import { useAuditDelegationLabel } from "@/components/audit/audit-delegation-detail";
-import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
-import { getActionLabel } from "@/lib/audit-action-label";
-import { getCommonTargetLabel } from "@/lib/audit-target-label";
+import { useAuditLogs, type AuditLogItem } from "@/hooks/vault/use-audit-logs";
+import { getActionLabel } from "@/lib/audit/audit-action-label";
+import { getCommonTargetLabel } from "@/lib/audit/audit-target-label";
 import { AuditActionFilter } from "@/components/audit/audit-action-filter";
 import { AuditDateFilter } from "@/components/audit/audit-date-filter";
 import { AuditDownloadButton } from "@/components/audit/audit-download-button";

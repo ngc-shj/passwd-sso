@@ -674,7 +674,7 @@ export const AUDIT_METADATA_KEY = {
 
 export const AUDIT_ACTION_EMERGENCY_PREFIX = "EMERGENCY_";
 
-import { envInt } from "@/lib/env-utils";
+import { envInt } from "@/lib/env/env-utils";
 
 export const AUDIT_OUTBOX = {
   BATCH_SIZE: envInt("OUTBOX_BATCH_SIZE", 500),

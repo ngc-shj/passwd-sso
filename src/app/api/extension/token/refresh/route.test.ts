@@ -32,12 +32,12 @@ const {
   mockEnforceAccessRestriction: vi.fn<(...args: unknown[]) => Promise<unknown>>().mockResolvedValue(null),
 }));
 
-vi.mock("@/lib/extension-token", () => ({
+vi.mock("@/lib/auth/extension-token", () => ({
   validateExtensionToken: mockValidateExtensionToken,
   revokeExtensionTokenFamily: mockRevokeExtensionTokenFamily,
 }));
 
-vi.mock("@/lib/access-restriction", () => ({
+vi.mock("@/lib/auth/access-restriction", () => ({
   enforceAccessRestriction: mockEnforceAccessRestriction,
 }));
 
@@ -57,12 +57,12 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "new-token-plaintext",
   hashToken: () => "new-token-hash",
 }));
 
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 

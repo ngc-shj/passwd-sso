@@ -24,8 +24,8 @@ import {
   PASSWORD_EXPIRY_WARNING_MIN,
   PASSWORD_EXPIRY_WARNING_MAX,
 } from "@/lib/validations";
-import { useFormDirty } from "@/hooks/use-form-dirty";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 import { bindRangeInput } from "@/lib/input-range";
 

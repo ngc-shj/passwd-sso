@@ -1,10 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { logAuditAsync, personalAuditBase } from "@/lib/audit";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { API_ERROR } from "@/lib/api-error-codes";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getSessionToken } from "../helpers";
 import { withUserTenantRls } from "@/lib/tenant-context";

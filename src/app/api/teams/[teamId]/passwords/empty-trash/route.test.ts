@@ -33,14 +33,14 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockPrismaTransaction,
   },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError,
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   logAuditBulkAsync: vi.fn(async (entries: unknown[]) => {
     for (const e of entries) await mockLogAudit(e);

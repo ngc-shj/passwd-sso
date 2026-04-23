@@ -25,7 +25,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => {
+vi.mock("@/lib/auth/team-auth", () => {
   class TeamAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -51,12 +51,12 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
   },
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/folder-utils", () => ({
+vi.mock("@/lib/folder/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
 }));
@@ -65,8 +65,8 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { GET, POST } from "@/app/api/teams/[teamId]/folders/route";
-import { TeamAuthError } from "@/lib/team-auth";
-import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
+import { TeamAuthError } from "@/lib/auth/team-auth";
+import { validateParentFolder, validateFolderDepth } from "@/lib/folder/folder-utils";
 
 describe("GET /api/teams/[teamId]/folders", () => {
   beforeEach(() => vi.clearAllMocks());

@@ -60,14 +60,14 @@ vi.mock("@/lib/mcp/oauth-server", () => ({
   createAuthorizationCode: mockCreateAuthorizationCode,
 }));
 
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
   tenantAuditBase: (_req: unknown, userId: string, tenantId: string) => ({ scope: "TENANT", userId, tenantId, ip: "127.0.0.1", userAgent: "test-agent", acceptLanguage: null }),
 }));
 
-vi.mock("@/lib/csrf", () => ({
+vi.mock("@/lib/auth/csrf", () => ({
   assertOrigin: vi.fn().mockReturnValue(null),
 }));
 
@@ -150,7 +150,7 @@ describe("POST /api/mcp/authorize/consent", () => {
   });
 
   it("returns 403 when Origin header does not match host (CSRF check)", async () => {
-    const { assertOrigin } = await import("@/lib/csrf");
+    const { assertOrigin } = await import("@/lib/auth/csrf");
     const mockAssertOrigin = vi.mocked(assertOrigin);
     const { NextResponse } = await import("next/server");
     mockAssertOrigin.mockReturnValueOnce(

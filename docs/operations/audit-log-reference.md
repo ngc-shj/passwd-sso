@@ -530,8 +530,8 @@ Changes across two feature branches that standardize audit log output:
 | Component | Path |
 |-----------|------|
 | Constants | `src/lib/constants/audit.ts`, `src/lib/constants/audit-target.ts` |
-| Logging function | `src/lib/audit.ts` |
-| Auth adapter (SESSION_EVICTED) | `src/lib/auth-adapter.ts` |
+| Logging function | `src/lib/audit/audit.ts` |
+| Auth adapter (SESSION_EVICTED) | `src/lib/auth/auth-adapter.ts` |
 | Access restriction (ACCESS_DENIED) | `src/lib/access-restriction.ts` |
 | Webhook dispatcher | `src/lib/webhook-dispatcher.ts` |
 | Personal API | `src/app/api/audit-logs/route.ts` |

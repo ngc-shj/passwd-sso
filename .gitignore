@@ -93,3 +93,7 @@ docs/temp/
 !.claude/skills/
 !.claude/hooks/
 !.claude/settings.json
+
+# Refactor orchestration — per-developer stale-branch baseline
+.refactor-phase-verify-baseline
+.refactor-test-count-baseline

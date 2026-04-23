@@ -14,7 +14,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   TeamAuthError: class TeamAuthError extends Error {
     status: number;
@@ -291,7 +291,7 @@ describe("GET /api/share-links/mine", () => {
     });
 
     it("returns error when team membership check fails", async () => {
-      const { TeamAuthError } = await import("@/lib/team-auth");
+      const { TeamAuthError } = await import("@/lib/auth/team-auth");
       mockRequireTeamMember.mockRejectedValue(new TeamAuthError("NOT_MEMBER", 403));
       const res = await GET(
         createRequest("GET", "http://localhost/api/share-links/mine", {

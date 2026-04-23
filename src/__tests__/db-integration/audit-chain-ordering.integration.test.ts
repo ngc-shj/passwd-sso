@@ -18,7 +18,7 @@ import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 
 describe("audit-chain-ordering (concurrent inserts)", () => {
   let ctx: TestContext;

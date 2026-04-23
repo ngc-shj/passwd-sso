@@ -23,9 +23,9 @@ const {
   mockWithTenantRls: vi.fn(async (_prisma: unknown, _tenantId: unknown, fn: () => unknown) => fn()),
 }));
 
-vi.mock("@/lib/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
-vi.mock("@/lib/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/auth/api-key", () => ({ validateApiKeyOnly: mockValidateApiKeyOnly }));
+vi.mock("@/lib/auth/access-restriction", () => ({ enforceAccessRestriction: mockEnforceAccessRestriction }));
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck }),
 }));
 vi.mock("@/lib/prisma", () => ({
@@ -36,7 +36,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),

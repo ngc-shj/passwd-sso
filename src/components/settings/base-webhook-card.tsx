@@ -13,7 +13,7 @@ import { Separator } from "@/components/ui/separator";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CopyButton } from "@/components/passwords/copy-button";
+import { CopyButton } from "@/components/passwords/shared/copy-button";
 import {
   Collapsible,
   CollapsibleContent,
@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ChevronDown, Loader2, Plus, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { MAX_WEBHOOKS } from "@/lib/validations/common";
 

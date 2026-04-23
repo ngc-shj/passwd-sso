@@ -30,7 +30,7 @@ vi.mock("next-auth/react", () => ({
   useSession: mockUseSession,
 }));
 
-vi.mock("@/lib/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", () => ({
   useVault: mockUseVault,
 }));
 
@@ -63,7 +63,7 @@ vi.mock("@/hooks/use-travel-mode", () => ({
   useTravelMode: () => ({ active: false, loading: false, enable: vi.fn(), disable: vi.fn() }),
 }));
 
-vi.mock("@/lib/active-vault-context", () => ({
+vi.mock("@/lib/vault/active-vault-context", () => ({
   useActiveVault: () => null,
 }));
 

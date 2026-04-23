@@ -17,7 +17,7 @@ import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 
 describe("audit-chain cross-tenant isolation", () => {
   let ctx: TestContext;

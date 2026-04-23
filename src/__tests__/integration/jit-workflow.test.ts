@@ -46,7 +46,7 @@ const {
 }));
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/tenant-auth", () => {
+vi.mock("@/lib/auth/tenant-auth", () => {
   class TenantAuthError extends Error {
     status: number;
     constructor(message: string, status: number) {
@@ -80,16 +80,16 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/auth-or-token", () => ({
+vi.mock("@/lib/auth/auth-or-token", () => ({
   authOrToken: mockAuthOrToken,
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   resolveActorType: () => "HUMAN",
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "test", acceptLanguage: null }),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 vi.mock("@/lib/with-request-log", () => ({
@@ -98,13 +98,13 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/webhook-dispatcher", () => ({
   dispatchTenantWebhook: mockDispatchTenantWebhook,
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   hashToken: mockHashToken,
 }));
 
 import { POST as createAccessRequest } from "@/app/api/tenant/access-requests/route";
 import { POST as approveAccessRequest } from "@/app/api/tenant/access-requests/[id]/approve/route";
-import { parseSaTokenScopes } from "@/lib/service-account-token";
+import { parseSaTokenScopes } from "@/lib/auth/service-account-token";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { z } from "zod";
 import { MS_PER_HOUR } from "@/lib/constants/time";

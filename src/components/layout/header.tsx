@@ -18,11 +18,11 @@ import { SignOutButton } from "@/components/auth/signout-button";
 import { LanguageSwitcher } from "./language-switcher";
 import { ThemeToggle } from "./theme-toggle";
 import { NotificationBell } from "@/components/notifications/notification-bell";
-import { useVault } from "@/lib/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { APP_NAME, VAULT_STATUS } from "@/lib/constants";
 import { ChangePassphraseDialog } from "@/components/vault/change-passphrase-dialog";
 import { RecoveryKeyDialog } from "@/components/vault/recovery-key-dialog";
-import { useActiveVault } from "@/lib/active-vault-context";
+import { useActiveVault } from "@/lib/vault/active-vault-context";
 import { useTravelMode } from "@/hooks/use-travel-mode";
 
 const CHROME_STORE_URL = process.env.NEXT_PUBLIC_CHROME_STORE_URL ?? "";

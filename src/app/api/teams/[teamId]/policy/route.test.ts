@@ -33,7 +33,7 @@ vi.mock("@/lib/prisma", () => ({
     team: mockPrismaTeam,
   },
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamMember: mockRequireTeamMember,
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: class TeamAuthError extends Error {
@@ -51,10 +51,10 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: vi.fn(async (_prisma: unknown, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/session-timeout", () => ({
+vi.mock("@/lib/auth/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: vi.fn(),
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
@@ -171,7 +171,7 @@ describe("PUT /api/teams/[teamId]/policy", () => {
   });
 
   it("returns 403 when member lacks TEAM_UPDATE permission", async () => {
-    const { TeamAuthError } = await import("@/lib/team-auth");
+    const { TeamAuthError } = await import("@/lib/auth/team-auth");
     mockRequireTeamPermission.mockRejectedValue(
       new TeamAuthError("FORBIDDEN", 403),
     );

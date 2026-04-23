@@ -6,7 +6,7 @@ import { parseAllowedGoogleDomains } from "@/lib/google-domain";
 import { isHttps } from "@/lib/url-helpers";
 import { sendEmail } from "@/lib/email";
 import { magicLinkEmail } from "@/lib/email/templates/magic-link";
-import { createRateLimiter } from "@/lib/rate-limit";
+import { createRateLimiter } from "@/lib/security/rate-limit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { getLogger } from "@/lib/logger";
 

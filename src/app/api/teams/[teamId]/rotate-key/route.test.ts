@@ -34,7 +34,7 @@ const txMock = {
 };
 
 vi.mock("@/auth", () => ({ auth: mockAuth }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: mockRequireTeamPermission,
   TeamAuthError: MockTeamAuthError,
 }));
@@ -44,7 +44,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
@@ -52,8 +52,8 @@ vi.mock("@/lib/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/auth/csrf", () => ({ assertOrigin: vi.fn(() => null) }));
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: vi.fn(() => ({
     check: mockRateLimitCheck,
     clear: vi.fn(),
@@ -61,7 +61,7 @@ vi.mock("@/lib/rate-limit", () => ({
 }));
 
 import { POST } from "./route";
-import { logAuditAsync } from "@/lib/audit";
+import { logAuditAsync } from "@/lib/audit/audit";
 
 function createRequest(body: unknown) {
   return new NextRequest("http://localhost/api/teams/team-1/rotate-key", {

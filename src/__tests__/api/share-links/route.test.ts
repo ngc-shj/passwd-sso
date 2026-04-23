@@ -23,7 +23,7 @@ vi.mock("@/lib/prisma", () => ({
     passwordShare: { create: mockCreate, findMany: mockFindMany },
   },
 }));
-vi.mock("@/lib/crypto-server", () => ({
+vi.mock("@/lib/crypto/crypto-server", () => ({
   generateShareToken: () => "a".repeat(64),
   hashToken: () => "h".repeat(64),
   encryptShareData: () => ({
@@ -35,7 +35,7 @@ vi.mock("@/lib/crypto-server", () => ({
   generateAccessPassword: () => "test-access-password-base64url-43ch",
   hashAccessPassword: () => "hashed-access-password",
 }));
-vi.mock("@/lib/team-auth", () => ({
+vi.mock("@/lib/auth/team-auth", () => ({
   requireTeamPermission: vi.fn(),
   TeamAuthError: class extends Error {
     status: number;
@@ -46,7 +46,7 @@ vi.mock("@/lib/team-auth", () => ({
     }
   },
 }));
-vi.mock("@/lib/audit", () => ({
+vi.mock("@/lib/audit/audit", () => ({
   logAuditInTx: mockLogAuditInTx,
   personalAuditBase: (_req: unknown, userId: string) => ({ scope: "PERSONAL", userId, ip: "127.0.0.1", userAgent: "Test", acceptLanguage: null }),
   teamAuditBase: (_req: unknown, userId: string, teamId: string) => ({ scope: "TEAM", userId, teamId, ip: "127.0.0.1", userAgent: "Test", acceptLanguage: null }),
@@ -59,7 +59,7 @@ vi.mock("@/lib/tenant-context", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/team-policy", () => ({
+vi.mock("@/lib/team/team-policy", () => ({
   assertPolicyAllowsSharing: vi.fn(),
   assertPolicySharePassword: vi.fn(),
   PolicyViolationError: class extends Error {},
@@ -68,7 +68,7 @@ vi.mock("@/lib/team-policy", () => ({
 const { mockCheck } = vi.hoisted(() => ({
   mockCheck: vi.fn().mockResolvedValue({ allowed: true }),
 }));
-vi.mock("@/lib/rate-limit", () => ({
+vi.mock("@/lib/security/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockCheck, clear: vi.fn() }),
 }));
 
@@ -283,8 +283,8 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValueOnce({ teamId: "team-123" });
 
-    const { requireTeamPermission } = await import("@/lib/team-auth");
-    const { TeamAuthError: RealTeamAuthError } = await import("@/lib/team-auth");
+    const { requireTeamPermission } = await import("@/lib/auth/team-auth");
+    const { TeamAuthError: RealTeamAuthError } = await import("@/lib/auth/team-auth");
     vi.mocked(requireTeamPermission).mockRejectedValueOnce(
       new RealTeamAuthError("INSUFFICIENT_PERMISSION", 403)
     );
@@ -483,8 +483,8 @@ describe("POST /api/share-links", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockFindUnique.mockResolvedValue({ teamId: "team-123", entryType: ENTRY_TYPE.LOGIN, tenantId: "tenant-1" });
 
-    const { assertPolicySharePassword } = await import("@/lib/team-policy");
-    const { PolicyViolationError: RealPVE } = await import("@/lib/team-policy");
+    const { assertPolicySharePassword } = await import("@/lib/team/team-policy");
+    const { PolicyViolationError: RealPVE } = await import("@/lib/team/team-policy");
     vi.mocked(assertPolicySharePassword).mockRejectedValueOnce(
       new RealPVE("Share password is required by team policy")
     );
