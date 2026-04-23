@@ -10,3 +10,4 @@ f0f0d0b1103defc2a9c41266047e6b617c368dec  # Phase 1b — move WebAuthn modules i
 ea94152862b9e4df212409e8de119213c4d750ae  # Phase 1d-2 — move remaining core auth modules into src/lib/auth/
 243cfc0ecc7dcb13237850c54d823b7974f64e2d  # Phase 2 — move crypto modules into src/lib/crypto/
 b0808235ed619c1556c609913418edbbbabec489  # Phase 3-1 — move audit.ts into src/lib/audit/
+dd6f84e8760c29268a9f814bee36dc8b5cf94236  # Phase 3-2 — move remaining audit modules into src/lib/audit/
