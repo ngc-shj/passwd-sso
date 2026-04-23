@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translations";
+import type { EntryFormTranslationsBundle } from "@/hooks/form/entry-form-translations";
 import {
   toPersonalLoginFormTranslations,
   toTeamLoginFormTranslations,
-} from "@/hooks/entry-form-translations";
+} from "@/hooks/form/entry-form-translations";
 
 function createBundle(): EntryFormTranslationsBundle {
   return {

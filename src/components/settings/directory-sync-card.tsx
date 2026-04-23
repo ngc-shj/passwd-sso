@@ -47,7 +47,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { NAME_MAX_LENGTH } from "@/lib/validations";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { formatDateTime, formatRelativeTime } from "@/lib/format/format-datetime";
-import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 // ─── Types ───────────────────────────────────────────────────

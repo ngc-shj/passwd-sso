@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
+import { buildEntryActionBarProps } from "@/hooks/form/entry-action-bar-props";
 
 function buildArgs(overrides: Partial<Parameters<typeof buildEntryActionBarProps>[0]> = {}) {
   return {

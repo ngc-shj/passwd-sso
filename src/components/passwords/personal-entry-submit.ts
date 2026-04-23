@@ -3,7 +3,7 @@ import { savePersonalEntry } from "@/lib/vault/personal-entry-save";
 import { handlePersonalSaveFeedback } from "@/components/passwords/personal-save-feedback";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
+import type { PasswordSubmitRouter } from "@/hooks/form/password-form-router";
 
 interface ExecutePersonalEntrySubmitArgs {
   mode: "create" | "edit";

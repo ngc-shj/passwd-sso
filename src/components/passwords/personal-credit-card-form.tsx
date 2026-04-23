@@ -34,8 +34,8 @@ import { preventIMESubmit } from "@/lib/ime-guard";
 import { toTagPayload } from "@/components/passwords/entry-form-tags";
 import { buildPersonalFormSectionsProps } from "@/hooks/personal/personal-form-sections-props";
 import { usePersonalBaseFormModel } from "@/hooks/personal/use-personal-base-form-model";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
-import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
+import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
+import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 
 interface CreditCardFormProps {
   mode: "create" | "edit";

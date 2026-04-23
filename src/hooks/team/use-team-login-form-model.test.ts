@@ -29,7 +29,7 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/hooks/use-entry-form-translations", () => ({
+vi.mock("@/hooks/form/use-entry-form-translations", () => ({
   useEntryFormTranslations: () => ({
     t: (key: string) => key,
     tc: (key: string) => key,

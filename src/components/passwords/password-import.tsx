@@ -18,7 +18,7 @@ import {
 } from "@/components/passwords/password-import-steps";
 import { useImportFileFlow } from "@/components/passwords/use-import-file-flow";
 import { useImportExecution } from "@/components/passwords/use-import-execution";
-import { useNavigationGuard } from "@/hooks/use-navigation-guard";
+import { useNavigationGuard } from "@/hooks/form/use-navigation-guard";
 import {
   AlertDialog,
   AlertDialogAction,

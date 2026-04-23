@@ -35,7 +35,7 @@ import {
   calculateTotalIssues,
   getWatchtowerVisibility,
 } from "@/lib/watchtower/state";
-import { useNavigationGuard } from "@/hooks/use-navigation-guard";
+import { useNavigationGuard } from "@/hooks/form/use-navigation-guard";
 import {
   formatBreachDetails,
   formatWeakDetails,

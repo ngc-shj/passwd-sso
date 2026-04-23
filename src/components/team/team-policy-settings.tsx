@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTranslations } from "next-intl";
-import { useFormDirty } from "@/hooks/use-form-dirty";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
+import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 import { toast } from "sonner";
 import { ListChecks, Loader2 } from "lucide-react";

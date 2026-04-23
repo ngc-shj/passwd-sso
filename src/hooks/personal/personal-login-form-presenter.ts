@@ -9,7 +9,7 @@ import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login
 import {
   selectPersonalEntryValues,
 } from "@/hooks/personal/use-personal-login-form-state";
-import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";
 import type { TagData } from "@/components/tags/tag-input";
 
 export interface PersonalLoginFormPresenterArgs {

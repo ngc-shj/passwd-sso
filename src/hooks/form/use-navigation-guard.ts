@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { resolveNavigationTarget } from "@/lib/client-navigation";
-import { useBeforeUnloadGuard } from "@/hooks/use-before-unload-guard";
+import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
 
 /**
  * Guards against both browser reload (beforeunload) and SPA navigation

@@ -8,7 +8,7 @@ import { EntryTravelSafeSection } from "@/components/passwords/entry-travel-safe
 import { EntryExpirationSection } from "@/components/passwords/entry-expiration-section";
 import { EntryTagsAndFolderSection } from "@/components/passwords/entry-tags-and-folder-section";
 import type { PersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
-import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
+import { buildEntryActionBarProps } from "@/hooks/form/entry-action-bar-props";
 
 type EntryTagsAndFolderSectionProps = ComponentProps<typeof EntryTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;

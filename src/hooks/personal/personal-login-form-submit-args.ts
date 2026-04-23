@@ -2,9 +2,9 @@
 
 import type { SubmitPersonalLoginFormArgs } from "@/components/passwords/personal-login-submit";
 import type { PersonalLoginFormProps } from "@/components/passwords/personal-login-form-types";
-import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/personal/use-personal-login-form-state";
-import type { PasswordFormRouter } from "@/hooks/password-form-router";
+import type { PasswordFormRouter } from "@/hooks/form/password-form-router";
 
 interface BuildPersonalLoginSubmitArgsParams {
   mode: Pick<PersonalLoginFormProps, "mode">["mode"];

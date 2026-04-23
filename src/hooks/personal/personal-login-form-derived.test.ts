@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
-import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";
 import { buildPersonalLoginFormDerived } from "@/hooks/personal/personal-login-form-derived";
 
 describe("buildPersonalLoginFormDerived", () => {

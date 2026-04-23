@@ -10,7 +10,7 @@ import { TeamTagsAndFolderSection } from "@/components/team/team-tags-and-folder
 import type { TeamFolderItem } from "@/components/team/team-entry-form-types";
 import type { TeamTagData } from "@/components/team/team-tag-input";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
-import { buildEntryActionBarProps } from "@/hooks/entry-action-bar-props";
+import { buildEntryActionBarProps } from "@/hooks/form/entry-action-bar-props";
 
 type TeamTagsAndFolderSectionProps = ComponentProps<typeof TeamTagsAndFolderSection>;
 type EntryCustomFieldsTotpSectionProps = ComponentProps<typeof EntryCustomFieldsTotpSection>;

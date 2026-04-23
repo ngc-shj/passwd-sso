@@ -14,7 +14,7 @@ import {
 import {
   toPersonalLoginFormTranslations,
   useEntryFormTranslations,
-} from "@/hooks/use-entry-form-translations";
+} from "@/hooks/form/use-entry-form-translations";
 import { usePersonalLoginFormState } from "@/hooks/personal/use-personal-login-form-state";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { SYMBOL_GROUP_KEYS } from "@/lib/generator/generator-prefs";

@@ -9,7 +9,7 @@ import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import type { TagData } from "@/components/tags/tag-input";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
-import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
+import type { PasswordSubmitRouter } from "@/hooks/form/password-form-router";
 
 export interface SubmitPersonalLoginFormArgs {
   mode: "create" | "edit";

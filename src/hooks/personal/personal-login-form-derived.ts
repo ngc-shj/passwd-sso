@@ -1,6 +1,6 @@
 import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
-import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
+import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/personal/use-personal-login-form-state";
 import type { TagData } from "@/components/tags/tag-input";
 import { buildLoginFormDerived, buildSnapshot } from "@/hooks/form/login-form-derived";

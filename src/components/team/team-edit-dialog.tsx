@@ -18,7 +18,7 @@ import { TeamSshKeyForm } from "@/components/team/team-ssh-key-form";
 import {
   toTeamLoginFormTranslations,
   useEntryFormTranslations,
-} from "@/hooks/use-entry-form-translations";
+} from "@/hooks/form/use-entry-form-translations";
 
 interface TeamEditDialogProps {
   teamId: string;

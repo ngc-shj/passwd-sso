@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import React from "react";
 import { ENTRY_TYPE } from "@/lib/constants";
 
-vi.mock("@/hooks/use-entry-form-translations", () => ({
+vi.mock("@/hooks/form/use-entry-form-translations", () => ({
   useEntryFormTranslations: () => ({}),
   toTeamLoginFormTranslations: () => ({}),
 }));

@@ -19,7 +19,7 @@ import { useTeamVault } from "@/lib/team/team-vault-context";
 import {
   useEntryFormTranslations,
   toTeamLoginFormTranslations,
-} from "@/hooks/use-entry-form-translations";
+} from "@/hooks/form/use-entry-form-translations";
 import {
   buildTeamEntryPayload,
   type BuildTeamEntryPayloadInput,

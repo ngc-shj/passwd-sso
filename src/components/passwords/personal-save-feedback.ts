@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import type { PasswordSubmitRouter } from "@/hooks/password-form-router";
+import type { PasswordSubmitRouter } from "@/hooks/form/password-form-router";
 
 interface PersonalSaveFeedbackParams {
   res: Response;

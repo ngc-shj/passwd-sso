@@ -46,7 +46,7 @@ const { mockPolicy, mockGetTeamKeyInfo, mockBuildTeamEntryCopy, stableTranslatio
   };
 });
 
-vi.mock("@/hooks/use-entry-form-translations", () => ({
+vi.mock("@/hooks/form/use-entry-form-translations", () => ({
   useEntryFormTranslations: () => stableTranslationBundle,
   toTeamLoginFormTranslations: () => stableTranslations,
 }));

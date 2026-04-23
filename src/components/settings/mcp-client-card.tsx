@@ -43,7 +43,7 @@ import { MCP_SCOPES } from "@/lib/constants/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
-import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface McpClient {

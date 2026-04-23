@@ -5,12 +5,12 @@ import type {
   PasswordFormTranslator,
   PasswordGeneratorTranslator,
 } from "@/lib/translation-types";
-import type { EntryFormTranslationsBundle } from "@/hooks/entry-form-translations";
+import type { EntryFormTranslationsBundle } from "@/hooks/form/entry-form-translations";
 
 export {
   toPersonalLoginFormTranslations,
   toTeamLoginFormTranslations,
-} from "@/hooks/entry-form-translations";
+} from "@/hooks/form/entry-form-translations";
 
 export function useEntryFormTranslations() {
   const t: PasswordFormTranslator = useTranslations("PasswordForm");

@@ -1,0 +1,16 @@
+{
+  "phaseName": "phase-5d-hooks-form",
+  "moves": [
+    { "from": "src/hooks/entry-action-bar-props.ts",      "to": "src/hooks/form/entry-action-bar-props.ts" },
+    { "from": "src/hooks/entry-action-bar-props.test.ts", "to": "src/hooks/form/entry-action-bar-props.test.ts" },
+    { "from": "src/hooks/entry-form-translations.ts", "to": "src/hooks/form/entry-form-translations.ts" },
+    { "from": "src/hooks/password-form-router.ts", "to": "src/hooks/form/password-form-router.ts" },
+    { "from": "src/hooks/use-entry-form-translations.ts", "to": "src/hooks/form/use-entry-form-translations.ts" },
+    { "from": "src/hooks/use-entry-has-changes.ts", "to": "src/hooks/form/use-entry-has-changes.ts" },
+    { "from": "src/hooks/use-form-dirty.ts", "to": "src/hooks/form/use-form-dirty.ts" },
+    { "from": "src/hooks/use-before-unload-guard.ts",      "to": "src/hooks/form/use-before-unload-guard.ts" },
+    { "from": "src/hooks/use-before-unload-guard.test.ts", "to": "src/hooks/form/use-before-unload-guard.test.ts" },
+    { "from": "src/hooks/use-navigation-guard.ts",      "to": "src/hooks/form/use-navigation-guard.ts" },
+    { "from": "src/hooks/use-navigation-guard.test.ts", "to": "src/hooks/form/use-navigation-guard.test.ts" }
+  ]
+}

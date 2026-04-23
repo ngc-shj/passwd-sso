@@ -43,7 +43,7 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
-import { useFormDirty } from "@/hooks/use-form-dirty";
+import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/form-dirty-badge";
 
 interface ServiceAccount {

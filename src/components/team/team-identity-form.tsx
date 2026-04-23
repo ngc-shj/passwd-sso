@@ -20,7 +20,7 @@ import { toISODateString } from "@/lib/format/format-datetime";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/team/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team/team-form-sections-props";
-import { useEntryHasChanges } from "@/hooks/use-entry-has-changes";
+import { useEntryHasChanges } from "@/hooks/form/use-entry-has-changes";
 
 export function TeamIdentityForm({
   teamId,
