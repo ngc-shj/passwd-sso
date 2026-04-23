@@ -218,14 +218,20 @@ export function checkBlameIgnoreRevs({ repoRoot = ROOT, runGitShow } = {}) {
 
   /** @type {string[]} */
   const allViolations = [];
+  /** @type {string[]} */
+  const warnings = [];
   let checked = 0;
   for (const { sha } of entries) {
     let output;
     try {
       output = doGitShow(sha);
     } catch (err) {
-      allViolations.push(
-        `${sha}: git show failed (commit may not be reachable): ${err.message}`
+      // Squash-merged PR SHAs are unreachable on the default branch after merge
+      // (PR #392 contributed 24 SHAs that only exist on the now-deleted feature
+      // branch). Warn but don't fail — historical entries can't be changed
+      // anyway, and the check's value is strict validation of NEW entries.
+      warnings.push(
+        `${sha}: git show failed (commit unreachable — likely squash-merged): ${err.message.split("\n")[0]}`
       );
       continue;
     }
@@ -235,20 +241,27 @@ export function checkBlameIgnoreRevs({ repoRoot = ROOT, runGitShow } = {}) {
     checked++;
   }
 
-  return { ok: allViolations.length === 0, violations: allViolations, checked };
+  return { ok: allViolations.length === 0, violations: allViolations, checked, warnings };
 }
 
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const { ok, violations, checked } = checkBlameIgnoreRevs();
+  const { ok, violations, checked, warnings } = checkBlameIgnoreRevs();
+  if (warnings && warnings.length > 0) {
+    for (const w of warnings) console.warn(`  warning: ${w}`);
+  }
   if (!ok) {
     console.error("check-blame-ignore-revs FAILED:");
     for (const v of violations) console.error(`  ${v}`);
     process.exit(1);
   }
-  console.log(`check-blame-ignore-revs OK: ${checked} SHAs validated (R100-only renames + allowlisted M/A/D).`);
+  const warnCount = warnings?.length ?? 0;
+  console.log(
+    `check-blame-ignore-revs OK: ${checked} SHAs validated (R100-only renames + allowlisted M/A/D)` +
+    (warnCount > 0 ? `; ${warnCount} SHAs skipped (unreachable, likely squash-merged).` : ".")
+  );
 }
 
 export { ALLOWED_MA_PATHS };
