@@ -117,7 +117,7 @@ vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 
-vi.mock("@/lib/session-meta", () => ({
+vi.mock("@/lib/auth/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
 

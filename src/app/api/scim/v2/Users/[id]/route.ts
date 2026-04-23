@@ -6,7 +6,7 @@ import { parseUserPatchOps, PatchParseError } from "@/lib/scim/patch-parser";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { AUDIT_ACTION, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { invalidateUserSessions } from "@/lib/user-session-invalidation";
+import { invalidateUserSessions } from "@/lib/auth/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { prisma } from "@/lib/prisma";

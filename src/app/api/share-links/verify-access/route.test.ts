@@ -44,7 +44,7 @@ vi.mock("@/lib/rate-limit", () => ({
     .mockReturnValueOnce({ check: mockIpCheck, clear: vi.fn() })
     .mockReturnValueOnce({ check: mockTokenCheck, clear: vi.fn() }),
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: vi.fn().mockReturnValue("127.0.0.1"),
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

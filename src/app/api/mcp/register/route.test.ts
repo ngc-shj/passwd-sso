@@ -50,7 +50,7 @@ vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
 
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
   rateLimitKeyFromIp: mockRateLimitKeyFromIp,
 }));

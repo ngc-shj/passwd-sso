@@ -53,7 +53,7 @@ import { prisma } from "@/lib/prisma";
 import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { extractClientIp } from "@/lib/ip-access";
+import { extractClientIp } from "@/lib/auth/ip-access";
 import { ACTOR_TYPE, AUDIT_SCOPE } from "@/lib/constants/audit";
 import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client";
 import type { NextRequest } from "next/server";

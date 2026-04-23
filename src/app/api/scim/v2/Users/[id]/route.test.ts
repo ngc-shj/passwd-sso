@@ -46,7 +46,7 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>, withTenantRls: mockWithTenantRls }));
-vi.mock("@/lib/user-session-invalidation", () => ({
+vi.mock("@/lib/auth/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
 vi.mock("@/lib/access-restriction", () => ({

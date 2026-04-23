@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { withTeamTenantRls, resolveTeamTenantId } from "@/lib/tenant-context";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { isIpAllowed, extractClientIp } from "@/lib/ip-access";
+import { isIpAllowed, extractClientIp } from "@/lib/auth/ip-access";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { ACTOR_TYPE } from "@/lib/constants/audit";

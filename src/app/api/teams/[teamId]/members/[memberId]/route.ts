@@ -11,7 +11,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
 import { TEAM_PERMISSION, TEAM_ROLE, AUDIT_TARGET_TYPE, AUDIT_ACTION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { invalidateUserSessions } from "@/lib/user-session-invalidation";
+import { invalidateUserSessions } from "@/lib/auth/user-session-invalidation";
 import { getLogger } from "@/lib/logger";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/api-response";

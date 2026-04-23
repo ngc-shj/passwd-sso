@@ -13,7 +13,7 @@ import { withTeamTenantRls } from "@/lib/tenant-context";
 import { logAuditAsync, teamAuditBase } from "@/lib/audit";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, notFound, unauthorized } from "@/lib/api-response";
-import { invalidateSessionTimeoutCacheForTenant } from "@/lib/session-timeout";
+import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session-timeout";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 

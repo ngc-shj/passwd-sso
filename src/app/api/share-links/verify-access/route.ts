@@ -5,7 +5,7 @@ import { verifyShareAccessSchema } from "@/lib/validations";
 import { hashToken, verifyAccessPassword } from "@/lib/crypto-server";
 import { createShareAccessToken } from "@/lib/auth/share-access-token";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { logAuditAsync, tenantAuditBase } from "@/lib/audit";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { errorResponse, rateLimited, notFound } from "@/lib/api-response";

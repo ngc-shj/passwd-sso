@@ -52,7 +52,7 @@ vi.mock("@/lib/team-auth", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/user-session-invalidation", () => ({
+vi.mock("@/lib/auth/user-session-invalidation", () => ({
   invalidateUserSessions: mockInvalidateUserSessions,
 }));
 vi.mock("@/lib/logger", () => ({

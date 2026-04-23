@@ -66,18 +66,18 @@ vi.mock("@/lib/with-request-log", () => ({
 vi.mock("@/lib/constants/tenant-permission", () => ({
   TENANT_PERMISSION: { MEMBER_MANAGE: "MEMBER_MANAGE" },
 }));
-vi.mock("@/lib/ip-access", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/ip-access")>("@/lib/ip-access");
+vi.mock("@/lib/auth/ip-access", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/auth/ip-access")>("@/lib/auth/ip-access");
   return { ...actual, extractClientIp: mockExtractClientIp };
 });
 vi.mock("@/lib/access-restriction", () => ({
   invalidateTenantPolicyCache: mockInvalidateCache,
   wouldIpBeAllowed: mockWouldIpBeAllowed,
 }));
-vi.mock("@/lib/session-timeout", () => ({
+vi.mock("@/lib/auth/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
-vi.mock("@/lib/account-lockout", () => ({
+vi.mock("@/lib/auth/account-lockout", () => ({
   invalidateLockoutThresholdCache: vi.fn(),
 }));
 

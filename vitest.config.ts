@@ -37,7 +37,7 @@ export default defineConfig({
         "src/lib/with-request-log.ts",
         "src/lib/auth-or-token.ts",
         "src/lib/access-restriction.ts",
-        "src/lib/account-lockout.ts",
+        "src/lib/auth/account-lockout.ts",
         "src/lib/webhook-dispatcher.ts",
         "src/lib/audit.ts",
         "src/lib/audit-outbox.ts",

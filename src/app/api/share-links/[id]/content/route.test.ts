@@ -37,7 +37,7 @@ vi.mock("@/lib/auth/share-access-token", () => ({
 vi.mock("@/lib/crypto-server", () => ({
   decryptShareData: mockDecryptShareData,
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: mockExtractClientIp,
   rateLimitKeyFromIp: (ip: string) => ip,
 }));

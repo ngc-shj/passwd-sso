@@ -28,7 +28,7 @@ vi.mock("@/i18n/locale-utils", () => ({
 vi.mock("@/lib/rate-limit", () => ({
   createRateLimiter: () => ({ check: mockRateLimiterCheck }),
 }));
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   extractClientIp: () => "127.0.0.1",
   rateLimitKeyFromIp: (ip: string) => `rl:${ip}`,
 }));

@@ -9,7 +9,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto-client";
 import { withRequestLog } from "@/lib/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { checkLockout, recordFailure, resetLockout } from "@/lib/account-lockout";
+import { checkLockout, recordFailure, resetLockout } from "@/lib/auth/account-lockout";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
 import { errorResponse, rateLimited, unauthorized } from "@/lib/api-response";

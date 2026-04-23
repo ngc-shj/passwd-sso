@@ -10,7 +10,7 @@ import { rateLimited } from "@/lib/api-response";
 import { parseBody } from "@/lib/parse-body";
 import { assertOrigin } from "@/lib/csrf";
 import { NIL_UUID } from "@/lib/constants/app";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { generateAuthenticationOpts, derivePrfSalt } from "@/lib/auth/webauthn-server";
 import { randomBytes } from "node:crypto";
 import { EMAIL_MAX_LENGTH } from "@/lib/validations/common";

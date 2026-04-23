@@ -11,10 +11,10 @@ import { createRateLimiter } from "@/lib/rate-limit";
 import { TAILNET_NAME_MAX_LENGTH } from "@/lib/validations";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
-import { isValidCidr, extractClientIp } from "@/lib/ip-access";
+import { isValidCidr, extractClientIp } from "@/lib/auth/ip-access";
 import { invalidateTenantPolicyCache, wouldIpBeAllowed } from "@/lib/access-restriction";
-import { invalidateLockoutThresholdCache } from "@/lib/account-lockout";
-import { invalidateSessionTimeoutCacheForTenant } from "@/lib/session-timeout";
+import { invalidateLockoutThresholdCache } from "@/lib/auth/account-lockout";
+import { invalidateSessionTimeoutCacheForTenant } from "@/lib/auth/session-timeout";
 import {
   pinLengthSchema,
   MAX_CIDRS,

@@ -38,9 +38,9 @@ const ALLOWED_USAGE = new Map([
   ["src/app/api/teams/pending-key-distributions/route.ts", ["teamMember"]],
   ["src/app/api/teams/[teamId]/members/route.ts", ["tenantMember"]],
   ["src/app/api/teams/invitations/accept/route.ts", ["teamInvitation"]],
-  ["src/lib/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
-  ["src/lib/lockout-admin-notify.ts", ["user", "tenantMember"]],
-  ["src/lib/new-device-detection.ts", ["session", "user"]],
+  ["src/lib/auth/account-lockout.ts", ["user", "tenant", "auditOutbox"]],
+  ["src/lib/auth/lockout-admin-notify.ts", ["user", "tenantMember"]],
+  ["src/lib/auth/new-device-detection.ts", ["session", "user"]],
   ["src/lib/notification.ts", ["user", "notification"]],
   ["src/lib/webhook-dispatcher.ts", ["teamWebhook", "tenantWebhook"]],
   ["src/lib/tenant-auth.ts", ["tenantMember"]],
@@ -52,12 +52,12 @@ const ALLOWED_USAGE = new Map([
   ["src/lib/auth/webauthn-authorize.ts", ["webAuthnCredential"]],
   ["src/app/api/auth/passkey/verify/route.ts", ["user", "session"]],
   ["src/app/api/auth/passkey/options/email/route.ts", ["user", "webAuthnCredential"]],
-  ["src/lib/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
+  ["src/lib/auth/user-session-invalidation.ts", ["session", "extensionToken", "apiKey"]],
   ["src/app/api/tenant/policy/route.ts", ["user", "tenant", "teamPolicy"]],
   ["src/lib/access-restriction.ts", ["tenant"]],
   ["src/lib/team-policy.ts", ["teamMember", "teamPolicy", "tenant"]],
   // Session timeout resolver: cross-team policy read for session lifetime enforcement
-  ["src/lib/session-timeout.ts", ["user"]],
+  ["src/lib/auth/session-timeout.ts", ["user"]],
   // Extension token refresh: cross-tenant token lookup + family-absolute check
   ["src/app/api/extension/token/refresh/route.ts", ["tenant"]],
   // Team policy route: pre-write tenant cap check (cross-tenant read of tenant row)

@@ -11,7 +11,7 @@
 
 import { resolve4, resolve6 } from "node:dns/promises";
 import { Agent as UndiciAgent } from "undici";
-import { isIpInCidr } from "@/lib/ip-access";
+import { isIpInCidr } from "@/lib/auth/ip-access";
 import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
 

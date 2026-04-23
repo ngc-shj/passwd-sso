@@ -41,7 +41,7 @@ vi.mock("@/hooks/use-travel-mode", () => ({
   useTravelMode: () => ({ active: false }),
 }));
 
-vi.mock("@/lib/travel-mode", () => ({
+vi.mock("@/lib/auth/travel-mode", () => ({
   filterTravelSafe: (entries: unknown[]) => entries,
 }));
 

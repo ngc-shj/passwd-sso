@@ -22,7 +22,7 @@ vi.mock("@/lib/tenant-rls", () => ({
   BYPASS_PURPOSE: { AUTH_FLOW: "auth_flow" },
 }));
 
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   isIpAllowed: vi.fn().mockReturnValue(false), // IP not in allowlist
   isTailscaleIp: vi.fn().mockReturnValue(false),
   extractClientIp: vi.fn().mockReturnValue("1.2.3.4"),

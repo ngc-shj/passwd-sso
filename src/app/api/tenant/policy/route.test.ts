@@ -67,11 +67,11 @@ vi.mock("@/lib/prisma", () => ({
   },
 }));
 
-vi.mock("@/lib/session-timeout", () => ({
+vi.mock("@/lib/auth/session-timeout", () => ({
   invalidateSessionTimeoutCacheForTenant: mockInvalidateSessionTimeoutCache,
 }));
 
-vi.mock("@/lib/account-lockout", () => ({
+vi.mock("@/lib/auth/account-lockout", () => ({
   invalidateLockoutThresholdCache: mockInvalidateLockoutThresholdCache,
 }));
 
@@ -139,7 +139,7 @@ vi.mock("@/lib/with-request-log", () => ({
   withRequestLog: (fn: any) => fn,
 }));
 
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   isValidCidr: () => true,
   extractClientIp: mockExtractClientIp,
 }));

@@ -16,7 +16,7 @@ import { useBulkSelection, type BulkSelectionHandle } from "@/hooks/use-bulk-sel
 import { useBulkAction } from "@/hooks/use-bulk-action";
 import { EntryListShell } from "@/components/bulk/entry-list-shell";
 import { fetchApi } from "@/lib/url-helpers";
-import { filterTravelSafe } from "@/lib/travel-mode";
+import { filterTravelSafe } from "@/lib/auth/travel-mode";
 import { useTravelMode } from "@/hooks/use-travel-mode";
 
 interface DecryptedOverview {

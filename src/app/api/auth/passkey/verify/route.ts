@@ -6,7 +6,7 @@ import { rateLimited } from "@/lib/api-response";
 import { assertOrigin } from "@/lib/csrf";
 import { authorizeWebAuthn } from "@/lib/auth/webauthn-authorize";
 import { logAuditAsync, extractRequestMeta, personalAuditBase } from "@/lib/audit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";

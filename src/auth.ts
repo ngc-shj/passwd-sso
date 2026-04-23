@@ -5,7 +5,7 @@ import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { extractTenantClaimValue } from "@/lib/tenant-claim";
-import { sessionMetaStorage } from "@/lib/session-meta";
+import { sessionMetaStorage } from "@/lib/auth/session-meta";
 import { SESSION_ABSOLUTE_TIMEOUT_MAX } from "@/lib/validations/common";
 import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";

@@ -2,7 +2,7 @@ import { type NextRequest, NextResponse } from "next/server";
 import { revokeToken } from "@/lib/mcp/oauth-server";
 import { hashToken } from "@/lib/crypto-server";
 import { createRateLimiter } from "@/lib/rate-limit";
-import { extractClientIp, rateLimitKeyFromIp } from "@/lib/ip-access";
+import { extractClientIp, rateLimitKeyFromIp } from "@/lib/auth/ip-access";
 
 const revokeLimiter = createRateLimiter({ windowMs: 60_000, max: 30 });
 

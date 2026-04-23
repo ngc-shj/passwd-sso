@@ -34,7 +34,7 @@ vi.mock("@/lib/audit", () => ({
   logAuditAsync: mockLogAudit,
 }));
 
-vi.mock("@/lib/ip-access", () => ({
+vi.mock("@/lib/auth/ip-access", () => ({
   isIpAllowed: vi.fn().mockReturnValue(false),
   extractClientIp: vi.fn().mockReturnValue("5.6.7.8"),
 }));

@@ -2,18 +2,18 @@ import { PrismaAdapter } from "@auth/prisma-adapter";
 import type { Adapter, AdapterSession, AdapterUser, AdapterAccount } from "next-auth/adapters";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { sessionMetaStorage } from "@/lib/session-meta";
+import { sessionMetaStorage } from "@/lib/auth/session-meta";
 import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
 import { findOrCreateSsoTenant } from "@/lib/tenant-management";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
-import { checkNewDeviceAndNotify } from "@/lib/new-device-detection";
+import { checkNewDeviceAndNotify } from "@/lib/auth/new-device-detection";
 import { USER_AGENT_MAX_LENGTH, BOOTSTRAP_SLUG_HASH_LENGTH } from "@/lib/validations/common.server";
 import { logAuditAsync } from "@/lib/audit";
 import { AUDIT_ACTION, AUDIT_SCOPE, AUDIT_TARGET_TYPE } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { createNotification } from "@/lib/notification";
-import { resolveEffectiveSessionTimeouts } from "@/lib/session-timeout";
+import { resolveEffectiveSessionTimeouts } from "@/lib/auth/session-timeout";
 
 /**
  * Custom Auth.js adapter that extends PrismaAdapter with:
