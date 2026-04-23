@@ -2,10 +2,10 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
-import type { ParsedEntry } from "@/components/passwords/password-import-utils";
-import type { ImportTranslator } from "@/components/passwords/password-import-types";
-import { runImportEntries } from "@/components/passwords/password-import-importer";
-import { fireImportAudit } from "@/components/passwords/password-import-steps";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-utils";
+import type { ImportTranslator } from "@/components/passwords/import/password-import-types";
+import { runImportEntries } from "@/components/passwords/import/password-import-importer";
+import { fireImportAudit } from "@/components/passwords/import/password-import-steps";
 
 interface UseImportExecutionParams {
   t: ImportTranslator;

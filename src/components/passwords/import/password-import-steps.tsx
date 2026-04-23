@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Upload, Loader2, FileUp, CheckCircle2, AlertCircle, Lock } from "lucide-react";
-import { formatLabels, type CsvFormat, type ParsedEntry } from "@/components/passwords/password-import-utils";
-import type { ImportTranslator } from "@/components/passwords/password-import-types";
+import { formatLabels, type CsvFormat, type ParsedEntry } from "@/components/passwords/import/password-import-utils";
+import type { ImportTranslator } from "@/components/passwords/import/password-import-types";
 import { fetchApi } from "@/lib/url-helpers";
 import type { ImportFormat } from "@/lib/constants";
 

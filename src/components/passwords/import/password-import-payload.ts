@@ -1,5 +1,5 @@
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import { ENTRY_SNIPPET_MAX } from "@/lib/validations/common";
 
 export function buildPersonalImportBlobs(entry: ParsedEntry): {

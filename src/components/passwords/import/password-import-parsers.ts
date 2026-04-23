@@ -1,5 +1,5 @@
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { CsvFormat, ParsedEntry } from "@/components/passwords/password-import-types";
+import type { CsvFormat, ParsedEntry } from "@/components/passwords/import/password-import-types";
 
 function extraDefaults(): Pick<
   ParsedEntry,

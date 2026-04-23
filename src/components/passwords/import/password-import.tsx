@@ -15,9 +15,9 @@ import {
   ImportDoneStep,
   ImportFileSelectStep,
   ImportPreviewStep,
-} from "@/components/passwords/password-import-steps";
-import { useImportFileFlow } from "@/components/passwords/use-import-file-flow";
-import { useImportExecution } from "@/components/passwords/use-import-execution";
+} from "@/components/passwords/import/password-import-steps";
+import { useImportFileFlow } from "@/components/passwords/import/use-import-file-flow";
+import { useImportExecution } from "@/components/passwords/import/use-import-execution";
 import { useNavigationGuard } from "@/hooks/form/use-navigation-guard";
 import {
   AlertDialog,

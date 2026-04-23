@@ -12,7 +12,7 @@ import {
   parseKeePassXcXml,
   type CsvFormat,
   type ParsedEntry,
-} from "@/components/passwords/password-import-utils";
+} from "@/components/passwords/import/password-import-utils";
 
 interface UseImportFileFlowResult {
   fileRef: React.RefObject<HTMLInputElement | null>;

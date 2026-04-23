@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { ParsedEntry } from "@/components/passwords/password-import-types";
-import { buildPersonalImportBlobs } from "@/components/passwords/password-import-payload";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
+import { buildPersonalImportBlobs } from "@/components/passwords/import/password-import-payload";
 
 function baseParsedEntry(overrides: Partial<ParsedEntry>): ParsedEntry {
   return {

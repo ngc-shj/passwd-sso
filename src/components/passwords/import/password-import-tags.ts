@@ -1,4 +1,4 @@
-import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface ExistingTag {

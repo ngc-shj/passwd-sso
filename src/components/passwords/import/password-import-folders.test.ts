@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import {
   resolveFolderPathsForImport,
   resolveEntryFolderId,
-} from "@/components/passwords/password-import-folders";
+} from "@/components/passwords/import/password-import-folders";
 
 function makeEntry(folderPath: string): ParsedEntry {
   return {

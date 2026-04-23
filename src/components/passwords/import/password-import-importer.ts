@@ -15,11 +15,11 @@ import {
   resolveEntryTagIds,
   resolveTagNameToIdForImport,
   type ParsedEntry,
-} from "@/components/passwords/password-import-utils";
+} from "@/components/passwords/import/password-import-utils";
 import {
   resolveFolderPathsForImport,
   resolveEntryFolderId,
-} from "@/components/passwords/password-import-folders";
+} from "@/components/passwords/import/password-import-folders";
 import { apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 

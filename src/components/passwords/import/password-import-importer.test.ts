@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ENTRY_TYPE } from "@/lib/constants";
-import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 
 const { mockEncryptData } = vi.hoisted(() => ({
   mockEncryptData: vi.fn(),
@@ -24,7 +24,7 @@ vi.mock("@/lib/crypto/crypto-team", () => ({
   deriveItemEncryptionKey: async () => ({} as CryptoKey),
 }));
 
-import { runImportEntries } from "@/components/passwords/password-import-importer";
+import { runImportEntries } from "@/components/passwords/import/password-import-importer";
 
 function response(ok: boolean): Response {
   return {

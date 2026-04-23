@@ -2,8 +2,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
-import type { ImportTranslator } from "@/components/passwords/password-import-types";
-import type { ParsedEntry } from "@/components/passwords/password-import-types";
+import type { ImportTranslator } from "@/components/passwords/import/password-import-types";
+import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import { ENTRY_TYPE } from "@/lib/constants";
 
 const { mockRunImportEntries, mockFireImportAudit, mockToastSuccess } = vi.hoisted(() => ({
@@ -12,11 +12,11 @@ const { mockRunImportEntries, mockFireImportAudit, mockToastSuccess } = vi.hoist
   mockToastSuccess: vi.fn(),
 }));
 
-vi.mock("@/components/passwords/password-import-importer", () => ({
+vi.mock("@/components/passwords/import/password-import-importer", () => ({
   runImportEntries: mockRunImportEntries,
 }));
 
-vi.mock("@/components/passwords/password-import-steps", () => ({
+vi.mock("@/components/passwords/import/password-import-steps", () => ({
   fireImportAudit: mockFireImportAudit,
 }));
 
@@ -26,7 +26,7 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { useImportExecution } from "@/components/passwords/use-import-execution";
+import { useImportExecution } from "@/components/passwords/import/use-import-execution";
 
 function makeEntry(): ParsedEntry {
   return {

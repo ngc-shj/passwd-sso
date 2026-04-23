@@ -10,7 +10,7 @@ const { mockParseCsv, mockParseJson, mockParseKeePassXcXml, mockIsEncryptedExpor
   mockDecryptExport: vi.fn(),
 }));
 
-vi.mock("@/components/passwords/password-import-utils", () => ({
+vi.mock("@/components/passwords/import/password-import-utils", () => ({
   parseCsv: mockParseCsv,
   parseJson: mockParseJson,
   parseKeePassXcXml: mockParseKeePassXcXml,
@@ -21,7 +21,7 @@ vi.mock("@/lib/crypto/export-crypto", () => ({
   decryptExport: mockDecryptExport,
 }));
 
-import { useImportFileFlow } from "@/components/passwords/use-import-file-flow";
+import { useImportFileFlow } from "@/components/passwords/import/use-import-file-flow";
 
 class MockFileReader {
   onload: ((e: { target: { result: string } }) => void) | null = null;

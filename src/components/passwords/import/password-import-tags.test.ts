@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { API_PATH } from "@/lib/constants";
-import { resolveEntryTagIds, resolveTagNameToIdForImport } from "@/components/passwords/password-import-utils";
+import { resolveEntryTagIds, resolveTagNameToIdForImport } from "@/components/passwords/import/password-import-utils";
 
 type ImportEntry = Parameters<
   typeof resolveTagNameToIdForImport
