@@ -41,17 +41,61 @@ function parseArgs(argv) {
   const args = argv.slice(2);
   let configPath = null;
   let dryRun = false;
+  let checkTestPairs = false;
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--config" && args[i + 1]) {
       configPath = args[++i];
     } else if (args[i] === "--dry-run") {
       dryRun = true;
+    } else if (args[i] === "--check-test-pairs") {
+      checkTestPairs = true;
     }
   }
   if (!configPath) {
     throw new CodemodConfigError("--config <path> is required");
   }
-  return { configPath, dryRun };
+  return { configPath, dryRun, checkTestPairs };
+}
+
+// ---------------------------------------------------------------------------
+// --check-test-pairs (Round 4 T14/T20 fix)
+//
+// Symmetric pair validation. Exact-extension match only — cross-extension
+// pairs (foo.ts + foo.test.tsx) are NOT treated as automatic pairs. If
+// intentional, list both in moves[] explicitly.
+// ---------------------------------------------------------------------------
+import { existsSync } from "node:fs";
+
+export function checkTestPairsForMoves(moves, repoRoot) {
+  const violations = [];
+  const movesSet = new Set(moves.map((m) => m.from));
+
+  for (const m of moves) {
+    const from = m.from;
+    // Case 1: test file in moves — impl sibling must also be in moves (if it exists).
+    const testMatch = from.match(/^(.+)\.test\.(ts|tsx)$/);
+    if (testMatch) {
+      const implSibling = `${testMatch[1]}.${testMatch[2]}`;
+      if (existsSync(resolve(repoRoot, implSibling)) && !movesSet.has(implSibling)) {
+        violations.push(
+          `${from} (test) in moves[] but impl sibling ${implSibling} exists on disk and is NOT in moves[]`
+        );
+      }
+      continue;
+    }
+    // Case 2: impl file in moves — test sibling must also be in moves (if it exists).
+    const implMatch = from.match(/^(.+)\.(ts|tsx)$/);
+    if (implMatch) {
+      const testSibling = `${implMatch[1]}.test.${implMatch[2]}`;
+      if (existsSync(resolve(repoRoot, testSibling)) && !movesSet.has(testSibling)) {
+        violations.push(
+          `${from} (impl) in moves[] but test sibling ${testSibling} exists on disk and is NOT in moves[]`
+        );
+      }
+    }
+  }
+
+  return violations;
 }
 
 // ---------------------------------------------------------------------------
@@ -743,11 +787,24 @@ function rewriteExternalRelativeImports(project, absMap, repoRoot, dryRun) {
 // ---------------------------------------------------------------------------
 
 async function main() {
-  const { configPath, dryRun } = parseArgs(process.argv);
+  const { configPath, dryRun, checkTestPairs } = parseArgs(process.argv);
   const config = loadConfig(configPath);
 
   // Use cwd as repo root so tests can run in a fixture directory.
   const repoRoot = process.cwd();
+
+  // --check-test-pairs is a standalone validation mode (Round 4 T14/T20 fix).
+  if (checkTestPairs) {
+    console.log(`--check-test-pairs on phase: ${config.phaseName} (${config.moves.length} moves)`);
+    const violations = checkTestPairsForMoves(config.moves, repoRoot);
+    if (violations.length > 0) {
+      console.error("--check-test-pairs FAILED:");
+      for (const v of violations) console.error(`  ${v}`);
+      process.exit(1);
+    }
+    console.log(`--check-test-pairs OK: ${config.moves.length} moves validated (symmetric impl <-> test pairs).`);
+    return;
+  }
 
   console.log(`Phase: ${config.phaseName}`);
   console.log(`Mode: ${dryRun ? "dry-run" : "live"}`);

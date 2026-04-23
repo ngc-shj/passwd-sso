@@ -57,8 +57,8 @@ const forceFlag = args.includes("--force");
 const verboseFlag = args.includes("--verbose");
 
 // Branch guard
-const branch = currentBranch();
-if (!forceFlag && !/^refactor\//.test(branch)) {
+const currentBranchName = currentBranch();
+if (!forceFlag && !/^refactor\//.test(currentBranchName)) {
   console.log("Not on refactor branch — skipping refactor-phase-verify.");
   process.exit(0);
 }
@@ -93,6 +93,37 @@ if (originSha !== expectedSha) {
   process.exit(1);
 }
 
+// Parallel-branch guard: fail if another refactor/* PR is open.
+function checkParallelRefactorBranches() {
+  try {
+    const output = execSync(
+      "gh pr list --state open --json headRefName --jq '.[].headRefName'",
+      { encoding: "utf8" }
+    );
+    const openBranches = output.split("\n").filter((b) => b.startsWith("refactor/"));
+    const currentBranch = currentBranchName;
+    const others = openBranches.filter((b) => b !== currentBranch);
+    if (others.length > 0) {
+      console.error(
+        `Parallel refactor branches detected (must be serialized):\n  ${others.join("\n  ")}\n` +
+          `Current: ${currentBranch}. Merge or close other refactor/* PRs first.`
+      );
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn(
+      `Warning: could not check parallel refactor branches via \`gh pr list\`: ${err.message}`
+    );
+    console.warn(`  Proceeding anyway — verify manually that no other refactor/* PRs are open.`);
+    return true; // Don't block if gh is unavailable
+  }
+}
+
+if (!checkParallelRefactorBranches()) {
+  process.exit(1);
+}
+
 // Script definitions
 /** @type {Array<{ label: string; cmd: string[] }>} */
 const scripts = [
@@ -108,7 +139,11 @@ const scripts = [
   { label: "check-dynamic-import-specifiers (src/lib)",        cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/lib"] },
   { label: "check-dynamic-import-specifiers (src/hooks)",      cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/hooks"] },
   { label: "check-dynamic-import-specifiers (src/components/passwords)", cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/passwords"] },
+  { label: "check-dynamic-import-specifiers (src/components/settings)",  cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/settings"] },
+  { label: "check-dynamic-import-specifiers (src/components/team)",      cmd: ["node", "scripts/check-dynamic-import-specifiers.mjs", "--old-prefix", "src/components/team"] },
   { label: "capture-test-counts",                cmd: ["node", "scripts/capture-test-counts.mjs"] },
+  { label: "check-codeowners-drift",             cmd: ["node", "scripts/check-codeowners-drift.mjs"] },
+  { label: "check-blame-ignore-revs",            cmd: ["node", "scripts/check-blame-ignore-revs.mjs"] },
 ];
 
 console.log(`\n${"═".repeat(50)}`);

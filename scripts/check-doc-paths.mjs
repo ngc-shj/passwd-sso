@@ -36,15 +36,21 @@ const SKIP_GLOBS = [
   /^operations[/\\]/,
 ];
 
-// Pattern: src/(lib|hooks|components/passwords)/path/to/file.ts(x)
+// Pattern: src/(lib|hooks|components/{passwords,settings,team})/path/to/file.ts(x)
 // NOTE: tsx must come before ts in the alternation to avoid matching the ts
 // prefix of a .tsx extension (regex alternation is ordered).
+// Round 4 F5 fix: extended to include settings/ and team/ for the second-level split.
 const SRC_REF_RE =
-  /src\/(?:lib|hooks|components\/passwords)\/[a-z0-9_/.-]+\.(?:tsx|ts)/g;
+  /src\/(?:lib|hooks|components\/(?:passwords|settings|team))\/[a-z0-9_/.-]+\.(?:tsx|ts)/g;
 
 // Also match markdown links: [text](src/lib/...)
 const MD_LINK_RE =
-  /\[([^\]]*)\]\((src\/(?:lib|hooks|components\/passwords)\/[^)]+)\)/g;
+  /\[([^\]]*)\]\((src\/(?:lib|hooks|components\/(?:passwords|settings|team))\/[^)]+)\)/g;
+
+// Pass B (Round 4 F17 fix): scripts/ references.
+// Scans ALL doc files including operations/, archive/, etc. (bypasses SKIP_GLOBS).
+// Matches: scripts/name.{sh,mjs,ts,sql,json}, scripts/subdir/name.{sh,mjs,...}.
+const SCRIPT_REF_RE = /\bscripts\/[a-z0-9_/-]+\.(?:sh|mjs|ts|sql|json)\b/g;
 
 function shouldSkip(relPath) {
   return SKIP_GLOBS.some((re) => re.test(relPath));
@@ -57,7 +63,7 @@ function collectDocFiles() {
   const files = [];
 
   // Root-level docs
-  for (const name of ["CLAUDE.md", "README.md"]) {
+  for (const name of ["CLAUDE.md", "README.md", "README.ja.md", "CONTRIBUTING.md"]) {
     const p = resolve(ROOT, name);
     if (existsSync(p)) files.push({ path: p, rel: name });
   }
@@ -86,6 +92,95 @@ function collectDocFiles() {
   if (existsSync(docsDir)) walkDocs(docsDir, "");
 
   return files;
+}
+
+// ---------------------------------------------------------------------------
+// Pass B (Round 4 F17 fix): collect doc files for SCRIPT_REF_RE scan.
+//
+// Scans OPERATIONAL docs (operations/, architecture/, security/, setup/,
+// assets/ + root docs) — explicitly bypasses Pass A's `SKIP_GLOBS` for
+// operations/architecture/security since those MUST have accurate script refs
+// for runbook correctness.
+//
+// Still skips:
+//   archive/ — historical plans/reviews contain pre-move paths by design
+//   plans/  — future-speculation may reference scripts not yet created
+// ---------------------------------------------------------------------------
+const PASS_B_SKIP_GLOBS = [/^archive[/\\]/, /^plans[/\\]/];
+
+function shouldSkipPassB(relPath) {
+  return PASS_B_SKIP_GLOBS.some((re) => re.test(relPath));
+}
+
+function collectAllDocFiles() {
+  const files = [];
+
+  for (const name of ["CLAUDE.md", "README.md", "README.ja.md", "CONTRIBUTING.md"]) {
+    const p = resolve(ROOT, name);
+    if (existsSync(p)) files.push({ path: p, rel: name });
+  }
+
+  function walkAllDocs(dir, rel) {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const entryRel = rel ? `${rel}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) {
+        walkAllDocs(join(dir, entry.name), entryRel);
+      } else if (entry.name.endsWith(".md")) {
+        if (!shouldSkipPassB(entryRel)) {
+          files.push({ path: join(dir, entry.name), rel: `docs/${entryRel}` });
+        }
+      }
+    }
+  }
+
+  const docsDir = resolve(ROOT, "docs");
+  if (existsSync(docsDir)) walkAllDocs(docsDir, "");
+
+  return files;
+}
+
+// ---------------------------------------------------------------------------
+// Pass B: check every scripts/ reference in a doc file.
+// ---------------------------------------------------------------------------
+function checkScriptRefs(filePath, relPath) {
+  let content;
+  try {
+    content = readFileSync(filePath, "utf8");
+  } catch {
+    return [];
+  }
+
+  const broken = [];
+  const lines = content.split("\n");
+  let inCodeBlock = false;
+
+  for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+    const line = lines[lineIdx];
+    const lineNum = lineIdx + 1;
+
+    if (/^```/.test(line.trim())) {
+      inCodeBlock = !inCodeBlock;
+      continue;
+    }
+    if (inCodeBlock) continue;
+
+    SCRIPT_REF_RE.lastIndex = 0;
+    let m;
+    while ((m = SCRIPT_REF_RE.exec(line)) !== null) {
+      const scriptPath = m[0];
+      if (!existsSync(resolve(ROOT, scriptPath))) {
+        broken.push({ relPath, lineNum, srcPath: scriptPath });
+      }
+    }
+  }
+
+  return broken;
 }
 
 // ---------------------------------------------------------------------------
@@ -171,8 +266,16 @@ function checkFile(filePath, relPath) {
 const docFiles = collectDocFiles();
 const allBroken = [];
 
+// Pass A: src/ refs (respecting SKIP_GLOBS).
 for (const { path, rel } of docFiles) {
   const broken = checkFile(path, rel);
+  allBroken.push(...broken);
+}
+
+// Pass B (Round 4 F17 fix): scripts/ refs in ALL docs (bypasses SKIP_GLOBS).
+const allDocFiles = collectAllDocFiles();
+for (const { path, rel } of allDocFiles) {
+  const broken = checkScriptRefs(path, rel);
   allBroken.push(...broken);
 }
 

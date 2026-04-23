@@ -156,10 +156,6 @@ vi.mock("@/components/passwords/entry/entry-sort-menu", () => ({
   EntrySortMenu: () => null,
 }));
 
-vi.mock("@/components/team/team-favorites-list", () => ({
-  TeamFavoritesList: () => null,
-}));
-
 vi.mock("@/lib/team/team-vault-context", () => ({
   useTeamVault: () => ({
     getTeamEncryptionKey: mockGetTeamEncryptionKey,

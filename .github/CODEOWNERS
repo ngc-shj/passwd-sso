@@ -1,17 +1,31 @@
 # Security-sensitive paths require review by the repository owner.
 # Changes to these files will not merge without an approving review from @ngc-shj.
 
+# Refactor-tool roots (stay at scripts/ root — CODEOWNERS-gated).
 /scripts/move-and-rewrite-imports.mjs        @ngc-shj
+/scripts/verify-allowlist-rename-only.mjs    @ngc-shj
+/scripts/verify-move-only-diff.mjs           @ngc-shj
+/scripts/refactor-phase-verify.mjs           @ngc-shj
+# CI orchestrator (S9, Round 4).
+/scripts/pre-pr.sh                           @ngc-shj
+
+# Transitional glob — covers scripts/check-*.mjs at root until PR 2 moves them
+# into scripts/checks/. PR 2 DELETEs this transitional rule along with the
+# obsolete literal check-*.mjs rules below.
+/scripts/check-*.mjs                         @ngc-shj
+# Post-PR-2 glob — matches nothing yet (benign empty glob); active once
+# PR 2 moves the 7 check scripts into scripts/checks/.
+/scripts/checks/**                           @ngc-shj
+
+# Obsolete literal rules — DELETED atomically with git mv in PR 2.
+# Kept here until PR 2 so current files at scripts/check-*.mjs retain coverage.
 /scripts/check-bypass-rls.mjs                @ngc-shj
 /scripts/check-crypto-domains.mjs            @ngc-shj
 /scripts/check-team-auth-rls.mjs             @ngc-shj
-/scripts/verify-allowlist-rename-only.mjs    @ngc-shj
-/scripts/verify-move-only-diff.mjs           @ngc-shj
 /scripts/check-vitest-coverage-include.mjs   @ngc-shj
 /scripts/check-dynamic-import-specifiers.mjs @ngc-shj
 /scripts/check-mjs-imports.mjs               @ngc-shj
 /scripts/check-doc-paths.mjs                 @ngc-shj
-/scripts/refactor-phase-verify.mjs           @ngc-shj
 # Flat-file patterns (e.g. src/lib/auth.ts) — GitHub * does NOT cross /
 /src/lib/crypto*                             @ngc-shj
 /src/lib/auth*                               @ngc-shj
@@ -23,6 +37,13 @@
 /src/lib/crypto/**                           @ngc-shj
 /src/lib/audit/**                            @ngc-shj
 /src/lib/tenant-rls.ts                       @ngc-shj
+# S18 (Round 4): earlier coverage for tenant-context.ts + tenant/ subdir.
+/src/lib/tenant-context.ts                   @ngc-shj
+/src/lib/tenant/**                           @ngc-shj
+# F26 (Round 2): preemptive rule for src/lib/constants/auth/ split in PR 4.
+/src/lib/constants/auth/**                   @ngc-shj
 /.github/workflows/                          @ngc-shj
 /.github/CODEOWNERS                          @ngc-shj
 /.git-blame-ignore-revs                      @ngc-shj
+# S14 (Round 4): supply-chain integrity — Trivy suppression list.
+/.trivyignore                                @ngc-shj

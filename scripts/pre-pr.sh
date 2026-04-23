@@ -50,6 +50,26 @@ fi
 # Clear vitest cache to match CI's clean environment
 rm -rf node_modules/.vitest extension/node_modules/.vitest 2>/dev/null || true
 run_step "Test"                   npx vitest run
+
+# Integration tests on refactor branches touching auth/DB modules.
+# Round 4: T10 (regex covers pre- and post-PR-5 paths), T13 (DB reachability + 3s timeout),
+# T22 (CI via ci-integration.yml is authoritative; this local run is a preview).
+# Set PREPR_SKIP_INTEGRATION=1 to defer to CI.
+if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/" && \
+   git diff --name-only main...HEAD | \
+     grep -E '^src/lib/(prisma|redis|tenant-(context|rls)|auth/.+-token)\.ts$|^src/lib/(prisma|tenant|auth)/' \
+     > /dev/null; then
+  if [ "${PREPR_SKIP_INTEGRATION:-0}" = "1" ]; then
+    printf "${BOLD}▸ Integration tests${RESET}\n"
+    printf "  (skipped — PREPR_SKIP_INTEGRATION=1; CI ci-integration.yml is authoritative)\n\n"
+  elif node -e 'const{Pool}=require("pg");const p=new Pool({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:3000,statement_timeout:3000});p.query("select 1").then(()=>process.exit(0)).catch(()=>process.exit(1)).finally(()=>p.end())' 2>/dev/null; then
+    run_step "Integration tests"  npm run test:integration
+  else
+    printf "${BOLD}▸ Integration tests${RESET}\n"
+    printf "  (skipped — no Postgres reachable within 3s; start docker compose or set DATABASE_URL)\n\n"
+  fi
+fi
+
 run_step "Build"                  npx next build
 
 echo ""
