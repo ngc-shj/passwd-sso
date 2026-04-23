@@ -28,7 +28,7 @@ import { ENTRY_TYPE } from "@/lib/constants";
 import { MAX_BULK_SELECTION } from "@/lib/bulk-selection-helpers";
 import { usePersonalFolders } from "@/hooks/use-personal-folders";
 import { usePersonalTags } from "@/hooks/use-personal-tags";
-import { buildFolderPath } from "@/lib/folder-path";
+import { buildFolderPath } from "@/lib/folder/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { TagData } from "@/components/tags/tag-input";
 import { VAULT_DATA_CHANGED_EVENT, notifyVaultDataChanged } from "@/lib/events";

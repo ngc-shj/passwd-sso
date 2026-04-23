@@ -40,7 +40,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 import { useFormDirty } from "@/hooks/use-form-dirty";

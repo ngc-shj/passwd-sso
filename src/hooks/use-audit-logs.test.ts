@@ -34,7 +34,7 @@ vi.mock("@/lib/download-blob", () => ({
   downloadBlob: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock("@/lib/format-datetime", () => ({
+vi.mock("@/lib/format/format-datetime", () => ({
   formatDateTime: vi.fn((iso: string) => iso),
 }));
 

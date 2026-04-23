@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { buildPersonalLoginFieldCallbacks } from "@/hooks/personal-login-fields-callbacks";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { PersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 
 function createState(): PersonalLoginFormState {

@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { useReprompt } from "@/hooks/use-reprompt";
-import { formatDateTime, formatDate } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import { DISPLAY_KEYS, SENSITIVE_KEYS, DATE_KEYS, TRANSLATED_VALUE_KEYS } from "./entry-history-keys";
 import { fetchApi } from "@/lib/url-helpers";
 import { REVEAL_TIMEOUT_MS } from "@/lib/constants";

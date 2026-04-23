@@ -20,7 +20,7 @@ import {
   KeySquare,
   Terminal,
 } from "lucide-react";
-import { formatDateTime, formatDate } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
 
 function isSafeHref(url: string): boolean {

@@ -35,7 +35,7 @@ import {
 import { Database, Loader2, Plus, ShieldAlert, ChevronDown, ChevronUp } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
-import { formatDate } from "@/lib/format-datetime";
+import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";

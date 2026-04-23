@@ -15,7 +15,7 @@ import {
   isTenantRoleAbove,
 } from "@/lib/auth/tenant-auth";
 import { withTenantRls } from "@/lib/tenant-rls";
-import { notificationTitle, notificationBody } from "@/lib/notification-messages";
+import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";

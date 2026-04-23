@@ -6,8 +6,8 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/passwords/copy-button";
 import { Clock, Eye, MessageSquare, Paperclip, Download, AlertTriangle } from "lucide-react";
-import { formatDateTime } from "@/lib/format-datetime";
-import { formatFileSize } from "@/lib/format-file-size";
+import { formatDateTime } from "@/lib/format/format-datetime";
+import { formatFileSize } from "@/lib/format/format-file-size";
 import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
 interface ShareSendViewProps {

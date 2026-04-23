@@ -12,7 +12,7 @@ import {
   validateFolderDepth,
   checkCircularReference,
   type ParentNode,
-} from "@/lib/folder-utils";
+} from "@/lib/folder/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";

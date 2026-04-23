@@ -50,7 +50,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/folder-utils", () => ({
+vi.mock("@/lib/folder/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
   checkCircularReference: vi.fn().mockResolvedValue(false),

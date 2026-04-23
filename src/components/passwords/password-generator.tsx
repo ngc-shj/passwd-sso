@@ -18,7 +18,7 @@ import {
   DEFAULT_GENERATOR_SETTINGS,
   buildSymbolString,
   buildEffectiveCharset,
-} from "@/lib/generator-prefs";
+} from "@/lib/generator/generator-prefs";
 import { API_PATH } from "@/lib/constants";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";

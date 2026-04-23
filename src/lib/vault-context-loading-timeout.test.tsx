@@ -43,7 +43,7 @@ vi.mock("./team/team-vault-context", () => ({
 vi.mock("./vault/auto-lock-context", () => ({
   AutoLockProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock("./emergency-access-context", () => ({
+vi.mock("./emergency-access/emergency-access-context", () => ({
   EmergencyAccessProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   confirmPendingEmergencyGrants: vi.fn(),
 }));

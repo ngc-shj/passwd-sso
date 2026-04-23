@@ -129,12 +129,12 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withBypassRls: mockWithBypassRls,
 }));
 
-vi.mock("@/lib/tenant-claim", () => ({
+vi.mock("@/lib/tenant/tenant-claim", () => ({
   extractTenantClaimValue: mockExtractTenantClaimValue,
   slugifyTenant: mockSlugifyTenant,
 }));
 
-vi.mock("@/lib/tenant-claim-storage", () => ({
+vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimGetStore },
 }));
 

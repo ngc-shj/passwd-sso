@@ -10,7 +10,7 @@ import { TeamCreateDialog } from "@/components/team/team-create-dialog";
 import { TeamRoleBadge } from "@/components/team/team-role-badge";
 import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
 import { API_PATH } from "@/lib/constants";
-import { formatDate } from "@/lib/format-datetime";
+import { formatDate } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { useTenantRole } from "@/hooks/use-tenant-role";

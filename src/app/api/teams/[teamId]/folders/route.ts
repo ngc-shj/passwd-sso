@@ -9,10 +9,10 @@ import {
 } from "@/lib/auth/team-auth";
 import { API_ERROR } from "@/lib/api-error-codes";
 import { parseBody } from "@/lib/parse-body";
-import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth, type ParentNode } from "@/lib/folder/folder-utils";
 import { AUDIT_TARGET_TYPE, AUDIT_ACTION, TEAM_PERMISSION } from "@/lib/constants";
 import { withTeamTenantRls } from "@/lib/tenant-context";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { withRequestLog } from "@/lib/with-request-log";
 import { handleAuthError, unauthorized } from "@/lib/api-response";
 

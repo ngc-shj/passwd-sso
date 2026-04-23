@@ -3,7 +3,7 @@ import {
   buildPersonalCurrentSnapshot,
   buildPersonalInitialSnapshot,
 } from "@/hooks/personal-login-form-derived";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 
 describe("personal-login-form-derived snapshot helpers", () => {
   it("builds initial snapshot with defaults", () => {

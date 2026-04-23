@@ -25,7 +25,7 @@ import {
   AUDIT_TARGET_TYPE,
   type AuditActionValue,
 } from "@/lib/constants";
-import { formatUserName } from "@/lib/format-user";
+import { formatUserName } from "@/lib/format/format-user";
 import { useAuditDelegationLabel } from "@/components/audit/audit-delegation-detail";
 import { useAuditLogs, type AuditLogItem } from "@/hooks/use-audit-logs";
 import { getActionLabel } from "@/lib/audit/audit-action-label";

@@ -46,7 +46,7 @@ export default defineConfig({
         "src/components/**/*.{ts,tsx}",
         "src/app/global-error.tsx",
         "src/lib/key-provider/**/*.ts",
-        "src/lib/prisma-error.ts",
+        "src/lib/prisma/prisma-error.ts",
         "src/lib/security/sentry-sanitize.ts",
         "src/lib/mcp/**/*.ts",
         "src/lib/security/password-policy-validation.ts",

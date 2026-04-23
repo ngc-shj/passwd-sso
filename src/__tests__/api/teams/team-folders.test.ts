@@ -56,7 +56,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   teamAuditBase: vi.fn((_, userId, teamId) => ({ scope: "TEAM", userId, teamId })),
 }));
-vi.mock("@/lib/folder-utils", () => ({
+vi.mock("@/lib/folder/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
 }));
@@ -66,7 +66,7 @@ vi.mock("@/lib/tenant-context", () => ({
 
 import { GET, POST } from "@/app/api/teams/[teamId]/folders/route";
 import { TeamAuthError } from "@/lib/auth/team-auth";
-import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth } from "@/lib/folder/folder-utils";
 
 describe("GET /api/teams/[teamId]/folders", () => {
   beforeEach(() => vi.clearAllMocks());

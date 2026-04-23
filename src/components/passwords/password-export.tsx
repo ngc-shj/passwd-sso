@@ -12,7 +12,7 @@ import { PageTitleCard } from "@/components/layout/page-title-card";
 import { ExportOptionsPanel } from "@/components/passwords/export-options-panel";
 import { Download, AlertTriangle } from "lucide-react";
 import { API_PATH, ENTRY_TYPE } from "@/lib/constants";
-import { buildFolderPath } from "@/lib/folder-path";
+import { buildFolderPath } from "@/lib/folder/folder-path";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import {
   type ExportFormat,

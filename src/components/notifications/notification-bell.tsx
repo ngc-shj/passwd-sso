@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { formatRelativeTime } from "@/lib/format-datetime";
+import { formatRelativeTime } from "@/lib/format/format-datetime";
 import { API_PATH, apiPath } from "@/lib/constants";
 import type { NotificationType } from "@prisma/client";
 import { fetchApi } from "@/lib/url-helpers";

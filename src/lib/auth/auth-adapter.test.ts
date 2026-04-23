@@ -57,10 +57,10 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/auth/session-meta", () => ({
   sessionMetaStorage: { getStore: mockSessionMetaGetStore },
 }));
-vi.mock("@/lib/tenant-claim-storage", () => ({
+vi.mock("@/lib/tenant/tenant-claim-storage", () => ({
   tenantClaimStorage: { getStore: mockTenantClaimStoreGetStore },
 }));
-vi.mock("@/lib/tenant-management", () => ({
+vi.mock("@/lib/tenant/tenant-management", () => ({
   findOrCreateSsoTenant: mockFindOrCreateSsoTenant,
 }));
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,

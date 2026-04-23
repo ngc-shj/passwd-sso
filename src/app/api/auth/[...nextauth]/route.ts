@@ -3,7 +3,7 @@ import { handlers } from "@/auth";
 import { withRequestLog } from "@/lib/with-request-log";
 import { extractRequestMeta } from "@/lib/audit/audit";
 import { sessionMetaStorage } from "@/lib/auth/session-meta";
-import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
+import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 
 export const runtime = "nodejs";
 

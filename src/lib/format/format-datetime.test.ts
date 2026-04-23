@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { formatDate, formatDateTime, formatRelativeTime, toISODateString } from "@/lib/format-datetime";
+import { formatDate, formatDateTime, formatRelativeTime, toISODateString } from "@/lib/format/format-datetime";
 
 describe("formatDateTime", () => {
   it("passes locale to toLocaleString for Date input", () => {

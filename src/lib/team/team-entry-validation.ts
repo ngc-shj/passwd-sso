@@ -1,6 +1,6 @@
 import { ENTRY_TYPE } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
-import { toISODateString } from "@/lib/format-datetime";
+import { toISODateString } from "@/lib/format/format-datetime";
 
 interface ValidateTeamEntryInput {
   entryType: EntryTypeValue;

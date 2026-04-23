@@ -18,7 +18,7 @@ vi.mock("@/components/ui/dropdown-menu", () => ({
   DropdownMenuSeparator: () => null,
   DropdownMenuTrigger: () => null,
 }));
-vi.mock("@/lib/format-datetime", () => ({
+vi.mock("@/lib/format/format-datetime", () => ({
   formatRelativeTime: () => "1 hour ago",
 }));
 

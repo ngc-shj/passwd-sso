@@ -37,7 +37,7 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: () => ({ ip: "127.0.0.1", userAgent: "Test" }),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/folder-utils", () => ({
+vi.mock("@/lib/folder/folder-utils", () => ({
   validateParentFolder: vi.fn(),
   validateFolderDepth: vi.fn(),
   checkCircularReference: vi.fn().mockResolvedValue(false),
@@ -47,7 +47,7 @@ vi.mock("@/lib/tenant-context", () => ({
 }));
 
 import { PUT, DELETE } from "@/app/api/folders/[id]/route";
-import { checkCircularReference, validateFolderDepth } from "@/lib/folder-utils";
+import { checkCircularReference, validateFolderDepth } from "@/lib/folder/folder-utils";
 
 describe("PUT /api/folders/[id]", () => {
   beforeEach(() => vi.clearAllMocks());

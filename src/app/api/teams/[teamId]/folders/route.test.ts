@@ -45,8 +45,8 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withTeamTenantRls: mockWithTeamTenantRls,
 }));
-vi.mock("@/lib/folder-utils", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/folder-utils")>();
+vi.mock("@/lib/folder/folder-utils", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/folder/folder-utils")>();
   return {
     ...original,
     validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "team-1" }),
@@ -55,7 +55,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
 });
 
 import { GET, POST } from "./route";
-import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth } from "@/lib/folder/folder-utils";
 import { TEAM_ROLE } from "@/lib/constants";
 
 const TEAM_ID = "team-1";

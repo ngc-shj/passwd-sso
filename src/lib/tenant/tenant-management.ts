@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { slugifyTenant } from "@/lib/tenant-claim";
+import { slugifyTenant } from "@/lib/tenant/tenant-claim";
 import { randomBytes } from "node:crypto";
 import { SLUG_MAX_LENGTH } from "@/lib/validations/common";
 

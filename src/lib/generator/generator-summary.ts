@@ -1,4 +1,4 @@
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 
 interface GeneratorSummaryLabels {
   modePassword: string;

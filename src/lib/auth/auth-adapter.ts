@@ -3,8 +3,8 @@ import type { Adapter, AdapterSession, AdapterUser, AdapterAccount } from "next-
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sessionMetaStorage } from "@/lib/auth/session-meta";
-import { tenantClaimStorage } from "@/lib/tenant-claim-storage";
-import { findOrCreateSsoTenant } from "@/lib/tenant-management";
+import { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
+import { findOrCreateSsoTenant } from "@/lib/tenant/tenant-management";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { randomUUID } from "node:crypto";
 import { checkNewDeviceAndNotify } from "@/lib/auth/new-device-detection";

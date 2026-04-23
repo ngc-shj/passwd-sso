@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { envInt } from "@/lib/env-utils";
+import { envInt } from "@/lib/env/env-utils";
 
 describe("envInt", () => {
   const ENV_KEY = "TEST_ENV_INT_VAR";

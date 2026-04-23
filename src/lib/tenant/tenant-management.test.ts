@@ -17,7 +17,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: mockPrisma,
 }));
 
-vi.mock("@/lib/tenant-claim", () => ({
+vi.mock("@/lib/tenant/tenant-claim", () => ({
   slugifyTenant: mockSlugifyTenant,
 }));
 

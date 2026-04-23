@@ -10,7 +10,7 @@ import type {
   EntryTagNameColor,
   EntryTotp,
 } from "@/lib/vault/entry-form-types";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 
 interface BuildPersonalEntryPayloadInput {
   title: string;

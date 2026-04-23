@@ -13,7 +13,7 @@ import { watchtowerAlertEmail } from "@/lib/email/templates/watchtower-alert";
 import { serverAppUrl } from "@/lib/url-helpers";
 import { resolveUserLocale } from "@/lib/locale";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { notificationTitle, notificationBody } from "@/lib/notification-messages";
+import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { AUDIT_ACTION } from "@/lib/constants";
 import { NOTIFICATION_TYPE } from "@/lib/constants/notification";
 import { withRequestLog } from "@/lib/with-request-log";

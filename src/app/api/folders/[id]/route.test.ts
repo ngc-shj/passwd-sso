@@ -36,8 +36,8 @@ vi.mock("@/lib/audit/audit", () => ({
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
 }));
-vi.mock("@/lib/folder-utils", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/folder-utils")>();
+vi.mock("@/lib/folder/folder-utils", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/folder/folder-utils")>();
   return {
     ...original,
     validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "user-1" }),
@@ -47,7 +47,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
 });
 
 import { PUT, DELETE } from "./route";
-import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth, checkCircularReference } from "@/lib/folder/folder-utils";
 
 const FOLDER_ID = "00000000-0000-4000-a000-000000000001";
 const now = new Date("2025-06-01T00:00:00Z");

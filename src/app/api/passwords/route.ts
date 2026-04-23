@@ -13,7 +13,7 @@ import { FILENAME_MAX_LENGTH } from "@/lib/validations/common";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { getAttachmentBlobStore, BLOB_STORAGE } from "@/lib/blob-store";
 import { MS_PER_DAY } from "@/lib/constants/time";
 

@@ -40,7 +40,7 @@ import { Loader2, CheckCircle, XCircle, Plus, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { SA_TOKEN_SCOPES } from "@/lib/constants/service-account";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
 

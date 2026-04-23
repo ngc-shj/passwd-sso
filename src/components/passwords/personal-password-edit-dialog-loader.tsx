@@ -14,7 +14,7 @@ import type {
   EntryTagNameColor,
   EntryTotp,
 } from "@/lib/vault/entry-form-types";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type { TagData } from "@/components/tags/tag-input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Loader2 } from "lucide-react";

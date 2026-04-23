@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator } from "@/lib/translation-types";
 import { submitPersonalLoginForm } from "@/components/passwords/personal-login-submit";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 
 const buildPasswordHistoryMock = vi.fn();
 const buildPersonalEntryPayloadMock = vi.fn();

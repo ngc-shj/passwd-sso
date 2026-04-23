@@ -17,7 +17,7 @@ import {
 } from "@/hooks/use-entry-form-translations";
 import { usePersonalLoginFormState } from "@/hooks/use-personal-login-form-state";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";
-import { SYMBOL_GROUP_KEYS } from "@/lib/generator-prefs";
+import { SYMBOL_GROUP_KEYS } from "@/lib/generator/generator-prefs";
 
 type PersonalLoginFormModelInput = Pick<PersonalLoginFormProps, "mode" | "initialData" | "variant" | "onSaved" | "onCancel" | "defaultFolderId" | "defaultTags">;
 

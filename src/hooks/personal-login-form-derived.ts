@@ -1,4 +1,4 @@
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { PersonalLoginFormTranslations } from "@/hooks/entry-form-translations";
 import type { PersonalLoginFormEntryValues } from "@/hooks/use-personal-login-form-state";

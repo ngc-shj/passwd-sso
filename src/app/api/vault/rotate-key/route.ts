@@ -5,7 +5,7 @@ import { assertOrigin } from "@/lib/auth/csrf";
 import { hmacVerifier } from "@/lib/crypto/crypto-server";
 import { VERIFIER_VERSION } from "@/lib/crypto/crypto-client";
 import { prisma } from "@/lib/prisma";
-import { markGrantsStaleForOwner } from "@/lib/emergency-access-server";
+import { markGrantsStaleForOwner } from "@/lib/emergency-access/emergency-access-server";
 import { revokeAllDelegationSessions } from "@/lib/auth/delegation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/api-error-codes";

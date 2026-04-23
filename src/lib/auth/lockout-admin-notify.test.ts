@@ -55,7 +55,7 @@ vi.mock("@/lib/constants", () => ({
   NOTIFICATION_TYPE: { SECURITY_ALERT: "SECURITY_ALERT" },
   TENANT_ROLE: { OWNER: "OWNER", ADMIN: "ADMIN" },
 }));
-vi.mock("@/lib/notification-messages", () => ({
+vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: vi.fn().mockReturnValue("Vault lockout alert"),
   notificationBody: vi.fn().mockReturnValue("Vault locked for user@test.com — 15 minutes"),
 }));
@@ -69,7 +69,7 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { notifyAdminsOfLockout } from "./lockout-admin-notify";
-import { notificationBody } from "@/lib/notification-messages";
+import { notificationBody } from "@/lib/notification/notification-messages";
 
 const baseParams = {
   userId: "user-1",

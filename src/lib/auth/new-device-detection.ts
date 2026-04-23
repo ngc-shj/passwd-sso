@@ -5,7 +5,7 @@ import { sendEmail } from "@/lib/email";
 import { newDeviceLoginEmail } from "@/lib/email/templates/new-device-login";
 import { createNotification } from "@/lib/notification";
 import { NOTIFICATION_TYPE } from "@/lib/constants";
-import { notificationTitle, notificationBody } from "@/lib/notification-messages";
+import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { resolveUserLocale } from "@/lib/locale";
 
 interface DeviceMeta {

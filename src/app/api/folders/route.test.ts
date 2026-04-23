@@ -29,8 +29,8 @@ vi.mock("@/lib/audit/audit", () => ({
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
 }));
-vi.mock("@/lib/folder-utils", async (importOriginal) => {
-  const original = await importOriginal<typeof import("@/lib/folder-utils")>();
+vi.mock("@/lib/folder/folder-utils", async (importOriginal) => {
+  const original = await importOriginal<typeof import("@/lib/folder/folder-utils")>();
   return {
     ...original,
     validateParentFolder: vi.fn().mockResolvedValue({ parentId: null, ownerId: "user-1" }),
@@ -39,7 +39,7 @@ vi.mock("@/lib/folder-utils", async (importOriginal) => {
 });
 
 import { GET, POST } from "./route";
-import { validateParentFolder, validateFolderDepth } from "@/lib/folder-utils";
+import { validateParentFolder, validateFolderDepth } from "@/lib/folder/folder-utils";
 
 const now = new Date("2025-06-01T00:00:00Z");
 

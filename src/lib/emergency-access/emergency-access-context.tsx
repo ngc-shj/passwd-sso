@@ -6,7 +6,7 @@ import type { VaultStatus } from "@/lib/constants";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { fetchApi } from "@/lib/url-helpers";
-import { createKeyEscrow } from "./crypto/crypto-emergency";
+import { createKeyEscrow } from "../crypto/crypto-emergency";
 
 const EA_CONFIRM_INTERVAL_MS = 2 * MS_PER_MINUTE;
 

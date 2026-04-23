@@ -396,7 +396,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 ### Password Generator
 
 - Settings stored per-entry in encrypted blob (not per-user DB column or localStorage)
-- Symbol groups defined in `src/lib/generator-prefs.ts` (6 groups with individual toggles)
+- Symbol groups defined in `src/lib/generator/generator-prefs.ts` (6 groups with individual toggles)
 - Server-side generation uses `node:crypto` randomBytes in `src/lib/password-generator.ts`
 
 ### Docker Services

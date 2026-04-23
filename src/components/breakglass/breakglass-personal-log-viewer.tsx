@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Loader2, ScrollText, ArrowLeft, ShieldAlert } from "lucide-react";
 import { apiPath, type AuditActionValue } from "@/lib/constants";
 import { normalizeAuditActionKey } from "@/lib/audit/audit-action-key";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
 
 interface AuditLogItem {

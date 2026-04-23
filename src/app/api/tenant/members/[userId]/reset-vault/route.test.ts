@@ -87,7 +87,7 @@ vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOrigina
   withTenantRls: mockWithTenantRls,
   withBypassRls: vi.fn((_p: unknown, fn: () => unknown) => fn()),
 }));
-vi.mock("@/lib/notification-messages", () => ({
+vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: mockNotificationTitle,
   notificationBody: mockNotificationBody,
 }));

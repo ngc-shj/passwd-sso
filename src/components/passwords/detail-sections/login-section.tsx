@@ -11,7 +11,7 @@ import { TOTPField } from "../totp-field";
 import { useRevealTimeout, useRevealSet } from "@/hooks/use-reveal-timeout";
 import type { RequireVerificationFn } from "@/hooks/use-reveal-timeout";
 import { CUSTOM_FIELD_TYPE } from "@/lib/constants";
-import { formatDateTime, formatDate } from "@/lib/format-datetime";
+import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import type { InlineDetailData } from "@/types/entry";
 import type { CreateGuardedGetterFn } from "./types";
 

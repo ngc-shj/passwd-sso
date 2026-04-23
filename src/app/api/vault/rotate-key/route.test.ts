@@ -42,7 +42,7 @@ vi.mock("@/lib/prisma", () => ({
     $transaction: mockTransaction,
   },
 }));
-vi.mock("@/lib/emergency-access-server", () => ({
+vi.mock("@/lib/emergency-access/emergency-access-server", () => ({
   markGrantsStaleForOwner: mockMarkStale,
 }));
 vi.mock("@/lib/security/rate-limit", () => ({

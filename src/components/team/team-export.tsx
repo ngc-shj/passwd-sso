@@ -21,7 +21,7 @@ import {
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { decryptData } from "@/lib/crypto/crypto-client";
 import { buildTeamEntryAAD } from "@/lib/crypto/crypto-aad";
-import { buildFolderPath } from "@/lib/folder-path";
+import { buildFolderPath } from "@/lib/folder/folder-path";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { fetchApi } from "@/lib/url-helpers";
 

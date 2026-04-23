@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { mockTranslator } from "@/__tests__/helpers/mock-translator";
 import type { PasswordFormTranslator, PasswordGeneratorTranslator, CommonTranslator } from "@/lib/translation-types";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
 import { buildPersonalLoginSubmitArgs } from "@/hooks/personal-login-form-submit-args";
 
 describe("buildPersonalLoginSubmitArgs", () => {

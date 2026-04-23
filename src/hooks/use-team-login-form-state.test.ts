@@ -15,7 +15,7 @@ import {
 import {
   DEFAULT_GENERATOR_SETTINGS,
   DEFAULT_SYMBOL_GROUPS,
-} from "@/lib/generator-prefs";
+} from "@/lib/generator/generator-prefs";
 import type { TeamPolicyClient } from "@/hooks/use-team-policy";
 
 const NO_POLICY: TeamPolicyClient = {

@@ -3,7 +3,7 @@
 import { type Dispatch, type SetStateAction } from "react";
 import type { PersonalLoginFormInitialData } from "@/components/passwords/personal-login-form-types";
 import type { TagData } from "@/components/tags/tag-input";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { usePersonalLoginFormUiState } from "@/hooks/use-personal-login-form-ui-state";
 import { usePersonalLoginFormValueState } from "@/hooks/use-personal-login-form-value-state";

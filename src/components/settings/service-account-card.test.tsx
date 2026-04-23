@@ -31,7 +31,7 @@ vi.mock("@/lib/url-helpers", () => ({
   fetchApi: (...args: unknown[]) => mockFetch(...args),
 }));
 
-vi.mock("@/lib/format-datetime", () => ({
+vi.mock("@/lib/format/format-datetime", () => ({
   formatDateTime: (date: string) => date,
 }));
 

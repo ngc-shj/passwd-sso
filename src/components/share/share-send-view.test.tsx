@@ -28,7 +28,7 @@ vi.mock("@/components/passwords/copy-button", () => ({
   CopyButton: () => <button>Copy</button>,
 }));
 
-vi.mock("@/lib/format-datetime", () => ({
+vi.mock("@/lib/format/format-datetime", () => ({
   formatDateTime: (iso: string) => iso,
 }));
 

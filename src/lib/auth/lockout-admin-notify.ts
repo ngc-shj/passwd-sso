@@ -11,7 +11,7 @@ import { sendEmail } from "@/lib/email";
 import { vaultLockoutEmail } from "@/lib/email/templates/vault-lockout";
 import { createNotification } from "@/lib/notification";
 import { NOTIFICATION_TYPE, TENANT_ROLE } from "@/lib/constants";
-import { notificationTitle, notificationBody } from "@/lib/notification-messages";
+import { notificationTitle, notificationBody } from "@/lib/notification/notification-messages";
 import { resolveUserLocale } from "@/lib/locale";
 import { getLogger } from "@/lib/logger";
 

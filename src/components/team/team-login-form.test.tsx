@@ -72,7 +72,7 @@ vi.mock("@/lib/team/team-entry-save", () => ({
   }),
 }));
 
-vi.mock("@/lib/generator-prefs", () => ({
+vi.mock("@/lib/generator/generator-prefs", () => ({
   DEFAULT_GENERATOR_SETTINGS: {
     mode: "password",
     length: 16,

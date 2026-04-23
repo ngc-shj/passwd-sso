@@ -28,7 +28,7 @@ import { TEAM_ROLE, ENTRY_TYPE, apiPath } from "@/lib/constants";
 import type { EntryTypeValue } from "@/lib/constants";
 import type { EntryCustomField, EntryTotp } from "@/lib/vault/entry-form-types";
 import { compareEntriesWithFavorite, type EntrySortOption } from "@/lib/vault/entry-sort";
-import { buildFolderPath } from "@/lib/folder-path";
+import { buildFolderPath } from "@/lib/folder/folder-path";
 import { buildTagPath } from "@/lib/tag-tree";
 import type { FolderItem } from "@/components/folders/folder-tree";
 import { useTeamVault } from "@/lib/team/team-vault-context";

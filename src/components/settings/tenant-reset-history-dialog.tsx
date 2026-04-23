@@ -15,7 +15,7 @@ import { Loader2, History, X } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 
 interface ResetRecord {
   id: string;

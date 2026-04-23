@@ -16,7 +16,7 @@ import {
 } from "@/components/passwords/entry-form-ui";
 import type { TeamEntryFormProps } from "@/components/team/team-entry-form-types";
 import { preventIMESubmit } from "@/lib/ime-guard";
-import { toISODateString } from "@/lib/format-datetime";
+import { toISODateString } from "@/lib/format/format-datetime";
 import { ENTRY_TYPE } from "@/lib/constants";
 import { useTeamBaseFormModel } from "@/hooks/use-team-base-form-model";
 import { buildTeamFormSectionsProps } from "@/hooks/team-form-sections-props";

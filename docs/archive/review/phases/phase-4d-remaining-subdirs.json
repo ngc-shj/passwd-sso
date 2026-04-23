@@ -1,0 +1,44 @@
+{
+  "phaseName": "phase-4d-remaining-subdirs",
+  "moves": [
+    { "from": "src/lib/emergency-access-context.tsx",   "to": "src/lib/emergency-access/emergency-access-context.tsx" },
+    { "from": "src/lib/emergency-access-server.ts",      "to": "src/lib/emergency-access/emergency-access-server.ts" },
+    { "from": "src/lib/emergency-access-server.test.ts", "to": "src/lib/emergency-access/emergency-access-server.test.ts" },
+    { "from": "src/lib/emergency-access-state.ts",      "to": "src/lib/emergency-access/emergency-access-state.ts" },
+    { "from": "src/lib/emergency-access-state.test.ts", "to": "src/lib/emergency-access/emergency-access-state.test.ts" },
+
+    { "from": "src/lib/tenant-claim-storage.ts", "to": "src/lib/tenant/tenant-claim-storage.ts" },
+    { "from": "src/lib/tenant-claim.ts",      "to": "src/lib/tenant/tenant-claim.ts" },
+    { "from": "src/lib/tenant-claim.test.ts", "to": "src/lib/tenant/tenant-claim.test.ts" },
+    { "from": "src/lib/tenant-management.ts",      "to": "src/lib/tenant/tenant-management.ts" },
+    { "from": "src/lib/tenant-management.test.ts", "to": "src/lib/tenant/tenant-management.test.ts" },
+
+    { "from": "src/lib/format-datetime.ts",      "to": "src/lib/format/format-datetime.ts" },
+    { "from": "src/lib/format-datetime.test.ts", "to": "src/lib/format/format-datetime.test.ts" },
+    { "from": "src/lib/format-file-size.ts",      "to": "src/lib/format/format-file-size.ts" },
+    { "from": "src/lib/format-file-size.test.ts", "to": "src/lib/format/format-file-size.test.ts" },
+    { "from": "src/lib/format-user.ts",      "to": "src/lib/format/format-user.ts" },
+    { "from": "src/lib/format-user.test.ts", "to": "src/lib/format/format-user.test.ts" },
+
+    { "from": "src/lib/folder-path.ts",      "to": "src/lib/folder/folder-path.ts" },
+    { "from": "src/lib/folder-path.test.ts", "to": "src/lib/folder/folder-path.test.ts" },
+    { "from": "src/lib/folder-utils.ts",      "to": "src/lib/folder/folder-utils.ts" },
+    { "from": "src/lib/folder-utils.test.ts", "to": "src/lib/folder/folder-utils.test.ts" },
+
+    { "from": "src/lib/prisma-error.ts",      "to": "src/lib/prisma/prisma-error.ts" },
+    { "from": "src/lib/prisma-error.test.ts", "to": "src/lib/prisma/prisma-error.test.ts" },
+    { "from": "src/lib/prisma-filters.ts",      "to": "src/lib/prisma/prisma-filters.ts" },
+    { "from": "src/lib/prisma-filters.test.ts", "to": "src/lib/prisma/prisma-filters.test.ts" },
+
+    { "from": "src/lib/env-utils.ts",      "to": "src/lib/env/env-utils.ts" },
+    { "from": "src/lib/env-utils.test.ts", "to": "src/lib/env/env-utils.test.ts" },
+
+    { "from": "src/lib/notification-messages.ts",      "to": "src/lib/notification/notification-messages.ts" },
+    { "from": "src/lib/notification-messages.test.ts", "to": "src/lib/notification/notification-messages.test.ts" },
+
+    { "from": "src/lib/generator-prefs.ts",      "to": "src/lib/generator/generator-prefs.ts" },
+    { "from": "src/lib/generator-prefs.test.ts", "to": "src/lib/generator/generator-prefs.test.ts" },
+    { "from": "src/lib/generator-summary.ts",      "to": "src/lib/generator/generator-summary.ts" },
+    { "from": "src/lib/generator-summary.test.ts", "to": "src/lib/generator/generator-summary.test.ts" }
+  ]
+}

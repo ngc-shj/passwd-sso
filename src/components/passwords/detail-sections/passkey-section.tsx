@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { CopyButton } from "../copy-button";
 import { useRevealTimeout } from "@/hooks/use-reveal-timeout";
 import type { RequireVerificationFn } from "@/hooks/use-reveal-timeout";
-import { formatDate } from "@/lib/format-datetime";
+import { formatDate } from "@/lib/format/format-datetime";
 import type { InlineDetailData } from "@/types/entry";
 import type { CreateGuardedGetterFn } from "./types";
 

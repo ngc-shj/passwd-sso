@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import { buildGeneratorSummary } from "@/lib/generator-summary";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
+import { buildGeneratorSummary } from "@/lib/generator/generator-summary";
 
 describe("buildGeneratorSummary", () => {
   it("builds password mode summary", () => {

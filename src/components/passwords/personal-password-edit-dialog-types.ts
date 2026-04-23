@@ -1,5 +1,5 @@
 import type { TagData } from "@/components/tags/tag-input";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import type {
   EntryCustomField,
   EntryPasswordHistory,

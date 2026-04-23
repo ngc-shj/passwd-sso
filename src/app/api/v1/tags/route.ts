@@ -7,7 +7,7 @@ import { withTenantRls } from "@/lib/tenant-rls";
 import { v1ApiKeyLimiter } from "@/lib/security/rate-limiters";
 import { API_KEY_SCOPE } from "@/lib/constants/api-key";
 import { enforceAccessRestriction } from "@/lib/auth/access-restriction";
-import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma-filters";
+import { ACTIVE_ENTRY_WHERE } from "@/lib/prisma/prisma-filters";
 import { rateLimited, unauthorized } from "@/lib/api-response";
 
 

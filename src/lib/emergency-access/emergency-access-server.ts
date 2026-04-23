@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { STALE_ELIGIBLE_STATUSES } from "@/lib/emergency-access-state";
+import { STALE_ELIGIBLE_STATUSES } from "@/lib/emergency-access/emergency-access-state";
 import { EA_STATUS } from "@/lib/constants";
 
 /**

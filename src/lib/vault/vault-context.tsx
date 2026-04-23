@@ -45,7 +45,7 @@ import {
   unwrapSecretKeyWithPrf,
 } from "../auth/webauthn-client";
 import { AutoLockProvider } from "./auto-lock-context";
-import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access-context";
+import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access/emergency-access-context";
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {

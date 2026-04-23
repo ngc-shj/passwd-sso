@@ -30,7 +30,7 @@ import { SectionCardHeader } from "@/components/settings/section-card-header";
 import { fetchApi } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
 import { MAX_AUDIT_DELIVERY_TARGETS } from "@/lib/validations/common";
-import { formatDateTime } from "@/lib/format-datetime";
+import { formatDateTime } from "@/lib/format/format-datetime";
 import { toast } from "sonner";
 import { ChevronDown, Loader2, Plus, RotateCcw, Send, Trash2 } from "lucide-react";
 

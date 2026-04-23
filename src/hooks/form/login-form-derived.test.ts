@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator-prefs";
-import type { GeneratorSettings } from "@/lib/generator-prefs";
+import { DEFAULT_GENERATOR_SETTINGS } from "@/lib/generator/generator-prefs";
+import type { GeneratorSettings } from "@/lib/generator/generator-prefs";
 import { buildLoginFormDerived, buildSnapshot } from "@/hooks/form/login-form-derived";
 
 /* ------------------------------------------------------------------ */

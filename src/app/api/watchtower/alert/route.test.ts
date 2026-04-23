@@ -67,7 +67,7 @@ vi.mock("@/lib/auth/team-auth", () => ({
 }));
 vi.mock("@/lib/locale", () => ({ resolveUserLocale: vi.fn(() => "en") }));
 vi.mock("@/lib/url-helpers", () => ({ serverAppUrl: vi.fn(() => "http://localhost") }));
-vi.mock("@/lib/notification-messages", () => ({
+vi.mock("@/lib/notification/notification-messages", () => ({
   notificationTitle: vi.fn(() => "Alert"),
   notificationBody: vi.fn(() => "Body"),
 }));
