@@ -23,7 +23,7 @@ import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 import { MS_PER_DAY } from "@/lib/constants/time";
 
 const rateLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });

@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import {
   EXTERNAL_DELIVERY_METADATA_BLOCKLIST,
   sanitizeForExternalDelivery,

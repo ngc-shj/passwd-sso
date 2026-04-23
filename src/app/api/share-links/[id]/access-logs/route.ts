@@ -6,7 +6,7 @@ import { errorResponse, unauthorized, notFound } from "@/lib/api-response";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { SHARE_ACCESS_LOG_LIMIT } from "@/lib/validations/common.server";
-import { isValidCursorId } from "@/lib/audit-query";
+import { isValidCursorId } from "@/lib/audit/audit-query";
 
 type Params = { params: Promise<{ id: string }> };
 

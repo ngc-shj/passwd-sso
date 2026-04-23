@@ -12,7 +12,7 @@
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import type { NotificationType } from "@prisma/client";
-import { METADATA_BLOCKLIST } from "@/lib/audit-logger";
+import { METADATA_BLOCKLIST } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
 import { NOTIFICATION_TITLE_MAX, NOTIFICATION_BODY_MAX } from "@/lib/validations/common";
 

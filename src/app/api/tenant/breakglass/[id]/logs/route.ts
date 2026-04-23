@@ -17,9 +17,9 @@ import {
   buildAuditLogActionFilter,
   paginateResult,
   isValidCursorId,
-} from "@/lib/audit-query";
+} from "@/lib/audit/audit-query";
 import type { Prisma } from "@prisma/client";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 
 export const runtime = "nodejs";

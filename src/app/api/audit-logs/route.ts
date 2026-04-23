@@ -21,8 +21,8 @@ import {
   buildAuditLogDateFilter,
   paginateResult,
   isValidCursorId,
-} from "@/lib/audit-query";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+} from "@/lib/audit/audit-query";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 
 // GET /api/audit-logs — Personal audit logs (cursor-based pagination)
 async function handleGET(req: NextRequest) {

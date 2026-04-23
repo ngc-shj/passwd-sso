@@ -41,7 +41,7 @@ vi.mock("@/lib/prisma", () => ({
 vi.mock("@/lib/tenant-rls", async (importOriginal) => ({ ...(await importOriginal()) as Record<string, unknown>,
   withBypassRls: mockWithBypassRls,
 }));
-vi.mock("@/lib/audit-logger", () => ({
+vi.mock("@/lib/audit/audit-logger", () => ({
   auditLogger: { info: mockAuditInfo, enabled: true },
   METADATA_BLOCKLIST: new Set([
     "password", "passphrase", "secret", "secretKey",

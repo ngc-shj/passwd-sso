@@ -9,9 +9,9 @@
  */
 
 import type { AuditLog } from "@prisma/client";
-import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit-csv";
+import { formatCsvRow, AUDIT_LOG_CSV_HEADERS } from "@/lib/audit/audit-csv";
 import { AUDIT_LOG_BATCH_SIZE, AUDIT_LOG_MAX_ROWS } from "@/lib/validations/common.server";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 
 export type AuditLogFormat = "csv" | "jsonl";
 

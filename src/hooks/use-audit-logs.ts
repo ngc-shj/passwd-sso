@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { normalizeAuditActionKey } from "@/lib/audit-action-key";
+import { normalizeAuditActionKey } from "@/lib/audit/audit-action-key";
 import { fetchApi } from "@/lib/url-helpers";
 import { downloadBlob } from "@/lib/download-blob";
 import { formatDateTime } from "@/lib/format-datetime";

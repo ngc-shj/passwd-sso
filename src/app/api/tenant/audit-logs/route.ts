@@ -16,8 +16,8 @@ import {
   buildAuditLogActionFilter,
   paginateResult,
   isValidCursorId,
-} from "@/lib/audit-query";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+} from "@/lib/audit/audit-query";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 
 const MERGED_ACTION_GROUPS = mergeActionGroups(AUDIT_ACTION_GROUPS_TENANT, AUDIT_ACTION_GROUPS_TEAM);
 

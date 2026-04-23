@@ -13,7 +13,7 @@ import {
   TEAM_WEBHOOK_SUBSCRIBABLE_ACTIONS,
   ACTOR_TYPE,
 } from "@/lib/constants/audit";
-import { VALID_ACTOR_TYPES } from "@/lib/audit-query";
+import { VALID_ACTOR_TYPES } from "@/lib/audit/audit-query";
 import {
   ANONYMOUS_ACTOR_ID,
   SYSTEM_ACTOR_ID,

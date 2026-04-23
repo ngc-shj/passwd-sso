@@ -20,8 +20,8 @@ import {
   buildAuditLogDateFilter,
   paginateResult,
   isValidCursorId,
-} from "@/lib/audit-query";
-import { fetchAuditUserMap } from "@/lib/audit-user-lookup";
+} from "@/lib/audit/audit-query";
+import { fetchAuditUserMap } from "@/lib/audit/audit-user-lookup";
 
 type Params = { params: Promise<{ teamId: string }> };
 

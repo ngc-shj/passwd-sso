@@ -16,7 +16,7 @@ const {
   mockAuditLogCreate: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/lib/audit-outbox", () => ({
+vi.mock("@/lib/audit/audit-outbox", () => ({
   enqueueAudit: mockEnqueueAudit,
   enqueueAuditInTx: vi.fn(),
 }));
@@ -31,8 +31,8 @@ vi.mock("@/lib/prisma", () => ({
 
 const mockAuditInfo = vi.hoisted(() => vi.fn());
 
-vi.mock("@/lib/audit-logger", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
+vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit/audit-logger")>();
   return {
     ...actual,
     auditLogger: { info: mockAuditInfo, enabled: true },

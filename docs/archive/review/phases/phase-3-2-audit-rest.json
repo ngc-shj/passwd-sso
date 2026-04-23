@@ -1,0 +1,22 @@
+{
+  "phaseName": "phase-3-2-audit-rest",
+  "moves": [
+    { "from": "src/lib/audit-action-key.ts",      "to": "src/lib/audit/audit-action-key.ts" },
+    { "from": "src/lib/audit-action-key.test.ts", "to": "src/lib/audit/audit-action-key.test.ts" },
+    { "from": "src/lib/audit-action-label.ts",      "to": "src/lib/audit/audit-action-label.ts" },
+    { "from": "src/lib/audit-action-label.test.ts", "to": "src/lib/audit/audit-action-label.test.ts" },
+    { "from": "src/lib/audit-chain.ts", "to": "src/lib/audit/audit-chain.ts" },
+    { "from": "src/lib/audit-csv.ts",      "to": "src/lib/audit/audit-csv.ts" },
+    { "from": "src/lib/audit-csv.test.ts", "to": "src/lib/audit/audit-csv.test.ts" },
+    { "from": "src/lib/audit-display.ts", "to": "src/lib/audit/audit-display.ts" },
+    { "from": "src/lib/audit-log-stream.ts", "to": "src/lib/audit/audit-log-stream.ts" },
+    { "from": "src/lib/audit-logger.ts",      "to": "src/lib/audit/audit-logger.ts" },
+    { "from": "src/lib/audit-logger.test.ts", "to": "src/lib/audit/audit-logger.test.ts" },
+    { "from": "src/lib/audit-outbox.ts", "to": "src/lib/audit/audit-outbox.ts" },
+    { "from": "src/lib/audit-query.ts",      "to": "src/lib/audit/audit-query.ts" },
+    { "from": "src/lib/audit-query.test.ts", "to": "src/lib/audit/audit-query.test.ts" },
+    { "from": "src/lib/audit-target-label.ts",      "to": "src/lib/audit/audit-target-label.ts" },
+    { "from": "src/lib/audit-target-label.test.ts", "to": "src/lib/audit/audit-target-label.test.ts" },
+    { "from": "src/lib/audit-user-lookup.ts", "to": "src/lib/audit/audit-user-lookup.ts" }
+  ]
+}

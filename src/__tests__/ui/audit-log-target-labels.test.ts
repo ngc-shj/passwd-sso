@@ -6,7 +6,7 @@ describe("audit log target labels", () => {
   it("uses parentAction and bulk trash/archive/unarchive/restore meta in shared target label helper", () => {
     // Personal and team pages delegate bulk/trash actions to getCommonTargetLabel
     const sharedHelper = readFileSync(
-      join(process.cwd(), "src/lib/audit-target-label.ts"),
+      join(process.cwd(), "src/lib/audit/audit-target-label.ts"),
       "utf8"
     );
 

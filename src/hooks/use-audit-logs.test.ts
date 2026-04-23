@@ -38,7 +38,7 @@ vi.mock("@/lib/format-datetime", () => ({
   formatDateTime: vi.fn((iso: string) => iso),
 }));
 
-vi.mock("@/lib/audit-action-key", () => ({
+vi.mock("@/lib/audit/audit-action-key", () => ({
   normalizeAuditActionKey: vi.fn((key: string) => key),
 }));
 

@@ -15,7 +15,7 @@ import {
   buildChainInput,
   computeCanonicalBytes,
   computeEventHash,
-} from "@/lib/audit-chain";
+} from "@/lib/audit/audit-chain";
 
 // Mirrors the verify endpoint's row type
 interface ChainRow {

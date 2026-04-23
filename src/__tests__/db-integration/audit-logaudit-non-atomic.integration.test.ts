@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
-import { enqueueAudit, type AuditOutboxPayload } from "@/lib/audit-outbox";
+import { enqueueAudit, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
 describe("audit logAuditAsync non-atomic (negative test)", () => {
   let ctx: TestContext;

@@ -124,8 +124,8 @@ vi.mock("@/lib/logger", () => ({
   },
 }));
 
-vi.mock("@/lib/audit-logger", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/audit-logger")>();
+vi.mock("@/lib/audit/audit-logger", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/audit/audit-logger")>();
   return {
     ...actual,
     deadLetterLogger: { warn: mockDeadLetterWarn },

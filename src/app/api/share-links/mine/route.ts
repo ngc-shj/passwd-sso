@@ -7,7 +7,7 @@ import { requireTeamMember } from "@/lib/auth/team-auth";
 import { TEAM_ROLE } from "@/lib/constants";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
-import { isValidCursorId } from "@/lib/audit-query";
+import { isValidCursorId } from "@/lib/audit/audit-query";
 
 // GET /api/share-links/mine
 // - Personal context (no `team`): links created by current user, personal entries only

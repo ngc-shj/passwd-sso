@@ -15,10 +15,10 @@ import type { Prisma } from "@prisma/client";
 import { withTeamTenantRls } from "@/lib/tenant-context";
 import { withRequestLog } from "@/lib/with-request-log";
 import { errorResponse, handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
-import { parseActionsCsvParam, parseActorType } from "@/lib/audit-query";
+import { parseActionsCsvParam, parseActorType } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
-import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit-log-stream";
+import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
 
 type Params = { params: Promise<{ teamId: string }> };
 

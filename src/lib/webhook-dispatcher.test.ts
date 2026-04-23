@@ -46,8 +46,8 @@ vi.mock("@/lib/audit/audit", async () => {
     logAuditAsync: mockLogAudit,
   };
 });
-vi.mock("@/lib/audit-logger", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/audit-logger")>("@/lib/audit-logger");
+vi.mock("@/lib/audit/audit-logger", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/audit/audit-logger")>("@/lib/audit/audit-logger");
   return {
     ...actual,
   };

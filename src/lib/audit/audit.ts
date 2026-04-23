@@ -50,7 +50,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit-logger";
+import { auditLogger, METADATA_BLOCKLIST, deadLetterLogger } from "@/lib/audit/audit-logger";
 import { safeRecord } from "@/lib/safe-keys";
 import { withBypassRls, BYPASS_PURPOSE } from "@/lib/tenant-rls";
 import { extractClientIp } from "@/lib/auth/ip-access";
@@ -59,7 +59,7 @@ import type { AuditAction, AuditScope, ActorType, Prisma } from "@prisma/client"
 import type { NextRequest } from "next/server";
 import type { AuthResult } from "@/lib/auth/auth-or-token";
 import { METADATA_MAX_BYTES, USER_AGENT_MAX_LENGTH } from "@/lib/validations/common.server";
-import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit-outbox";
+import { enqueueAudit, enqueueAuditBulk, enqueueAuditInTx, type AuditOutboxPayload } from "@/lib/audit/audit-outbox";
 
 /** Truncate metadata to fit METADATA_MAX_BYTES, preserving the original if within limits. */
 function truncateMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {

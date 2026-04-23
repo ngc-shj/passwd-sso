@@ -9,10 +9,10 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { createRateLimiter } from "@/lib/rate-limit";
 import { handleAuthError, rateLimited, unauthorized, validationError } from "@/lib/api-response";
 import { AUDIT_ACTION, AUDIT_SCOPE } from "@/lib/constants";
-import { parseActionsCsvParam } from "@/lib/audit-query";
+import { parseActionsCsvParam } from "@/lib/audit/audit-query";
 import { AUDIT_LOG_MAX_RANGE_DAYS } from "@/lib/validations/common.server";
 import { MS_PER_DAY } from "@/lib/constants/time";
-import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit-log-stream";
+import { buildAuditLogStream, buildAuditLogDownloadResponse } from "@/lib/audit/audit-log-stream";
 
 const downloadLimiter = createRateLimiter({
   windowMs: 60_000,

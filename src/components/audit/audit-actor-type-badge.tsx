@@ -2,7 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
-import { resolveActorDisplay } from "@/lib/audit-display";
+import { resolveActorDisplay } from "@/lib/audit/audit-display";
 
 interface AuditActorTypeBadgeProps {
   actorType?: string;

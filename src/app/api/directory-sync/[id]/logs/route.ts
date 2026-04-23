@@ -13,7 +13,7 @@ import { API_ERROR } from "@/lib/api-error-codes";
 import { unauthorized, notFound, errorResponse, handleAuthError } from "@/lib/api-response";
 import { withRequestLog } from "@/lib/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
-import { isValidCursorId } from "@/lib/audit-query";
+import { isValidCursorId } from "@/lib/audit/audit-query";
 import { requireTenantPermission } from "@/lib/auth/tenant-auth";
 import { TENANT_PERMISSION } from "@/lib/constants/tenant-permission";
 

@@ -11,7 +11,7 @@ import {
   NOTIFICATION_PAGE_DEFAULT,
   NOTIFICATION_PAGE_MAX,
 } from "@/lib/validations/common.server";
-import { isValidCursorId } from "@/lib/audit-query";
+import { isValidCursorId } from "@/lib/audit/audit-query";
 
 // GET /api/notifications — List notifications (cursor-based pagination)
 async function handleGET(req: NextRequest) {
