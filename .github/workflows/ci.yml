@@ -22,6 +22,7 @@ jobs:
       cli: ${{ steps.filter.outputs.cli }}
       e2e: ${{ steps.filter.outputs.e2e }}
       ci: ${{ steps.filter.outputs.ci }}
+      env: ${{ steps.filter.outputs.env }}
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +54,35 @@ jobs:
             ci:
               - ".github/workflows/ci.yml"
               - "scripts/checks/check-licenses.mjs"
+            env:
+              - ".env.example"
+              - "src/lib/env.ts"
+              - "src/lib/env-schema.ts"
+              - "scripts/env-descriptions.ts"
+              - "scripts/check-env-docs.ts"
+              - "scripts/env-allowlist.ts"
+              - "scripts/lib/compose-env-scan.ts"
+              - "scripts/generate-env-example.ts"
+              - "docker-compose.yml"
+              - "docker-compose.override.yml"
+              - "docker-compose.ha.yml"
+              - "docker-compose.logging.yml"
+
+  # ─── Env Drift Check ──────────────────────────────────────
+  env-drift-check:
+    name: env drift check
+    needs: changes
+    if: needs.changes.outputs.env == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run check:env-docs
 
   # ─── Version Drift Check ──────────────────────────────────
   version-check:

@@ -45,6 +45,9 @@ const ROSTER_GLOBS = [
   "scripts/check-codeowners-drift.mjs",
   "scripts/check-blame-ignore-revs.mjs",
 
+  // Env allowlist governance (Step 8, SEC-4).
+  "scripts/env-allowlist.ts",
+
   // Check scripts (pre-PR-2 at scripts/ root; post-PR-2 at scripts/checks/).
   // Both globs listed. Whichever matches files on disk is the authoritative one.
   "scripts/check-*.mjs",
