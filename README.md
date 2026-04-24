@@ -163,11 +163,24 @@ npm install
 
 ### 2. Configure environment
 
+Run the interactive generator — it walks you through every required variable, auto-generates cryptographic secrets, and validates the result against the Zod schema before writing:
+
+```bash
+npm run init:env                       # interactive, default profile=dev
+npm run init:env -- --profile=production    # prompts for real provider secrets
+```
+
+The generator writes `.env.local` atomically with mode `0o600` and refuses to overwrite unless you explicitly say so. Generated secrets are shown as `[generated]` placeholders in the terminal transcript; use `--print-secrets` only when you need to copy them.
+
+If you prefer to edit manually, copy the template:
+
 ```bash
 cp .env.example .env.local
 ```
 
-Edit `.env.local` — key variables:
+`.env.example` is generated from `src/lib/env-schema.ts` (the single source of truth) — regenerate it with `npm run generate:env-example` after changing the schema. Run `npm run check:env-docs` to verify `.env.example`, the allowlist, and `docker-compose*.yml` stay in sync.
+
+Key variables:
 
 | Variable | Description |
 | --- | --- |
@@ -317,6 +330,9 @@ docs/                     # Documentation (architecture, security, operations, s
 | `npm run db:seed` | Seed data |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | Generate 256-bit hex key |
+| `npm run init:env` | Interactive .env.local generator (dev/ci/production) |
+| `npm run generate:env-example` | Regenerate .env.example from Zod schema + sidecar |
+| `npm run check:env-docs` | Drift check: schema ↔ .env.example ↔ allowlist ↔ compose |
 | `npm run generate:icons` | Generate app icons |
 
 <details>

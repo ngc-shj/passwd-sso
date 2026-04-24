@@ -33,7 +33,9 @@ import { run } from "../init-env.ts";
 import { envObject } from "../../src/lib/env-schema.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_ROOT = resolve(__dirname, "..", "..");
+// REPO_ROOT kept for potential future use when tests need absolute paths.
+const _REPO_ROOT = resolve(__dirname, "..", "..");
+void _REPO_ROOT;
 
 // ── env snapshot / restore ────────────────────────────────────────────────────
 

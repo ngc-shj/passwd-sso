@@ -13,6 +13,9 @@ npm run db:push          # Push schema without migration
 npm run db:seed          # Seed data (tsx prisma/seed.ts)
 npm run db:studio        # Prisma Studio GUI
 npm run generate:key     # Generate 256-bit hex master key
+npm run init:env         # Interactive .env.local generator (dev/ci/production profiles)
+npm run generate:env-example  # Regenerate .env.example from Zod schema + sidecar
+npm run check:env-docs   # Drift check: .env.example ↔ env-schema.ts ↔ allowlist ↔ docker-compose
 npm run version:bump     # Suggest next version from git log (interactive)
 npm run version:bump -- 0.3.0  # Bump to explicit version
 ```

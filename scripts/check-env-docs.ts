@@ -424,7 +424,8 @@ export async function main(argv: string[]): Promise<number> {
   };
   let allowlist: AllowlistEntry[] | null;
   let composeVars: Set<string>;
-  let envExampleText: string;
+  // envExampleText is read once just before parseEnvExample; see below.
+
 
   try {
     zodKeys = await getZodKeys(root);
@@ -468,7 +469,7 @@ export async function main(argv: string[]): Promise<number> {
     process.stderr.write(errors.join("\n") + "\n");
     return 1;
   }
-  envExampleText = readText(envExamplePath);
+  const envExampleText = readText(envExamplePath);
   const { activeKeys, commentedKeys, allKeys } = parseEnvExample(envExampleText);
   const allExampleKeys = new Set([...activeKeys, ...commentedKeys]);
 
