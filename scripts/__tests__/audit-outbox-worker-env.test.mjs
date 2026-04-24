@@ -53,17 +53,22 @@ function spawnWorker(envOverrides = {}) {
 
 /**
  * Extract the first line from stdout that parses as valid JSON.
- * The dotenvx library logs "[dotenv@...] injecting env..." lines to stdout
- * before the worker's own JSON output. This helper skips those preamble lines.
+ *
+ * The dotenv library (v17, silent by default) does not emit preamble lines in
+ * the current setup. We still skip non-JSON lines defensively: if a future
+ * load-env wrapper adds a diagnostic banner, the test should continue to
+ * locate the worker's own JSON output rather than fail on JSON.parse of the
+ * banner (CT6). Non-matching lines fall through to JSON.parse, which returns
+ * them if valid or skips them via catch if not — no explicit prefix allowlist.
  */
 function extractJsonLine(stdout) {
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("[dotenv")) continue;
+    if (!trimmed) continue;
     try {
       return JSON.parse(trimmed);
     } catch {
-      // skip non-JSON lines
+      // skip non-JSON lines (e.g. future dotenv/dotenvx diagnostic banners)
     }
   }
   return null;

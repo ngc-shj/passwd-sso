@@ -4,18 +4,24 @@
  * Key ordering: sorted by (GROUPS.indexOf(group), order) tuple — never by
  * envObject.shape iteration order (NF-3 determinism requirement).
  *
- * Run: tsx scripts/generate-env-example.ts [--locale=<tag>]
+ * Run: tsx scripts/generate-env-example.ts [--locale=<tag>] [--out=<path>]
  */
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { envObject } from "@/lib/env-schema";
 import { GROUPS, descriptions } from "./env-descriptions";
+import { makeEnvKeyCollator } from "./lib/env-sort";
 
 // ── Arg parsing ───────────────────────────────────────────────────────────
 
 const localeArg = process.argv.find((a) => a.startsWith("--locale="));
 const locale = localeArg ? localeArg.split("=")[1] : "en";
+
+// --out=<path>: override the output path. Defaults to ./env.example at cwd.
+// Hermetic tests use this to write to a tmp dir instead of the real repo file.
+const outArg = process.argv.find((a) => a.startsWith("--out="));
+const outPathOverride = outArg ? outArg.split("=")[1] : undefined;
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -80,6 +86,29 @@ function hasZodDefault(_unused: unknown, key: string): boolean {
   return hasDefault(fieldSchema._def);
 }
 
+// Returns true if the Zod shape for a key is wrapped in .optional() at top level.
+function isOptional(def: ZodDefNode): boolean {
+  if (!def) return false;
+  if (def.type === "optional") return true;
+  // ZodPipe — check the output side (rarely optional, but handle it)
+  if (def.type === "pipe" && def.in) return isOptional(def.in._def);
+  return false;
+}
+function isZodOptional(key: string): boolean {
+  const shape = envObject.shape as Record<string, { _def: ZodDefNode }>;
+  const fieldSchema = shape[key];
+  if (!fieldSchema) return false;
+  return isOptional(fieldSchema._def);
+}
+
+// A key is "always required" when the Zod shape declares it without a default
+// AND without .optional(). Emitting such a key as a commented placeholder in
+// .env.example would mislead developers doing `cp .env.example .env.local` —
+// they'd get a boot-time "Required" error. Emit uncommented instead (CF4).
+function isAlwaysRequired(key: string): boolean {
+  return !hasZodDefault(null, key) && !isZodOptional(key);
+}
+
 // Secret-pattern guard (NF-4.6 / S16).
 // If a value matches the hex-32+ pattern:
 //   - secret: true  → replace with placeholder comment
@@ -106,7 +135,7 @@ function guardExample(key: string, value: string | undefined, isSecret: boolean 
 
 // ── Sort entries ──────────────────────────────────────────────────────────
 
-const collator = new Intl.Collator(locale, { sensitivity: "variant" });
+const compareKey = makeEnvKeyCollator(locale);
 
 type Entry = {
   key: string;
@@ -126,8 +155,10 @@ const entries: Entry[] = Object.keys(descriptions).map((key) => {
 entries.sort((a, b) => {
   if (a.groupIndex !== b.groupIndex) return a.groupIndex - b.groupIndex;
   if (a.order !== b.order) return a.order - b.order;
-  // Stable tiebreaker using collator (should not be needed in practice)
-  return collator.compare(a.key, b.key);
+  // Stable tiebreaker using collator (should not be needed in practice).
+  // Using makeEnvKeyCollator from ./lib/env-sort so tests can exercise the
+  // same comparator directly without re-implementation (T26/CT2).
+  return compareKey(a.key, b.key);
 });
 
 // ── Generate output ───────────────────────────────────────────────────────
@@ -163,12 +194,16 @@ for (const { key, groupIndex } of entries) {
     continue;
   }
 
-  // Determine if this key has a Zod default
-  const isRequired = hasZodDefault(null as never, key);
+  // Emit uncommented when:
+  //   - the key has a Zod .default() — it always has a runtime value; OR
+  //   - the key is always-required (no default, no .optional()) — CF4 fix:
+  //     developers doing `cp .env.example .env.local && npm run dev` must see
+  //     the assignment uncommented so the template shows what to fill in.
+  // Emit commented when the key is truly optional (may be left unset at boot).
+  const emitUncommented =
+    hasZodDefault(null as never, key) || isAlwaysRequired(key);
 
-  // Keys with a .default() → emit as uncommented (they always have a value)
-  // Keys without → emit as commented (optional or conditionally required)
-  if (isRequired) {
+  if (emitUncommented) {
     lines.push(`${key}=${guardedExample ?? ""}`);
   } else {
     const val = guardedExample !== undefined ? guardedExample : "";
@@ -183,6 +218,8 @@ const output = lines.join("\n").trimEnd() + "\n";
 
 // ── Write ──────────────────────────────────────────────────────────────────
 
-const outPath = path.join(process.cwd(), ".env.example");
+const outPath = outPathOverride
+  ? path.resolve(outPathOverride)
+  : path.join(process.cwd(), ".env.example");
 fs.writeFileSync(outPath, output, "utf8");
 console.log(`Wrote ${outPath} (${entries.length} entries)`);

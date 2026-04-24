@@ -99,8 +99,12 @@ export function scanDiff(diffText, filePath) {
       continue;
     }
 
-    // Check for 64-char hex runs.
-    const m = HEX64_RE.exec(content);
+    // Strip inline /* ... */ runs before the hex check (CS1).
+    // Multi-line block comments are still handled by the state machine above.
+    const cleaned = content.replace(/\/\*[\s\S]*?\*\//g, "");
+
+    // Check for 64-char hex runs in the non-comment portion.
+    const m = HEX64_RE.exec(cleaned);
     if (m) {
       const hexPrefix = m[1].slice(0, 8);
       matches.push({ line: content, lineNum: diffLineNum, hexPrefix, filePath });

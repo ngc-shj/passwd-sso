@@ -517,13 +517,18 @@ export async function run(opts: RunOptions): Promise<number> {
 
       let resolved = false;
 
+      // CS2: track which issues to show on the NEXT iteration. Starts with the
+      // initial validation failure; replaced after each retry with the fresh
+      // testResult issues so the user sees the error for the value they just
+      // typed, not the stale original message.
+      let currentIssues = validationResult.error.issues.filter(
+        (i) => String(i.path[0]) === fieldPath,
+      );
+
       for (let attempt = 0; attempt < MAX_FIELD_ATTEMPTS; attempt++) {
         // Show errors — path + message only, NEVER the rejected value (NF-4.3).
-        const fieldIssues = validationResult.error.issues.filter(
-          (i) => String(i.path[0]) === fieldPath,
-        );
         stderr.write(`\nValidation error for ${fieldPath}:\n`);
-        for (const issue of fieldIssues) {
+        for (const issue of currentIssues) {
           stderr.write(`  ${issue.message}\n`);
         }
 
@@ -561,6 +566,14 @@ export async function run(opts: RunOptions): Promise<number> {
           resolved = true;
           break;
         }
+
+        // Refresh issues from the latest testResult so the next iteration
+        // displays the CURRENT failure's message (CS2), not the stale initial one.
+        currentIssues = testResult.success
+          ? []
+          : testResult.error.issues.filter(
+              (i) => String(i.path[0]) === fieldPath,
+            );
       }
 
       if (!resolved) {
@@ -596,12 +609,28 @@ export async function run(opts: RunOptions): Promise<number> {
 
   let currentGroupIndex = -1;
 
+  // NF-4.6 / S16: same hex32+ emit-time guard as generate-env-example.ts.
+  // A value matching /^[A-Fa-f0-9]{32,}$/ on a non-secret field indicates a
+  // sidecar bug (either the field should be marked secret, or the example
+  // should not look like a hex secret). Fail closed before writing.
+  const HEX32_RE = /^[A-Fa-f0-9]{32,}$/;
+
   for (const field of writeFields) {
     const { key, groupIndex } = field;
     const value = collected.get(key);
     if (value === undefined) continue;
 
     const sidecar = descriptions[key as keyof typeof descriptions];
+
+    if (HEX32_RE.test(value) && !sidecar.secret) {
+      stderr.write(
+        `ERROR: refusing to write .env.local — key "${key}" has a value ` +
+          `matching /^[A-Fa-f0-9]{32,}$/ but its sidecar entry is not marked ` +
+          `secret: true. This is a sidecar bug (see NF-4.6/S16). Fix the ` +
+          `sidecar and re-run.\n`,
+      );
+      return 1;
+    }
 
     if (groupIndex !== currentGroupIndex) {
       if (lines.length > 1) lines.push("");

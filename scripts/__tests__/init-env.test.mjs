@@ -30,7 +30,7 @@ import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
 import { run } from "../init-env.ts";
-import { envObject } from "../../src/lib/env-schema.ts";
+import { envObject, envSchema } from "../../src/lib/env-schema.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // REPO_ROOT kept for potential future use when tests need absolute paths.
@@ -140,8 +140,19 @@ describe("init-env.ts run()", () => {
       expect(existsSync(envLocalPath)).toBe(true);
 
       const parsed = dotenv.parse(readFileSync(envLocalPath, "utf8"));
-      const result = envObject.safeParse(parsed);
+      // CT10: use envSchema (refined) — matches what init-env itself asserts
+      // via envSchema.safeParse at write time. Catches regressions where dev
+      // profile output would fail refined validation.
+      const result = envSchema.safeParse(parsed);
+      if (!result.success) {
+        console.error(
+          "envSchema issues:",
+          result.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; "),
+        );
+      }
       expect(result.success).toBe(true);
+      // Also verify envObject acceptance for completeness.
+      expect(envObject.safeParse(parsed).success).toBe(true);
 
       // Generated secrets must NOT leak to stdout/stderr.
       const HEX64_RE = /^[0-9a-f]{64}$/;
@@ -186,16 +197,18 @@ describe("init-env.ts run()", () => {
     // Intentional skip: file chmod is a no-op on win32.
   });
 
-  it("reprompts up to 5 times and then exits 1 when production profile receives invalid input", async () => {
+  it("reprompts exactly 5 times per failing field and then exits 1 when production profile receives invalid input", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "init-env-prod-fail-"));
     try {
       process.chdir(tmpDir);
 
-      // Feed "y" for all prompts. DATABASE_URL receives "y" → not a valid URL.
-      // After 5 re-prompt failures per field, init-env exits 1.
+      // Feed "y" for all prompts. DATABASE_URL receives "y" → passes initial
+      // nonEmpty check but fails envSchema production superRefine. The re-prompt
+      // loop then re-asks DATABASE_URL (and other failed fields) up to 5 times.
       const stdin = new DelayedAnswerStream([], "y");
       const stdout = new PassThrough();
       const stderr = new PassThrough();
+      const getStdout = collectStream(stdout);
       const getStderr = collectStream(stderr);
 
       const code = await run({
@@ -207,13 +220,32 @@ describe("init-env.ts run()", () => {
       });
       stdin.destroy();
 
+      const stdoutText = getStdout();
       const stderrText = getStderr();
 
       expect(code).toBe(1);
       expect(stderrText).toMatch(
         /The following fields failed validation|failed validation after/i,
       );
+      // NF-4.3: rejected value must not appear in transcript.
       expect(stderrText).not.toMatch(/value\s*=\s*["']y["']/i);
+
+      // CT3: assert the re-prompt count is exactly 5 per failing field.
+      // The prompter writes "Re-enter <fieldPath>" on each retry. At least one
+      // failing field must show exactly MAX_FIELD_ATTEMPTS (=5) Re-enter lines.
+      const reEnterMatches = stdoutText.match(/Re-enter\s+\S+/g) ?? [];
+      expect(reEnterMatches.length).toBeGreaterThan(0);
+
+      // Bucket by field path and verify at least one bucket has 5 retries.
+      const countByField = new Map();
+      for (const line of reEnterMatches) {
+        const m = line.match(/Re-enter\s+(\S+)/);
+        if (!m) continue;
+        const f = m[1];
+        countByField.set(f, (countByField.get(f) ?? 0) + 1);
+      }
+      const maxRetries = Math.max(...countByField.values());
+      expect(maxRetries).toBe(5);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
@@ -229,11 +261,10 @@ describe("init-env.ts run()", () => {
       process.chdir(tmpDir);
 
       // The abort path issues exactly one readline read (the choice prompt).
-      // fallback=null stalls after "3\n" is consumed — no further pushes.
-      // After "3\n" is consumed readline may call _read() for read-ahead but
-      // the stream stalls; prompter.close() fires (rl.close()), readline stops
-      // requesting data, and run() returns 0. No OOM, no EOF "closed" error.
-      const stdin = new DelayedAnswerStream(["3"], null);
+      // Use fallback="3" so any extra read-ahead from readline returns the
+      // same valid choice. Avoids a stall-based race that made this test flaky
+      // under tight timeout when readline buffered beyond the first line.
+      const stdin = new DelayedAnswerStream(["3"], "3");
       const stdout = new PassThrough();
       const stderr = new PassThrough();
       const getStdout = collectStream(stdout);

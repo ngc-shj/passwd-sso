@@ -74,6 +74,43 @@ describe("hex-leak-scan.mjs scanDiff()", () => {
     expect(matches).toHaveLength(0);
   });
 
+  it("(d-bare) exempts hex on a BARE line inside a /* ... */ block — state machine must track cross-line context (CT4)", () => {
+    // The hex line has NO leading ` * ` / `#` / `//` — only the block-state
+    // machine can exempt it. If the scanner relies purely on the single-line
+    // comment regex, this test fails.
+    const diff = makeDiff(
+      [
+        "/*",
+        `${FAKE_HEX64}`,
+        "*/",
+      ],
+      "foo.ts",
+    );
+    const matches = scanDiff(diff, "foo.ts");
+    expect(matches).toHaveLength(0);
+  });
+
+  it("(f) exempts hex inside a SAME-LINE /* ... */ block comment (CS1)", () => {
+    // `+const x = /* <64hex> */;` — both opener and closer on one line.
+    // Without the inline-strip fix, HEX64_RE would still flag the line.
+    const diff = makeDiff(
+      [`const x = /* ${FAKE_HEX64} */;`],
+      "foo.ts",
+    );
+    const matches = scanDiff(diff, "foo.ts");
+    expect(matches).toHaveLength(0);
+  });
+
+  it("(g) still flags a SAME-LINE block comment when hex leaks OUTSIDE the comment", () => {
+    // Defense against over-eager stripping: hex BEFORE the /* ... */ is still a leak.
+    const diff = makeDiff(
+      [`const leaked = "${FAKE_HEX64}"; /* benign */`],
+      "foo.ts",
+    );
+    const matches = scanDiff(diff, "foo.ts");
+    expect(matches.length).toBeGreaterThan(0);
+  });
+
   it("(e) conservatively matches hex in a Markdown fenced code block (fail-closed per S20)", () => {
     // Markdown fenced code blocks are NOT exempt — fail-closed.
     // In a .md file, indented hex inside a fenced section is still flagged.
