@@ -17,6 +17,12 @@ dist/
 .env.test.local
 .env.production.local
 .env*.local
+# env generator artifacts (secrets) — SEC-1
+.env.local.tmp
+.env.local.tmp.*
+.env.local.bak
+.env.local.bak-*
+.env.local.bak.*
 
 # Database
 *.db
