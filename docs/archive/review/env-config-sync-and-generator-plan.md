@@ -657,6 +657,72 @@ All other `process.env.*` strings that appear only in `*.test.ts`/`*.test.tsx` f
 
 ---
 
+## Implementation Checklist (Phase 2 Step 2-1)
+
+### Files to create (new)
+- `scripts/env-descriptions.ts` — sidecar (GROUPS, SidecarEntry, descriptions record)
+- `scripts/env-allowlist.ts` — literal + regex allowlist
+- `scripts/generate-env-example.ts` — `.env.example` generator
+- `scripts/check-env-docs.ts` — drift checker (11 rules)
+- `scripts/init-env.ts` — interactive generator
+- `scripts/lib/prompt.ts` — readline/promises wrapper
+- `scripts/lib/compose-env-scan.ts` — docker-compose YAML limited-subset parser
+- `scripts/lib/hex-leak-scan.mjs` — Node-based gitleaks fallback
+- `scripts/__tests__/generate-env-example.test.mjs`
+- `scripts/__tests__/check-env-docs.test.mjs`
+- `scripts/__tests__/init-env.test.mjs`
+- `scripts/__tests__/audit-outbox-worker-env.test.mjs`
+- `scripts/__tests__/pre-pr-env-drift.test.mjs`
+- `scripts/__tests__/pre-pr-hex-fallback.test.mjs`
+- `scripts/__tests__/check-env-gitignore.test.mjs`
+- 8 fixture subdirectories under `scripts/__tests__/fixtures/env-drift/`
+
+### Files to modify
+- `.gitignore` — add 5 lines (SEC-1)
+- `.github/CODEOWNERS` — add 1 line for scripts/env-allowlist.ts (SEC-4)
+- `scripts/check-codeowners-drift.mjs` — add "scripts/env-allowlist.ts" to ROSTER_GLOBS (S18)
+- `src/lib/env.ts` — split `envObject`/`envSchema`, add A1-A33 + V1-V10, remove SMTP_HOST escape hatch
+- `src/lib/env.test.ts` — NEW file (or extend); per-field tests using `envObject.safeParse`
+- `src/__tests__/env.test.ts` — keep as boot/superRefine coverage; top docstring clarifies split
+- `src/lib/env/env-utils.ts` — UNCHANGED (envInt helper stays; drift checker scans for it)
+- `scripts/audit-outbox-worker.ts` — add envObject.pick + --validate-env-only flag
+- `scripts/pre-pr.sh` — add check:env-docs step + Node-based gitleaks fallback
+- `.github/workflows/ci.yml` — add env-drift-check job + changes.env filter
+- `package.json` — add scripts: `init:env`, `generate:env-example`, `check:env-docs`
+- `.env.example` — regenerated from sidecar + schema
+- `README.md` — "Configure environment" section points to `npm run init:env`
+- `CLAUDE.md` — Common Commands block gets 3 new scripts
+
+### Shared utilities to REUSE (R1 discipline)
+- `src/lib/env/env-utils.ts::envInt` — used by audit.ts OUTBOX_* reads (keep as-is; drift check 9 scans these)
+- `npm run generate:key` (existing npm script) — referenced in `.env.example` placeholder (S21)
+- `scripts/__tests__/check-licenses.test.mjs` `run()` helper pattern — reuse for drift-checker tests
+- `scripts/__tests__/move-and-rewrite-imports.test.mjs` `execFileSync`/`spawnSync` pattern — reuse for worker + pre-pr tests
+- Existing `scripts/checks/check-codeowners-drift.mjs` — extend ROSTER_GLOBS, don't duplicate the check
+- `dotenv@^17.2.4` (existing dep) — for quoting/escaping values in the generator
+- `src/lib/load-env.ts` (existing wrapper for dotenv) — worker already imports via `loadEnv()`
+
+### Dependencies NOT to introduce
+- `@clack/prompts` (even transitive) — use `node:readline/promises` only
+- `js-yaml` — use in-repo `compose-env-scan.ts` (package.json confirms not present)
+- Any new TUI lib
+
+### Existing constants/defaults that must match Zod additions
+| Variable | Current runtime default | Zod action |
+|---|---|---|
+| HEALTH_REDIS_REQUIRED | `false` (unset → false) | `.default("false")` — NF-5 |
+| LOG_LEVEL | `"info"` | `.default("info")` — no superRefine prod ban this PR |
+| SMTP_PORT | `587` | `.default(587)` — empty string now rejects (documented) |
+| AUDIT_LOG_APP_NAME | `"passwd-sso"` | already `.default("passwd-sso")` |
+| OUTBOX_BATCH_SIZE..OUTBOX_REAPER_INTERVAL_MS | values in `src/lib/constants/audit/audit.ts:680-688` | match envInt defaults exactly |
+| SHARE_MASTER_KEY_CURRENT_VERSION | `.max(100)` | unchanged (NF-5 F17) |
+| NEXT_PUBLIC_* | consumer `??` fallbacks | server-side `.default()` added; consumer fallbacks kept (F20) |
+
+### Storage-backend schema verification
+N/A — no DB migrations, no raw-query tests.
+
+---
+
 ## Open questions (all resolved through Round 2)
 
 1. ~~README.md env table sync~~ → NOT in scope; README table becomes descriptive, not authoritative. Generator's `.env.example` is the source of truth.
