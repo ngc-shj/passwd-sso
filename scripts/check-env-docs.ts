@@ -155,7 +155,7 @@ async function getAllowlist(root: string) {
     return null;
   }
   const mod = await import(allowlistPath);
-  return mod.ALLOWLIST as import("./env-allowlist.ts").AllowlistEntry[];
+  return mod.ALLOWLIST as AllowlistEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -264,6 +264,10 @@ type AllowlistEntry = {
   justification: string;
   consumers: readonly string[];
   reviewedAt: string;
+  // Set on literal entries for framework-provided vars that our code reads
+  // but users cannot configure (e.g. NEXT_RUNTIME set by Next.js). Exempts
+  // the entry from rule 9; default false.
+  readByApp?: boolean;
 };
 
 function validateAllowlistShape(entry: AllowlistEntry, idx: number): string[] {
@@ -586,10 +590,12 @@ export async function main(argv: string[]): Promise<number> {
   if (allowlist) {
     for (const entry of allowlist) {
       if (entry.type !== "literal") continue;
-      if (entry.readByApp) continue;
-      if (appReaders.has(entry.key)) {
+      if (entry.readByApp === true) continue;
+      const key = entry.key;
+      if (!key) continue;
+      if (appReaders.has(key)) {
         errors.push(
-          `check 9 [allowlist-app-read]: "${entry.key}" is in the literal allowlist but is read by src/**/*.ts — move it to Zod instead (or set readByApp: true if framework-set)`
+          `check 9 [allowlist-app-read]: "${key}" is in the literal allowlist but is read by src/**/*.ts — move it to Zod instead (or set readByApp: true if framework-set)`
         );
       }
     }

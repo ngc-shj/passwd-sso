@@ -39,7 +39,8 @@
     "version:bump": "bash scripts/bump-version.sh",
     "worker:audit-outbox": "tsx scripts/audit-outbox-worker.ts",
     "generate:env-example": "tsx scripts/generate-env-example.ts",
-    "check:env-docs": "tsx scripts/check-env-docs.ts"
+    "check:env-docs": "tsx scripts/check-env-docs.ts",
+    "init:env": "tsx scripts/init-env.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",
