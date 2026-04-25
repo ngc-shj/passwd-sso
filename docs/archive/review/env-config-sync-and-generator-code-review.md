@@ -59,6 +59,17 @@ Three expert sub-agents reviewed the onboarding-gap fix commit. **0 Critical, 3 
 
 **Verification**: lint clean, `npm run check:env-docs` exit 0, `npx next build` succeeds.
 
+### Round 4 (verification-only, post commit `e563460c`)
+A single verification-scope sub-agent confirmed each Round 3 claimed fix against the shipped code:
+- CF5/CF6/CF7 wiring at concrete file:line locations (sidecar grep + structural assertions).
+- CT15/CT16 test names match the plan obligations.
+- vitest: 138 passed + 1 skipped. lint: 0 errors. check:env-docs: exit 0.
+- No new regressions.
+
+**Verdict: Verified clean. No Round 5 needed.**
+
+Code review converged after **4 review rounds + 2 fix commits + 1 follow-up commit**, total 12 commits on the feature branch.
+
 ## Functionality Findings
 
 ### [CF1] Major: init-env.ts missing NF-4.6 secret-pattern guard
