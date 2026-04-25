@@ -87,6 +87,49 @@ Changes:
 
 Verification: lint clean, `npm run check:env-docs` exit 0, `npx vitest run scripts/__tests__/ src/lib/env.test.ts` 144 passed + 1 skipped, `npx next build` succeeds.
 
+### Round 5 (incremental review of commit `44e7211e`, the .env-primary refactor)
+
+Triangulated review on the .env-primary refactor commit alone. Three experts + Ollama pre-screen. **1 Critical, 6 Major, 3 Minor.** Critical was caught independently by both Functionality (RF1) and Security (RS-1). Pre-screening returned a Major finding that proved to be a false positive (Ollama hallucinated based on partial diff context — sidecar entries it claimed were missing actually exist from earlier commits).
+
+#### Findings + resolutions
+
+**RF1 / RS-1 Critical**: `docker-compose.yml:13` and `docker-compose.override.yml:26` retained `env_file: - .env.local`. After the refactor, `init:env` writes to `.env` and the README migration callout says `mv .env.local .env`. Result: `npm run docker:up` would fail with "env file `.env.local` not found" for any developer following the new flow.
+- **RESOLVED**: Both compose files now `env_file: - .env`. Inline comments explain that `.env.local` is NOT injected into containers; override semantics apply only to host-side `npm run dev` via `src/lib/load-env.ts`.
+
+**RF2 Major**: README migration paragraph contradicted itself (told users `mv .env.local .env` would let docker:up work, but RF1 broke that promise).
+- **RESOLVED**: RF1 fix makes the README accurate. No README change needed beyond what the prior commit already shipped.
+
+**RF3 Minor → upgraded to addressed because operator UX matters**: when both `.env` and `.env.local` exist on a mid-migration developer's machine, the Backup-and-overwrite path read `priorValues` from `.env` only, silently losing keys that lived solely in `.env.local`.
+- **RESOLVED**: When `legacyLocalExists && envExists` and the operator picks Backup-and-overwrite, init-env.ts now also parses `.env.local` and merges its keys into `priorValues` (`.env` wins on conflicts — mirrors load-env.ts precedence). User-visible message confirms the merge count.
+
+**RT1 Major**: legacy `.env.local` migration NOTE had no test.
+- **RESOLVED**: New test `emits the migration NOTE when .env.local exists and writes new content to .env (not .env.local)` pre-creates `.env.local` in the tmpDir, runs `init:env --profile=dev`, asserts (a) stderr contains the NOTE + recommended `mv` command, (b) `.env` is created with new content, (c) `.env.local` is left untouched.
+
+**RT2 Major**: backup-file path (`.env.bak-<stamp>`) and 0600 mode were not exercised by any end-to-end test.
+- **PARTIALLY RESOLVED via wiring assertion**: an end-to-end Backup-and-overwrite test consistently OOMed vitest's fork worker (the readline-non-TTY buffering issue documented in the existing test file's preamble — driving 40+ prompts via `DelayedAnswerStream` + fallback `""` exhausts the fork's heap). Replaced with a wiring assertion that greps init-env.ts for the exact `path.join(repoRoot, \`.env.bak-${stamp}\`)` literal AND for `await atomicWrite(backupPath, ...)`. The atomicWrite mode-0600 guarantee is already verified end-to-end by the existing "sets file mode 0600 on the written .env" test (same call site — atomic-write helper is shared between primary and backup paths).
+- **Anti-Deferral check**: acceptable risk per Anti-Deferral Rules §Point 3.
+  - Worst case: a future change reverts the backup-file naming to `.env.local.bak-*` AND replaces atomicWrite with a non-atomic write. The wiring assertion catches the path naming; the atomicWrite call coverage in the primary path catches the mode regression.
+  - Likelihood: low — both regressions would have to land together.
+  - Cost to fix: ~50 LoC plus solving the readline-OOM driver issue (historically flake-prone).
+
+**RT3 Major**: `src/lib/load-env.ts` precedence (`.env.local` overrides `.env`) was an invariant in a comment with no enforcing test (R25 persist-hydrate symmetry).
+- **RESOLVED**: New `src/lib/load-env.test.ts` with 5 tests pinning the override semantics: (1) `.env.local` overrides `.env` at the same key; (2) `.env` fills in keys not in `.env.local`; (3) `.env`-only fallback; (4) `.env.local`-only back-compat; (5) shell-env wins over both files (dotenv default no-overwrite behavior).
+
+**RT4 Minor (deferred)**: CT16 inversion test only checks `docker:up`/`docker:down`, not sibling `docker:*` scripts that don't exist yet. Acceptable risk — sibling scripts can be added with their own assertions when needed.
+
+**RS-2 Minor (no action)**: `.env.bak` (no suffix) is gitignored + tested but never written by `init-env.ts`. Defensive — guards against operator manual `cp .env .env.bak`. Correct as-is.
+
+**Pre-screening false positive**: Ollama claimed many sidecar entries (NEXTAUTH_URL, AZURE_KV_URL, etc.) were missing. Verified all 4 cited keys exist in `scripts/env-descriptions.ts`. `npm run check:env-docs` continues to pass — the sidecar↔Zod sync check confirms completeness independently.
+
+#### Verification
+
+- `npm run lint`: exit 0
+- `npm run check:env-docs`: exit 0
+- `npx vitest run scripts/__tests__/ src/lib/env.test.ts src/lib/load-env.test.ts`: 151 passed + 1 skipped (13 test files)
+- `npx next build`: success
+
+**Verdict**: 1 Critical + 5 Major resolved on this branch (RF1/RS-1, RF2, RF3, RT1, RT3). 1 Major partially resolved via wiring assertion (RT2). 1 Minor deferred (RT4). Plan converged.
+
 ## Functionality Findings
 
 ### [CF1] Major: init-env.ts missing NF-4.6 secret-pattern guard

@@ -347,6 +347,77 @@ describe("init-env.ts run()", () => {
     expect(initEnvSrc).toMatch(/Prior values restored as defaults/);
   });
 
+  // RT1: legacy .env.local migration NOTE must fire when only .env.local exists.
+  it("emits the migration NOTE when .env.local exists and writes new content to .env (not .env.local)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "init-env-legacy-"));
+    try {
+      process.chdir(tmpDir);
+
+      // Pre-create a legacy .env.local with one identifying key.
+      const legacyContent = "LEGACY_MARKER=preserved\n";
+      writeFileSync(join(tmpDir, ".env.local"), legacyContent, { mode: 0o600 });
+
+      const stdin = new DelayedAnswerStream([], "");
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const getStderr = collectStream(stderr);
+
+      const code = await run({
+        stdin,
+        stdout,
+        stderr,
+        now: () => new Date("2026-04-25T00:00:00Z"),
+        args: ["--profile=dev"],
+      });
+      stdin.destroy();
+
+      expect(code).toBe(0);
+
+      // The NOTE warns about the legacy file and recommends the rename.
+      const stderrText = getStderr();
+      expect(stderrText).toContain(".env.local exists in this directory");
+      expect(stderrText).toContain("mv .env.local .env");
+
+      // init:env writes to .env (the canonical file), NOT .env.local.
+      expect(existsSync(join(tmpDir, ".env"))).toBe(true);
+
+      // .env.local is left untouched with its original content.
+      expect(readFileSync(join(tmpDir, ".env.local"), "utf8")).toBe(legacyContent);
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  // RT2: backup-file naming + atomicWrite call site for the .env-primary
+  // refactor. Wiring-assertion form — an end-to-end Backup-and-overwrite
+  // flow test would have to drive 40+ readline prompts via DelayedAnswerStream
+  // and consistently OOMs the vitest worker (the existing test file's
+  // preamble comment documents the same readline-non-TTY buffering issue).
+  // Coverage rationale:
+  //   - atomicWrite's mode-0600 + atomic-rename guarantees are already
+  //     verified end-to-end by the "sets file mode 0600 on the written .env"
+  //     test above (same atomicWrite() call site for both .env and the
+  //     backup file in init-env.ts).
+  //   - This wiring assertion catches a regression where the rename from
+  //     `.env.local.bak-${stamp}` to `.env.bak-${stamp}` is partially
+  //     reverted, or atomicWrite is replaced with a non-atomic writeFile.
+  it("Backup-and-overwrite path writes .env.bak-<stamp> via atomicWrite (wiring assertion)", () => {
+    const repoRoot = resolve(__dirname, "..", "..");
+    const initEnvSrc = readFileSync(
+      join(repoRoot, "scripts", "init-env.ts"),
+      "utf8",
+    );
+    // The backup path uses the .env.bak-${stamp} naming convention (NOT
+    // .env.local.bak-* — that would be a rollback).
+    expect(initEnvSrc).toMatch(
+      /backupPath\s*=\s*path\.join\(repoRoot,\s*`\.env\.bak-\$\{stamp\}`\)/,
+    );
+    // The backup is written via atomicWrite (mode 0600 + fsync + rename).
+    expect(initEnvSrc).toMatch(/await atomicWrite\(backupPath,/);
+    // formatBackupTimestamp is UTC-based (matches the migration documentation).
+    expect(initEnvSrc).toMatch(/getUTCFullYear\(\)/);
+  });
+
   // CF5: --profile=ci must not block on external-allowlist prompts.
   it("--profile=ci does NOT prompt for external allowlist entries (no hang)", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "init-env-ci-"));

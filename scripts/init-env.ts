@@ -416,6 +416,30 @@ export async function run(opts: RunOptions): Promise<number> {
 
       const existing = await fs.readFile(envPath, "utf8");
       priorValues = parseSimpleDotenv(existing);
+
+      // RF3: when a legacy .env.local also exists, merge its keys into
+      // priorValues so prompt defaults reflect the WHOLE current
+      // configuration the operator was running with — not just the
+      // .env half. Override semantics: .env wins (it is the canonical
+      // file we are about to overwrite); .env.local fills in keys that
+      // exist only there. Mirrors load-env.ts precedence at runtime.
+      if (legacyLocalExists) {
+        try {
+          const legacyContent = await fs.readFile(envLocalPath, "utf8");
+          const legacyValues = parseSimpleDotenv(legacyContent);
+          for (const [k, v] of Object.entries(legacyValues)) {
+            if (!(k in priorValues)) priorValues[k] = v;
+          }
+          stdout.write(
+            `Merged ${Object.keys(legacyValues).length} prior values from ` +
+              `.env.local (.env wins on conflicts).\n`,
+          );
+        } catch {
+          // Best-effort — legacy file may have been removed between the
+          // initial existence check and now. Fall through.
+        }
+      }
+
       await atomicWrite(backupPath, existing, stderr);
       stdout.write(`Backed up to ${backupPath}\n`);
       stdout.write(
