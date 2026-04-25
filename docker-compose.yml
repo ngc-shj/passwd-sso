@@ -53,7 +53,7 @@ services:
     # Do NOT expose port 5432 to host in production
 
   jackson:
-    image: boxyhq/jackson:1.49.4
+    image: boxyhq/jackson:1.52.2
     environment:
       JACKSON_API_KEYS: ${JACKSON_API_KEY:?JACKSON_API_KEY is required}
       DB_ENGINE: sql
