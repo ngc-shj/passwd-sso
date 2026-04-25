@@ -35,8 +35,6 @@ interface PolicyData {
   requireLowercase: boolean;
   requireNumbers: boolean;
   requireSymbols: boolean;
-  /** @deprecated use sessionAbsoluteTimeoutMinutes */
-  maxSessionDurationMinutes: number | null;
   sessionIdleTimeoutMinutes: number | null;
   sessionAbsoluteTimeoutMinutes: number | null;
   requireRepromptForAll: boolean;
@@ -54,7 +52,6 @@ const DEFAULT_POLICY: PolicyData = {
   requireLowercase: false,
   requireNumbers: false,
   requireSymbols: false,
-  maxSessionDurationMinutes: null,
   sessionIdleTimeoutMinutes: null,
   sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,

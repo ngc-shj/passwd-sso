@@ -358,7 +358,6 @@ describe("upsertTeamPolicySchema", () => {
     requireLowercase: true,
     requireNumbers: true,
     requireSymbols: false,
-    maxSessionDurationMinutes: 60,
     requireRepromptForAll: false,
     allowExport: true,
     allowSharing: true,
@@ -381,12 +380,27 @@ describe("upsertTeamPolicySchema", () => {
     expect(upsertTeamPolicySchema.safeParse({ ...valid, minPasswordLength: 129 }).success).toBe(false);
   });
 
-  it("rejects maxSessionDurationMinutes below 5", () => {
-    expect(upsertTeamPolicySchema.safeParse({ ...valid, maxSessionDurationMinutes: 4 }).success).toBe(false);
+  it("strips legacy maxSessionDurationMinutes (graceful degradation for old clients)", () => {
+    const result = upsertTeamPolicySchema.safeParse({ ...valid, maxSessionDurationMinutes: 60 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("maxSessionDurationMinutes" in result.data).toBe(false);
+    }
   });
 
-  it("accepts null maxSessionDurationMinutes (no limit)", () => {
-    expect(upsertTeamPolicySchema.safeParse({ ...valid, maxSessionDurationMinutes: null }).success).toBe(true);
+  it("accepts the F8 response-shape fields (passwordHistoryCount, inheritTenantCidrs, teamAllowedCidrs)", () => {
+    const result = upsertTeamPolicySchema.safeParse({
+      ...valid,
+      passwordHistoryCount: 3,
+      inheritTenantCidrs: false,
+      teamAllowedCidrs: ["10.0.0.0/8", "192.168.0.0/16"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.passwordHistoryCount).toBe(3);
+      expect(result.data.inheritTenantCidrs).toBe(false);
+      expect(result.data.teamAllowedCidrs).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
+    }
   });
 });
 

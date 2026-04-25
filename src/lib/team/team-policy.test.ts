@@ -60,7 +60,6 @@ const fullPolicy: TeamPolicyData & { teamId: string } = {
   requireLowercase: true,
   requireNumbers: true,
   requireSymbols: false,
-  maxSessionDurationMinutes: 60,
   sessionIdleTimeoutMinutes: null,
   sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,
@@ -86,7 +85,6 @@ describe("getTeamPolicy", () => {
       requireLowercase: false,
       requireNumbers: false,
       requireSymbols: false,
-      maxSessionDurationMinutes: null,
       sessionIdleTimeoutMinutes: null,
       sessionAbsoluteTimeoutMinutes: null,
       requireRepromptForAll: false,
@@ -104,7 +102,6 @@ describe("getTeamPolicy", () => {
     const policy = await getTeamPolicy("team-1");
     expect(policy.minPasswordLength).toBe(12);
     expect(policy.requireUppercase).toBe(true);
-    expect(policy.maxSessionDurationMinutes).toBe(60);
     expect(policy.allowExport).toBe(true);
   });
 
@@ -199,7 +196,8 @@ describe("checkTeamAccessRestriction — sentinel fallback", () => {
     requireLowercase: false,
     requireNumbers: false,
     requireSymbols: false,
-    maxSessionDurationMinutes: null,
+    sessionIdleTimeoutMinutes: null,
+    sessionAbsoluteTimeoutMinutes: null,
     requireRepromptForAll: false,
     allowExport: true,
     allowSharing: true,

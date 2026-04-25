@@ -1355,8 +1355,6 @@ model TeamPolicy {
   requireLowercase          Boolean @default(false) @map("require_lowercase")
   requireNumbers            Boolean @default(false) @map("require_numbers")
   requireSymbols            Boolean @default(false) @map("require_symbols")
-  /// @deprecated — use sessionAbsoluteTimeoutMinutes; retained for one release, dropped in post-release cleanup migration
-  maxSessionDurationMinutes Int?    @map("max_session_duration_minutes")
   /// Team override: session idle timeout in minutes. null = inherit tenant. Must be <= tenant value.
   sessionIdleTimeoutMinutes     Int? @map("session_idle_timeout_minutes")
   /// Team override: session absolute timeout in minutes. null = inherit tenant. Must be <= tenant value.

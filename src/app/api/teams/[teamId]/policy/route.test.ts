@@ -81,13 +81,15 @@ const DEFAULT_RESPONSE = {
   requireLowercase: false,
   requireNumbers: false,
   requireSymbols: false,
-  maxSessionDurationMinutes: null,
   sessionIdleTimeoutMinutes: null,
   sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,
   allowExport: true,
   allowSharing: true,
   requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [],
 };
 
 describe("GET /api/teams/[teamId]/policy", () => {
@@ -124,11 +126,13 @@ describe("GET /api/teams/[teamId]/policy", () => {
       requireLowercase: true,
       requireNumbers: true,
       requireSymbols: false,
-      maxSessionDurationMinutes: 60,
       requireRepromptForAll: true,
       allowExport: false,
       allowSharing: true,
       requireSharePassword: false,
+      passwordHistoryCount: 5,
+      inheritTenantCidrs: false,
+      teamAllowedCidrs: ["10.0.0.0/8"],
     });
 
     const res = await GET(
@@ -141,7 +145,10 @@ describe("GET /api/teams/[teamId]/policy", () => {
     expect(json.minPasswordLength).toBe(12);
     expect(json.requireUppercase).toBe(true);
     expect(json.allowExport).toBe(false);
-    expect(json.maxSessionDurationMinutes).toBe(60);
+    // F8 regression sentinel: GET response must surface fields the UI edits
+    expect(json.passwordHistoryCount).toBe(5);
+    expect(json.inheritTenantCidrs).toBe(false);
+    expect(json.teamAllowedCidrs).toEqual(["10.0.0.0/8"]);
   });
 });
 
@@ -190,6 +197,9 @@ describe("PUT /api/teams/[teamId]/policy", () => {
       ...DEFAULT_RESPONSE,
       minPasswordLength: 16,
       requireUppercase: true,
+      passwordHistoryCount: 3,
+      inheritTenantCidrs: false,
+      teamAllowedCidrs: ["10.0.0.0/8"],
     };
     mockPrismaTeamPolicy.upsert.mockResolvedValue(savedPolicy);
 
@@ -202,8 +212,8 @@ describe("PUT /api/teams/[teamId]/policy", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.minPasswordLength).toBe(16);
-    expect(json.requireUppercase).toBe(true);
+    // R19: lock in exact response shape so future field additions/removals are caught
+    expect(json).toEqual(savedPolicy);
 
     expect(mockPrismaTeamPolicy.upsert).toHaveBeenCalledWith({
       where: { teamId: "team-1" },
@@ -239,17 +249,12 @@ describe("PUT /api/teams/[teamId]/policy", () => {
   });
 
   it("is idempotent — PUT twice returns same result", async () => {
+    // RT1: mock matches the post-drop Prisma TeamPolicy shape (all 14 response fields)
     const policyData = {
+      ...DEFAULT_RESPONSE,
       minPasswordLength: 8,
       requireUppercase: true,
       requireLowercase: true,
-      requireNumbers: false,
-      requireSymbols: false,
-      maxSessionDurationMinutes: null,
-      requireRepromptForAll: false,
-      allowExport: true,
-      allowSharing: true,
-      requireSharePassword: false,
     };
     mockPrismaTeamPolicy.upsert.mockResolvedValue(policyData);
 
