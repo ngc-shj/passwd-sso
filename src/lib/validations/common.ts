@@ -148,8 +148,6 @@ export const SLUG_MAX_LENGTH = 50;
 export const DESCRIPTION_MAX_LENGTH = 500;
 export const POLICY_MIN_PW_LENGTH_MIN = 0;
 export const POLICY_MIN_PW_LENGTH_MAX = 128;
-export const POLICY_SESSION_DURATION_MIN = 5;
-export const POLICY_SESSION_DURATION_MAX = 43200;
 
 // ─── Session Policy ─────────────────────────────────────────
 export const MAX_CONCURRENT_SESSIONS_MIN = 1;

@@ -56,14 +56,15 @@ async function handleGET(req: NextRequest, { params }: Params) {
     requireLowercase: policy?.requireLowercase ?? false,
     requireNumbers: policy?.requireNumbers ?? false,
     requireSymbols: policy?.requireSymbols ?? false,
-    /** @deprecated use sessionAbsoluteTimeoutMinutes */
-    maxSessionDurationMinutes: policy?.maxSessionDurationMinutes ?? null,
     sessionIdleTimeoutMinutes: policy?.sessionIdleTimeoutMinutes ?? null,
     sessionAbsoluteTimeoutMinutes: policy?.sessionAbsoluteTimeoutMinutes ?? null,
     requireRepromptForAll: policy?.requireRepromptForAll ?? false,
     allowExport: policy?.allowExport ?? true,
     allowSharing: policy?.allowSharing ?? true,
     requireSharePassword: policy?.requireSharePassword ?? false,
+    passwordHistoryCount: policy?.passwordHistoryCount ?? 0,
+    inheritTenantCidrs: policy?.inheritTenantCidrs ?? true,
+    teamAllowedCidrs: policy?.teamAllowedCidrs ?? [],
   });
 }
 
@@ -151,14 +152,15 @@ async function handlePUT(req: NextRequest, { params }: Params) {
     requireLowercase: policy.requireLowercase,
     requireNumbers: policy.requireNumbers,
     requireSymbols: policy.requireSymbols,
-    /** @deprecated use sessionAbsoluteTimeoutMinutes */
-    maxSessionDurationMinutes: policy.maxSessionDurationMinutes,
     sessionIdleTimeoutMinutes: policy.sessionIdleTimeoutMinutes,
     sessionAbsoluteTimeoutMinutes: policy.sessionAbsoluteTimeoutMinutes,
     requireRepromptForAll: policy.requireRepromptForAll,
     allowExport: policy.allowExport,
     allowSharing: policy.allowSharing,
     requireSharePassword: policy.requireSharePassword,
+    passwordHistoryCount: policy.passwordHistoryCount,
+    inheritTenantCidrs: policy.inheritTenantCidrs,
+    teamAllowedCidrs: policy.teamAllowedCidrs,
   });
 }
 

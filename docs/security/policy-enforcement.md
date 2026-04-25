@@ -51,7 +51,6 @@ Password content (plaintext) is encrypted client-side before reaching the server
 | `requireLowercase` | Blocking | Client | `use-team-login-form-state.ts` | Same |
 | `requireNumbers` | Blocking | Client | `use-team-login-form-state.ts` | Same |
 | `requireSymbols` | Blocking | Client | `use-team-login-form-state.ts` | Same |
-| `maxSessionDurationMinutes` | — | — | — | **Deprecated.** Kept in schema for one release; semantics migrated to `sessionAbsoluteTimeoutMinutes`. Removal tracked in the post-release cleanup migration |
 | `sessionIdleTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Nullable (inherit tenant). Enforced via `min(tenant, ...teams.filter(non-null))`. Write constrained to `<= tenant` |
 | `sessionAbsoluteTimeoutMinutes` | Blocking | Server | `auth-adapter.ts` `updateSession()` via `session-timeout.ts` resolver | Nullable (inherit tenant). Enforced via `min(tenant, ...teams.filter(non-null))`. Write constrained to `<= tenant`. Cascade-clamped when tenant lowers — emits `TEAM_POLICY_CLAMPED_BY_TENANT` audit |
 | `requireRepromptForAll` | Blocking | Client | `use-team-base-form-model.ts` | Forces `requireReprompt=true` on entries; reprompt gate is client-side |

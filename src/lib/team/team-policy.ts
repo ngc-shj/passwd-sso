@@ -14,8 +14,6 @@ export interface TeamPolicyData {
   requireLowercase: boolean;
   requireNumbers: boolean;
   requireSymbols: boolean;
-  /** @deprecated use sessionAbsoluteTimeoutMinutes */
-  maxSessionDurationMinutes: number | null;
   sessionIdleTimeoutMinutes: number | null;
   sessionAbsoluteTimeoutMinutes: number | null;
   requireRepromptForAll: boolean;
@@ -33,7 +31,6 @@ const DEFAULT_POLICY: TeamPolicyData = {
   requireLowercase: false,
   requireNumbers: false,
   requireSymbols: false,
-  maxSessionDurationMinutes: null,
   sessionIdleTimeoutMinutes: null,
   sessionAbsoluteTimeoutMinutes: null,
   requireRepromptForAll: false,
@@ -68,7 +65,6 @@ export async function getTeamPolicy(teamId: string): Promise<TeamPolicyData> {
     requireLowercase: policy.requireLowercase,
     requireNumbers: policy.requireNumbers,
     requireSymbols: policy.requireSymbols,
-    maxSessionDurationMinutes: policy.maxSessionDurationMinutes,
     sessionIdleTimeoutMinutes: policy.sessionIdleTimeoutMinutes,
     sessionAbsoluteTimeoutMinutes: policy.sessionAbsoluteTimeoutMinutes,
     requireRepromptForAll: policy.requireRepromptForAll,

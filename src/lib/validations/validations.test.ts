@@ -358,7 +358,6 @@ describe("upsertTeamPolicySchema", () => {
     requireLowercase: true,
     requireNumbers: true,
     requireSymbols: false,
-    maxSessionDurationMinutes: 60,
     requireRepromptForAll: false,
     allowExport: true,
     allowSharing: true,
@@ -381,12 +380,12 @@ describe("upsertTeamPolicySchema", () => {
     expect(upsertTeamPolicySchema.safeParse({ ...valid, minPasswordLength: 129 }).success).toBe(false);
   });
 
-  it("rejects maxSessionDurationMinutes below 5", () => {
-    expect(upsertTeamPolicySchema.safeParse({ ...valid, maxSessionDurationMinutes: 4 }).success).toBe(false);
-  });
-
-  it("accepts null maxSessionDurationMinutes (no limit)", () => {
-    expect(upsertTeamPolicySchema.safeParse({ ...valid, maxSessionDurationMinutes: null }).success).toBe(true);
+  it("strips legacy maxSessionDurationMinutes (graceful degradation for old clients)", () => {
+    const result = upsertTeamPolicySchema.safeParse({ ...valid, maxSessionDurationMinutes: 60 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect("maxSessionDurationMinutes" in result.data).toBe(false);
+    }
   });
 });
 
