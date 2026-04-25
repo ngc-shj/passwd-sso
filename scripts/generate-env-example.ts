@@ -233,9 +233,10 @@ if (externalEntries.length > 0) {
   lines.push("# The following vars are NOT in the Zod schema and are not");
   lines.push("# validated at app startup. They are required by external");
   lines.push("# consumers: docker-compose.yml, the Sentry webpack plugin,");
-  lines.push("# or one-shot provisioning scripts. docker-compose reads");
-  lines.push("# .env by default; to share this file with docker pass");
-  lines.push("# `--env-file .env.local` (see README 'Configure environment').");
+  lines.push("# or one-shot provisioning scripts. Both Docker Compose and");
+  lines.push("# our load-env.ts read .env automatically; .env.local (if");
+  lines.push("# present) overrides any of these values for an individual");
+  lines.push("# developer (Next.js convention).");
   lines.push("");
 
   for (const entry of externalEntries) {

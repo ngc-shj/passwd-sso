@@ -16,6 +16,14 @@ function checkIgnore(path) {
 
 describe("env generator gitignore coverage (SEC-1)", () => {
   const patterns = [
+    // Canonical write target after the .env-primary refactor.
+    ".env",
+    ".env.tmp",
+    ".env.tmp.123",
+    ".env.bak",
+    ".env.bak-20260425-090000",
+    ".env.bak.foo",
+    // Legacy patterns — preserved so developers mid-migration are still safe.
     ".env.local",
     ".env.local.tmp",
     ".env.local.tmp.123",

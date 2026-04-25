@@ -102,7 +102,7 @@ function collectStream(stream) {
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 describe("init-env.ts run()", () => {
-  it("writes a valid .env.local under the dev profile and exits 0", async () => {
+  it("writes a valid .env under the dev profile and exits 0", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "init-env-dev-"));
     try {
       process.chdir(tmpDir);
@@ -136,10 +136,10 @@ describe("init-env.ts run()", () => {
 
       expect(code).toBe(0);
 
-      const envLocalPath = join(tmpDir, ".env.local");
-      expect(existsSync(envLocalPath)).toBe(true);
+      const envPath = join(tmpDir, ".env");
+      expect(existsSync(envPath)).toBe(true);
 
-      const parsed = dotenv.parse(readFileSync(envLocalPath, "utf8"));
+      const parsed = dotenv.parse(readFileSync(envPath, "utf8"));
       // CT10: use envSchema (refined) — matches what init-env itself asserts
       // via envSchema.safeParse at write time. Catches regressions where dev
       // profile output would fail refined validation.
@@ -164,7 +164,7 @@ describe("init-env.ts run()", () => {
       expect(parsed.PASSWD_OUTBOX_WORKER_PASSWORD).toBeDefined();
       expect(/^[0-9a-f]{64}$/.test(parsed.PASSWD_OUTBOX_WORKER_PASSWORD)).toBe(true);
       // External section header appears in file content.
-      const rawContent = readFileSync(envLocalPath, "utf8");
+      const rawContent = readFileSync(envPath, "utf8");
       expect(rawContent).toContain(
         "External / Build-time (not read by the Next.js app)",
       );
@@ -182,7 +182,7 @@ describe("init-env.ts run()", () => {
     }
   }, 120_000);
 
-  it.skipIf(platform === "win32")("sets file mode 0600 on the written .env.local (POSIX-only)", async () => {
+  it.skipIf(platform === "win32")("sets file mode 0600 on the written .env (POSIX-only)", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "init-env-mode-"));
     try {
       process.chdir(tmpDir);
@@ -201,7 +201,7 @@ describe("init-env.ts run()", () => {
       stdin.destroy();
 
       expect(code).toBe(0);
-      const mode = statSync(join(tmpDir, ".env.local")).mode & 0o777;
+      const mode = statSync(join(tmpDir, ".env")).mode & 0o777;
       expect(mode).toBe(0o600);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
@@ -266,11 +266,11 @@ describe("init-env.ts run()", () => {
     }
   }, 120_000);
 
-  it("aborts without modification when the user rejects overwriting an existing .env.local", async () => {
+  it("aborts without modification when the user rejects overwriting an existing .env", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "init-env-abort-"));
-    const envLocalPath = join(tmpDir, ".env.local");
+    const envPath = join(tmpDir, ".env");
     const originalContent = "# existing content\nKEY=value\n";
-    writeFileSync(envLocalPath, originalContent, { mode: 0o600 });
+    writeFileSync(envPath, originalContent, { mode: 0o600 });
 
     try {
       process.chdir(tmpDir);
@@ -294,7 +294,7 @@ describe("init-env.ts run()", () => {
       stdin.destroy();
 
       expect(code).toBe(0);
-      expect(readFileSync(envLocalPath, "utf8")).toBe(originalContent);
+      expect(readFileSync(envPath, "utf8")).toBe(originalContent);
       expect(getStdout()).toMatch(/[Aa]bort/);
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
@@ -304,7 +304,7 @@ describe("init-env.ts run()", () => {
   // CT15 / CF6: parseSimpleDotenv unit-tests cover the parser used to
   // restore prior values during Backup-and-overwrite. Keeping these as
   // pure unit tests avoids the readline-driver flakiness that the
-  // "writes a valid .env.local" test deliberately scopes around.
+  // "writes a valid .env" test deliberately scopes around.
   it("parseSimpleDotenv reads bare KEY=value and quoted KEY=\"value\" (CF6)", () => {
     const text =
       'DATABASE_URL=postgresql://passwd_app:p@host/db\n' +
@@ -369,7 +369,7 @@ describe("init-env.ts run()", () => {
       });
       stdin.destroy();
 
-      // Should write a valid .env.local without external section blocking.
+      // Should write a valid .env without external section blocking.
       expect(code).toBe(0);
 
       // External section must NOT appear in stdout — confirms loop was skipped.
@@ -378,9 +378,9 @@ describe("init-env.ts run()", () => {
         /=== External \(docker-compose \/ build-time \/ scripts\) ===/,
       );
 
-      // External keys must NOT be written to .env.local under ci.
-      const envLocalPath = join(tmpDir, ".env.local");
-      const parsed = dotenv.parse(readFileSync(envLocalPath, "utf8"));
+      // External keys must NOT be written to .env under ci.
+      const envPath = join(tmpDir, ".env");
+      const parsed = dotenv.parse(readFileSync(envPath, "utf8"));
       expect(parsed.JACKSON_API_KEY).toBeUndefined();
       expect(parsed.PASSWD_OUTBOX_WORKER_PASSWORD).toBeUndefined();
       expect(parsed.SENTRY_AUTH_TOKEN).toBeUndefined();
@@ -390,9 +390,11 @@ describe("init-env.ts run()", () => {
   }, 30_000);
 });
 
-// CT16: docker:up wrapper string assertion — prevent silent --env-file drop.
+// CT16: docker:up wrapper string assertion — verify both compose files are
+// passed. After the .env-primary refactor, --env-file is no longer needed
+// because docker compose auto-loads .env from the repo root.
 describe("package.json docker:up wrapper", () => {
-  it("docker:up passes --env-file .env.local AND both compose files", () => {
+  it("docker:up uses both compose files and does NOT pass --env-file", () => {
     const repoRoot = resolve(
       dirname(fileURLToPath(import.meta.url)),
       "..",
@@ -404,12 +406,15 @@ describe("package.json docker:up wrapper", () => {
     const dockerUp = pkg.scripts["docker:up"];
     expect(dockerUp).toBeDefined();
     expect(dockerUp).toMatch(/docker compose/);
-    expect(dockerUp).toMatch(/--env-file\s+\.env\.local/);
     expect(dockerUp).toMatch(/-f\s+docker-compose\.yml/);
     expect(dockerUp).toMatch(/-f\s+docker-compose\.override\.yml/);
+    // The .env-primary design means docker compose reads .env automatically.
+    // Re-introducing --env-file would be a regression to the workaround era.
+    expect(dockerUp).not.toMatch(/--env-file/);
     // docker:down should mirror the same flags.
     const dockerDown = pkg.scripts["docker:down"];
     expect(dockerDown).toBeDefined();
-    expect(dockerDown).toMatch(/--env-file\s+\.env\.local/);
+    expect(dockerDown).toMatch(/-f\s+docker-compose\.yml/);
+    expect(dockerDown).not.toMatch(/--env-file/);
   });
 });

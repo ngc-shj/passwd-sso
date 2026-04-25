@@ -41,8 +41,9 @@ function spawnWorker(envOverrides = {}) {
     {
       // Never inherit parent env — explicit pass only (T16/T24).
       // DATABASE_URL="" is passed explicitly so dotenv's loadEnv() cannot
-      // override it from .env.local (dotenv does not override already-set vars).
-      // Callers that want a valid DATABASE_URL must pass it in envOverrides.
+      // override it from .env or .env.local (dotenv does not override
+      // already-set vars). Callers that want a valid DATABASE_URL must
+      // pass it in envOverrides.
       env: { PATH: process.env.PATH, DATABASE_URL: "", ...envOverrides },
       encoding: "utf8",
       timeout: 15_000,

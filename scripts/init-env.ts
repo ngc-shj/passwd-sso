@@ -1,9 +1,12 @@
 /**
- * Interactive .env.local generator.
+ * Interactive .env generator.
  *
  * Prompts for every env var declared in the Zod schema, writes a valid
- * .env.local atomically (mode 0o600), and validates the result before
- * committing the rename.
+ * .env atomically (mode 0o600), and validates the result before committing
+ * the rename. The Next.js convention `.env.local` is preserved as an
+ * optional override file (loaded by src/lib/load-env.ts after .env), but
+ * init:env writes the canonical .env so Docker Compose auto-loads it
+ * without an explicit --env-file flag.
  *
  * Usage: tsx scripts/init-env.ts [--profile=dev|ci|production]
  *                                [--print-secrets]
@@ -86,7 +89,7 @@ function formatBackupTimestamp(d: Date): string {
 }
 
 /**
- * Minimal dotenv parser for re-reading an existing .env.local on the
+ * Minimal dotenv parser for re-reading an existing .env on the
  * Backup-and-overwrite path (CF6). Handles the subset our generator emits:
  *   - "KEY=value"           → { KEY: "value" }
  *   - 'KEY="quoted"'        → unescapes \", \\, \n, \r and strips the outer "
@@ -305,7 +308,7 @@ export async function run(opts: RunOptions): Promise<number> {
   if (process.platform === "win32") {
     stderr.write(
       "Warning: file permission cannot be restricted on this platform. " +
-        "Treat .env.local as sensitive.\n",
+        "Treat .env as sensitive.\n",
     );
   }
 
@@ -313,6 +316,7 @@ export async function run(opts: RunOptions): Promise<number> {
 
   // Scripts are run from the repo root via `npm run init:env` (process.cwd()).
   const repoRoot = process.cwd();
+  const envPath = path.join(repoRoot, ".env");
   const envLocalPath = path.join(repoRoot, ".env.local");
 
   const gitResult = spawnSync("git", ["status", "--porcelain", "-z"], {
@@ -324,7 +328,9 @@ export async function run(opts: RunOptions): Promise<number> {
     // NUL-separated entries, each in format "XY path" or "XY old\0new".
     const entries = gitResult.stdout.split("\0").filter(Boolean);
     const trackedStatusCodes = new Set(["M", "A", "R", "C"]);
-    const targetNames = [".env.local", ".env.local.tmp"];
+    // Cover both new (.env, .env.tmp) and legacy (.env.local, .env.local.tmp)
+    // target names so a developer mid-migration is still protected.
+    const targetNames = [".env", ".env.tmp", ".env.local", ".env.local.tmp"];
 
     for (const entry of entries) {
       // First two chars are XY status codes; rest is path (after a space).
@@ -344,28 +350,50 @@ export async function run(opts: RunOptions): Promise<number> {
     }
   }
 
-  // ── Check for existing .env.local ─────────────────────────────────────────
+  // ── Migration warning: legacy .env.local detected ─────────────────────────
 
   const prompter = createPrompter({ stdin, stdout, stderr });
 
-  let envLocalExists = false;
+  let legacyLocalExists = false;
   try {
     await fs.access(envLocalPath);
-    envLocalExists = true;
+    legacyLocalExists = true;
   } catch {
-    envLocalExists = false;
+    legacyLocalExists = false;
   }
 
-  // CF6: when Backup-and-overwrite is chosen, parse the existing .env.local
-  // and seed `priorValues` so re-prompts default to the previous value.
-  // Pressing Enter on a non-secret prompt re-uses the prior value; secret
-  // prompts default to "Generate now? Y" but the user can answer "n" and
-  // press Enter to re-use the prior secret. Eliminates accidental rotation.
+  if (legacyLocalExists) {
+    stderr.write(
+      "\nNOTE: .env.local exists in this directory. The init:env generator now\n" +
+        "writes to .env (the canonical file Docker Compose auto-reads). Next.js\n" +
+        "and our load-env.ts continue to load .env.local AFTER .env, so any\n" +
+        "values you set in .env.local override the .env values written here.\n" +
+        "If you intended .env.local to be the canonical file, run:\n" +
+        "  mv .env.local .env\n" +
+        "before re-running init:env.\n\n",
+    );
+  }
+
+  // ── Check for existing .env ───────────────────────────────────────────────
+
+  let envExists = false;
+  try {
+    await fs.access(envPath);
+    envExists = true;
+  } catch {
+    envExists = false;
+  }
+
+  // CF6: when Backup-and-overwrite is chosen, parse the existing .env and
+  // seed `priorValues` so re-prompts default to the previous value. Pressing
+  // Enter on a non-secret prompt re-uses the prior value; secret prompts
+  // default to "Generate now? Y" but the user can answer "n" and press Enter
+  // to re-use the prior secret. Eliminates accidental rotation.
   let priorValues: Record<string, string> = {};
 
-  if (envLocalExists) {
+  if (envExists) {
     const action = await prompter.askChoice(
-      ".env.local already exists. What would you like to do?",
+      ".env already exists. What would you like to do?",
       ["Overwrite", "Backup-and-overwrite", "Abort"] as const,
     );
 
@@ -377,16 +405,16 @@ export async function run(opts: RunOptions): Promise<number> {
 
     if (action === "Backup-and-overwrite") {
       const stamp = formatBackupTimestamp(now());
-      const backupPath = path.join(repoRoot, `.env.local.bak-${stamp}`);
+      const backupPath = path.join(repoRoot, `.env.bak-${stamp}`);
 
       if (process.platform === "win32") {
         stderr.write(
           "Warning: file permission cannot be restricted on this platform. " +
-            "Treat .env.local as sensitive.\n",
+            "Treat .env as sensitive.\n",
         );
       }
 
-      const existing = await fs.readFile(envLocalPath, "utf8");
+      const existing = await fs.readFile(envPath, "utf8");
       priorValues = parseSimpleDotenv(existing);
       await atomicWrite(backupPath, existing, stderr);
       stdout.write(`Backed up to ${backupPath}\n`);
@@ -449,7 +477,7 @@ export async function run(opts: RunOptions): Promise<number> {
     }
   }
 
-  // CF6: prior values from the existing .env.local override profile defaults
+  // CF6: prior values from the existing .env override profile defaults
   // so the operator's last-known-good values become the prompt defaults.
   // Applied after profile seeding (so prior wins) but before prompt loop.
   for (const [k, v] of Object.entries(priorValues)) {
@@ -575,7 +603,7 @@ export async function run(opts: RunOptions): Promise<number> {
 
   // CF5: --profile=ci is for scripted/non-interactive seeding. CI runners
   // configure these external vars via repo secrets / GitHub Actions env,
-  // not via .env.local. Skip the prompt loop entirely so a piped or empty
+  // not via .env. Skip the prompt loop entirely so a piped or empty
   // stdin does not block.
   const skipExternalPrompts = profile === "ci";
 
@@ -585,8 +613,8 @@ export async function run(opts: RunOptions): Promise<number> {
     );
     stdout.write(
       "The following vars are NOT read by the Next.js app but are required\n" +
-        "by external consumers. They will be written to .env.local so you can\n" +
-        "pass it to docker compose via `--env-file .env.local`.\n",
+        "by external consumers. They will be written to .env so docker compose\n" +
+        "and the Sentry build plugin pick them up automatically.\n",
     );
 
     for (const entry of externalAllowlistEntries) {
@@ -757,7 +785,7 @@ export async function run(opts: RunOptions): Promise<number> {
 
   prompter.close();
 
-  // ── Build .env.local content ───────────────────────────────────────────────
+  // ── Build .env content ─────────────────────────────────────────────────────
 
   // Write order: pure sidecar (group, order) — NF-3 determinism.
   const writeFields = buildSortedFields();
@@ -786,7 +814,7 @@ export async function run(opts: RunOptions): Promise<number> {
 
     if (HEX32_RE.test(value) && !sidecar.secret) {
       stderr.write(
-        `ERROR: refusing to write .env.local — key "${key}" has a value ` +
+        `ERROR: refusing to write .env — key "${key}" has a value ` +
           `matching /^[A-Fa-f0-9]{32,}$/ but its sidecar entry is not marked ` +
           `secret: true. This is a sidecar bug (see NF-4.6/S16). Fix the ` +
           `sidecar and re-run.\n`,
@@ -811,7 +839,7 @@ export async function run(opts: RunOptions): Promise<number> {
   }
 
   // Emit external allowlist entries (if the operator supplied values) in a
-  // trailing section. Skip entries the operator left blank so .env.local
+  // trailing section. Skip entries the operator left blank so .env
   // stays minimal and diffable.
   const externalWritten = externalAllowlistEntries.filter(
     (e) => collected.has(e.key),
@@ -826,7 +854,7 @@ export async function run(opts: RunOptions): Promise<number> {
       const value = collected.get(entry.key)!;
       if (HEX32_RE.test(value) && !entry.secret) {
         stderr.write(
-          `ERROR: refusing to write .env.local — external allowlist key ` +
+          `ERROR: refusing to write .env — external allowlist key ` +
             `"${entry.key}" has a hex-32+ value but is not marked secret: true.\n`,
         );
         return 1;
@@ -847,15 +875,15 @@ export async function run(opts: RunOptions): Promise<number> {
   if (process.platform === "win32") {
     stderr.write(
       "Warning: file permission cannot be restricted on this platform. " +
-        "Treat .env.local as sensitive.\n",
+        "Treat .env as sensitive.\n",
     );
   }
 
   try {
-    await atomicWrite(envLocalPath, content, stderr);
+    await atomicWrite(envPath, content, stderr);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    stderr.write(`ERROR: Failed to write .env.local: ${msg}\n`);
+    stderr.write(`ERROR: Failed to write .env: ${msg}\n`);
     return 1;
   }
 
@@ -876,7 +904,7 @@ export async function run(opts: RunOptions): Promise<number> {
 
   const total = nGenerated + nProfile + nUser;
   stdout.write(
-    `\nwrote .env.local: ${total} vars ` +
+    `\nwrote .env: ${total} vars ` +
       `(${nGenerated} generated, ${nProfile} from profile, ${nUser} user-entered).\n`,
   );
 

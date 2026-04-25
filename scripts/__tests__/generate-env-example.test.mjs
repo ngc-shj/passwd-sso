@@ -140,7 +140,7 @@ describe("generate-env-example.ts", () => {
       "External / Build-time (not read by the Next.js app)",
     );
     // requiredForConsumer entries (CF7) are emitted UNCOMMENTED so that
-    // `cp .env.example .env.local && npm run docker:up` produces a usable
+    // `cp .env.example .env && npm run docker:up` produces a usable
     // template — symmetric with CF4 always-required Zod fields.
     expect(content).toMatch(/^JACKSON_API_KEY=/m);
     expect(content).toMatch(/^PASSWD_OUTBOX_WORKER_PASSWORD=/m);

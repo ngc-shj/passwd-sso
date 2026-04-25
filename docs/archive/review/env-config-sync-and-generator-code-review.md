@@ -70,6 +70,23 @@ A single verification-scope sub-agent confirmed each Round 3 claimed fix against
 
 Code review converged after **4 review rounds + 2 fix commits + 1 follow-up commit**, total 12 commits on the feature branch.
 
+### Post-convergence refactor: `.env`-primary (2026-04-25)
+
+User questioned whether `.env.local` was necessary at all given the new `--env-file .env.local` workaround in the docker wrappers. Confirmed it was workaround complexity without underlying value: both `.env` and `.env.local` were gitignored at the same level, no shared base file was ever committed, and Docker Compose's natural file is `.env`. Switched to **Option A**: `.env` is the canonical file (auto-loaded by both Docker Compose and Next.js convention); `.env.local` is preserved as the optional per-developer override.
+
+Changes:
+- `src/lib/load-env.ts`: comment-only clarification — load order was already correct (`.env.local` first under dotenv's no-overwrite policy = override semantics; `.env` second as base).
+- `scripts/init-env.ts`: write target changed to `.env`. Backup files now `.env.bak-<UTC stamp>` (was `.env.local.bak-...`). Atomic-write tmp file is `.env.tmp`. The git tracked-file safety check covers BOTH new (`.env`/`.env.tmp`) and legacy (`.env.local`/`.env.local.tmp`) names so a mid-migration developer is still protected. New "Migration warning" surfaces a one-time NOTE when a legacy `.env.local` exists, recommending `mv .env.local .env`. The header doc + every internal stderr/stdout message updated.
+- `package.json`: `docker:up`/`docker:down` no longer pass `--env-file .env.local` — Docker Compose auto-loads `.env`.
+- `.gitignore`: added `.env.tmp`/`.env.tmp.*`/`.env.bak`/`.env.bak-*`/`.env.bak.*` patterns alongside the existing legacy `.env.local.*` patterns.
+- `scripts/__tests__/check-env-gitignore.test.mjs`: now iterates both new and legacy patterns (12 tests total).
+- `scripts/__tests__/init-env.test.mjs`: `envLocalPath` → `envPath`, all `.env.local` references → `.env`. CT16 docker-wrapper test inverted — now asserts `--env-file` is NOT present (a regression to it would re-introduce the workaround era).
+- `scripts/generate-env-example.ts`: External-section header text updated to reflect the new `.env`-auto-load reality (no more `--env-file` instruction).
+- `README.md`: rewrote ".env vs .env.local" subsection. Migration callout: "if your repo predates this change you may have a `.env.local` and no `.env` — run `mv .env.local .env`".
+- `CLAUDE.md`: Common Commands + Notes-on-env-files updated with the new convention.
+
+Verification: lint clean, `npm run check:env-docs` exit 0, `npx vitest run scripts/__tests__/ src/lib/env.test.ts` 144 passed + 1 skipped, `npx next build` succeeds.
+
 ## Functionality Findings
 
 ### [CF1] Major: init-env.ts missing NF-4.6 secret-pattern guard

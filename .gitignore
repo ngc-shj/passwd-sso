@@ -18,6 +18,13 @@ dist/
 .env.production.local
 .env*.local
 # env generator artifacts (secrets) — SEC-1
+# Init-env now writes .env (the canonical file Docker Compose auto-reads);
+# legacy .env.local.* patterns kept for developers mid-migration.
+.env.tmp
+.env.tmp.*
+.env.bak
+.env.bak-*
+.env.bak.*
 .env.local.tmp
 .env.local.tmp.*
 .env.local.bak

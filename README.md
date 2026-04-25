@@ -170,26 +170,26 @@ npm run init:env                       # interactive, default profile=dev
 npm run init:env -- --profile=production    # prompts for real provider secrets
 ```
 
-The generator writes `.env.local` atomically with mode `0o600` and refuses to overwrite unless you explicitly say so. Generated secrets are shown as `[generated]` placeholders in the terminal transcript; use `--print-secrets` only when you need to copy them.
+The generator writes `.env` atomically with mode `0o600` and refuses to overwrite unless you explicitly say so. Generated secrets are shown as `[generated]` placeholders in the terminal transcript; use `--print-secrets` only when you need to copy them.
 
 If you prefer to edit manually, copy the template:
 
 ```bash
-cp .env.example .env.local
+cp .env.example .env
 ```
 
 `.env.example` is generated from `src/lib/env-schema.ts` (the single source of truth) — regenerate it with `npm run generate:env-example` after changing the schema. Run `npm run check:env-docs` to verify `.env.example`, the allowlist, and `docker-compose*.yml` stay in sync.
 
-**`.env` vs `.env.local`** — the Next.js app reads `.env.local`; Docker Compose by default reads `.env` (a different file). Use the provided wrapper so both tools share the same single source of truth:
+**`.env` vs `.env.local`** — the canonical file is `.env`. Both Docker Compose (auto-load) and the Next.js app (via `src/lib/load-env.ts`) read it natively. `.env.local` is loaded *after* `.env` and overrides any of its values, matching the Next.js convention. Use it for individual-developer tweaks (different DB port, alternate Tailscale hostname, etc.) — leave the canonical configuration in `.env`. No `--env-file` flag needed:
 
 ```bash
-npm run docker:up     # wraps: docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.override.yml up
+npm run docker:up     # wraps: docker compose -f docker-compose.yml -f docker-compose.override.yml up
 npm run docker:down   # stops and tears down
 ```
 
-Or pass `--env-file .env.local` manually to any ad-hoc `docker compose` invocation.
+> **Migration from older clones**: if your repo predates this change you may have a `.env.local` and no `.env`. Run `mv .env.local .env` so Docker Compose can find it without `--env-file`. Re-running `npm run init:env` warns when both files exist.
 
-The bottom of `.env.example` has a dedicated **External / Build-time** section listing variables that are NOT read by the Next.js app but ARE required by docker-compose, provisioning scripts, or the production build (`JACKSON_API_KEY` for the Jackson container, `PASSWD_OUTBOX_WORKER_PASSWORD` for the worker DB role, `SENTRY_AUTH_TOKEN` for source-map upload, `NEXT_DEV_ALLOWED_ORIGINS` for the dev server). `npm run init:env` prompts for these alongside the Zod-declared vars and writes them into the same `.env.local`.
+The bottom of `.env.example` has a dedicated **External / Build-time** section listing variables that are NOT read by the Next.js app but ARE required by docker-compose, provisioning scripts, or the production build (`JACKSON_API_KEY` for the Jackson container, `PASSWD_OUTBOX_WORKER_PASSWORD` for the worker DB role, `SENTRY_AUTH_TOKEN` for source-map upload, `NEXT_DEV_ALLOWED_ORIGINS` for the dev server). `npm run init:env` prompts for these alongside the Zod-declared vars and writes them into the same `.env`.
 
 Key variables:
 
