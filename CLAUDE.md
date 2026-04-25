@@ -13,6 +13,11 @@ npm run db:push          # Push schema without migration
 npm run db:seed          # Seed data (tsx prisma/seed.ts)
 npm run db:studio        # Prisma Studio GUI
 npm run generate:key     # Generate 256-bit hex master key
+npm run init:env         # Interactive .env generator (dev/ci/production profiles)
+npm run generate:env-example  # Regenerate .env.example from Zod schema + sidecar
+npm run check:env-docs   # Drift check: .env.example ↔ env-schema.ts ↔ allowlist ↔ docker-compose
+npm run docker:up        # Docker Compose up (auto-reads .env from repo root)
+npm run docker:down      # Docker Compose down
 npm run version:bump     # Suggest next version from git log (interactive)
 npm run version:bump -- 0.3.0  # Bump to explicit version
 ```
@@ -30,7 +35,13 @@ npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_D
 npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 
-Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.yml up`
+Docker (dev): `npm run docker:up` (wraps `docker compose -f docker-compose.yml -f docker-compose.override.yml up`). Stop with `npm run docker:down`.
+
+Notes on env files:
+- The canonical file is `.env`. Both Docker Compose (auto-load) and the Next.js app (`src/lib/load-env.ts`) read it natively.
+- `.env.local` is loaded second by load-env.ts, matching the Next.js precedence rule (`.env` base, `.env.local` per-developer override). Leave canonical config in `.env`; use `.env.local` for personal tweaks only.
+- `init:env` writes `.env`. If a legacy `.env.local` exists from older clones, it remains valid as override; the script prints a one-time NOTE recommending `mv .env.local .env` for the canonical move.
+- `JACKSON_API_KEY`, `PASSWD_OUTBOX_WORKER_PASSWORD`, `SENTRY_AUTH_TOKEN`, `NEXT_DEV_ALLOWED_ORIGINS` are NOT in the Zod schema (operators set them for their deployment path). `npm run init:env` prompts for them alongside the app vars; they live in the "External / Build-time" section at the bottom of `.env.example` / `.env`.
 
 ## Code Quality Rules
 

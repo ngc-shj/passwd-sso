@@ -1,0 +1,4 @@
+services:
+  app:
+    environment:
+      - UNDOCUMENTED_COMPOSE_VAR=${UNDOCUMENTED_COMPOSE_VAR:?required}

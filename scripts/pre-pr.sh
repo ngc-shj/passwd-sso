@@ -31,6 +31,7 @@ printf "${BOLD}═══ Pre-PR Checks ═══${RESET}\n\n"
 
 run_step "Static: e2e-selectors"  bash scripts/checks/check-e2e-selectors.sh
 run_step "Lint"                   npx eslint .
+run_step "Static: env drift check"  npm run check:env-docs
 run_step "Static: team-auth-rls"  node scripts/checks/check-team-auth-rls.mjs
 run_step "Static: bypass-rls"     node scripts/checks/check-bypass-rls.mjs
 run_step "Static: crypto-domains" node scripts/checks/check-crypto-domains.mjs
@@ -40,8 +41,21 @@ run_step "Static: no-deprecated-logAudit" bash -c 'if grep -rn "logAudit(" src/ 
 if command -v gitleaks >/dev/null 2>&1; then
   run_step "Secret scan (gitleaks)" gitleaks detect --no-banner --redact --staged
 else
-  printf "${BOLD}▸ Secret scan (gitleaks)${RESET}\n"
-  printf "  (skipped — gitleaks not installed; install with: brew install gitleaks OR see https://github.com/gitleaks/gitleaks)\n\n"
+  # S19/S27 safe fallback: use node (already available — package.json runtime).
+  # No shell-regex dialect issues; safe filename handling via -z.
+  printf "${BOLD}▸ Secret scan (gitleaks fallback)${RESET}\n"
+  if LEAK_OUTPUT=$(node scripts/lib/hex-leak-scan.mjs 2>&1); then
+    printf "${GREEN}  ✓ Secret scan (gitleaks fallback)${RESET}\n"
+    passed=$((passed + 1))
+    printf "  (WARNING: gitleaks not installed; best-effort Node fallback passed — not a gitleaks substitute)\n\n"
+  else
+    printf "${RED}  ✗ Secret scan (gitleaks fallback)${RESET}\n\n"
+    echo "ERROR: 64-char hex secret detected in staged diff (fallback scan):"
+    echo "$LEAK_OUTPUT"
+    echo "Install gitleaks for full-coverage scanning (brew install gitleaks / apt install gitleaks)."
+    failed=$((failed + 1))
+    failures+=("Secret scan (gitleaks fallback)")
+  fi
 fi
 
 if git rev-parse --abbrev-ref HEAD | grep -q "^refactor/"; then

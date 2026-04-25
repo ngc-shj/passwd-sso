@@ -74,11 +74,24 @@ npm install
 
 ### 2. Configure Environment Variables
 
+The recommended path is the interactive generator — it walks through every required variable, auto-generates secrets, and validates against the Zod schema before writing:
+
 ```bash
-cp .env.example .env.local
+npm run init:env                       # interactive, default profile=dev
+npm run init:env -- --profile=production    # prompts for real provider secrets
 ```
 
-Edit `.env.local` and set the following values:
+Or copy the template and edit manually:
+
+```bash
+cp .env.example .env
+```
+
+`.env` is the canonical file — it is auto-loaded by both Docker Compose and the Next.js app (via `src/lib/load-env.ts`). If you need a per-developer override, drop it into `.env.local` (loaded second, with override precedence; matches the Next.js convention). Both files are gitignored.
+
+> **Migration from older clones**: if your repo predates this change you may have a `.env.local` and no `.env` — run `mv .env.local .env` so Docker Compose can find it without `--env-file`.
+
+Set the following values:
 
 | Variable | Description | How to Generate |
 |----------|-------------|-----------------|
@@ -123,7 +136,7 @@ docker compose ps
 npx prisma migrate dev --name init
 ```
 
-> **Note**: Local migrations require `MIGRATION_DATABASE_URL` in `.env.local` pointing to the SUPERUSER role (`passwd_user`). See `.env.example` for the correct value.
+> **Note**: Local migrations require `MIGRATION_DATABASE_URL` in `.env` pointing to the SUPERUSER role (`passwd_user`). See `.env.example` for the correct value.
 
 ### 5. Seed Default Data
 
@@ -177,7 +190,7 @@ Unauthenticated users are redirected to `/auth/signin`.
    - Production: `https://<your-domain>/api/auth/callback/google`
    - With basePath: `https://<your-domain>/<basePath>/api/auth/callback/google`
 5. Click "Create"
-6. Set the displayed **Client ID** and **Client Secret** in `.env.local`:
+6. Set the displayed **Client ID** and **Client Secret** in `.env`:
 
    ```bash
    AUTH_GOOGLE_ID=<Client ID>
@@ -201,9 +214,9 @@ Any SAML 2.0 compliant IdP (HENNGE, Okta, Azure AD, OneLogin, etc.) can be used.
    - ACS URL: `http://localhost:5225/api/oauth/saml`
    - Entity ID: Use the value provided by Jackson
 
-4. Set the OIDC Client ID / Secret issued by Jackson in `.env.local`
+4. Set the OIDC Client ID / Secret issued by Jackson in `.env`
 
-5. Set `SAML_PROVIDER_NAME` in `.env.local` to the IdP name shown on the sign-in page (e.g., `HENNGE`, `Okta`)
+5. Set `SAML_PROVIDER_NAME` in `.env` to the IdP name shown on the sign-in page (e.g., `HENNGE`, `Okta`)
 
 ## Production Deployment
 
@@ -346,7 +359,7 @@ Prisma 7 introduces the following breaking changes:
 
 - `url` removed from `datasource` block in `schema.prisma`. DB URL is managed in `prisma.config.ts`
 - Default engine changed to `client`. Requires `@prisma/adapter-pg` + `pg` packages
-- `dotenv` does not auto-load `.env.local`. Must explicitly call `config({ path: ".env.local" })` in `prisma.config.ts`
+- `dotenv` does not auto-load `.env`/`.env.local` from a non-cwd path. `prisma.config.ts` calls `config({ path: ".env.local" })` then `config({ path: ".env" })` so override semantics match the runtime app — see `src/lib/load-env.ts` for the same pattern.
 
 ## Directory Structure
 

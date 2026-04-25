@@ -31,3 +31,5 @@
 /.git-blame-ignore-revs                      @ngc-shj
 # S14 (Round 4): supply-chain integrity — Trivy suppression list.
 /.trivyignore                                @ngc-shj
+# Step 8 (SEC-4): env allowlist governance — changes require owner review.
+/scripts/env-allowlist.ts                    @ngc-shj

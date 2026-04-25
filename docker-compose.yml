@@ -10,7 +10,13 @@ services:
     ports:
       - "3000:3000"
     env_file:
-      - .env.local
+      # Canonical env file. Created by `npm run init:env` or by manual edit
+      # of `.env.example`. Docker Compose auto-loads .env from the project
+      # root for ${VAR} substitution AND for env_file injection here.
+      # `.env.local` (Next.js per-developer override) is NOT injected into
+      # the container — overrides only apply to the host-side `npm run dev`
+      # path through src/lib/load-env.ts.
+      - .env
     environment:
       - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
       - JACKSON_URL=http://jackson:5225
@@ -47,7 +53,7 @@ services:
     # Do NOT expose port 5432 to host in production
 
   jackson:
-    image: boxyhq/jackson:1.49.4
+    image: boxyhq/jackson:1.52.2
     environment:
       JACKSON_API_KEYS: ${JACKSON_API_KEY:?JACKSON_API_KEY is required}
       DB_ENGINE: sql

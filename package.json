@@ -37,7 +37,12 @@
     "scim:smoke": "bash scripts/scim-smoke.sh",
     "test:cli": "cd cli && npm test",
     "version:bump": "bash scripts/bump-version.sh",
-    "worker:audit-outbox": "tsx scripts/audit-outbox-worker.ts"
+    "worker:audit-outbox": "tsx scripts/audit-outbox-worker.ts",
+    "generate:env-example": "tsx scripts/generate-env-example.ts",
+    "check:env-docs": "tsx scripts/check-env-docs.ts",
+    "init:env": "tsx scripts/init-env.ts",
+    "docker:up": "docker compose -f docker-compose.yml -f docker-compose.override.yml up",
+    "docker:down": "docker compose -f docker-compose.yml -f docker-compose.override.yml down"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.1",

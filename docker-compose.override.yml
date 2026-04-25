@@ -23,7 +23,8 @@ services:
       - .:/app
       - /app/node_modules
     env_file:
-      - .env.local
+      # See docker-compose.yml app service for the .env vs .env.local note.
+      - .env
     environment:
       - OUTBOX_WORKER_DATABASE_URL=postgresql://passwd_outbox_worker:passwd_outbox_pass@db:5432/passwd_sso
       - DATABASE_URL=postgresql://passwd_app:passwd_app_pass@db:5432/passwd_sso
@@ -31,7 +32,13 @@ services:
       db:
         condition: service_healthy
       migrate:
+        # migrate is profile-gated (profiles: ["migrate"] in docker-compose.yml).
+        # required: false makes this dependency optional — Compose only waits
+        # for migrate when the migrate profile is active (e.g. via `docker
+        # compose --profile migrate up`). Without it, Compose v2.20+ rejects
+        # the project as "service depends on undefined service: migrate".
         condition: service_completed_successfully
+        required: false
     command: ["npx", "tsx", "scripts/audit-outbox-worker.ts"]
     restart: unless-stopped
     networks:
