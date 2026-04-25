@@ -32,7 +32,13 @@ services:
       db:
         condition: service_healthy
       migrate:
+        # migrate is profile-gated (profiles: ["migrate"] in docker-compose.yml).
+        # required: false makes this dependency optional — Compose only waits
+        # for migrate when the migrate profile is active (e.g. via `docker
+        # compose --profile migrate up`). Without it, Compose v2.20+ rejects
+        # the project as "service depends on undefined service: migrate".
         condition: service_completed_successfully
+        required: false
     command: ["npx", "tsx", "scripts/audit-outbox-worker.ts"]
     restart: unless-stopped
     networks:
