@@ -80,6 +80,26 @@ import { GET, PUT } from "@/app/api/teams/[teamId]/policy/route";
 const TEAM_ID = "team-1";
 const params = createParams({ teamId: TEAM_ID });
 
+// RT1: shape of a fully-populated TeamPolicy DB row, post-drop. All mocks for
+// `prisma.teamPolicy.{findUnique,upsert}` should spread this so partial mocks
+// don't mask field-omission regressions in the route handler.
+const FULL_DB_ROW = {
+  minPasswordLength: 0,
+  requireUppercase: false,
+  requireLowercase: false,
+  requireNumbers: false,
+  requireSymbols: false,
+  sessionIdleTimeoutMinutes: null,
+  sessionAbsoluteTimeoutMinutes: null,
+  requireRepromptForAll: false,
+  allowExport: true,
+  allowSharing: true,
+  requireSharePassword: false,
+  passwordHistoryCount: 0,
+  inheritTenantCidrs: true,
+  teamAllowedCidrs: [] as string[],
+};
+
 describe("GET /api/teams/[teamId]/policy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -130,14 +150,12 @@ describe("GET /api/teams/[teamId]/policy", () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTeamMember.mockResolvedValue({ role: "ADMIN" });
     mockFindUnique.mockResolvedValue({
+      ...FULL_DB_ROW,
       minPasswordLength: 12,
       requireUppercase: true,
       requireLowercase: true,
       requireNumbers: true,
-      requireSymbols: false,
-      requireRepromptForAll: false,
       allowExport: false,
-      allowSharing: true,
     });
 
     const req = createRequest("GET", `http://localhost/api/teams/${TEAM_ID}/policy`);
@@ -208,14 +226,11 @@ describe("PUT /api/teams/[teamId]/policy", () => {
     });
 
     const policyData = {
+      ...FULL_DB_ROW,
       minPasswordLength: 12,
       requireUppercase: true,
       requireLowercase: true,
       requireNumbers: true,
-      requireSymbols: false,
-      requireRepromptForAll: false,
-      allowExport: true,
-      allowSharing: true,
     };
 
     mockUpsert.mockResolvedValue(policyData);
