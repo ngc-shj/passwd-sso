@@ -12,6 +12,7 @@ import * as path from "node:path";
 import { envObject } from "@/lib/env-schema";
 import { GROUPS, descriptions } from "./env-descriptions";
 import { makeEnvKeyCollator } from "./lib/env-sort";
+import { ALLOWLIST } from "./env-allowlist";
 
 // ── Arg parsing ───────────────────────────────────────────────────────────
 
@@ -211,6 +212,51 @@ for (const { key, groupIndex } of entries) {
   }
 
   lines.push("");
+}
+
+// ── External allowlist entries (docker-compose / build-time / scripts) ───
+// Emit allowlist entries marked `includeInExample: true` in a dedicated
+// trailing section so operators see vars that are REQUIRED for their
+// deployment path (docker-compose, production build, provisioning scripts)
+// even though our Next.js app does not read them.
+const externalEntries = ALLOWLIST.filter(
+  (e): e is Extract<typeof ALLOWLIST[number], { type: "literal" }> =>
+    e.type === "literal" && e.includeInExample === true,
+);
+
+if (externalEntries.length > 0) {
+  lines.push("");
+  lines.push("# ===========================================================");
+  lines.push("# External / Build-time (not read by the Next.js app)");
+  lines.push("# ===========================================================");
+  lines.push("#");
+  lines.push("# The following vars are NOT in the Zod schema and are not");
+  lines.push("# validated at app startup. They are required by external");
+  lines.push("# consumers: docker-compose.yml, the Sentry webpack plugin,");
+  lines.push("# or one-shot provisioning scripts. docker-compose reads");
+  lines.push("# .env by default; to share this file with docker pass");
+  lines.push("# `--env-file .env.local` (see README 'Configure environment').");
+  lines.push("");
+
+  for (const entry of externalEntries) {
+    const desc = entry.description ?? entry.justification.split("\n")[0];
+    for (const dl of wrapDescriptionLines(desc)) {
+      lines.push(`# ${dl}`);
+    }
+
+    // Secret-pattern guard also applies here (NF-4.6): hex-32+ example
+    // on a non-secret field aborts; hex-32+ on a secret field is replaced
+    // with a placeholder.
+    const guarded = guardExample(entry.key, entry.example, entry.secret);
+    if (guarded === KEY_PLACEHOLDER) {
+      lines.push(`# ${entry.key}=`);
+      lines.push(KEY_PLACEHOLDER);
+    } else {
+      const val = guarded ?? "";
+      lines.push(`# ${entry.key}=${val}`);
+    }
+    lines.push("");
+  }
 }
 
 // Output ends with a single trailing newline

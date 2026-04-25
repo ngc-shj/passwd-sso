@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { spawnSync } from "node:child_process";
 import { envObject, envSchema } from "@/lib/env-schema";
 import { descriptions, GROUPS } from "./env-descriptions";
+import { ALLOWLIST } from "./env-allowlist";
 import { createPrompter } from "./lib/prompt";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -487,6 +488,86 @@ export async function run(opts: RunOptions): Promise<number> {
     }
   }
 
+  // ── External allowlist prompts (docker-compose / build-time / scripts) ────
+  // Entries marked `includeInExample: true` in scripts/env-allowlist.ts are
+  // required by external consumers (docker-compose.yml, provisioning scripts,
+  // Sentry webpack plugin). They are NOT in the Zod schema and are not
+  // validated at app startup — operators set them for their deployment path.
+  // Prompt after the Zod fields so the user knows they have passed the "app
+  // validation" surface.
+  const externalAllowlistEntries = ALLOWLIST.filter(
+    (e): e is Extract<typeof ALLOWLIST[number], { type: "literal" }> =>
+      e.type === "literal" && e.includeInExample === true,
+  );
+
+  if (externalAllowlistEntries.length > 0) {
+    stdout.write(
+      "\n=== External (docker-compose / build-time / scripts) ===\n",
+    );
+    stdout.write(
+      "The following vars are NOT read by the Next.js app but are required\n" +
+        "by external consumers. They will be written to .env.local so you can\n" +
+        "pass it to docker compose via `--env-file .env.local`.\n",
+    );
+
+    for (const entry of externalAllowlistEntries) {
+      stdout.write(`\n--- ${entry.key} ---\n`);
+      const desc = entry.description ?? entry.justification;
+      for (const line of desc.split("\n")) {
+        stdout.write(`  ${line}\n`);
+      }
+
+      // Offer generate-random for secret entries.
+      if (entry.secret) {
+        const generate = await prompter.askYesNo(
+          `Generate a random value for ${entry.key}?`,
+          true,
+        );
+        if (generate) {
+          // 48 hex chars (24 bytes) is the BoxyHQ Jackson convention; use 32
+          // for worker/sentry entries to match other 256-bit secrets.
+          const bytes = entry.key === "JACKSON_API_KEY" ? 24 : 32;
+          const generated = crypto.randomBytes(bytes).toString("hex");
+          collected.set(entry.key, generated);
+          sources.set(entry.key, "generated");
+          stdout.write(
+            printSecrets
+              ? `  Generated: ${generated}\n`
+              : `  Generated: [generated]\n`,
+          );
+          continue;
+        }
+      }
+
+      // Prompt for value (allow empty — these are operator-optional).
+      const defaultValue = entry.example;
+      let attempts = 0;
+      const maxAttempts = 5;
+      let accepted: string | undefined;
+      while (attempts < maxAttempts) {
+        const answer = await prompter.ask(
+          `Enter value for ${entry.key} (leave empty to skip)`,
+          { defaultValue, secret: entry.secret === true },
+        );
+        if (!validateInputValue(answer)) {
+          stderr.write(
+            "  ERROR: value contains illegal characters (\\n, \\r, or \\x00). Try again.\n",
+          );
+          attempts++;
+          continue;
+        }
+        accepted = answer;
+        break;
+      }
+
+      if (accepted !== undefined && accepted !== "") {
+        collected.set(entry.key, accepted);
+        sources.set(entry.key, "user");
+      }
+      // Empty input → skip; operator can set later via manual edit.
+    }
+  }
+
   // ── Validate collected values ──────────────────────────────────────────────
 
   // Build object for Zod validation (use raw strings — Zod coerces).
@@ -646,6 +727,36 @@ export async function run(opts: RunOptions): Promise<number> {
 
     lines.push(`${key}=${dotenvEscape(value)}`);
     lines.push("");
+  }
+
+  // Emit external allowlist entries (if the operator supplied values) in a
+  // trailing section. Skip entries the operator left blank so .env.local
+  // stays minimal and diffable.
+  const externalWritten = externalAllowlistEntries.filter(
+    (e) => collected.has(e.key),
+  );
+  if (externalWritten.length > 0) {
+    lines.push("");
+    lines.push("# ===========================================================");
+    lines.push("# External / Build-time (not read by the Next.js app)");
+    lines.push("# ===========================================================");
+    lines.push("");
+    for (const entry of externalWritten) {
+      const value = collected.get(entry.key)!;
+      if (HEX32_RE.test(value) && !entry.secret) {
+        stderr.write(
+          `ERROR: refusing to write .env.local — external allowlist key ` +
+            `"${entry.key}" has a hex-32+ value but is not marked secret: true.\n`,
+        );
+        return 1;
+      }
+      const desc = entry.description ?? entry.justification;
+      for (const descLine of desc.split("\n")) {
+        lines.push(`# ${descLine}`);
+      }
+      lines.push(`${entry.key}=${dotenvEscape(value)}`);
+      lines.push("");
+    }
   }
 
   const content = lines.join("\n") + "\n";

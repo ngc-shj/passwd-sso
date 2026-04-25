@@ -268,6 +268,11 @@ type AllowlistEntry = {
   // but users cannot configure (e.g. NEXT_RUNTIME set by Next.js). Exempts
   // the entry from rule 9; default false.
   readByApp?: boolean;
+  // Operator-facing fields surfaced by generate-env-example.ts + init:env.
+  includeInExample?: boolean;
+  description?: string;
+  example?: string;
+  secret?: boolean;
 };
 
 function validateAllowlistShape(entry: AllowlistEntry, idx: number): string[] {

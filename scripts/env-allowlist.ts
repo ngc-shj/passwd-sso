@@ -26,6 +26,33 @@ export type LiteralAllowlistEntry = {
    * prevent allowlist abuse.
    */
   readByApp?: boolean;
+  /**
+   * Set to true when operators must configure this var for the app to run
+   * (e.g. JACKSON_API_KEY for docker compose, PASSWD_OUTBOX_WORKER_PASSWORD
+   * for provisioning scripts). The env-example generator emits these under
+   * a dedicated "External" section so new developers see them in the
+   * template. The interactive generator (init:env) also prompts for them.
+   * Default false (entry is internal-only and not shown to operators).
+   */
+  includeInExample?: boolean;
+  /**
+   * Optional one-line operator-facing description shown above the emitted
+   * line in .env.example and as the prompt in init:env. When absent the
+   * generator falls back to the first line of justification.
+   */
+  description?: string;
+  /**
+   * Optional example placeholder value shown after `# KEY=` in .env.example
+   * and as the default during init:env prompting. Never write a real secret
+   * here — secret-pattern guard (NF-4.6) will fail the build.
+   */
+  example?: string;
+  /**
+   * Marks the value as secret so that (a) the env-example generator never
+   * emits the `example` verbatim (replaces with a placeholder comment) and
+   * (b) init:env suppresses echo at prompt time.
+   */
+  secret?: boolean;
 };
 
 export type RegexAllowlistEntry = {
@@ -47,6 +74,12 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
       "Declared as ${JACKSON_API_KEY:?...} required only at Jackson container start.",
     consumers: ["docker-compose.yml"],
     reviewedAt: "2026-04-24",
+    includeInExample: true,
+    description:
+      "Admin API key for BoxyHQ SAML Jackson container's /api/v1/* endpoints.\n" +
+      "Required by docker-compose.yml; generate with: openssl rand -hex 24\n" +
+      "NOT read by the Next.js app — only the Jackson container consumes it.",
+    secret: true,
   },
   {
     type: "literal",
@@ -59,6 +92,12 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
       "infra/postgres/initdb",
     ],
     reviewedAt: "2026-04-24",
+    includeInExample: true,
+    description:
+      "Password for the passwd_outbox_worker least-privilege DB role.\n" +
+      "Consumed by infra/postgres/initdb on first boot AND by\n" +
+      "scripts/set-outbox-worker-password.sh for existing clusters.",
+    secret: true,
   },
   {
     type: "literal",
@@ -79,6 +118,11 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
       "Referenced in README.md/README.ja.md operator-facing docs as a deploy-time secret.",
     consumers: ["README.md", "README.ja.md"],
     reviewedAt: "2026-04-24",
+    includeInExample: true,
+    description:
+      "Sentry auth token for source map upload during production build.\n" +
+      "Optional — only needed when deploying with Sentry source maps.",
+    secret: true,
   },
   {
     type: "literal",
@@ -106,6 +150,12 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
       "would be unreachable at the reader site. Comma-separated hostnames, enforced by Next's own dev-origin check (F19).",
     consumers: ["next.config.ts"],
     reviewedAt: "2026-04-24",
+    includeInExample: true,
+    description:
+      "Comma-separated hostnames allowed to access `npm run dev`.\n" +
+      "Required when accessing the dev server from a non-localhost\n" +
+      "origin (e.g., Tailscale or LAN hostname).",
+    example: "",
   },
   {
     type: "regex",

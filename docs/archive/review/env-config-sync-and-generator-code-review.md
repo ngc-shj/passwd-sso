@@ -13,7 +13,25 @@ Round 1 surfaced **17 findings: 0 Critical, 8 Major, 9 Minor.** All Majors fixed
 ### Round 2 (verification-only)
 After Round 1 fixes landed as commit `6e47d0a4`, a single verification-scope sub-agent confirmed each of the 14 claimed fixes against the actual shipped code, ran `npx vitest run scripts/__tests__/ src/lib/env.test.ts` (132 passed + 1 skipped), `npm run lint` (exit 0), and `npm run check:env-docs` (exit 0).
 
-**Verdict: Verified clean. No new regressions. No Round 3 needed.**
+**Verdict: Verified clean. No new regressions.**
+
+### Post-review user feedback (2026-04-25)
+User pointed out a real onboarding gap: the new `npm run init:env` writes only Zod-declared vars to `.env.local`, but Docker Compose's `${JACKSON_API_KEY:?...}` substitution requires `JACKSON_API_KEY` to be in the host env. New developers running `init:env` then `docker compose up` would hit `Error: JACKSON_API_KEY is required`. The plan's allowlist accepted that the var was "external to the app" but did not surface it to operators.
+
+Closed the gap on this branch (commit pending):
+- `scripts/env-allowlist.ts`: added `includeInExample`, `description`, `example`, `secret` fields to `LiteralAllowlistEntry`. Marked JACKSON_API_KEY, PASSWD_OUTBOX_WORKER_PASSWORD, SENTRY_AUTH_TOKEN, NEXT_DEV_ALLOWED_ORIGINS as `includeInExample: true`. Framework-set NEXT_RUNTIME and test-only BASE_URL/APP_DATABASE_URL stay invisible.
+- `scripts/generate-env-example.ts`: emits a trailing **External / Build-time** section listing every `includeInExample: true` entry with its description, secret-pattern guard applied. NF-3 determinism preserved.
+- `scripts/init-env.ts`: prompts for the same set after the Zod loop, with the secret-aware "Generate now? [Y/n]" flow (24-byte hex for JACKSON_API_KEY, 32-byte for the others). Empty input → field omitted from .env.local. Values written under a matching trailing section with the same hex-32+ guard.
+- `scripts/check-env-docs.ts`: extended `AllowlistEntry` shape to accept the new fields.
+- `package.json`: added `npm run docker:up` / `docker:down` wrappers that pass `--env-file .env.local` so the Next.js app and Docker Compose share one source of truth.
+- `README.md`: new ".env vs .env.local" subsection documenting the docker workflow and the trailing External section.
+- `CLAUDE.md`: Common Commands block adds docker:up/down; Docker line updated with the new wrapper.
+
+Tests added:
+- `generate-env-example.test.mjs`: asserts External section header + each operator-facing var appears as commented; verifies framework-set/test-only vars do NOT appear.
+- `init-env.test.mjs`: dev-profile happy path now also asserts `JACKSON_API_KEY` (48-hex generated) and `PASSWD_OUTBOX_WORKER_PASSWORD` (64-hex) are written; verifies External section header in file content.
+
+Verification: lint clean, 133 tests pass + 1 win32 skip, `npm run check:env-docs` exit 0, `npx next build` succeeds.
 
 ## Functionality Findings
 

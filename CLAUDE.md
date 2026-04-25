@@ -16,6 +16,8 @@ npm run generate:key     # Generate 256-bit hex master key
 npm run init:env         # Interactive .env.local generator (dev/ci/production profiles)
 npm run generate:env-example  # Regenerate .env.example from Zod schema + sidecar
 npm run check:env-docs   # Drift check: .env.example ↔ env-schema.ts ↔ allowlist ↔ docker-compose
+npm run docker:up        # Docker Compose up (reads .env.local via --env-file)
+npm run docker:down      # Docker Compose down
 npm run version:bump     # Suggest next version from git log (interactive)
 npm run version:bump -- 0.3.0  # Bump to explicit version
 ```
@@ -33,7 +35,12 @@ npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_D
 npm run test:integration       # Run real-DB integration tests (requires running Postgres)
 ```
 
-Docker (dev): `docker compose -f docker-compose.yml -f docker-compose.override.yml up`
+Docker (dev): `npm run docker:up` (wraps `docker compose --env-file .env.local -f docker-compose.yml -f docker-compose.override.yml up`). Stop with `npm run docker:down`.
+
+Notes on env files:
+- The Next.js app reads `.env.local` (via `src/lib/load-env.ts`).
+- Docker Compose by default reads `.env` (not `.env.local`). Pass `--env-file .env.local` on every invocation so both tools share the same single source of truth.
+- `JACKSON_API_KEY`, `PASSWD_OUTBOX_WORKER_PASSWORD`, `SENTRY_AUTH_TOKEN`, `NEXT_DEV_ALLOWED_ORIGINS` are NOT in the Zod schema (operators set them for their deployment path). `npm run init:env` prompts for them alongside the app vars; they live in the "External / Build-time" section at the bottom of `.env.example` / `.env.local`.
 
 ## Code Quality Rules
 

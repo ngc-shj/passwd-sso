@@ -130,6 +130,29 @@ describe("generate-env-example.ts", () => {
     }
   });
 
+  it("emits the External allowlist section with JACKSON_API_KEY and peers", () => {
+    const result = runGenerator();
+    expect(result.status).toBe(0);
+    const content = readFileSync(result.outPath, "utf8");
+
+    // Dedicated section header appears.
+    expect(content).toContain(
+      "External / Build-time (not read by the Next.js app)",
+    );
+    // Each includeInExample-true allowlist entry appears as a commented line.
+    expect(content).toMatch(/^# JACKSON_API_KEY=/m);
+    expect(content).toMatch(/^# PASSWD_OUTBOX_WORKER_PASSWORD=/m);
+    expect(content).toMatch(/^# SENTRY_AUTH_TOKEN=/m);
+    expect(content).toMatch(/^# NEXT_DEV_ALLOWED_ORIGINS=/m);
+
+    // Entries with readByApp: true (NEXT_RUNTIME) and non-operator-facing
+    // entries (BASE_URL, APP_DATABASE_URL, regex V11..V100) must NOT appear
+    // in the generated template.
+    expect(content).not.toMatch(/^# ?NEXT_RUNTIME=/m);
+    expect(content).not.toMatch(/^# ?BASE_URL=/m);
+    expect(content).not.toMatch(/^# ?APP_DATABASE_URL=/m);
+  });
+
   it("--locale=tr produces a different key order than --locale=en when Turkish-I keys are present", () => {
     // End-to-end: spawn the generator with --locale=tr and --locale=en. The
     // current sidecar uses only ASCII keys so the outputs are identical. This

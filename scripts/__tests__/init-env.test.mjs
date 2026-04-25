@@ -154,6 +154,21 @@ describe("init-env.ts run()", () => {
       // Also verify envObject acceptance for completeness.
       expect(envObject.safeParse(parsed).success).toBe(true);
 
+      // External allowlist entries: with fallback="" the operator "skips"
+      // each prompt, EXCEPT secret entries which take the "Generate" Y/n
+      // default (true) and land in the file as hex. JACKSON_API_KEY should
+      // be present (48-hex) even though it is not a Zod-declared var.
+      expect(parsed.JACKSON_API_KEY).toBeDefined();
+      expect(/^[0-9a-f]{48}$/.test(parsed.JACKSON_API_KEY)).toBe(true);
+      // PASSWD_OUTBOX_WORKER_PASSWORD is also secret → auto-generated 64-hex.
+      expect(parsed.PASSWD_OUTBOX_WORKER_PASSWORD).toBeDefined();
+      expect(/^[0-9a-f]{64}$/.test(parsed.PASSWD_OUTBOX_WORKER_PASSWORD)).toBe(true);
+      // External section header appears in file content.
+      const rawContent = readFileSync(envLocalPath, "utf8");
+      expect(rawContent).toContain(
+        "External / Build-time (not read by the Next.js app)",
+      );
+
       // Generated secrets must NOT leak to stdout/stderr.
       const HEX64_RE = /^[0-9a-f]{64}$/;
       for (const val of Object.values(parsed)) {
