@@ -161,11 +161,35 @@ npm install
 
 ### 2. 環境変数の設定
 
+対話式ジェネレータが推奨です — 必須項目を順に質問し、暗号鍵は自動生成、Zod スキーマで検証してから書き出します:
+
 ```bash
-cp .env.example .env.local
+npm run init:env                          # 対話式、デフォルト profile=dev
+npm run init:env -- --profile=production  # 本番プロバイダの実値を入力
 ```
 
-`.env.local` を編集 — 主要な変数:
+ジェネレータは `.env` を atomic に mode `0o600` で書き出し、上書き時には必ず確認します。生成された秘密値は端末上では `[generated]` のプレースホルダで表示され、ファイルにのみ書き込まれます (`--print-secrets` を付けると表示)。
+
+手動編集が好みなら、テンプレートをコピー:
+
+```bash
+cp .env.example .env
+```
+
+`.env.example` は `src/lib/env-schema.ts` (Single Source of Truth) から自動生成されます — スキーマ変更後は `npm run generate:env-example` で再生成してください。`npm run check:env-docs` で `.env.example`、allowlist、`docker-compose*.yml` の整合性を検証できます。
+
+**`.env` と `.env.local` の使い分け** — canonical なファイルは `.env` です。Docker Compose (auto-load) と Next.js アプリ (`src/lib/load-env.ts` 経由) のどちらもこれを native に読みます。`.env.local` は `.env` の **後** に読み込まれて値を上書きする (Next.js 慣習) override 用ファイルです。個人ローカルの調整 (DB ポート違い、別の Tailscale ホスト名など) のみ書き、canonical な設定は `.env` に置いてください。`--env-file` フラグは不要です:
+
+```bash
+npm run docker:up     # docker compose -f docker-compose.yml -f docker-compose.override.yml up
+npm run docker:down
+```
+
+> **古いクローンからの移行**: 過去の運用で `.env.local` のみ作成しているリポジトリは、`mv .env.local .env` を実行して Docker Compose が自動読込できる canonical なファイルに移してください。`npm run init:env` は legacy `.env.local` を検出すると 1 度だけ NOTE で同じことを案内します。
+
+`.env.example` の末尾には **External / Build-time** セクションがあり、Next.js アプリは読まないが docker-compose / 本番ビルド / プロビジョニングスクリプトが必要とする変数 (`JACKSON_API_KEY` (Jackson コンテナ用), `PASSWD_OUTBOX_WORKER_PASSWORD` (worker DB ロール用), `SENTRY_AUTH_TOKEN` (ソースマップアップロード用), `NEXT_DEV_ALLOWED_ORIGINS` (dev サーバ用)) が並びます。`npm run init:env` は Zod 宣言済み変数と並んで、これらも同一の `.env` に書き出します。
+
+主要な変数:
 
 | 変数 | 説明 |
 | --- | --- |

@@ -341,7 +341,7 @@ docs/                     # Documentation (architecture, security, operations, s
 | `npm run db:seed` | Seed data |
 | `npm run db:studio` | Prisma Studio GUI |
 | `npm run generate:key` | Generate 256-bit hex key |
-| `npm run init:env` | Interactive .env.local generator (dev/ci/production) |
+| `npm run init:env` | Interactive .env generator (dev/ci/production) |
 | `npm run generate:env-example` | Regenerate .env.example from Zod schema + sidecar |
 | `npm run check:env-docs` | Drift check: schema ↔ .env.example ↔ allowlist ↔ compose |
 | `npm run generate:icons` | Generate app icons |
