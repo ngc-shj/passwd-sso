@@ -84,15 +84,22 @@ jobs:
       # roles so the integration tests' role-specific connection strings
       # (helpers.ts:getConnectionString) can authenticate.
       #
-      # Passwords match the dev fallback constants in 02-create-app-role.sql
-      # so the tests' base→role substitution in helpers.ts works without
-      # additional env vars. Tests still run as NOSUPERUSER/NOBYPASSRLS roles,
-      # so RLS enforcement assertions remain valid.
+      # Round 4 S22: passwords below are CI-only ephemeral credentials
+      # (service container is destroyed per run; port 5432 binds to runner
+      # localhost only). DO NOT reuse outside this CI runner. Values match
+      # the dev fallback constants in 02-create-app-role.sql so the tests'
+      # base→role substitution in helpers.ts works without additional env
+      # vars. Tests still run as NOSUPERUSER/NOBYPASSRLS roles, so RLS
+      # enforcement assertions remain valid.
       - name: Bootstrap application DB roles
         env:
           PGPASSWORD: postgres
         run: |
           psql -h localhost -U postgres -d passwd_test <<'EOF'
+          -- Defense-in-depth: revoke default PUBLIC CREATE on the public schema
+          -- (mirrors infra/postgres/initdb/02-create-app-role.sql:24).
+          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+
           -- passwd_outbox_worker: created by migration without password; set it now.
           ALTER ROLE passwd_outbox_worker WITH LOGIN PASSWORD 'passwd_outbox_pass';
 
@@ -113,6 +120,10 @@ jobs:
 
       - name: Run integration tests
         env:
-          # Superuser URL for migrations and DDL setup in tests (helpers.ts:23)
+          # Explicit superuser URL: helpers.ts:23 prefers MIGRATION_DATABASE_URL
+          # over DATABASE_URL when both are set. They point to the same role
+          # here (postgres = single SUPERUSER), but setting it explicitly
+          # documents intent and makes a future role-separation change a
+          # one-line edit.
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
         run: npm run test:integration
