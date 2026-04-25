@@ -249,8 +249,15 @@ if (externalEntries.length > 0) {
     // with a placeholder.
     const guarded = guardExample(entry.key, entry.example, entry.secret);
     if (guarded === KEY_PLACEHOLDER) {
+      // Secret fields with a placeholder always emit commented + placeholder.
       lines.push(`# ${entry.key}=`);
       lines.push(KEY_PLACEHOLDER);
+    } else if (entry.requiredForConsumer) {
+      // CF7: operator MUST configure this var for the standard deployment
+      // path. Emit uncommented (parallel to CF4 always-required Zod fields)
+      // so `cp .env.example .env.local` produces a usable template.
+      const val = guarded ?? "";
+      lines.push(`${entry.key}=${val}`);
     } else {
       const val = guarded ?? "";
       lines.push(`# ${entry.key}=${val}`);

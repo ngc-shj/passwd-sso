@@ -85,6 +85,41 @@ function formatBackupTimestamp(d: Date): string {
   );
 }
 
+/**
+ * Minimal dotenv parser for re-reading an existing .env.local on the
+ * Backup-and-overwrite path (CF6). Handles the subset our generator emits:
+ *   - "KEY=value"           → { KEY: "value" }
+ *   - 'KEY="quoted"'        → unescapes \", \\, \n, \r and strips the outer "
+ *   - blank lines / `# ...` / lines without `=` → skipped
+ * Does not implement export-prefix or multi-line YAML-style values; those
+ * never appear in our own writes.
+ *
+ * Exported for unit testing — production callers use it through the
+ * Backup-and-overwrite branch only.
+ */
+export function parseSimpleDotenv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rawLine of text.split("\n")) {
+    const line = rawLine.replace(/\r$/, "");
+    if (!line || /^\s*#/.test(line)) continue;
+    const eq = line.indexOf("=");
+    if (eq <= 0) continue;
+    const key = line.slice(0, eq).trim();
+    if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) continue;
+    let value = line.slice(eq + 1);
+    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+      value = value
+        .slice(1, -1)
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "\r")
+        .replace(/\\"/g, '"')
+        .replace(/\\\\/g, "\\");
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 /** Atomic write: open with "wx" (fails on EEXIST), write, fsync, close, rename. */
 async function atomicWrite(
   targetPath: string,
@@ -321,6 +356,13 @@ export async function run(opts: RunOptions): Promise<number> {
     envLocalExists = false;
   }
 
+  // CF6: when Backup-and-overwrite is chosen, parse the existing .env.local
+  // and seed `priorValues` so re-prompts default to the previous value.
+  // Pressing Enter on a non-secret prompt re-uses the prior value; secret
+  // prompts default to "Generate now? Y" but the user can answer "n" and
+  // press Enter to re-use the prior secret. Eliminates accidental rotation.
+  let priorValues: Record<string, string> = {};
+
   if (envLocalExists) {
     const action = await prompter.askChoice(
       ".env.local already exists. What would you like to do?",
@@ -345,10 +387,15 @@ export async function run(opts: RunOptions): Promise<number> {
       }
 
       const existing = await fs.readFile(envLocalPath, "utf8");
+      priorValues = parseSimpleDotenv(existing);
       await atomicWrite(backupPath, existing, stderr);
       stdout.write(`Backed up to ${backupPath}\n`);
+      stdout.write(
+        "Prior values restored as defaults — press Enter to keep, type a " +
+          "new value to change, or answer Generate=y on a secret to rotate it.\n",
+      );
     }
-    // "Overwrite" falls through — we'll overwrite in the write step.
+    // "Overwrite" falls through — priorValues stays empty.
   }
 
   // ── Build sorted field list ────────────────────────────────────────────────
@@ -366,6 +413,21 @@ export async function run(opts: RunOptions): Promise<number> {
     for (const [k, v] of Object.entries(CI_DEFAULTS)) {
       collected.set(k, v!);
       sources.set(k, "profile");
+    }
+    // CF5 follow-up: ci profile is non-interactive; also seed Zod defaults
+    // so any field with .default() doesn't trigger a stdin-blocking prompt.
+    // Optional fields without defaults stay unset (Zod accepts undefined).
+    for (const field of allFields) {
+      if (!collected.has(field.key)) {
+        const fieldSchema = shape[field.key];
+        if (fieldSchema && hasDefault(fieldSchema._def)) {
+          const defVal = extractDefault(fieldSchema._def);
+          if (defVal !== undefined) {
+            collected.set(field.key, defVal);
+            sources.set(field.key, "profile");
+          }
+        }
+      }
     }
   } else if (profile === "dev") {
     for (const [k, v] of Object.entries(DEV_DEFAULTS)) {
@@ -385,6 +447,14 @@ export async function run(opts: RunOptions): Promise<number> {
         }
       }
     }
+  }
+
+  // CF6: prior values from the existing .env.local override profile defaults
+  // so the operator's last-known-good values become the prompt defaults.
+  // Applied after profile seeding (so prior wins) but before prompt loop.
+  for (const [k, v] of Object.entries(priorValues)) {
+    collected.set(k, v);
+    sources.set(k, "user");
   }
 
   // ── Prompt loop (sorted by tier then group/order) ──────────────────────────
@@ -407,8 +477,11 @@ export async function run(opts: RunOptions): Promise<number> {
     const sidecar = descriptions[key as keyof typeof descriptions];
     const existing = collected.get(key);
 
-    // For ci profile: values already seeded, skip prompting.
-    if (profile === "ci" && sources.get(key) === "profile") {
+    // For ci profile: never prompt. Fields are either seeded by CI_DEFAULTS
+    // / Zod defaults (CF5 follow-up above) or stay unset — Zod accepts
+    // undefined for any field declared .optional(). This guarantees ci
+    // never blocks on stdin (e.g. closed pipe in GitHub Actions).
+    if (profile === "ci") {
       continue;
     }
 
@@ -500,7 +573,13 @@ export async function run(opts: RunOptions): Promise<number> {
       e.type === "literal" && e.includeInExample === true,
   );
 
-  if (externalAllowlistEntries.length > 0) {
+  // CF5: --profile=ci is for scripted/non-interactive seeding. CI runners
+  // configure these external vars via repo secrets / GitHub Actions env,
+  // not via .env.local. Skip the prompt loop entirely so a piped or empty
+  // stdin does not block.
+  const skipExternalPrompts = profile === "ci";
+
+  if (externalAllowlistEntries.length > 0 && !skipExternalPrompts) {
     stdout.write(
       "\n=== External (docker-compose / build-time / scripts) ===\n",
     );
@@ -540,7 +619,9 @@ export async function run(opts: RunOptions): Promise<number> {
       }
 
       // Prompt for value (allow empty — these are operator-optional).
-      const defaultValue = entry.example;
+      // CF6: prefer prior value over the example placeholder so re-runs
+      // preserve operator-supplied values.
+      const defaultValue = priorValues[entry.key] ?? entry.example;
       let attempts = 0;
       const maxAttempts = 5;
       let accepted: string | undefined;

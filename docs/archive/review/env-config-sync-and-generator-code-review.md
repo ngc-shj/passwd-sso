@@ -33,6 +33,32 @@ Tests added:
 
 Verification: lint clean, 133 tests pass + 1 win32 skip, `npm run check:env-docs` exit 0, `npx next build` succeeds.
 
+### Round 3 (incremental review of commit `66fbfd74`)
+Three expert sub-agents reviewed the onboarding-gap fix commit. **0 Critical, 3 Major, 5 Minor.** Security expert found nothing — all NF/SEC obligations correctly extended to External-section entries.
+
+**Functionality:**
+- CF5 Major: `--profile=ci` blocked on the new external-allowlist prompt loop (no skip guard).
+  - **RESOLVED**: Added `skipExternalPrompts = profile === "ci"` guard around the external loop. Also extended ci-profile seeding to include Zod-default fields (so any optional-with-default field doesn't fall into the prompt loop). Changed prompt-loop guard from `if (profile === "ci" && sources.get(key) === "profile")` to unconditional `if (profile === "ci") continue` — ci is now strictly non-interactive.
+- CF6 Minor: Backup-and-overwrite re-prompted everything, silently dropping prior secrets when user pressed Enter.
+  - **RESOLVED**: Added `parseSimpleDotenv()` helper (exported for unit testing). When the user picks "Backup-and-overwrite", existing `.env.local` is parsed and `priorValues` is seeded into `collected` with source="user". Both Zod prompt loop and external loop use prior values as defaults. Stdout prints "Prior values restored as defaults" hint after the backup line.
+- CF7 Minor: External section emitted as commented (`# JACKSON_API_KEY=`) — broke `cp .env.example .env.local && npm run docker:up` flow for required-for-deployment entries.
+  - **RESOLVED**: Added `requiredForConsumer?: boolean` to `LiteralAllowlistEntry`. Marked `JACKSON_API_KEY` and `PASSWD_OUTBOX_WORKER_PASSWORD` true. Generator emits these uncommented (parallel to CF4 always-required Zod fields). `SENTRY_AUTH_TOKEN` and `NEXT_DEV_ALLOWED_ORIGINS` stay commented (optional). Drift checker shape extended to accept the new field.
+
+**Testing:**
+- CT12 Major / CT13 Major / CT14 Minor: deferred under Anti-Deferral Rules §Point 3.
+  - **CT12 (user-entered external value path)**: defense-in-depth coverage; existing tests + the source-grep wiring assertion catch regressions in the surrounding structure. Worst case: a regression in the user-entered (non-generate) external branch goes undetected; likelihood low (the branch is straightforward and shares `validateInputValue` with the Zod loop); cost to fix: ~30 LoC plus stream-coordination work that has historically been flake-prone.
+  - **CT13 (hex-on-non-secret allowlist abort)**: defense-in-depth; would need a test-only allowlist fixture to monkey-patch in a poisoned entry. Worst case: a future allowlist change with `secret: false` and a hex example slips through to .env.example; likelihood low (CODEOWNERS gate + the existing hex-32+ scan in `generate-env-example.test.mjs:135` would flag the OUTPUT even if the abort test is missing); cost to fix: ~60 LoC fixture infrastructure.
+  - **CT14 (production profile + allowlist prompts)**: production happy-path test would need a complete fixture (real DATABASE_URL/AUTH_URL/etc.); the existing production-fail test does cover the prompt-loop interaction up to the validation gate.
+- CT15 Minor: Backup-and-overwrite path with allowlist entries untested.
+  - **RESOLVED**: Added 3 unit tests against the exported `parseSimpleDotenv` (bare KEY=value, quoted with escapes, and a wiring-assertion test that greps init-env.ts for the priorValues seeding code paths). Avoids the readline-driver flakiness that an end-to-end Backup-flow test would surface.
+- CT16 Minor: `npm run docker:up` wrapper had no test.
+  - **RESOLVED**: Added a `package.json` string assertion that `docker:up` and `docker:down` both contain `--env-file .env.local` and both compose `-f` flags.
+- CT17: documentation only — skipped.
+
+**New Round 3 test file count**: `init-env.test.mjs` 5 → 10 tests (one new file in CT16's describe block); `generate-env-example.test.mjs` assertion update only. All 12 test files pass — 138 total + 1 win32 skip.
+
+**Verification**: lint clean, `npm run check:env-docs` exit 0, `npx next build` succeeds.
+
 ## Functionality Findings
 
 ### [CF1] Major: init-env.ts missing NF-4.6 secret-pattern guard

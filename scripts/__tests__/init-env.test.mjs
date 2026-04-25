@@ -29,7 +29,7 @@ import { join, resolve, dirname } from "node:path";
 import { platform } from "node:process";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
-import { run } from "../init-env.ts";
+import { run, parseSimpleDotenv } from "../init-env.ts";
 import { envObject, envSchema } from "../../src/lib/env-schema.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -299,5 +299,117 @@ describe("init-env.ts run()", () => {
     } finally {
       rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  // CT15 / CF6: parseSimpleDotenv unit-tests cover the parser used to
+  // restore prior values during Backup-and-overwrite. Keeping these as
+  // pure unit tests avoids the readline-driver flakiness that the
+  // "writes a valid .env.local" test deliberately scopes around.
+  it("parseSimpleDotenv reads bare KEY=value and quoted KEY=\"value\" (CF6)", () => {
+    const text =
+      'DATABASE_URL=postgresql://passwd_app:p@host/db\n' +
+      'JACKSON_API_KEY="aabbccdd"\n' +
+      'EMPTY=\n' +
+      '# comment line\n' +
+      '\n' +
+      'BAD KEY WITH SPACE=ignored\n';
+    const out = parseSimpleDotenv(text);
+    expect(out.DATABASE_URL).toBe("postgresql://passwd_app:p@host/db");
+    expect(out.JACKSON_API_KEY).toBe("aabbccdd");
+    expect(out.EMPTY).toBe("");
+    expect(out["# comment line"]).toBeUndefined();
+    expect(out["BAD KEY WITH SPACE"]).toBeUndefined();
+  });
+
+  it("parseSimpleDotenv unescapes \\\", \\\\, \\n, \\r in quoted values", () => {
+    const text = 'A="line1\\nline2"\nB="quote\\"end"\nC="back\\\\slash"\n';
+    const out = parseSimpleDotenv(text);
+    expect(out.A).toBe("line1\nline2");
+    expect(out.B).toBe('quote"end');
+    expect(out.C).toBe("back\\slash");
+  });
+
+  it("init-env.ts source contains the priorValues seed wiring (CF6 wiring assertion)", () => {
+    const repoRoot = resolve(__dirname, "..", "..");
+    const initEnvSrc = readFileSync(
+      join(repoRoot, "scripts", "init-env.ts"),
+      "utf8",
+    );
+    // Backup branch reads the existing file and seeds priorValues.
+    expect(initEnvSrc).toMatch(/priorValues\s*=\s*parseSimpleDotenv\(existing\)/);
+    // priorValues is iterated into the collected map before the prompt loop.
+    expect(initEnvSrc).toMatch(/Object\.entries\(priorValues\)/);
+    // External-loop prompt uses priorValues as default before example.
+    expect(initEnvSrc).toMatch(
+      /defaultValue\s*=\s*priorValues\[entry\.key\]\s*\?\?\s*entry\.example/,
+    );
+    // User-visible message about prior restoration is emitted (CF6 safety).
+    expect(initEnvSrc).toMatch(/Prior values restored as defaults/);
+  });
+
+  // CF5: --profile=ci must not block on external-allowlist prompts.
+  it("--profile=ci does NOT prompt for external allowlist entries (no hang)", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "init-env-ci-"));
+    try {
+      process.chdir(tmpDir);
+
+      // No fallback fixtures — ci profile should never read stdin for
+      // external entries. Use null fallback to PROVE it doesn't read.
+      const stdin = new DelayedAnswerStream([], null);
+      const stdout = new PassThrough();
+      const stderr = new PassThrough();
+      const getStdout = collectStream(stdout);
+
+      const code = await run({
+        stdin,
+        stdout,
+        stderr,
+        now: () => new Date("2026-04-25T00:00:00Z"),
+        args: ["--profile=ci"],
+      });
+      stdin.destroy();
+
+      // Should write a valid .env.local without external section blocking.
+      expect(code).toBe(0);
+
+      // External section must NOT appear in stdout — confirms loop was skipped.
+      const out = getStdout();
+      expect(out).not.toMatch(
+        /=== External \(docker-compose \/ build-time \/ scripts\) ===/,
+      );
+
+      // External keys must NOT be written to .env.local under ci.
+      const envLocalPath = join(tmpDir, ".env.local");
+      const parsed = dotenv.parse(readFileSync(envLocalPath, "utf8"));
+      expect(parsed.JACKSON_API_KEY).toBeUndefined();
+      expect(parsed.PASSWD_OUTBOX_WORKER_PASSWORD).toBeUndefined();
+      expect(parsed.SENTRY_AUTH_TOKEN).toBeUndefined();
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }, 30_000);
+});
+
+// CT16: docker:up wrapper string assertion — prevent silent --env-file drop.
+describe("package.json docker:up wrapper", () => {
+  it("docker:up passes --env-file .env.local AND both compose files", () => {
+    const repoRoot = resolve(
+      dirname(fileURLToPath(import.meta.url)),
+      "..",
+      "..",
+    );
+    const pkg = JSON.parse(
+      readFileSync(join(repoRoot, "package.json"), "utf8"),
+    );
+    const dockerUp = pkg.scripts["docker:up"];
+    expect(dockerUp).toBeDefined();
+    expect(dockerUp).toMatch(/docker compose/);
+    expect(dockerUp).toMatch(/--env-file\s+\.env\.local/);
+    expect(dockerUp).toMatch(/-f\s+docker-compose\.yml/);
+    expect(dockerUp).toMatch(/-f\s+docker-compose\.override\.yml/);
+    // docker:down should mirror the same flags.
+    const dockerDown = pkg.scripts["docker:down"];
+    expect(dockerDown).toBeDefined();
+    expect(dockerDown).toMatch(/--env-file\s+\.env\.local/);
   });
 });

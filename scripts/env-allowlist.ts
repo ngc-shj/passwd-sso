@@ -53,6 +53,16 @@ export type LiteralAllowlistEntry = {
    * (b) init:env suppresses echo at prompt time.
    */
   secret?: boolean;
+  /**
+   * Set to true when an operator MUST configure this var for the standard
+   * deployment path to succeed (e.g. JACKSON_API_KEY for `docker compose up`,
+   * PASSWD_OUTBOX_WORKER_PASSWORD for the worker DB role provisioning step).
+   * The env-example generator emits these uncommented so a `cp .env.example
+   * .env.local` user sees the line ready to fill in — symmetric with the
+   * always-required Zod fields like DATABASE_URL (CF4/CF7). Default false:
+   * the entry is optional from the operator's perspective.
+   */
+  requiredForConsumer?: boolean;
 };
 
 export type RegexAllowlistEntry = {
@@ -75,6 +85,7 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     consumers: ["docker-compose.yml"],
     reviewedAt: "2026-04-24",
     includeInExample: true,
+    requiredForConsumer: true,
     description:
       "Admin API key for BoxyHQ SAML Jackson container's /api/v1/* endpoints.\n" +
       "Required by docker-compose.yml; generate with: openssl rand -hex 24\n" +
@@ -93,6 +104,7 @@ export const ALLOWLIST: readonly AllowlistEntry[] = [
     ],
     reviewedAt: "2026-04-24",
     includeInExample: true,
+    requiredForConsumer: true,
     description:
       "Password for the passwd_outbox_worker least-privilege DB role.\n" +
       "Consumed by infra/postgres/initdb on first boot AND by\n" +

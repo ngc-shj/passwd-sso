@@ -273,6 +273,7 @@ type AllowlistEntry = {
   description?: string;
   example?: string;
   secret?: boolean;
+  requiredForConsumer?: boolean;
 };
 
 function validateAllowlistShape(entry: AllowlistEntry, idx: number): string[] {
