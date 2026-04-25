@@ -387,6 +387,21 @@ describe("upsertTeamPolicySchema", () => {
       expect("maxSessionDurationMinutes" in result.data).toBe(false);
     }
   });
+
+  it("accepts the F8 response-shape fields (passwordHistoryCount, inheritTenantCidrs, teamAllowedCidrs)", () => {
+    const result = upsertTeamPolicySchema.safeParse({
+      ...valid,
+      passwordHistoryCount: 3,
+      inheritTenantCidrs: false,
+      teamAllowedCidrs: ["10.0.0.0/8", "192.168.0.0/16"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.passwordHistoryCount).toBe(3);
+      expect(result.data.inheritTenantCidrs).toBe(false);
+      expect(result.data.teamAllowedCidrs).toEqual(["10.0.0.0/8", "192.168.0.0/16"]);
+    }
+  });
 });
 
 describe("inviteSchema", () => {

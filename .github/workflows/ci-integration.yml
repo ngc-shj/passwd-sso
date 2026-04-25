@@ -35,6 +35,13 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: passwd_test
+          # Migration 20260413120000_convert_timestamp_to_timestamptz guards
+          # against timezone-dependent USING clauses by requiring the server
+          # timezone to be exactly 'UTC'. The default 'Etc/UTC' value used by
+          # postgres:16 fails this guard. PGTZ sets the server timezone at
+          # initdb time so the guard passes.
+          PGTZ: UTC
+          TZ: UTC
         ports:
           - 5432:5432
         options: >-
