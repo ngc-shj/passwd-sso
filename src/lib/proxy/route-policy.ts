@@ -14,16 +14,34 @@
 import { API_PATH } from "@/lib/constants";
 import { isBearerBypassRoute } from "./cors-gate";
 
+/**
+ * RoutePolicy kind constants. Use these instead of string literals so a
+ * typo is a compile error, not a silently-unreachable branch.
+ */
+export const ROUTE_POLICY_KIND = {
+  PREFLIGHT: "preflight",
+  PUBLIC_SHARE: "public-share",
+  PUBLIC_RECEIVER: "public-receiver",
+  API_V1: "api-v1",
+  API_BEARER_BYPASS: "api-bearer-bypass",
+  API_EXTENSION_EXCHANGE: "api-extension-exchange",
+  API_SESSION_REQUIRED: "api-session-required",
+  API_DEFAULT: "api-default",
+  PAGE: "page",
+} as const;
+
+export type RoutePolicyKind = typeof ROUTE_POLICY_KIND[keyof typeof ROUTE_POLICY_KIND];
+
 export type RoutePolicy =
-  | { kind: "preflight" }                               // OPTIONS preflight (method-checked separately)
-  | { kind: "public-share" }                            // /api/share-links/*/content, /verify-access
-  | { kind: "public-receiver" }                         // /api/csp-report — public POST receiver
-  | { kind: "api-v1" }                                  // /api/v1/* — Bearer (API key) authenticated
-  | { kind: "api-bearer-bypass" }                       // Routes that accept session OR extension Bearer
-  | { kind: "api-extension-exchange" }                  // /api/extension/token/exchange — bootstraps Bearer
-  | { kind: "api-session-required" }                    // session-cookie-protected API routes
-  | { kind: "api-default" }                             // other /api/* — default cache-control only
-  | { kind: "page" };                                   // non-API path
+  | { kind: typeof ROUTE_POLICY_KIND.PREFLIGHT }                // OPTIONS preflight (method-checked separately)
+  | { kind: typeof ROUTE_POLICY_KIND.PUBLIC_SHARE }             // /api/share-links/*/content, /verify-access
+  | { kind: typeof ROUTE_POLICY_KIND.PUBLIC_RECEIVER }          // /api/csp-report — public POST receiver
+  | { kind: typeof ROUTE_POLICY_KIND.API_V1 }                   // /api/v1/* — Bearer (API key) authenticated
+  | { kind: typeof ROUTE_POLICY_KIND.API_BEARER_BYPASS }        // Routes that accept session OR extension Bearer
+  | { kind: typeof ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE }   // /api/extension/token/exchange — bootstraps Bearer
+  | { kind: typeof ROUTE_POLICY_KIND.API_SESSION_REQUIRED }     // session-cookie-protected API routes
+  | { kind: typeof ROUTE_POLICY_KIND.API_DEFAULT }              // other /api/* — default cache-control only
+  | { kind: typeof ROUTE_POLICY_KIND.PAGE };                    // non-API path
 
 const SESSION_REQUIRED_PREFIXES: readonly string[] = [
   API_PATH.PASSWORDS,
@@ -60,7 +78,7 @@ const SESSION_REQUIRED_PREFIXES: readonly string[] = [
 export function classifyRoute(pathname: string): RoutePolicy {
   // Non-API paths are page routes (handled by the page-side branch).
   if (!pathname.startsWith(`${API_PATH.API_ROOT}/`)) {
-    return { kind: "page" };
+    return { kind: ROUTE_POLICY_KIND.PAGE };
   }
 
   // Public share-link viewer endpoints (no auth, no CSRF).
@@ -68,46 +86,46 @@ export function classifyRoute(pathname: string): RoutePolicy {
     pathname === `${API_PATH.SHARE_LINKS}/verify-access` ||
     /^\/api\/share-links\/[^/]+\/content$/.test(pathname)
   ) {
-    return { kind: "public-share" };
+    return { kind: ROUTE_POLICY_KIND.PUBLIC_SHARE };
   }
 
   // Public POST receiver — CSP violation reports. Browsers may attach
   // session cookies on these (top-level navigation reports), but the
   // route is intentionally public and accepts cross-origin / null Origin.
   if (pathname === API_PATH.CSP_REPORT) {
-    return { kind: "public-receiver" };
+    return { kind: ROUTE_POLICY_KIND.PUBLIC_RECEIVER };
   }
 
   // /api/v1/* — API-key-authenticated REST API. CSRF gate skips it
   // because v1 routes do not authenticate via session cookies.
   if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
-    return { kind: "api-v1" };
+    return { kind: ROUTE_POLICY_KIND.API_V1 };
   }
 
   // Bridge-code exchange — bootstraps a Bearer token from a one-time
   // code. No session, no Bearer on the request.
   if (pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE) {
-    return { kind: "api-extension-exchange" };
+    return { kind: ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE };
   }
 
   // Routes that accept either a session OR an extension Bearer token.
   // The proxy lets the route handler decide; CSRF gate fires only when
   // a session cookie is present.
   if (isBearerBypassRoute(pathname)) {
-    return { kind: "api-bearer-bypass" };
+    return { kind: ROUTE_POLICY_KIND.API_BEARER_BYPASS };
   }
 
   // Session-required API routes — proxy validates session before
   // delegating to the route handler.
   if (SESSION_REQUIRED_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
-    return { kind: "api-session-required" };
+    return { kind: ROUTE_POLICY_KIND.API_SESSION_REQUIRED };
   }
 
   // Other /api/* routes (e.g., /api/internal/*, /api/maintenance/*,
   // /api/admin/*, /api/scim/*, /api/auth/*). The proxy applies only
   // default cache-control headers; the route handler is responsible for
   // its own auth.
-  return { kind: "api-default" };
+  return { kind: ROUTE_POLICY_KIND.API_DEFAULT };
 }
 
 /**

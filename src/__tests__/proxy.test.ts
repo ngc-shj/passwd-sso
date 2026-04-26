@@ -693,7 +693,11 @@ describe("proxy — access restriction", () => {
 
     const req = new NextRequest(`${APP_ORIGIN}/api/vault/unlock`, {
       method: "POST",
-      headers: { Cookie: "authjs.session-token=sess-acl-vault" },
+      headers: {
+        Cookie: "authjs.session-token=sess-acl-vault",
+        Origin: APP_ORIGIN,
+        Host: "localhost:3000",
+      },
     } as ConstructorParameters<typeof NextRequest>[1]);
     const res = await proxy(req, dummyOptions);
 

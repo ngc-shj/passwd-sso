@@ -8,8 +8,6 @@ import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
 import {
   applyCorsHeaders,
-  isBearerBypassRoute,
-  isExtensionExchangeRoute,
   handleApiPreflight,
 } from "./lib/proxy/cors-gate";
 import { applySecurityHeaders } from "./lib/proxy/security-headers";
@@ -17,8 +15,11 @@ import {
   getSessionInfo,
   setSessionCache,
   extractSessionToken,
+  hasSessionCookie,
   sessionCache,
 } from "./lib/proxy/auth-gate";
+import { classifyRoute, ROUTE_POLICY_KIND } from "./lib/proxy/route-policy";
+import { shouldEnforceCsrf, assertSessionCsrf } from "./lib/proxy/csrf-gate";
 import { extractClientIp } from "./lib/auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "./lib/auth/policy/access-restriction";
 
@@ -137,10 +138,15 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
             if (oldest !== undefined) passkeyAuditEmitted.delete(oldest);
           }
           passkeyAuditEmitted.set(userId, Date.now());
+          // Internal self-fetch: declare same-origin explicitly. Node
+          // fetch (undici) does not auto-set Origin; without it the new
+          // proxy CSRF gate would 403 this request.
+          const selfOrigin = new URL(request.url).origin;
           void fetch(new URL(`${basePath}${API_PATH.INTERNAL_AUDIT_EMIT}`, request.url), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
+              "Origin": selfOrigin,
               cookie: request.headers.get("cookie") ?? "",
             },
             body: JSON.stringify({
@@ -164,25 +170,40 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 }
 
 async function handleApiAuth(request: NextRequest) {
-  const { pathname } = request.nextUrl;
+  const policy = classifyRoute(request.nextUrl.pathname);
+  const isBearerRoute = policy.kind === ROUTE_POLICY_KIND.API_BEARER_BYPASS;
+  const isExchangeRoute = policy.kind === ROUTE_POLICY_KIND.API_EXTENSION_EXCHANGE;
 
-  const isBearerRoute = isBearerBypassRoute(pathname);
-  const isExchangeRoute = isExtensionExchangeRoute(pathname);
-
-  // Handle CORS preflight for API routes.
+  // Preflight (handled regardless of policy.kind).
   if (request.method === "OPTIONS") {
-    return handleApiPreflight(request, {
-      isBearerRoute,
-      isExchangeRoute,
-    });
+    return handleApiPreflight(request, { isBearerRoute, isExchangeRoute });
   }
 
-  // /api/v1/* — Public REST API. Skip session redirect and assertOrigin.
-  // Route handlers handle all auth via validateApiKeyOnly().
-  if (pathname.startsWith(`${API_PATH.API_ROOT}/v1/`)) {
+  // Non-CSRF early returns. ALL paths outside the cookie-CSRF threat
+  // model MUST short-circuit BEFORE the CSRF gate fires.
+  if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_SHARE) {
+    const res = NextResponse.next();
+    res.headers.set("Cache-Control", "no-store");
+    return res;
+  }
+  if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_RECEIVER) {
+    return NextResponse.next();
+  }
+  if (policy.kind === ROUTE_POLICY_KIND.API_V1) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return res;
+  }
+
+  // Baseline CSRF gate: request-attribute-based, path-independent.
+  // Fires whenever a request carries a session cookie AND uses a
+  // mutating method, regardless of route classification. This closes
+  // pre1 (audit-emit) and the R3 baseline gap structurally.
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookiePresent = hasSessionCookie(cookieHeader);
+  if (shouldEnforceCsrf(request, cookiePresent)) {
+    const csrfError = assertSessionCsrf(request);
+    if (csrfError) return applyCorsHeaders(request, csrfError);
   }
 
   const hasBearer = request.headers
@@ -196,10 +217,7 @@ async function handleApiAuth(request: NextRequest) {
   // only clients (extension from chrome-extension:// origin, API key
   // clients, SA / MCP tokens) do not ship the Auth.js session cookie, so
   // the bypass still applies to them.
-  const hasSessionCookie =
-    extractSessionToken(request.headers.get("cookie") ?? "") !== "";
-
-  if (hasBearer && isBearerRoute && !hasSessionCookie) {
+  if (hasBearer && isBearerRoute && !cookiePresent) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });
@@ -215,41 +233,15 @@ async function handleApiAuth(request: NextRequest) {
     return applyCorsHeaders(request, res, { allowExtension: true });
   }
 
-  // Public share-link endpoints for unauthenticated share viewers.
-  // These use their own auth (access password / access token).
+  // Session-required routes + Bearer-bypass routes that didn't take the
+  // Bearer-bypass branch above (e.g., session-cookie-only callers to
+  // /api/passwords). Validate session, then enforce tenant IP
+  // restriction. Note: /api/scim/v2/* is intentionally NOT in this
+  // classification — SCIM endpoints use their own Bearer token auth in
+  // each route handler.
   if (
-    pathname === `${API_PATH.SHARE_LINKS}/verify-access` ||
-    /^\/api\/share-links\/[^/]+\/content$/.test(pathname)
-  ) {
-    const res = NextResponse.next();
-    res.headers.set("Cache-Control", "no-store");
-    return res;
-  }
-
-  // Note: /api/scim/v2/* is intentionally NOT listed here — SCIM endpoints
-  // use their own Bearer token auth (validateScimToken) in each route handler.
-  if (
-    pathname.startsWith(API_PATH.PASSWORDS) ||
-    pathname.startsWith(API_PATH.TAGS) ||
-    pathname.startsWith(API_PATH.WATCHTOWER) ||
-    pathname.startsWith(API_PATH.TEAMS) ||
-    pathname.startsWith(API_PATH.AUDIT_LOGS) ||
-    pathname.startsWith(API_PATH.SHARE_LINKS) ||
-    pathname.startsWith(API_PATH.SENDS) ||
-    pathname.startsWith(API_PATH.EMERGENCY_ACCESS) ||
-    pathname.startsWith(API_PATH.SESSIONS) ||
-    pathname.startsWith(API_PATH.NOTIFICATIONS) ||
-    pathname.startsWith(API_PATH.USER_LOCALE) ||
-    pathname.startsWith(API_PATH.USER_MCP_TOKENS) ||
-    pathname.startsWith(API_PATH.USER_AUTH_PROVIDER) ||
-    pathname.startsWith(API_PATH.EXTENSION) ||
-    pathname.startsWith(API_PATH.TENANT) ||
-    pathname.startsWith(API_PATH.API_KEYS) ||
-    pathname.startsWith(API_PATH.TRAVEL_MODE) ||
-    pathname.startsWith(API_PATH.DIRECTORY_SYNC) ||
-    pathname.startsWith(API_PATH.VAULT) ||
-    pathname.startsWith(API_PATH.FOLDERS) ||
-    pathname.startsWith(API_PATH.WEBAUTHN)
+    policy.kind === ROUTE_POLICY_KIND.API_SESSION_REQUIRED ||
+    policy.kind === ROUTE_POLICY_KIND.API_BEARER_BYPASS
   ) {
     const session = await getSessionInfo(request);
     if (!session.valid) {
@@ -262,7 +254,6 @@ async function handleApiAuth(request: NextRequest) {
       );
     }
 
-    // Access restriction check for session-authenticated API routes
     if (session.tenantId) {
       const clientIp = extractClientIp(request);
       const accessResult = await checkAccessRestrictionWithAudit(
@@ -283,8 +274,9 @@ async function handleApiAuth(request: NextRequest) {
     }
   }
 
-  // Default: prevent CDN/proxy from caching authenticated API responses.
-  // Route handlers may override with explicit Cache-Control headers.
+  // Default (api-default): prevent CDN/proxy from caching authenticated
+  // API responses. Route handlers may override with explicit
+  // Cache-Control headers.
   const res = NextResponse.next();
   res.headers.set("Cache-Control", "private, no-store");
   return applyCorsHeaders(request, res);
