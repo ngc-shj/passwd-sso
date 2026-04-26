@@ -39,7 +39,7 @@ import { Blocks, ChevronDown, Loader2, Plus, Search, Trash2, Pencil, Users } fro
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { apiPath } from "@/lib/constants";
-import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
@@ -65,10 +65,13 @@ interface NewClientCredentials {
 }
 
 function validateRedirectUris(uris: string[]): boolean {
+  // Mirrors the server-side schema in `src/app/api/tenant/mcp-clients/route.ts`
+  // and DCR (`src/app/api/mcp/register/route.ts`). Keep in sync via the shared
+  // LOOPBACK_REDIRECT_RE constant.
   return uris.every((u) => {
     try {
       const url = new URL(u);
-      return url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost");
+      return url.protocol === "https:" || LOOPBACK_REDIRECT_RE.test(u);
     } catch {
       return false;
     }

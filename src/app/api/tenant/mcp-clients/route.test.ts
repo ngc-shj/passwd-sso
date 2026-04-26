@@ -199,6 +199,52 @@ describe("POST /api/tenant/mcp-clients", () => {
     );
   });
 
+  it.each([
+    ["http://127.0.0.1:8765/callback"],
+    ["http://localhost:8765/callback"],
+    ["http://[::1]:8765/callback"],
+  ])("accepts loopback redirect URI %s", async (uri) => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientCount.mockResolvedValue(0);
+    mockMcpClientFindFirst.mockResolvedValue(null);
+    mockMcpClientCreate.mockResolvedValue(makeClient({ id: "client-loopback" }));
+
+    const req = createRequest("POST", "http://localhost/api/tenant/mcp-clients", {
+      body: {
+        name: "loopback-client",
+        redirectUris: [uri],
+        allowedScopes: ["credentials:list"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+  });
+
+  it.each([
+    ["http://127.0.0.1/callback"],
+    ["http://localhost/callback"],
+    ["http://[::1]/callback"],
+  ])("rejects loopback redirect URI without port: %s", async (uri) => {
+    mockAuth.mockResolvedValue(DEFAULT_SESSION);
+    mockRequireTenantPermission.mockResolvedValue(ACTOR);
+    mockMcpClientCount.mockResolvedValue(0);
+
+    const req = createRequest("POST", "http://localhost/api/tenant/mcp-clients", {
+      body: {
+        name: "loopback-client",
+        redirectUris: [uri],
+        allowedScopes: ["credentials:list"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(400);
+  });
+
   it("returns 409 for name conflict", async () => {
     mockAuth.mockResolvedValue(DEFAULT_SESSION);
     mockRequireTenantPermission.mockResolvedValue(ACTOR);

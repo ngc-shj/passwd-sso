@@ -198,6 +198,33 @@ describe("POST /api/mcp/register", () => {
     expect(json.error).toBe("invalid_client_metadata");
   });
 
+  it("accepts http://[::1]:<port>/ IPv6 loopback redirect URIs (RFC 8252 §7.3)", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://[::1]:3000/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status } = await parseResponse(res);
+
+    expect(status).toBe(201);
+  });
+
+  it("rejects http://[::1]/ IPv6 loopback without port", async () => {
+    const req = createRequest("POST", "http://localhost/api/mcp/register", {
+      body: {
+        client_name: "Test",
+        redirect_uris: ["http://[::1]/callback"],
+      },
+    });
+    const res = await POST(req);
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(400);
+    expect(json.error).toBe("invalid_client_metadata");
+  });
+
   it("rejects plain http:// (non-loopback) redirect URIs", async () => {
     const req = createRequest("POST", "http://localhost/api/mcp/register", {
       body: {

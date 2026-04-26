@@ -9,7 +9,7 @@ import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { AUDIT_TARGET_TYPE } from "@/lib/constants/audit/audit-target";
 import { TENANT_PERMISSION } from "@/lib/constants/auth/tenant-permission";
-import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES } from "@/lib/constants/auth/mcp";
+import { MAX_MCP_CLIENTS_PER_TENANT, MCP_SCOPES, LOOPBACK_REDIRECT_RE } from "@/lib/constants/auth/mcp";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { errorResponse, handleAuthError, unauthorized } from "@/lib/http/api-response";
 import { parseBody } from "@/lib/http/parse-body";
@@ -23,10 +23,10 @@ const createSchema = z.object({
       (u) => {
         try {
           const url = new URL(u);
-          return url.protocol === "https:" || (url.protocol === "http:" && url.hostname === "localhost");
+          return url.protocol === "https:" || LOOPBACK_REDIRECT_RE.test(u);
         } catch { return false; }
       },
-      { message: "redirect_uri must use https:// or http://localhost" },
+      { message: "redirect_uri must use https:// or http://(127.0.0.1|localhost|[::1]):<port>/" },
     ),
   ).min(1).max(10),
   allowedScopes: z.array(z.enum(MCP_SCOPES as [string, ...string[]])).min(1),
