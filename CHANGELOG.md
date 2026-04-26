@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.4.44](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.43...passwd-sso-v0.4.44) (2026-04-25)
+
+
+### Features
+
+* **env:** Zod SSOT + interactive .env generator + drift checker ([#394](https://github.com/ngc-shj/passwd-sso/issues/394)) ([516acb5](https://github.com/ngc-shj/passwd-sso/commit/516acb5b3fb79fa44f0ead9b33ed08a6d831972c))
+
+
+### Bug Fixes
+
+* correct external spec citations and i18n share group label ([#386](https://github.com/ngc-shj/passwd-sso/issues/386)) ([0c1753a](https://github.com/ngc-shj/passwd-sso/commit/0c1753aafa91dbce74e64a02ecf32fd58caaf881))
+* **security:** close XFF spoofing and Origin fail-open ([#391](https://github.com/ngc-shj/passwd-sso/issues/391)) ([6a0e330](https://github.com/ngc-shj/passwd-sso/commit/6a0e330b3ebe950e5ca57a57b1593c765bbb9be2))
+* **security:** enforce tenant IP on bearer routes and close share-content TOCTOU ([#390](https://github.com/ngc-shj/passwd-sso/issues/390)) ([a8cff21](https://github.com/ngc-shj/passwd-sso/commit/a8cff2151d8061614400c6827b2c8e12e79e3065))
+
+
+### Code Refactoring
+
+* **audit:** enforce *AuditBase helper usage on logAudit calls ([#389](https://github.com/ngc-shj/passwd-sso/issues/389)) ([7f8e039](https://github.com/ngc-shj/passwd-sso/commit/7f8e039cfdd0b17a0a9e5f13ed3b207b04cef1de))
+* cleanup legacy extension token relay + audit doc/comment sync ([#388](https://github.com/ngc-shj/passwd-sso/issues/388)) ([f3f9975](https://github.com/ngc-shj/passwd-sso/commit/f3f9975cf030a092011e58fa270d36343dea6e87))
+* **db:** drop team_policies.max_session_duration_minutes ([#396](https://github.com/ngc-shj/passwd-sso/issues/396)) ([43473c5](https://github.com/ngc-shj/passwd-sso/commit/43473c5e370c75c20d83ab5896aca0b12e6fa7af))
+* second-level directory split (src/lib, constants, components, auth) ([#393](https://github.com/ngc-shj/passwd-sso/issues/393)) ([736747a](https://github.com/ngc-shj/passwd-sso/commit/736747ac07bbf9316ea8853c68a3cfae18f3a512))
+* split overcrowded src/{lib,hooks,components/passwords} into feature-based subdirs ([#392](https://github.com/ngc-shj/passwd-sso/issues/392)) ([02752a8](https://github.com/ngc-shj/passwd-sso/commit/02752a8e3b352dc7fd8e76c95b04e6b6f1bd26f6))
+
 ## [0.4.43](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.42...passwd-sso-v0.4.43) (2026-04-18)
 
 
