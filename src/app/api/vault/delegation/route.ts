@@ -301,7 +301,7 @@ async function handleGET(_request: NextRequest) {
   });
 }
 
-async function handleDELETE(request: NextRequest) {
+async function handleDELETE() {
   const session = await auth();
   if (!session?.user?.id) {
     return unauthorized();
