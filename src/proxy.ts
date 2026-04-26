@@ -6,9 +6,8 @@ import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
 import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
-import { PERMISSIONS_POLICY } from "./lib/security/security-headers";
 import { handlePreflight, applyCorsHeaders } from "./lib/http/cors";
-import { isHttps } from "./lib/url-helpers";
+import { applySecurityHeaders } from "./lib/proxy/security-headers";
 import { extractClientIp } from "./lib/auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "./lib/auth/policy/access-restriction";
 import { resolveUserTenantId } from "./lib/tenant-context";
@@ -438,48 +437,8 @@ function extractSessionToken(cookie: string): string {
   return "";
 }
 
-function applySecurityHeaders(
-  response: NextResponse,
-  { cspHeader, nonce }: ProxyOptions,
-  basePath: string = "",
-): NextResponse {
-  response.headers.set("Content-Security-Policy", cspHeader);
-  const cspReportUrl = `${basePath}${API_PATH.CSP_REPORT}`;
-  response.headers.set(
-    "Report-To",
-    JSON.stringify({
-      group: "csp-endpoint",
-      max_age: 10886400,
-      endpoints: [{ url: cspReportUrl }],
-    })
-  );
-  response.headers.set(
-    "Reporting-Endpoints",
-    `csp-endpoint="${cspReportUrl}"`
-  );
-
-  response.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  if (isHttps) {
-    response.headers.set(
-      "Strict-Transport-Security",
-      "max-age=63072000; includeSubDomains; preload"
-    );
-  }
-  response.headers.set("Permissions-Policy", PERMISSIONS_POLICY);
-
-  response.cookies.set("csp-nonce", nonce, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: isHttps,
-    path: `${basePath}/`,
-  });
-
-  return response;
-}
-
-// Exported for testing
+// Test-only shim: re-export applySecurityHeaders from its new home so
+// existing tests in src/__tests__/proxy.test.ts continue to import via this path.
 export { applySecurityHeaders as _applySecurityHeaders };
 export { extractSessionToken as _extractSessionToken };
 export { setSessionCache as _setSessionCache };
