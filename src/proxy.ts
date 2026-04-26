@@ -6,7 +6,12 @@ import { getLocaleFromPathname, stripLocalePrefix } from "./i18n/locale-utils";
 import { API_PATH } from "./lib/constants";
 import { AUDIT_ACTION } from "./lib/constants/audit/audit";
 import { MS_PER_DAY, MS_PER_MINUTE } from "./lib/constants/time";
-import { handlePreflight, applyCorsHeaders } from "./lib/http/cors";
+import {
+  applyCorsHeaders,
+  isBearerBypassRoute,
+  isExtensionExchangeRoute,
+  handleApiPreflight,
+} from "./lib/proxy/cors-gate";
 import { applySecurityHeaders } from "./lib/proxy/security-headers";
 import {
   getSessionInfo,
@@ -161,40 +166,14 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
 async function handleApiAuth(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // Routes that accept extension token (Bearer) as alternative auth.
-  // Let the route handler validate the token instead of checking session.
-  // IMPROVE(#39): harden allowlist matching — add edge-case tests for child paths
-  const extensionTokenRoutes = [
-    API_PATH.PASSWORDS,
-    API_PATH.VAULT_STATUS,
-    API_PATH.VAULT_UNLOCK_DATA,
-    API_PATH.EXTENSION_TOKEN,         // DELETE (revoke) — validated by route handler
-    API_PATH.EXTENSION_TOKEN_REFRESH, // POST (refresh) — validated by route handler
-    API_PATH.API_KEYS,  // API key management — validated by route handler via authOrToken
-    API_PATH.TENANT_ACCESS_REQUESTS, // SA self-service JIT — validated by route handler via authOrToken
-    API_PATH.VAULT_DELEGATION,       // Delegation check — CLI agent uses Bearer for /check
-  ];
-  const isBearerBypassRoute = (route: string) => {
-    // Extension token endpoints should be exact only.
-    if (
-      route === API_PATH.EXTENSION_TOKEN ||
-      route === API_PATH.EXTENSION_TOKEN_REFRESH
-    ) {
-      return pathname === route;
-    }
-    // Password/vault routes allow child paths.
-    return pathname === route || pathname.startsWith(route + "/");
-  };
-  const isBearerRoute = extensionTokenRoutes.some(isBearerBypassRoute);
+  const isBearerRoute = isBearerBypassRoute(pathname);
+  const isExchangeRoute = isExtensionExchangeRoute(pathname);
 
   // Handle CORS preflight for API routes.
-  // For extension Bearer routes AND the bridge code exchange endpoint, allow
-  // chrome-extension:// origins so that the extension's fetch (which triggers
-  // a preflight due to Content-Type/Authorization headers) can proceed.
-  const isExtensionExchangeRoute = pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE;
   if (request.method === "OPTIONS") {
-    return handlePreflight(request, {
-      allowExtension: isBearerRoute || isExtensionExchangeRoute,
+    return handleApiPreflight(request, {
+      isBearerRoute,
+      isExchangeRoute,
     });
   }
 
@@ -230,7 +209,7 @@ async function handleApiAuth(request: NextRequest) {
   // one-time bridge code. No session, no Bearer. Called by the extension
   // content script (isolated world). The route handler validates the code
   // and atomically consumes it. CORS must allow chrome-extension origins.
-  if (pathname === API_PATH.EXTENSION_TOKEN_EXCHANGE) {
+  if (isExchangeRoute) {
     const res = NextResponse.next();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });
